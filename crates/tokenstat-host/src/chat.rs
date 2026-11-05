@@ -3950,7 +3950,7 @@ impl Store {
         let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
             .ok_or("This conversation is already running in another instance of tokenstat.")?;
         let workspace = crate::workspaces::folder(&chat.workspace_id)?;
-        let mut writer = crate::workspace_writer::Guard::acquire_interactive(&workspace.path)
+        let mut writer = crate::workspace_writer::Guard::acquire(&workspace.path)
             .map_err(workspace_writer_error)?;
         if !routing_continuation && !compact {
             chat = self.router_return_locked(id, chat)?;

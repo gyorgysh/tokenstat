@@ -96,9 +96,6 @@ fn lock_file(path: &Path, create: bool) -> Result<File, Error> {
     }
     Ok(file)
 }
-pub(super) fn existing_lock(path: &Path) -> Result<File, Error> {
-    lock_file(path, false)
-}
 pub(super) fn lock(path: &Path, exclusive: bool) -> Result<File, Error> {
     let file = lock_file(path, true)?;
     #[cfg(unix)]

@@ -478,8 +478,6 @@ pub enum CatchUp {
     Dirty,
     /// The local branch has its own commits. The person merges, not tokenstat.
     Diverged,
-    /// Another writer holds the folder right now.
-    Busy,
     Failed(String),
 }
 
@@ -487,8 +485,9 @@ pub enum CatchUp {
 /// a fast-forward only, only on the target branch, only with nothing
 /// uncommitted. Hooks stay off, so a landed hook script never runs from a sync.
 pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
-    let Ok(writer) = crate::writer::Lease::acquire(dir) else {
-        return CatchUp::Busy;
+    let writer = match crate::writer::Lease::acquire(dir) {
+        Ok(writer) => writer,
+        Err(error) => return CatchUp::Failed(error.to_string()),
     };
     if let Err(message) = run(dir, &["fetch", "-q", remote, target]) {
         return CatchUp::Failed(message);

@@ -4,7 +4,7 @@ use super::*;
 use std::process::{Child, Command};
 
 #[test]
-fn an_abandoned_claim_blocks_managed_writers_and_an_owned_completion_clears_only_its_exact_id() {
+fn recovery_is_scoped_to_the_run_and_completion_clears_only_its_exact_id() {
     let temp = tempfile::tempdir().unwrap();
     let folder = temp.path().join("checkout");
     std::fs::create_dir(&folder).unwrap();
@@ -23,19 +23,26 @@ fn an_abandoned_claim_blocks_managed_writers_and_an_owned_completion_clears_only
     let mut next = Lease::at(&folder, &root).unwrap();
     next.claim_run(&id).unwrap();
     drop(next);
-    assert!(matches!(
-        Lease::at(&folder, &root),
-        Err(Error::RecoveryRequired)
-    ));
-    assert!(matches!(
-        Lease::at(temp.path(), &root),
-        Err(Error::Busy) | Err(Error::RecoveryRequired)
-    ));
+    let mut duplicate = Lease::at(&folder, &root).unwrap();
+    assert_eq!(duplicate.claim_run(&id), Err(Error::RecoveryRequired));
+    duplicate.ensure_current().unwrap();
+    let mut unrelated = Lease::at(&folder, &root).unwrap();
+    let other_id = "ef".repeat(32);
+    unrelated.claim_run(&other_id).unwrap();
+    Lease::at(temp.path(), &root)
+        .unwrap()
+        .ensure_current()
+        .unwrap();
     assert_eq!(
         claim::clear_orphaned_run_at("not-an-id", &root),
         Err(Error::Changed)
     );
     claim::clear_orphaned_run_at(&id, &root).unwrap();
+    unrelated.ensure_current().unwrap();
+    assert_eq!(duplicate.claim_run(&other_id), Err(Error::RecoveryRequired));
+    duplicate.claim_run(&id).unwrap();
+    duplicate.clear_completed_run(&id).unwrap();
+    unrelated.clear_completed_run(&other_id).unwrap();
     Lease::at(&folder, &root).unwrap().ensure_current().unwrap();
     // Clearing a claim that is already gone changes nothing.
     claim::clear_orphaned_run_at(&id, &root).unwrap();
@@ -45,7 +52,7 @@ fn an_abandoned_claim_blocks_managed_writers_and_an_owned_completion_clears_only
 }
 
 #[test]
-fn an_abandoned_common_git_claim_blocks_linked_checkouts_and_aliases() {
+fn an_abandoned_run_does_not_block_linked_checkouts_or_aliases() {
     let temp = tempfile::tempdir().unwrap();
     let main = temp.path().join("primary");
     repo(&main);
@@ -64,18 +71,14 @@ fn an_abandoned_common_git_claim_blocks_linked_checkouts_and_aliases() {
     let mut lease = Lease::at(&main, &root).unwrap();
     lease.claim_run(&"ab".repeat(32)).unwrap();
     drop(lease);
-    assert!(matches!(
-        Lease::at(&linked, &root),
-        Err(Error::RecoveryRequired)
-    ));
+    let mut other = Lease::at(&linked, &root).unwrap();
+    other.claim_run(&"cd".repeat(32)).unwrap();
+    other.ensure_current().unwrap();
     #[cfg(unix)]
     {
         let alias = temp.path().join("alias");
         std::os::unix::fs::symlink(&main, &alias).unwrap();
-        assert!(matches!(
-            Lease::at(&alias, &root),
-            Err(Error::RecoveryRequired)
-        ));
+        Lease::at(&alias, &root).unwrap().ensure_current().unwrap();
     }
 }
 
@@ -100,7 +103,11 @@ fn a_torn_or_missing_initialized_claim_registry_never_becomes_an_empty_registry(
                 std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
             }
         }
-        let result = Lease::at(&folder, &root).err();
+        // Ordinary operations do not depend on recovery records. A Team run
+        // must still refuse to overwrite a damaged registry.
+        let mut ordinary = Lease::at(&folder, &root).unwrap();
+        ordinary.ensure_current().unwrap();
+        let result = ordinary.claim_run(&"cd".repeat(32));
         let present = std::fs::read_dir(&root)
             .map(|entries| {
                 entries
@@ -109,7 +116,7 @@ fn a_torn_or_missing_initialized_claim_registry_never_becomes_an_empty_registry(
             })
             .ok();
         assert!(
-            matches!(result, Some(Error::RecoveryRequired)),
+            matches!(result, Err(Error::RecoveryRequired)),
             "{damage}: {result:?}; {present:?}"
         );
     }
@@ -133,18 +140,14 @@ fn lanes_run_beside_the_main_checkout_and_each_other() {
     let main_lease = Lease::at(&main, &root).unwrap();
     let mut first = Lease::at_with(&a, None, &root, true).unwrap();
     let second = Lease::at_with(&b, None, &root, true).unwrap();
-    // One lane still has one writer.
-    assert!(Lease::at_with(&a, None, &root, true).is_err());
+    Lease::at_with(&a, None, &root, true).unwrap();
     first.claim_run(&"ab".repeat(32)).unwrap();
     first.ensure_current().unwrap();
     drop(main_lease);
-    // A lane's unresolved run fences that lane, not the project.
+    // A run's recovery record does not reserve its lane or the project.
     Lease::at(&main, &root).unwrap().ensure_current().unwrap();
     drop((first, second));
-    assert!(matches!(
-        Lease::at_with(&a, None, &root, true),
-        Err(Error::RecoveryRequired)
-    ));
+    Lease::at_with(&a, None, &root, true).unwrap();
     Lease::at_with(&b, None, &root, true).unwrap();
 }
 
@@ -179,7 +182,7 @@ fn repo(path: &Path) {
 }
 
 #[test]
-fn linked_checkouts_conflict_but_independent_clones_do_not() {
+fn linked_checkouts_and_independent_clones_can_run_concurrently() {
     let temp = tempfile::tempdir().unwrap();
     let main = temp.path().join("primary");
     repo(&main);
@@ -208,12 +211,12 @@ fn linked_checkouts_conflict_but_independent_clones_do_not() {
     );
     let root = temp.path().join("locks");
     let first = Lease::at(&main, &root).unwrap();
-    assert!(matches!(Lease::at(&linked, &root), Err(Error::Busy)));
+    let linked_lease = Lease::at(&linked, &root).unwrap();
     let independent = Lease::at(&clone, &root).unwrap();
     independent.ensure_current().unwrap();
     first.ensure_current().unwrap();
+    linked_lease.ensure_current().unwrap();
     drop(first);
-    // A failed partial acquisition must not leave a linked-checkout lock.
     let next = Lease::at(&linked, &root).unwrap();
     next.ensure_current().unwrap();
     assert_eq!(
@@ -227,13 +230,14 @@ fn linked_checkouts_conflict_but_independent_clones_do_not() {
 }
 
 #[test]
-fn plain_folders_are_exclusive_and_release_on_drop_and_unwind() {
+fn ordinary_operations_do_not_create_checkout_lock_files() {
     let temp = tempfile::tempdir().unwrap();
     let folder = temp.path().join("plain");
     std::fs::create_dir(&folder).unwrap();
     let root = temp.path().join("locks");
     let lease = Lease::at(&folder, &root).unwrap();
-    assert!(matches!(Lease::at(&folder, &root), Err(Error::Busy)));
+    Lease::at(&folder, &root).unwrap().ensure_current().unwrap();
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
     drop(lease);
     let _ = std::panic::catch_unwind(|| {
         let _held = Lease::at(&folder, &root).unwrap();
@@ -243,7 +247,7 @@ fn plain_folders_are_exclusive_and_release_on_drop_and_unwind() {
 }
 
 #[test]
-fn nested_folders_conflict_in_both_directions_while_siblings_remain_independent() {
+fn nested_folders_and_siblings_can_run_concurrently() {
     let temp = tempfile::tempdir().unwrap();
     let parent = temp.path().join("parent");
     let child = parent.join("child");
@@ -252,10 +256,10 @@ fn nested_folders_conflict_in_both_directions_while_siblings_remain_independent(
     std::fs::create_dir(&sibling).unwrap();
     let root = temp.path().join("locks");
     let held = Lease::at(&parent, &root).unwrap();
-    assert!(matches!(Lease::at(&child, &root), Err(Error::Busy)));
+    Lease::at(&child, &root).unwrap().ensure_current().unwrap();
     drop(held);
     let held = Lease::at(&child, &root).unwrap();
-    assert!(matches!(Lease::at(&parent, &root), Err(Error::Busy)));
+    Lease::at(&parent, &root).unwrap().ensure_current().unwrap();
     Lease::at(&sibling, &root)
         .unwrap()
         .ensure_current()
@@ -265,7 +269,7 @@ fn nested_folders_conflict_in_both_directions_while_siblings_remain_independent(
 
 #[cfg(unix)]
 #[test]
-fn aliases_and_subfolders_use_the_same_git_metadata_lock() {
+fn aliases_and_subfolders_do_not_reserve_shared_git_metadata() {
     use std::os::unix::fs::symlink;
     let temp = tempfile::tempdir().unwrap();
     let main = temp.path().join(" leading and trailing ");
@@ -276,8 +280,8 @@ fn aliases_and_subfolders_use_the_same_git_metadata_lock() {
     symlink(&main, &alias).unwrap();
     let root = temp.path().join("locks");
     let held = Lease::at(&main, &root).unwrap();
-    assert!(matches!(Lease::at(&alias, &root), Err(Error::Busy)));
-    assert!(matches!(Lease::at(&nested, &root), Err(Error::Busy)));
+    Lease::at(&alias, &root).unwrap().ensure_current().unwrap();
+    Lease::at(&nested, &root).unwrap().ensure_current().unwrap();
     held.ensure_current().unwrap();
 }
 
@@ -313,7 +317,7 @@ fn linked_metadata_paths_preserve_non_utf8_and_control_bytes() {
     );
     let root = temp.path().join("locks");
     let held = Lease::at(&main, &root).unwrap();
-    assert!(matches!(Lease::at(&linked, &root), Err(Error::Busy)));
+    Lease::at(&linked, &root).unwrap().ensure_current().unwrap();
     held.ensure_current().unwrap();
 }
 
@@ -337,30 +341,31 @@ fn linked_metadata_paths_preserve_unicode_quotes_newlines_and_whitespace() {
     );
     let root = temp.path().join("locks");
     let held = Lease::at(&main, &root).unwrap();
-    assert!(matches!(Lease::at(&linked, &root), Err(Error::Busy)));
+    Lease::at(&linked, &root).unwrap().ensure_current().unwrap();
     held.ensure_current().unwrap();
 }
 
 #[cfg(unix)]
 #[test]
-fn replacement_or_symlinked_lock_retires_the_original_writer() {
+fn old_checkout_lock_files_do_not_affect_operations() {
     use std::os::unix::fs::symlink;
     let temp = tempfile::tempdir().unwrap();
     let folder = temp.path().join("folder");
     std::fs::create_dir(&folder).unwrap();
     let lease = Lease::at(&folder, &temp.path().join("locks")).unwrap();
-    let path = &lease.locks[0].0;
+    let path = &lease.root.path.join(lease.target.folder.identity.name());
+    let legacy = file::lock(path, true).unwrap();
+    lease.ensure_current().unwrap();
+    Lease::at(&folder, &lease.root.path).unwrap();
     let old = path.with_extension("old");
     std::fs::rename(path, &old).unwrap();
     symlink(&old, path).unwrap();
-    assert_eq!(lease.ensure_current(), Err(Error::Changed));
+    lease.ensure_current().unwrap();
+    Lease::at(&folder, &lease.root.path).unwrap();
     std::fs::remove_file(path).unwrap();
     std::fs::rename(&old, path).unwrap();
-    assert_eq!(
-        lease.ensure_current(),
-        Err(Error::Changed),
-        "a retired writer cannot revive"
-    );
+    lease.ensure_current().unwrap();
+    drop(legacy);
 }
 
 #[cfg(unix)]
@@ -372,6 +377,9 @@ fn replaced_folder_does_not_gain_the_old_writer() {
     let lease = Lease::at(&folder, &temp.path().join("locks")).unwrap();
     std::fs::rename(&folder, temp.path().join("original")).unwrap();
     std::fs::create_dir(&folder).unwrap();
+    assert_eq!(lease.ensure_current(), Err(Error::Changed));
+    std::fs::remove_dir(&folder).unwrap();
+    std::fs::rename(temp.path().join("original"), &folder).unwrap();
     assert_eq!(lease.ensure_current(), Err(Error::Changed));
 }
 
@@ -388,7 +396,7 @@ fn broken_git_metadata_is_never_treated_as_a_plain_folder() {
 }
 
 #[test]
-fn active_writer_blocks_real_git_and_editor_effects_but_leaves_status_readable() {
+fn another_operation_does_not_block_git_or_editor_actions() {
     let temp = tempfile::tempdir().unwrap();
     let main = temp.path().join("main");
     repo(&main);
@@ -399,17 +407,17 @@ fn active_writer_blocks_real_git_and_editor_effects_but_leaves_status_readable()
         .unwrap()
         .stdout;
     let held = Lease::acquire(&main).unwrap();
-    assert!(!crate::gitwrite::stage(&main, &["file.txt".into()]).ok);
-    assert!(!crate::gitwrite::create_branch(&main, "blocked-fixture", None).ok);
-    assert!(!crate::gitwrite::write_text(&main, "file.txt", "replace").ok);
+    assert!(crate::gitwrite::stage(&main, &["file.txt".into()]).ok);
+    assert!(crate::gitwrite::create_branch(&main, "concurrent-fixture", None).ok);
+    assert!(crate::gitwrite::write_text(&main, "file.txt", "replace").ok);
     let destination = temp.path().join("worktree");
     assert!(
-        !crate::gitwrite::worktree::create(&main, &destination, "fixture", "blocked", "HEAD").ok
+        crate::gitwrite::worktree::create(&main, &destination, "fixture", "concurrent", "HEAD").ok
     );
-    assert!(!destination.exists());
+    assert!(destination.is_dir());
     assert_eq!(
         std::fs::read_to_string(main.join("file.txt")).unwrap(),
-        "keep this writing\n"
+        "replace"
     );
     assert_eq!(
         crate::gitwrite::git_command(&main)
@@ -426,7 +434,7 @@ fn active_writer_blocks_real_git_and_editor_effects_but_leaves_status_readable()
 }
 
 #[test]
-fn bare_repository_and_its_linked_checkout_share_a_writer() {
+fn bare_repository_and_its_linked_checkout_can_run_concurrently() {
     let temp = tempfile::tempdir().unwrap();
     let main = temp.path().join("main");
     repo(&main);
@@ -456,7 +464,7 @@ fn bare_repository_and_its_linked_checkout_share_a_writer() {
     );
     let root = temp.path().join("locks");
     let _held = Lease::at(&bare, &root).unwrap();
-    assert!(matches!(Lease::at(&linked, &root), Err(Error::Busy)));
+    Lease::at(&linked, &root).unwrap().ensure_current().unwrap();
 }
 
 struct Process(Child);
@@ -468,7 +476,7 @@ impl Drop for Process {
 }
 
 #[test]
-fn independent_process_ownership_releases_after_process_exit() {
+fn a_separate_process_does_not_reserve_the_checkout() {
     let temp = tempfile::tempdir().unwrap();
     let folder = temp.path().join("folder");
     std::fs::create_dir(&folder).unwrap();
@@ -498,21 +506,28 @@ fn independent_process_ownership_releases_after_process_exit() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(matches!(Lease::at(&folder, &root), Err(Error::Busy)));
+    Lease::at(&folder, &root).unwrap().ensure_current().unwrap();
     child.0.kill().unwrap();
     child.0.wait().unwrap();
     Lease::at(&folder, &root).unwrap().ensure_current().unwrap();
 }
 
 #[test]
-#[ignore = "owned child of independent_process_ownership_releases_after_process_exit"]
+#[ignore = "owned child of a_separate_process_does_not_reserve_the_checkout"]
 fn lease_process_child() {
     let Some(folder) = std::env::var_os("TOKENSTAT_WRITER_FIXTURE_FOLDER") else {
         return;
     };
     let root = std::env::var_os("TOKENSTAT_WRITER_FIXTURE_LOCKS").unwrap();
     let ready = std::env::var_os("TOKENSTAT_WRITER_FIXTURE_READY").unwrap();
-    let _held = Lease::at(Path::new(&folder), Path::new(&root)).unwrap();
+    let held = Lease::at(Path::new(&folder), Path::new(&root)).unwrap();
+    // Model a still-running host from before checkout locks were removed.
+    let _legacy: Vec<_> = held
+        .target
+        .requests()
+        .into_iter()
+        .map(|(id, exclusive)| file::lock(&held.root.path.join(id.name()), exclusive).unwrap())
+        .collect();
     std::fs::write(ready, b"ready").unwrap();
     std::thread::sleep(Duration::from_secs(10));
 }

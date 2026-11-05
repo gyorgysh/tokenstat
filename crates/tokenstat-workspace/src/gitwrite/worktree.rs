@@ -181,49 +181,39 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_destination_is_refused_before_creating_a_branch_or_folder() {
+    fn another_operation_in_the_destination_parent_does_not_block_creation() {
         let repository = repository();
         let parent = tempfile::tempdir().unwrap();
         let held = crate::writer::Lease::acquire(parent.path()).unwrap();
         let destination = parent.path().join("new-checkout");
         assert!(
-            !create(
+            create(
                 repository.path(),
                 &destination,
                 "fixture",
-                "destination-busy",
+                "concurrent-destination",
                 "HEAD"
             )
             .ok
         );
-        assert!(!destination.exists());
+        assert!(destination.is_dir());
         assert!(
-            !git_command(repository.path())
+            git_command(repository.path())
                 .args([
                     "show-ref",
                     "--verify",
                     "--quiet",
-                    "refs/heads/fixture/destination-busy"
+                    "refs/heads/fixture/concurrent-destination"
                 ])
                 .status()
                 .unwrap()
                 .success()
         );
-        drop(held);
-        assert!(
-            create(
-                repository.path(),
-                &destination,
-                "fixture",
-                "destination-busy",
-                "HEAD"
-            )
-            .ok
-        );
+        held.ensure_current().unwrap();
     }
 
     #[test]
-    fn a_destination_above_the_source_does_not_conflict_with_its_own_locks() {
+    fn a_destination_above_the_source_is_supported() {
         let parent = tempfile::tempdir().unwrap();
         let source = parent.path().join("source");
         std::fs::create_dir(&source).unwrap();

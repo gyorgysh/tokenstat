@@ -315,6 +315,15 @@ fn permission_is_checked_again_after_the_check_and_before_the_target_moves() {
 }
 
 #[test]
+fn catch_up_reports_a_missing_folder_as_a_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        catch_up(&temp.path().join("missing"), "main", "origin"),
+        CatchUp::Failed(_)
+    ));
+}
+
+#[test]
 fn catch_up_preserves_untracked_and_ignored_files() {
     let f = fixture();
     git(&f.main, &["config", "core.excludesFile", "/dev/null"]);

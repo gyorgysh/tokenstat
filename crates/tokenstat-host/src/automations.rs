@@ -4766,13 +4766,10 @@ mod tests {
                 max_concurrent: 1,
             })
             .unwrap();
-        // Capacity is global, while each physical checkout has one writer.
+        // The configured queue cap applies even when jobs share a checkout.
         let first_folder = dir.join("first");
-        let second_folder = dir.join("second");
         std::fs::create_dir_all(&first_folder).unwrap();
-        std::fs::create_dir_all(&second_folder).unwrap();
         let workspace_id = sh_workspace(&first_folder);
-        let other_workspace_id = sh_workspace(&second_folder);
         let make = |id: &str| Automation {
             id: id.into(),
             name: id.into(),
@@ -4795,9 +4792,7 @@ mod tests {
             revision: 0,
         };
         let first = store.run_adhoc(make("a")).unwrap();
-        let mut other = make("b");
-        other.workspace_id = other_workspace_id;
-        let second = store.run_adhoc(other).unwrap();
+        let second = store.run_adhoc(make("b")).unwrap();
         assert_eq!(first.status, "running");
         assert_eq!(second.status, "queued");
         store
@@ -4818,7 +4813,7 @@ mod tests {
     }
 
     #[test]
-    fn an_occupied_checkout_refuses_an_adhoc_launch_without_running_its_command() {
+    fn another_operation_in_the_checkout_does_not_block_an_automation() {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("workspace");
         std::fs::create_dir(&folder).unwrap();
@@ -4830,15 +4825,6 @@ mod tests {
         request.enabled = false;
         request.prompt = "echo fixture > ran.txt".into();
         let held = tokenstat_workspace::writer::Lease::acquire(&folder).unwrap();
-        let error = store.run_adhoc(request.clone()).unwrap_err();
-        assert!(error.contains("checkout"), "{error}");
-        assert!(!folder.join("ran.txt").exists());
-        assert_eq!(store.runs().len(), 1);
-        assert_eq!(store.runs()[0].status, "error");
-        drop(held);
-        // Release alone never launches the refused command. The next launch
-        // is an explicit new request and uses the ordinary automation path.
-        assert!(!folder.join("ran.txt").exists());
         let run = store.run_adhoc(request).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while store.get_run(&run.id).unwrap().status == "running" {
@@ -4847,6 +4833,7 @@ mod tests {
         }
         assert!(folder.join("ran.txt").exists());
         assert_eq!(store.get_run(&run.id).unwrap().status, "ok");
+        held.ensure_current().unwrap();
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use super::*;
 use std::time::Instant;
+use tokenstat_workspace::writer::Lease;
 
 struct Session(String);
 impl Drop for Session {
@@ -35,7 +36,7 @@ fn request(folder: &Path, script: &str) -> tokenstat_pty::Spawn {
 }
 
 #[test]
-fn closed_output_and_a_dropped_guard_cannot_release_a_still_running_writer() {
+fn closed_output_and_a_dropped_guard_keep_observing_a_live_process() {
     let temp = tempfile::tempdir().unwrap();
     let mut writer = Guard::acquire(temp.path()).unwrap();
     let info = writer.spawn_piped(&request(temp.path(), "exec </dev/null >/dev/null 2>&1; echo ready > ready.txt; while [ ! -f release.txt ]; do sleep 0.02; done; echo done > done.txt")).unwrap();
@@ -50,20 +51,16 @@ fn closed_output_and_a_dropped_guard_cannot_release_a_still_running_writer() {
     );
     drop(writer);
     assert!(pending_count() >= 1);
-    assert!(
-        matches!(Lease::acquire(temp.path()), Err(Error::Busy)),
-        "a lost local guard released a live writer"
-    );
+    Lease::acquire(temp.path()).unwrap();
     std::fs::write(temp.path().join("release.txt"), b"release").unwrap();
     wait_until("actual process exit", || process.completed());
-    wait_until("writer retirement", || Lease::acquire(temp.path()).is_ok());
     assert!(temp.path().join("done.txt").exists());
 }
 
 #[test]
-fn interactive_agents_share_one_checkout_until_both_exit() {
+fn agents_in_the_same_checkout_are_observed_independently() {
     let temp = tempfile::tempdir().unwrap();
-    let mut first = Guard::acquire_interactive(temp.path()).unwrap();
+    let mut first = Guard::acquire(temp.path()).unwrap();
     let first_info = first
         .spawn_piped(&request(
             temp.path(),
@@ -76,7 +73,7 @@ fn interactive_agents_share_one_checkout_until_both_exit() {
         temp.path().join("first.ready").exists()
     });
 
-    let mut second = Guard::acquire_interactive(temp.path()).unwrap();
+    let mut second = Guard::acquire(temp.path()).unwrap();
     let second_info = second
         .spawn_piped(&request(
             temp.path(),
@@ -91,25 +88,77 @@ fn interactive_agents_share_one_checkout_until_both_exit() {
     drop(first);
     drop(second);
 
-    assert!(matches!(Lease::acquire(temp.path()), Err(Error::Busy)));
+    Lease::acquire(temp.path()).unwrap();
     std::fs::write(temp.path().join("first.release"), b"release").unwrap();
     wait_until("first terminal exit", || first_process.completed());
-    assert!(matches!(Lease::acquire(temp.path()), Err(Error::Busy)));
+    assert!(!second_process.completed());
+    Lease::acquire(temp.path()).unwrap();
     std::fs::write(temp.path().join("second.release"), b"release").unwrap();
     wait_until("second terminal exit", || second_process.completed());
-    wait_until("shared writer retirement", || {
-        Lease::acquire(temp.path()).is_ok()
+}
+
+#[test]
+fn agents_can_start_while_another_operation_uses_the_same_checkout() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut background = Guard::acquire(temp.path()).unwrap();
+    let info = background
+        .spawn_piped(&request(
+            temp.path(),
+            "echo ready > background.ready; while [ ! -f background.release ]; do sleep 0.02; done",
+        ))
+        .unwrap();
+    let _background_session = Session(info.id);
+    wait_until("background job startup", || {
+        temp.path().join("background.ready").exists()
+    });
+    let _operation = Lease::acquire(temp.path()).unwrap();
+    let mut chat = Guard::acquire(temp.path()).unwrap();
+    let info = chat
+        .spawn_piped(&request(temp.path(), "echo ran > chat.started"))
+        .unwrap();
+    let _session = Session(info.id);
+    wait_until("chat alongside another checkout operation", || {
+        temp.path().join("chat.started").exists()
+    });
+    assert!(!background.process.as_ref().unwrap().completed());
+    std::fs::write(temp.path().join("background.release"), b"release").unwrap();
+    wait_until("background job exit", || {
+        background.process.as_ref().unwrap().completed()
     });
 }
 
 #[test]
-fn interactive_agent_cannot_join_a_background_writer() {
+fn a_process_launch_does_not_require_working_git_metadata() {
     let temp = tempfile::tempdir().unwrap();
-    let _background = Guard::acquire(temp.path()).unwrap();
-    assert!(matches!(
-        Guard::acquire_interactive(temp.path()),
-        Err(Error::Busy)
-    ));
+    std::fs::write(temp.path().join(".git"), "gitdir: no-longer-present\n").unwrap();
+    let mut guard = Guard::acquire(temp.path()).unwrap();
+    let info = guard
+        .spawn_piped(&request(temp.path(), "echo ran > started"))
+        .unwrap();
+    let _session = Session(info.id);
+    wait_until("launch in folder with broken Git metadata", || {
+        temp.path().join("started").exists()
+    });
+}
+
+#[test]
+fn a_replaced_launch_folder_is_rejected_and_stays_rejected() {
+    let temp = tempfile::tempdir().unwrap();
+    let folder = temp.path().join("folder");
+    let original = temp.path().join("original");
+    std::fs::create_dir(&folder).unwrap();
+    let mut guard = Guard::acquire(&folder).unwrap();
+    std::fs::rename(&folder, &original).unwrap();
+    std::fs::create_dir(&folder).unwrap();
+    assert!(
+        guard
+            .spawn_piped(&request(&folder, "echo wrong > started"))
+            .is_err()
+    );
+    assert!(!folder.join("started").exists());
+    std::fs::remove_dir(&folder).unwrap();
+    std::fs::rename(&original, &folder).unwrap();
+    assert_eq!(guard.ensure_current(), Err(Error::Changed));
 }
 
 #[test]

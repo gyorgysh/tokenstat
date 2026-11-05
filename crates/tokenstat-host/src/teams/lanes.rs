@@ -868,9 +868,6 @@ fn record_catch_up(checkout: &str, outcome: &lane::CatchUp) {
         lane::CatchUp::Diverged => Some(
             "This folder has its own commits on the target, so it was not updated. Pull or rebase it yourself.",
         ),
-        lane::CatchUp::Busy => {
-            Some("Another change was being written in this folder, so it was not updated.")
-        }
         lane::CatchUp::Failed(_) => Some(
             "This folder was not updated. Check the remote and any local or ignored files before trying again.",
         ),

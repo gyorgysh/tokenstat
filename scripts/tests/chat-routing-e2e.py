@@ -29,6 +29,12 @@ backend = pathlib.Path(sys.argv[0]).name
 if '--version' in sys.argv or '--help' in sys.argv or 'app-server' in sys.argv or sys.argv[1:] == ['models']:
     print(backend + ' QA 1.0')
     sys.exit(0)
+if '--qa-hold' in sys.argv:
+    (root / 'terminal.ready').touch()
+    deadline = time.monotonic() + 90
+    while not (root / 'terminal.release').exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    sys.exit(0)
 with (root / 'control.json').open('r+') as file:
     fcntl.flock(file, fcntl.LOCK_EX)
     state = json.load(file)
@@ -174,6 +180,18 @@ def main():
 
                 proofs = []
                 if not args.fixture_only:
+                    # A live background job used to deny chat admission and
+                    # automatic continuations in this same working folder.
+                    job = call("automation.create", {"job": {
+                        "id": "checkout-concurrency", "name": "QA concurrent job",
+                        "backend": "sh", "workspaceId": workspace,
+                        "prompt": "echo ready > background.ready; while [ ! -f background.release ]; do sleep 0.02; done",
+                        "budgetSeconds": 90, "enabled": False}})
+                    background = call("automation.run", {"id": job["id"]})["lastRunId"]
+                    wait(lambda: (root / "project/background.ready").exists())
+                    terminal = call("pty.spawn", {"workspaceId": workspace,
+                        "command": "codex", "args": ["--qa-hold"], "hidden": True})
+                    wait(lambda: (root / "terminal.ready").exists())
                     reset = int(time.time() * 1000) + 25000
                     conversation = setup("QA automatic failover", [{"kind": "quota", "reset": reset}],
                                          [{"kind": "ok"}], returning=True, waiting=True)
@@ -190,6 +208,15 @@ def main():
                     prompt = " ".join(rows[1]["args"])
                     assert "QA_CONTEXT_MARKER" in prompt and "QA_STANDING_INSTRUCTIONS" in prompt
                     assert current["allowedTools"] == [] and current["allowedShellPrefixes"] == []
+                    runs = call("automation.runs", {})
+                    assert next(row for row in runs if row["id"] == background)["status"] == "running"
+                    assert call("pty.info", {"id": terminal["id"]})["alive"]
+                    (root / "project/background.release").touch()
+                    (root / "terminal.release").touch()
+                    call("pty.close", {"id": terminal["id"]})
+                    wait(lambda: next(row for row in call("automation.runs", {})
+                        if row["id"] == background)["status"] == "ok")
+                    proofs.append("manual send and automatic continuation complete beside a live background job and terminal agent in the same checkout")
                     wait(lambda: int(time.time() * 1000) > reset)
                     assert len(traces()) == start + 2, "Reset must not interrupt the healthy fallback"
                     send(chat(conversation["id"]), "Next manual turn after reset.")
@@ -271,6 +298,8 @@ def main():
                 print("QA host log:", (root / "host.log").read_text()[-4000:], file=sys.stderr)
                 raise
             finally:
+                (root / "project/background.release").touch()
+                (root / "terminal.release").touch()
                 host.terminate()
                 try:
                     host.wait(timeout=10)

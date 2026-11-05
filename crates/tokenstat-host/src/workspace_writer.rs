@@ -1,25 +1,20 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-//! Retain a writer after a lost response, failed persistence or early drain.
-//! This is process observation, not a sandbox or durable crash recovery.
+//! Observe launched processes after a lost response or early stream closure.
+//! Launches verify folder identity without reserving a checkout.
 
 #[cfg(all(test, unix))]
 mod tests;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
+use std::path::Path;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 use tokenstat_pty::ProcessWitness;
-use tokenstat_workspace::writer::{Error, Lease};
+use tokenstat_workspace::writer::{Error, Location};
 
-struct Entry {
-    process: ProcessWitness,
-    _writer: Arc<Lease>,
-}
 struct Registry {
-    entries: Mutex<HashMap<String, Entry>>,
-    terminal_writers: Mutex<HashMap<PathBuf, Weak<Lease>>>,
+    entries: Mutex<HashMap<String, ProcessWitness>>,
     wake: Condvar,
 }
 static REGISTRY: OnceLock<Option<Arc<Registry>>> = OnceLock::new();
@@ -34,7 +29,7 @@ pub(crate) fn pending_count() -> usize {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .values()
-                .filter(|entry| !entry.process.completed())
+                .filter(|process| !process.completed())
                 .count()
         })
 }
@@ -42,12 +37,11 @@ impl Registry {
     fn start() -> Option<Arc<Self>> {
         let registry = Arc::new(Self {
             entries: Mutex::new(HashMap::new()),
-            terminal_writers: Mutex::new(HashMap::new()),
             wake: Condvar::new(),
         });
         let worker = Arc::clone(&registry);
         std::thread::Builder::new()
-            .name("workspace-writers".into())
+            .name("workspace-processes".into())
             .spawn(move || worker.watch())
             .ok()?;
         Some(registry)
@@ -64,10 +58,7 @@ impl Registry {
                     .wait(entries)
                     .unwrap_or_else(|error| error.into_inner());
             }
-            let observed: Vec<_> = entries
-                .values()
-                .map(|entry| entry.process.clone())
-                .collect();
+            let observed: Vec<_> = entries.values().cloned().collect();
             drop(entries);
             for process in observed {
                 self.release_completed(&process);
@@ -84,8 +75,8 @@ impl Registry {
         }
     }
     fn release_completed(&self, process: &ProcessWitness) {
-        // Never block other checkouts behind a child whose stop holds its
-        // process mutex; the witness conservatively answers false instead.
+        // A child whose stop holds its process mutex conservatively answers
+        // false, so observation does not wait behind that stop.
         if process.completed() {
             self.entries
                 .lock()
@@ -96,7 +87,7 @@ impl Registry {
 }
 
 pub(crate) struct Guard {
-    writer: Arc<Lease>,
+    location: Location,
     registry: Arc<Registry>,
     process: Option<ProcessWitness>,
 }
@@ -104,36 +95,7 @@ impl Guard {
     pub fn acquire(path: &Path) -> Result<Self, Error> {
         let registry = Self::registry()?;
         Ok(Self {
-            writer: Arc::new(Lease::acquire(path)?),
-            registry,
-            process: None,
-        })
-    }
-    /// Interactive agents, a terminal or a chat turn a person sent, share one
-    /// checkout lease. A chat refused because a terminal agent is open in the
-    /// same folder left a person unable to start a chat at all. Their processes
-    /// still exclude background writers and managed Git operations until the
-    /// last one exits. Unattended work keeps `acquire` exclusive.
-    pub fn acquire_interactive(path: &Path) -> Result<Self, Error> {
-        let registry = Self::registry()?;
-        let path = path.canonicalize().map_err(|_| Error::Unavailable)?;
-        let writer = {
-            let mut writers = registry
-                .terminal_writers
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            writers.retain(|_, writer| writer.strong_count() > 0);
-            if let Some(writer) = writers.get(&path).and_then(Weak::upgrade) {
-                writer.ensure_for(&path)?;
-                writer
-            } else {
-                let writer = Arc::new(Lease::acquire(&path)?);
-                writers.insert(path, Arc::downgrade(&writer));
-                writer
-            }
-        };
-        Ok(Self {
-            writer,
+            location: Location::capture(path)?,
             registry,
             process: None,
         })
@@ -146,7 +108,7 @@ impl Guard {
             .ok_or(Error::Unavailable)
     }
     pub fn ensure_current(&self) -> Result<(), Error> {
-        self.writer.ensure_current()
+        self.location.ensure_current()
     }
     pub fn spawn(
         &mut self,
@@ -166,11 +128,11 @@ impl Guard {
         request: &tokenstat_pty::Spawn,
         piped: bool,
     ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
-        self.writer
+        self.location
             .ensure_for(&request.cwd)
             .map_err(|error| tokenstat_pty::PtyError::Spawn(error.to_string()))?;
         let mut anchored = request.clone();
-        anchored.cwd = self.writer.folder().to_owned();
+        anchored.cwd = self.location.folder().to_owned();
         let check = || {
             self.ensure_current()
                 .map_err(|error| tokenstat_pty::PtyError::Spawn(error.to_string()))
@@ -188,13 +150,7 @@ impl Guard {
             .entries
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .insert(
-                process.id().into(),
-                Entry {
-                    process: process.clone(),
-                    _writer: Arc::clone(&self.writer),
-                },
-            );
+            .insert(process.id().into(), process.clone());
         self.process = Some(process);
         self.registry.wake.notify_one();
     }

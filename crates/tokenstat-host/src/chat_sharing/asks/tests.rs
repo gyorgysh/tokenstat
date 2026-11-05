@@ -150,7 +150,11 @@ fn interrupted_recovery_keeps_the_chat_fenced_and_can_finish_after_restart() {
         .unwrap_err();
     assert_eq!(error.code, "fixture_claim_write_failed");
     assert_eq!(f.chat().team_run_fence, Some(fence.clone()));
-    assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_err());
+    let mut unrelated = tokenstat_workspace::writer::Lease::acquire(&f.folder).unwrap();
+    assert_eq!(
+        unrelated.claim_run(fence.incarnation()),
+        Err(tokenstat_workspace::writer::Error::RecoveryRequired)
+    );
     let store = Store::load_at(f.store.root.clone());
     assert_eq!(
         store
@@ -197,7 +201,11 @@ fn proven_recovery_clears_running_only_after_durable_writer_release() {
     );
     assert!(f.chat().running);
     assert_eq!(f.chat().team_run_fence.as_ref(), Some(&fence));
-    assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_err());
+    let mut unrelated = tokenstat_workspace::writer::Lease::acquire(&f.folder).unwrap();
+    assert_eq!(
+        unrelated.claim_run(fence.incarnation()),
+        Err(tokenstat_workspace::writer::Error::RecoveryRequired)
+    );
     assert_eq!(
         f.store
             .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, true, || {
@@ -227,7 +235,7 @@ fn an_ask_has_one_canonical_author_and_retry_keeps_original_device_grant_and_fen
     assert_eq!(owned.context.backend, "codex");
     assert!(!owned.context.worktree.repository);
     assert_eq!(f.chat().team_run_fence.as_ref(), Some(&owned.binding.fence));
-    assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_err());
+    assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_ok());
     assert!(
         RunnerLease::try_acquire(&f.store.root, &f.chat.id)
             .unwrap()
@@ -337,14 +345,23 @@ fn comments_after_acceptance_do_not_change_the_owned_context_or_reuse_the_ask_id
 }
 
 #[test]
-fn stale_review_and_busy_writer_leave_no_intent_or_canonical_fence() {
+fn another_operation_does_not_block_an_ask() {
     let f = Fixture::new();
     let actor = principal("fixture-person", 'a', 'b');
     let input = f.input(&actor, "ask-one");
     let lease = tokenstat_workspace::writer::Lease::acquire(&f.folder).unwrap();
-    assert_eq!(failed(f.prepare(&actor, &input)).code, "team_run_busy");
-    assert!(f.chat().team_run_fence.is_none());
-    drop(lease);
+    let mut owned = new(f.prepare(&actor, &input).unwrap());
+    owned.claim_writer().unwrap();
+    lease.ensure_current().unwrap();
+    assert!(f.chat().team_run_fence.is_some());
+    f.store.refuse_prepared_ask(f.target(), owned).unwrap();
+}
+
+#[test]
+fn stale_review_leaves_no_intent_or_canonical_fence() {
+    let f = Fixture::new();
+    let actor = principal("fixture-person", 'a', 'b');
+    let input = f.input(&actor, "ask-one");
     let c = CommentInput {
         text: "New discussion".into(),
         client_message_id: "comment-one".into(),

@@ -216,8 +216,16 @@ mod tests {
         let record = Manual::begin(&lane, &mut lease).unwrap();
         let claim = record.claim.clone();
         drop(lease);
-        assert!(tokenstat_workspace::writer::Lease::acquire_lane(&lane).is_err());
+        let mut unrelated = tokenstat_workspace::writer::Lease::acquire_lane(&lane).unwrap();
+        assert_eq!(
+            unrelated.claim_run(&claim),
+            Err(tokenstat_workspace::writer::Error::RecoveryRequired)
+        );
         assert!(recover_manual(&lane).is_err());
+        assert_eq!(
+            unrelated.claim_run(&claim),
+            Err(tokenstat_workspace::writer::Error::RecoveryRequired)
+        );
         // No child was born in this fixture. Record the same durable completed
         // step used after a real owned-process completion, then restart cleanup.
         let mut record = record;

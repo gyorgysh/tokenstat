@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-//! Process-owned coordination for managed workspace writers. These locks do
-//! not confine an agent or prevent edits by other programs.
+//! Folder identity checks and recovery records for managed operations.
+//! Agents and Git operations may use the same checkout concurrently.
 
 mod claim;
 pub use claim::clear_orphaned_run;
@@ -19,15 +19,13 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
-    #[error("This checkout is in use by another agent or Git operation. Wait for it to finish.")]
+    #[error("Team run records are being updated. Try again.")]
     Busy,
-    #[error("Could not lock this checkout. Check the folder and try again.")]
+    #[error("Could not open this folder. Check it and try again.")]
     Unavailable,
     #[error("This checkout changed while it was being prepared. Review it and try again.")]
     Changed,
-    #[error(
-        "This checkout has an unresolved Team run. Recover it on the publishing computer before making changes."
-    )]
+    #[error("Team run records need recovery on the publishing computer.")]
     RecoveryRequired,
 }
 
@@ -70,6 +68,49 @@ impl Folder {
     }
 }
 
+/// Anchor a process launch to its requested folder without taking a checkout
+/// lock or depending on Git metadata or Team recovery records.
+pub struct Location {
+    original: PathBuf,
+    folder: Folder,
+    retired: AtomicBool,
+}
+impl Location {
+    pub fn capture(path: &Path) -> Result<Self, Error> {
+        Ok(Self {
+            original: path.to_owned(),
+            folder: Folder::capture(path)?,
+            retired: AtomicBool::new(false),
+        })
+    }
+    pub fn folder(&self) -> &Path {
+        &self.folder.path
+    }
+    pub fn ensure_current(&self) -> Result<(), Error> {
+        if self.retired.load(Ordering::SeqCst) {
+            return Err(Error::Changed);
+        }
+        let current = Folder::capture(&self.original);
+        if !current.is_ok_and(|folder| {
+            folder.path == self.folder.path && folder.identity == self.folder.identity
+        }) {
+            self.retired.store(true, Ordering::SeqCst);
+        }
+        if self.retired.load(Ordering::SeqCst) {
+            return Err(Error::Changed);
+        }
+        Ok(())
+    }
+    pub fn ensure_for(&self, path: &Path) -> Result<(), Error> {
+        self.ensure_current()?;
+        let requested = Folder::capture(path).map_err(|_| Error::Changed)?;
+        if requested.identity != self.folder.identity {
+            return Err(Error::Changed);
+        }
+        Ok(())
+    }
+}
+
 struct Target {
     folder: Folder,
     common: Option<Folder>,
@@ -80,9 +121,7 @@ impl Target {
     fn capture(path: &Path) -> Result<Self, Error> {
         Self::capture_as(path, false)
     }
-    /// A lane is a linked worktree outside every project folder. It holds only
-    /// its own folder: git's ref and index locks cover the shared directory,
-    /// so other lanes and the main checkout keep working beside it.
+    /// A lane's recovery record tracks its folder without shared Git metadata.
     fn capture_as(path: &Path, lane: bool) -> Result<Self, Error> {
         let folder = Folder::capture(path)?;
         let common = if !lane && git_marker(&folder.path)? {
@@ -140,14 +179,13 @@ impl Target {
     }
 }
 
-/// Hold from launch preparation through process completion, or through one
-/// explicit Git/editor operation. Never unlink its lock files on release.
+/// Revalidate folder and Git metadata identities through a managed operation.
+/// This does not reserve a checkout; Git supplies its own transaction locks.
 pub struct Lease {
     original: PathBuf,
     target: Target,
     additional: Option<(PathBuf, Target)>,
     root: Folder,
-    locks: Vec<(PathBuf, File)>,
     retired: AtomicBool,
     claim: Option<String>,
 }
@@ -166,12 +204,11 @@ impl Lease {
     pub fn acquire(folder: &Path) -> Result<Self, Error> {
         Self::at(folder, &lock_root()?)
     }
-    /// Hold one lane for an agent run. See `Target::capture_as`.
+    /// Track one lane for an agent run. See `Target::capture_as`.
     pub fn acquire_lane(folder: &Path) -> Result<Self, Error> {
         Self::at_with(folder, None, &lock_root()?, true)
     }
-    /// Coordinate a source and an existing destination parent atomically.
-    /// Merging first avoids conflicting with this operation's own ancestors.
+    /// Track both a source and an existing destination parent.
     pub fn acquire_pair(folder: &Path, destination_parent: &Path) -> Result<Self, Error> {
         Self::at_with_destination(folder, Some(destination_parent), &lock_root()?)
     }
@@ -197,35 +234,11 @@ impl Lease {
             .transpose()?;
         file::private_directory(root)?;
         let root = Folder::capture(root)?;
-        let mut locks = Vec::new();
-        // Nonblocking acquisition and a fixed order avoid deadlock between
-        // linked checkouts. A partial failure drops every acquired handle.
-        let mut requests = target.requests();
-        if let Some((_, target)) = &additional {
-            requests.extend(target.requests());
-        }
-        requests.sort_unstable_by_key(|(identity, _)| *identity);
-        let mut merged: Vec<(Identity, bool)> = Vec::new();
-        for (identity, exclusive) in requests {
-            if let Some((prior, prior_exclusive)) = merged.last_mut()
-                && *prior == identity
-            {
-                *prior_exclusive |= exclusive;
-            } else {
-                merged.push((identity, exclusive));
-            }
-        }
-        for (identity, exclusive) in merged {
-            let path = root.path.join(identity.name());
-            let lock = file::lock(&path, exclusive)?;
-            locks.push((path, lock));
-        }
         let lease = Self {
             original: folder.to_owned(),
             target,
             additional,
             root,
-            locks,
             retired: AtomicBool::new(false),
             claim: None,
         };
@@ -233,7 +246,7 @@ impl Lease {
         Ok(lease)
     }
     /// Recheck immediately before managed effects after asynchronous work or
-    /// launch preparation. A replaced folder or lock retires this writer.
+    /// launch preparation. A replaced folder retires this operation.
     pub fn ensure_current(&self) -> Result<(), Error> {
         if self.retired.load(Ordering::SeqCst) {
             return Err(Error::Changed);
@@ -259,29 +272,7 @@ impl Lease {
         {
             return Err(Error::Changed);
         }
-        for (path, handle) in &self.locks {
-            let current = file::existing_lock(path).map_err(|_| Error::Changed)?;
-            if file::identity(&current)? != file::identity(handle)? {
-                return Err(Error::Changed);
-            }
-        }
         claim::check(self)
-    }
-}
-
-impl Drop for Lease {
-    fn drop(&mut self) {
-        // Closing the descriptor releases a lock on a normal return. A panic
-        // unwind on macOS can leave that release pending, so unlock explicitly
-        // while the descriptors are still open.
-        #[cfg(unix)]
-        {
-            use std::os::fd::AsRawFd;
-            for (_, file) in &self.locks {
-                // The descriptor belongs to this lease. LOCK_UN releases only that hold.
-                let _ = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-            }
-        }
     }
 }
 

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-//! Durable unresolved ownership beside kernel writer locks. Identity requests
-//! include shared ancestors, so a lost guardian also fences parent-folder
-//! writers and linked checkouts without blocking independent siblings.
+//! Durable ownership of individual Team runs. Folder identity mappings retain
+//! the v1 storage format; overlapping mappings do not reserve a checkout.
 
 use super::{Error, Folder, Lease, file};
 use serde::{Deserialize, Serialize};
@@ -137,20 +136,12 @@ fn check_index(lease: &Lease, index: &Index) -> Result<(), Error> {
     {
         return Err(Error::Changed);
     }
-    for (id, req) in &index.claims {
-        if lease.claim.as_ref() == Some(id) {
-            continue;
-        }
-        if wanted.iter().any(|(name, exclusive)| {
-            req.binary_search_by(|(other, _)| other.cmp(name))
-                .is_ok_and(|position| *exclusive || req[position].1)
-        }) {
-            return Err(Error::RecoveryRequired);
-        }
-    }
     Ok(())
 }
 pub(super) fn check(lease: &Lease) -> Result<(), Error> {
+    if lease.claim.is_none() {
+        return Ok(());
+    }
     let mut file = gate(&lease.root)?;
     check_index(lease, &read(&lease.root, &mut file)?)
 }
@@ -222,8 +213,7 @@ impl Lease {
 }
 
 /// Remove one run's claim after the caller proved that every process of the
-/// run is gone. Only the publisher's explicit recovery calls this: a fenced
-/// checkout refuses a normal lease, so there is no lease to clear it through.
+/// run is gone. Only the publisher's explicit recovery calls this.
 pub fn clear_orphaned_run(id: &str) -> Result<(), Error> {
     clear_orphaned_run_at(id, &super::lock_root()?)
 }
