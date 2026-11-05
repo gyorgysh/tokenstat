@@ -103,6 +103,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private readonly ChatHistoryBuffer _history = new();
     private JsonArray _events { get => _history.Events; set => _history.Events = value; }
     private JsonArray _approvals = new();
+    private long _approvalVersion;
+    private readonly HashSet<string> _resolvingApprovals = new();
     private readonly List<StagedFile> _attachments = [];
     private readonly Dictionary<string, (string Text, StagedFile[] Attachments)> _drafts = new();
     private readonly Dictionary<string, string> _instructionDrafts = new();
@@ -1643,18 +1645,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
         });
-        if (pending)
+        if (pending && !SharedSource)
         {
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             var id = Format.Text(approval, "id");
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.allow.e213c161"), ActionIcon.Allow, async (_, _) => await ResolveAsync(id, "allow")));
-            actions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.always_allow.977618bd"), ActionIcon.Allow, async (_, _) => await ResolveAsync(id, "allowAlways")));
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.deny.05a2d733"), ActionIcon.Deny, async (_, _) => await ResolveAsync(id, "deny")));
+            var reply = ApprovalReply(id);
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.allow.e213c161"), ActionIcon.Allow, async (_, _) => await reply("allow")));
+            actions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.always_allow.977618bd"), ActionIcon.Allow, async (_, _) => await reply("allowAlways")));
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.deny.05a2d733"), ActionIcon.Deny, async (_, _) => await reply("deny")));
             body.Children.Add(actions);
             var note = SeatStep.AllowAlwaysNote(verb, Format.Text(approval, "shellPrefix"));
             if (!string.IsNullOrEmpty(note)) body.Children.Add(Muted(note));
         }
-        else
+        else if (!pending)
         {
             body.Children.Add(Muted(L10n.Text("windows.chatpage.this_request_is_no_longer_waiting.b64fd4de")));
         }
@@ -2373,23 +2376,54 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
+    private Func<string, Task> ApprovalReply(string id)
+    {
+        var chat = _openId;
+        var generation = _openGeneration;
+        var account = AppServices.AccountGeneration;
+        return choice => chat is not null && OpenChatIs(chat) && generation == _openGeneration
+            && account == AppServices.AccountGeneration ? ResolveAsync(id, choice) : Task.CompletedTask;
+    }
+
+    private bool ApplyApprovalSnapshot(JsonArray approvals, long version)
+    {
+        if (version != _approvalVersion) return false;
+        _approvals = approvals;
+        return true;
+    }
+
     private async Task ResolveAsync(string id, string choice)
     {
+        if (_openId is not string chat) return;
+        var generation = _openGeneration;
+        var account = AppServices.AccountGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration
+            && account == AppServices.AccountGeneration && !_opening && !SharedSource;
+        if (!Current()) return;
+        var pending = _approvals.FirstOrDefault(row => Format.Text(row, "id") == id);
+        var owner = Format.Text(pending, "conversationId");
+        if (pending is null || !string.IsNullOrEmpty(Format.Text(pending, "decision"))
+            || !string.IsNullOrEmpty(owner) && owner != chat || !_resolvingApprovals.Add(id)) return;
+        // A poll started before this mutation must not restore its old prompts.
+        _approvalVersion++;
+        long? refreshVersion = null;
         try
         {
-            await CallChatAsync("chat.resolveApproval", new JsonObject
-            {
-                ["id"] = id,
-                ["choice"] = choice,
-            });
-            _approvals = AsArray(await CallChatAsync(
-                "chat.approvals", new JsonObject { ["id"] = _openId }));
+            await CallChatAsync("chat.resolveApproval", new JsonObject { ["id"] = id, ["choice"] = choice });
+            if (!Current()) return;
+            var version = ++_approvalVersion;
+            refreshVersion = version;
+            _approvals = new JsonArray(_approvals.Where(row => Format.Text(row, "id") != id)
+                .Select(row => row?.DeepClone()).ToArray());
             RebuildTranscript();
+            var approvals = AsArray(await CallChatAsync("chat.approvals", new JsonObject { ["id"] = chat }));
+            if (Current() && ApplyApprovalSnapshot(approvals, version)) RebuildTranscript();
         }
         catch (Exception ex)
         {
-            Banner(ex.Message);
+            if (Current() && (refreshVersion is null || refreshVersion == _approvalVersion)) Banner(ex.Message);
         }
+        finally { _resolvingApprovals.Remove(id); }
     }
 
     private async Task ConfirmDeleteAsync(string? chatId = null)
@@ -2493,10 +2527,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 // resumes on the UI thread. Still, guard the UI mutations
                 // explicitly so a future ConfigureAwait(false) or a call from a
                 // non-UI context cannot trigger RPC_E_WRONG_THREAD.
+                var approvalVersion = ++_approvalVersion;
                 void ApplyPoll(JsonArray approvals)
                 {
                     if (!_history.ApplyTail(chunk, historyGeneration)) return;
-                    _approvals = approvals;
+                    ApplyApprovalSnapshot(approvals, approvalVersion);
                 }
                 var approvals = AsArray(await CallChatAsync(
                     "chat.approvals", new JsonObject { ["id"] = chatId }));
@@ -2505,7 +2540,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 if (token.IsCancellationRequested || _openId != chatId) return;
 
                 if (historyGeneration != _historyGeneration) continue;
-                var transcriptChanged = next.Count > 0 || !JsonNode.DeepEquals(_approvals, approvals);
+                var transcriptChanged = next.Count > 0
+                    || approvalVersion == _approvalVersion && !JsonNode.DeepEquals(_approvals, approvals);
 
                 // All UI state is mutated on the DispatcherQueue regardless of
                 // which thread the awaits resumed on.
