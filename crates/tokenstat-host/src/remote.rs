@@ -2384,7 +2384,7 @@ pub(crate) fn call_peer_result(
     params: &str,
 ) -> Result<Value, String> {
     let answer = call_peer(peer_hex, method, params)?;
-    let value: Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+    let mut value: Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
     if value.get("ok").and_then(Value::as_bool) != Some(true) {
         let message = value
             .get("error")
@@ -2393,7 +2393,10 @@ pub(crate) fn call_peer_result(
             .unwrap_or("the other machine rejected the call without saying why");
         return Err(message.to_string());
     }
-    Ok(value.get("result").cloned().unwrap_or(Value::Null))
+    Ok(value
+        .get_mut("result")
+        .map(Value::take)
+        .unwrap_or(Value::Null))
 }
 
 /// Forward one call to a peer and return its envelope verbatim.
@@ -2402,6 +2405,28 @@ pub(crate) fn call_peer_result(
 /// end decodes, so re-wrapping it here would create a second envelope format
 /// that only remote calls use.
 pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, String> {
+    crate::request_context::refuse_remote("remote forwarding")?;
+    call_peer_value(peer_hex, method, &parse_params(params))
+}
+
+fn peer_request(method: &str, params: &Value) -> String {
+    #[derive(Serialize)]
+    struct Request<'a> {
+        id: u64,
+        method: &'a str,
+        params: &'a Value,
+    }
+    // Borrow payloads such as attachment chunks instead of copying them into
+    // another JSON tree. These fields contain only serializable JSON values.
+    serde_json::to_string(&Request {
+        id: 0,
+        method,
+        params,
+    })
+    .expect("JSON request")
+}
+
+fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<String, String> {
     crate::request_context::refuse_remote("remote forwarding")?;
     // A pooled connection authenticated earlier, before the owner may have
     // revoked this destination. Check disk before every request, including
@@ -2415,7 +2440,8 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
         return Err("That machine is not approved on this device, so nothing was sent.".into());
     }
     drop(store);
-    let request = json!({"id": 0, "method": method, "params": parse_params(params)}).to_string();
+    let request = peer_request(method, params);
+    let allow_relay = params.get("allowRelay").and_then(Value::as_bool) == Some(true);
     // Held for the whole call, pooled connection included: a connection taken
     // out of the pool is as live as a freshly dialled one while it is in use.
     let _slot = LiveSlot::take(peer_hex)?;
@@ -2439,13 +2465,7 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
                 dial_peer_as(peer_hex, ChannelPurpose::Files)?
             }
         };
-        if connection.is_relay()
-            && is_file_payload(method)
-            && !parse_params(params)
-                .get("allowRelay")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        {
+        if connection.is_relay() && is_file_payload(method) && !allow_relay {
             return Ok(relay_file_refusal());
         }
         match round_trip(&mut connection, request.as_bytes(), ANSWER_IDLE) {
@@ -2459,13 +2479,7 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
             // replacing its listener, not a real failure.
             Err(tokenstat_remote::RemoteError::Closed) => {
                 let mut redialled = dial_peer_as(peer_hex, ChannelPurpose::Files)?;
-                if redialled.is_relay()
-                    && is_file_payload(method)
-                    && !parse_params(params)
-                        .get("allowRelay")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                {
+                if redialled.is_relay() && is_file_payload(method) && !allow_relay {
                     return Ok(relay_file_refusal());
                 }
                 let answer = round_trip(&mut redialled, request.as_bytes(), ANSWER_IDLE)
@@ -3482,7 +3496,7 @@ fn forward(params: &str) -> Result<Value, crate::error::DispatchError> {
     forwarded_result(
         &p.method,
         crate::account_session::with_snapshot(owner, || {
-            call_peer(&p.peer, &p.method, &p.params.to_string())
+            call_peer_value(&p.peer, &p.method, &p.params)
         }),
     )
 }
@@ -3502,11 +3516,11 @@ fn forwarded_result(
         }
     };
     let answer = answer.map_err(unreadable)?;
-    let value: Value = serde_json::from_str(&answer).map_err(|e| unreadable(e.to_string()))?;
+    let mut value: Value = serde_json::from_str(&answer).map_err(|e| unreadable(e.to_string()))?;
     match value.get("ok").and_then(Value::as_bool) {
         Some(true) => value
-            .get("result")
-            .cloned()
+            .get_mut("result")
+            .map(Value::take)
             .ok_or_else(|| unreadable("The computer returned no result.".into())),
         Some(false) => {
             let error = value.get("error");
@@ -4122,6 +4136,98 @@ mod tests {
 
     /// Trust is not transitive. An approved peer must not be able to use this
     /// machine as a hop to a third one that never approved it.
+    #[test]
+    fn borrowed_peer_requests_keep_the_existing_wire_format() {
+        for raw in [
+            "",
+            "  ",
+            "not json",
+            "null",
+            "true",
+            "[]",
+            "42",
+            "-0.0",
+            r#"{"allowRelay":true,"data":"a\nβ\"\\😀","offset":18446744073709551615}"#,
+            r#"{"allowRelay":false,"nested":[null,true,{"size":1.25,"key":"value"}]}"#,
+            r#"{"allowRelay":"true","duplicate":1,"duplicate":2}"#,
+            r#"{"allowRelay":null}"#,
+        ] {
+            let params = parse_params(raw);
+            for method in ["chat.events", "chat.fileUploadChunk", "unicode.β\"\\"] {
+                let previous =
+                    json!({"id": 0, "method": method, "params": parse_params(&params.to_string())})
+                        .to_string();
+                assert_eq!(peer_request(method, &params), previous, "{raw}");
+            }
+            let previous_consent = parse_params(&params.to_string())
+                .get("allowRelay")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            assert_eq!(
+                params.get("allowRelay").and_then(Value::as_bool) == Some(true),
+                previous_consent
+            );
+        }
+        for result in [
+            Value::Null,
+            json!([1, "β", {"data":"x".repeat(512 * 1024)}]),
+        ] {
+            let response = json!({"ok":true,"result":result}).to_string();
+            assert_eq!(
+                forwarded_result("chat.events", Ok(response)).unwrap(),
+                result
+            );
+        }
+        assert!(forwarded_result("chat.events", Ok(r#"{"ok":true}"#.into())).is_err());
+    }
+
+    #[test]
+    #[ignore = "manual remote request preparation measurement"]
+    fn benchmark_peer_request_preparation() {
+        for (name, params) in [
+            ("poll", json!({"id":"chat-fixture","after":42000})),
+            (
+                "512 KiB upload",
+                json!({"id":"upload-fixture","offset":1048576,"data":"A".repeat(512 * 1024 * 4 / 3 + 4),"allowRelay":true}),
+            ),
+        ] {
+            let raw =
+                json!({"peer":"ab".repeat(32),"method":"chat.fileUploadChunk","params":params})
+                    .to_string();
+            let mut before = Vec::new();
+            let mut after = Vec::new();
+            for _ in 0..11 {
+                let start = Instant::now();
+                let p: ForwardParams = serde_json::from_str(&raw).unwrap();
+                let encoded = p.params.to_string();
+                let previous =
+                    json!({"id":0,"method":p.method,"params":parse_params(&encoded)}).to_string();
+                let consent = parse_params(&encoded)
+                    .get("allowRelay")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                std::hint::black_box((&previous, consent));
+                before.push(start.elapsed());
+
+                let start = Instant::now();
+                let p: ForwardParams = serde_json::from_str(&raw).unwrap();
+                let request = peer_request(&p.method, &p.params);
+                let allow = p.params.get("allowRelay").and_then(Value::as_bool) == Some(true);
+                std::hint::black_box((&request, allow));
+                after.push(start.elapsed());
+                assert_eq!(request, previous);
+                assert_eq!(allow, consent);
+            }
+            before.sort();
+            after.sort();
+            eprintln!(
+                "{name}: request preparation {:.3} -> {:.3} ms",
+                before[5].as_secs_f64() * 1000.0,
+                after[5].as_secs_f64() * 1000.0
+            );
+        }
+    }
+
     #[test]
     fn a_remote_call_cannot_chain_through_a_peer() {
         let params = json!({"peer": "ab".repeat(32), "method": "remote.call", "params": {}});
