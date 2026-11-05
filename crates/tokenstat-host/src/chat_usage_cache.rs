@@ -189,6 +189,57 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual release-build usage cache measurement"]
+    fn benchmark_cold_warm_and_appended_history() {
+        use std::io::Write;
+        use std::time::Instant;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("events.ndjson");
+        for backend in ["codex", "muse"] {
+            let mut file = fs::File::create(&path).unwrap();
+            let row = json!({"kind":"agent", "backend":backend, "event":{"kind":"toolEnd", "detail":"output 😀 \"line\"\n".repeat(8_000)}}).to_string() + "\n";
+            for _ in 0..256 {
+                file.write_all(row.as_bytes()).unwrap();
+            }
+            file.write_all(usage(42).replace("codex", backend).as_bytes())
+                .unwrap();
+            file.flush().unwrap();
+            let mut cold = Vec::new();
+            let mut warm = Vec::new();
+            let mut changed = Vec::new();
+            for iteration in 0..9 {
+                let mut cache = Cache::default();
+                let expected = 42 + iteration;
+                let start = Instant::now();
+                let first = read(&mut cache, &path, backend == "muse");
+                cold.push(start.elapsed());
+                assert_eq!(first.0["input"], expected);
+                let start = Instant::now();
+                let cached = read(&mut cache, &path, backend == "muse");
+                warm.push(start.elapsed());
+                assert_eq!(first, cached);
+                file.write_all(usage(1).replace("codex", backend).as_bytes())
+                    .unwrap();
+                file.flush().unwrap();
+                let start = Instant::now();
+                let appended = read(&mut cache, &path, backend == "muse");
+                changed.push(start.elapsed());
+                assert_eq!(appended.0["input"], expected + 1);
+            }
+            cold.sort();
+            warm.sort();
+            changed.sort();
+            eprintln!(
+                "usage cache {backend}: bytes={} cold_ms={:.3} warm_ms={:.3} appended_ms={:.3}",
+                file.metadata().unwrap().len(),
+                cold[4].as_secs_f64() * 1000.0,
+                warm[4].as_secs_f64() * 1000.0,
+                changed[4].as_secs_f64() * 1000.0
+            );
+        }
+    }
+
+    #[test]
     fn cached_metadata_keeps_counters_and_boundaries_without_tool_bodies() {
         assert_eq!(
             metadata_only(json!(["private malformed content"])),
