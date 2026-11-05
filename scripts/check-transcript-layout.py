@@ -114,6 +114,44 @@ assert(growth.pinned && repins == 0, "growth must queue a correction without scr
 drain()
 assert(repins == 1, "stationary growth must still follow")
 
+// A large reply can finish measuring inside the 150 ms pin throttle. Its
+// final geometry callback still needs a correction when no more text arrives.
+growth.note(metrics(600, 1200))
+RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+assert(repins == 2, "growth during the throttle must receive a trailing correction")
+
+let reached = TranscriptFollowState()
+reached.note(native(600, 1000, 0, scrolling: false))
+var reachedPins = 0
+reached.repin = { reachedPins += 1; return true }
+reached.note(native(600, 1100, 100, scrolling: false))
+drain()
+reached.note(native(600, 1200, 200, scrolling: false))
+reached.note(native(800, 1200, 0, scrolling: false))
+RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+assert(reachedPins == 1, "arriving before a delayed correction must retire the extra walk")
+
+let delayedPause = TranscriptFollowState()
+delayedPause.note(native(600, 1000, 0, scrolling: false))
+var delayedPins = 0
+delayedPause.repin = { delayedPins += 1; return true }
+delayedPause.note(native(600, 1100, 100, scrolling: false))
+drain()
+delayedPause.note(native(600, 1200, 200, scrolling: false))
+delayedPause.pause()
+RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+assert(delayedPins == 1, "pausing must cancel a throttled correction")
+
+let bounded = TranscriptFollowState()
+bounded.note(native(600, 1000, 0, scrolling: false))
+var boundedPins = 0
+bounded.repin = { boundedPins += 1; return true }
+for index in 0..<12 {
+    bounded.note(native(600, CGFloat(1100 + index * 100), CGFloat(100 + index * 100), scrolling: false))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.17))
+}
+assert(boundedPins == 6, "a nonconverging lazy stack must retain its six-walk limit")
+
 let departed = TranscriptFollowState()
 departed.note(metrics(600))
 var unwanted = 0

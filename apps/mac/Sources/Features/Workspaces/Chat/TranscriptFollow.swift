@@ -558,14 +558,17 @@ final class TranscriptFollowState {
                 // grows for hundreds of frames and each repin walks the lazy
                 // stack over every row in between. Coalesce to ~6 walks a
                 // second; the end still catches up every frame it matters.
-                let now = Date()
-                guard now.timeIntervalSince(lastRepinAt) > 0.15 else { return }
                 guard repinsSpent < Self.repinBudget else { return }
-                lastRepinAt = now
-                repinsSpent += 1
-                repinDelivery.submit { [weak self] in
+                let delay = max(0, 0.15 - Date().timeIntervalSince(lastRepinAt))
+                // A final layout frame inside the throttle must still land.
+                // Dropping it leaves a quiet, completed reply above the end.
+                repinDelivery.submit(after: delay) { [weak self] in
                     guard let self, self.active, self.pinned,
-                          !self.suppressed, !self.settling else { return }
+                          !self.atEnd, !self.sliceHidesNewest,
+                          !self.suppressed, !self.settling,
+                          self.repinsSpent < Self.repinBudget else { return }
+                    self.lastRepinAt = Date()
+                    self.repinsSpent += 1
                     self.markDrivenInstant()
                     if self.repin?() == false { self.stopFollowing() }
                 }
@@ -857,7 +860,7 @@ final class TranscriptScrollDelivery {
     private var pending: DispatchWorkItem?
     private var latest: (() -> Void)?
 
-    func submit(_ action: @escaping () -> Void) {
+    func submit(after delay: TimeInterval = 0, _ action: @escaping () -> Void) {
         latest = action
         guard pending == nil else { return }
         let work = DispatchWorkItem { [weak self] in
@@ -868,7 +871,11 @@ final class TranscriptScrollDelivery {
             action?()
         }
         pending = work
-        DispatchQueue.main.async(execute: work)
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        } else {
+            DispatchQueue.main.async(execute: work)
+        }
     }
 
     func cancel() {
