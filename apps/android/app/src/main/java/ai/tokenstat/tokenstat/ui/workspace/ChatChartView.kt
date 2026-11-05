@@ -83,7 +83,7 @@ internal fun ChatChartView(source: String, pending: Boolean = false) {
     } else if (source.toByteArray(Charsets.UTF_8).size > 256 * 1024) {
         Text(L10n.text("common.chart.too_large"), modifier = Modifier.padding(16.dp), color = colors.textSecondary)
     } else if (failure != null) {
-        Text(L10n.text("common.chart.unavailable") + ": " + failure, modifier = Modifier.padding(16.dp), color = colors.textSecondary)
+        Text(L10n.text("common.chart.unavailable") + failure?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty(), modifier = Modifier.padding(16.dp), color = colors.textSecondary)
     } else {
         // Keep every chart's place in the reply while only visible charts own
         // a browser. Clipped bounds include the transcript's scroll viewport.
@@ -142,6 +142,15 @@ internal class ChartWebSurface(context: Context) : WebView(context) {
         isVerticalScrollBarEnabled = false
         addJavascriptInterface(Bridge(), "TokenstatChartHost")
         webViewClient = object : WebViewClient() {
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                if (!stopped) {
+                    val notify = onError
+                    (parent as? android.view.ViewGroup)?.removeView(this@ChartWebSurface)
+                    shutdown()
+                    notify("")
+                }
+                return true
+            }
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = request.url.toString() != PAGE
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse {
                 val name = request.url.toString().removePrefix(BASE)

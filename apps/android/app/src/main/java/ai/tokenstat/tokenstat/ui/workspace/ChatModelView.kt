@@ -51,6 +51,7 @@ internal fun ChatModelView(name: String, file: File) {
     var payload by remember(file.path, file.lastModified()) { mutableStateOf<ModelPayload>(ModelPayload.Loading) }
     var failure by remember(file.path, file.lastModified()) { mutableStateOf<String?>(null) }
     var ready by remember(file.path, file.lastModified()) { mutableStateOf(false) }
+    var terminated by remember(file.path, file.lastModified()) { mutableStateOf(false) }
     LaunchedEffect(file.path, file.lastModified()) {
         delay(10_000)
         if (!ready && failure == null) failure = L10n.text("android.chatmodel.preview_timed_out")
@@ -72,12 +73,17 @@ internal fun ChatModelView(name: String, file: File) {
         }
         is ModelPayload.Ready -> {
             Box(Modifier.fillMaxWidth().height(320.dp), contentAlignment = Alignment.Center) {
-                AndroidView(
+                if (!terminated) AndroidView(
                     factory = { ModelWebSurface(it) },
                     modifier = Modifier.fillMaxWidth().height(320.dp),
                     onReset = null,
                     onRelease = { it.shutdown() },
                     update = {
+                        it.onTerminated = {
+                            terminated = true
+                            ready = false
+                            failure = L10n.text("android.chatmodel.preview_unavailable")
+                        }
                         it.onResult = { message ->
                             ready = message == null
                             failure = message
@@ -94,6 +100,7 @@ internal fun ChatModelView(name: String, file: File) {
 @SuppressLint("SetJavaScriptEnabled")
 internal class ModelWebSurface(context: Context) : WebView(context) {
     var onResult: (String?) -> Unit = {}
+    var onTerminated: () -> Unit = {}
     private val main = Handler(Looper.getMainLooper())
     private var loaded = false
     private var pageRequested = false
@@ -121,6 +128,15 @@ internal class ModelWebSurface(context: Context) : WebView(context) {
             }
         }, "TokenstatModelHost")
         webViewClient = object : WebViewClient() {
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                if (!stopped) {
+                    val notify = onTerminated
+                    (parent as? android.view.ViewGroup)?.removeView(this@ModelWebSurface)
+                    shutdown()
+                    notify()
+                }
+                return true
+            }
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
                 if (request.isForMainFrame) main.post { if (!stopped) onResult(L10n.text("android.chatmodel.preview_unavailable")) }
             }
@@ -189,6 +205,7 @@ internal class ModelWebSurface(context: Context) : WebView(context) {
         stopped = true
         pending = null
         onResult = {}
+        onTerminated = {}
         main.removeCallbacksAndMessages(null)
         stopLoading()
         removeJavascriptInterface("TokenstatModelHost")
