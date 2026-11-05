@@ -4,6 +4,7 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+ChatUsageTests.Run();
 TeamTranscriptTests.Run();
 ChartViewportTests.Run();
 TeamPageTests.Run();
@@ -328,11 +329,11 @@ history.ApplyPage(newest, true);
 var generation = history.Generation;
 Check(history.Events.Count == 1 && history.HasEarlier && history.Offset == 900, "opening must use the bounded page");
 history.ApplyTail(Json("""{"events":[{"event":{"kind":"usage","input":100,"output":50,"cacheRead":5,"cacheWrite":3,"costUsd":0.25}}],"nextOffset":1000,"tailCursor":"tail-b"}"""), generation);
-Check(history.Usage!["input"]!.GetValue<long>() == 1100, "tail usage adds to the whole conversation");
+Check(history.Usage!["input"]!.GetValue<ulong>() == 1100, "tail usage adds to the whole conversation");
 history.ApplyPage(Json("""{"events":[{"id":"oldest"}],"nextOffset":500,"cursor":null,"hasEarlier":false,"usage":{"input":99999}}"""), false);
 Check(history.Events.Count == 3 && history.Events[0]!["id"]!.GetValue<string>() == "oldest", "earlier pages prepend without losing live events");
 Check(history.Offset == 1000 && history.TailCursor == "tail-b", "earlier pagination must not rewind the live tail");
-Check(history.Usage!["input"]!.GetValue<long>() == 1100 && history.Usage["cost"]!.GetValue<double>() == 1.75, "earlier pages must not double-count usage");
+Check(history.Usage!["input"]!.GetValue<ulong>() == 1100 && history.Usage["cost"]!.GetValue<double>() == 1.75, "earlier pages must not double-count usage");
 Check(newest["usage"]!["input"]!.GetValue<long>() == 1000, "cached responses must stay independent of mutable usage");
 history.ApplyPage(Json("""{"reset":true,"events":[{"id":"replacement"}],"nextOffset":80,"tailCursor":"new-tail","hasEarlier":false}"""), false);
 Check(history.Events.Count == 1 && history.Offset == 80 && history.Usage is null, "trim reset must replace history and totals");

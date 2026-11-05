@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
@@ -33,7 +35,7 @@ internal sealed class ChatHistoryBuffer
             Events = (JsonArray)rows.DeepClone();
             Offset = page["nextOffset"]?.GetValue<ulong>() ?? 0;
             TailCursor = page["tailCursor"]?.GetValue<string>();
-            Usage = page["usage"]?.DeepClone() as JsonObject;
+            Usage = ChatUsageTotals.Read(page["usage"]);
         }
         else
         {
@@ -52,12 +54,7 @@ internal sealed class ChatHistoryBuffer
         foreach (var row in chunk["events"] as JsonArray ?? new())
         {
             Events.Add(row?.DeepClone());
-            var ev = row?["event"];
-            if (Usage is null || ev?["kind"]?.GetValue<string>() != "usage") continue;
-            foreach (var key in new[] { "input", "output", "cacheRead", "cacheWrite" })
-                Usage[key] = Number(Usage, key) + Number(ev, key);
-            Usage["turns"] = Number(Usage, "turns") + 1;
-            Usage["cost"] = (Usage["cost"]?.GetValue<double>() ?? 0) + (ev?["costUsd"]?.GetValue<double>() ?? 0);
+            if (Usage is not null) Usage = ChatUsageTotals.AddRow(Usage, row);
         }
         var previousOffset = Offset;
         Offset = chunk["nextOffset"]?.GetValue<ulong>() ?? Offset;
@@ -65,6 +62,49 @@ internal sealed class ChatHistoryBuffer
         TailCursor = chunk["tailCursor"]?.GetValue<string>();
         return true;
     }
+}
 
-    private static long Number(JsonNode? node, string key) => node?[key]?.GetValue<long>() ?? 0;
+/// <summary>Verified whole-conversation counts; invalid telemetry never blocks history.</summary>
+internal static class ChatUsageTotals
+{
+    private static readonly string[] Counts = ["input", "output", "cacheRead", "cacheWrite", "turns"];
+
+    internal static ulong? Count(JsonNode? value) => value is JsonValue number && number.GetValueKind() == JsonValueKind.Number
+        && ulong.TryParse(number.ToJsonString(), NumberStyles.None, CultureInfo.InvariantCulture, out var count) ? count : null;
+
+    internal static double? Amount(JsonNode? value) => value is JsonValue number && number.GetValueKind() == JsonValueKind.Number
+        && double.TryParse(number.ToJsonString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var amount)
+        && double.IsFinite(amount) && amount >= 0 ? amount : null;
+
+    internal static JsonObject? Read(JsonNode? value)
+    {
+        if (value is not JsonObject obj || Counts.Any(key => Count(obj[key]) is null) || Amount(obj["cost"]) is null) return null;
+        return (JsonObject)obj.DeepClone();
+    }
+
+    internal static bool HasReportedUsage(JsonObject value) => Counts.Where(key => key != "turns").Any(key => Count(value[key]) > 0)
+        || Amount(value["cost"]) > 0;
+
+    internal static JsonObject? AddRow(JsonObject total, JsonNode? row)
+    {
+        if (row is not JsonObject record) return total;
+        if (record["kind"] is JsonValue kind && kind.TryGetValue<string>(out var name) && name is "retainedUsage" or "teamAgentSegment") return null;
+        if (record["event"] is not JsonObject ev || ev["kind"] is not JsonValue tag || !tag.TryGetValue<string>(out var eventName) || eventName != "usage") return total;
+        var next = new JsonObject();
+        foreach (var key in Counts)
+        {
+            var alias = key switch { "cacheRead" => "cache_read", "cacheWrite" => "cache_write", _ => key };
+            var raw = ev.ContainsKey(key) ? ev[key] : ev[alias];
+            var increment = key == "turns" ? 1UL : raw is null ? 0UL : Count(raw);
+            var current = Count(total[key]);
+            if (increment is null || current is null || increment > ulong.MaxValue - current) return null;
+            next[key] = current.Value + increment.Value;
+        }
+        var cost = ev.ContainsKey("costUsd") ? ev["costUsd"] : ev["cost_usd"];
+        var delta = cost is null ? 0 : Amount(cost);
+        var amount = Amount(total["cost"]) + delta;
+        if (amount is not double valid || !double.IsFinite(valid)) return null;
+        next["cost"] = valid;
+        return next;
+    }
 }
