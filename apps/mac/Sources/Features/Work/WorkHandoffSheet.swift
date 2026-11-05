@@ -17,6 +17,7 @@ struct WorkHandoffSheet: View {
     @State private var fileGeneration = UUID()
     @State private var loadingFiles = false
     @State private var importing = false
+    @State private var importTask: Task<Void, Never>?
     @State private var preparingDraft = false
     @State private var notice: String?
     @State private var fileError: String?
@@ -57,18 +58,18 @@ struct WorkHandoffSheet: View {
         }
         .task(id: model?.shared?.requestID) { await loadFiles() }
         .onChange(of: chat.readingIdentity.reference) { _, _ in
-            if connection?.isCurrent != true { model?.invalidate() }
+            if connection?.isCurrent != true { invalidate() }
         }
         .onChange(of: chat.selectionGeneration) { _, _ in
-            if connection?.isCurrent != true { model?.invalidate() }
+            if connection?.isCurrent != true { invalidate() }
         }
         .onChange(of: account.account?.machines.compactMap(\.publicIdentity)) { _, _ in
-            if connection?.isCurrent != true { model?.invalidate() }
+            if connection?.isCurrent != true { invalidate() }
         }
         .onChange(of: WorkSessionContext.shared.scope) { _, _ in
-            if connection?.isCurrent != true { model?.invalidate() }
+            if connection?.isCurrent != true { invalidate() }
         }
-        .onDisappear { model?.invalidate() }
+        .onDisappear { invalidate() }
     }
 
     private var sharingHelp: some View {
@@ -235,36 +236,51 @@ struct WorkHandoffSheet: View {
     }
 
     private func importDraft(_ draft: WorkSharedDraft, model: WorkHandoffModel) {
-        guard !importing, chat.stagingAttachments == 0, let connection, connection.isCurrent else { return }
+        guard model.phase != .invalidated, !importing, chat.stagingAttachments == 0, let connection, connection.isCurrent else { return }
         let expected = chat.handoffDraft
         importing = true
-        Task {
-            defer { importing = false }
+        importTask = Task {
+            defer { importing = false; importTask = nil }
             do {
                 let resolved = try await connection.attachments(for: draft)
+                try Task.checkCancellation()
+                guard model.phase != .invalidated, connection.isCurrent else { return }
                 try await chat.keepImportedDraftFiles(resolved, reference: model.reference, expected: expected)
-                guard model.phase != .invalidated, connection.isCurrent,
-                      chat.importHandoffDraft(draft, files: resolved, replacing: expected, reference: model.reference) else {
+                guard !Task.isCancelled, model.phase != .invalidated, connection.isCurrent else { return }
+                guard chat.importHandoffDraft(draft, files: resolved, replacing: expected, reference: model.reference) else {
                     notice = L10n.text("apple.workhandoffsheet.your_draft_changed_while_opening_shared_wo.ccca9699")
                     return
                 }
                 dismiss()
-            } catch { notice = error.localizedDescription }
+            } catch {
+                guard !Task.isCancelled, model.phase != .invalidated, connection.isCurrent else { return }
+                notice = error.localizedDescription
+            }
         }
     }
 
     private func importAnchor(_ anchor: WorkHandoffAnchor, model: WorkHandoffModel) {
-        guard !importing, let connection, connection.isCurrent else { return }
+        guard model.phase != .invalidated, !importing, let connection, connection.isCurrent else { return }
         importing = true
-        Task {
-            defer { importing = false }
+        importTask = Task {
+            defer { importing = false; importTask = nil }
             do {
                 try await connection.verifyForImport()
-                guard model.phase != .invalidated, connection.isCurrent,
+                try Task.checkCancellation()
+                guard !Task.isCancelled, model.phase != .invalidated, connection.isCurrent,
                       chat.importHandoffAnchor(anchor, reference: model.reference) else { return }
                 dismiss()
-            } catch { notice = error.localizedDescription }
+            } catch {
+                guard !Task.isCancelled, model.phase != .invalidated, connection.isCurrent else { return }
+                notice = error.localizedDescription
+            }
         }
+    }
+
+    private func invalidate() {
+        model?.invalidate()
+        importTask?.cancel()
+        importTask = nil
     }
 
     private func copy(_ text: String) {
