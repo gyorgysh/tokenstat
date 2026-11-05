@@ -64,7 +64,12 @@ account, so native QA apps can use their normal device login calls. Run `chat-hi
 to connect the iPhone through that relay while the Mac uses its owned host
 socket. The runner starts and stops the service, verifies relay payload with
 zero direct payload, and cuts the phone's relay connection during streaming.
-A remote Mac reader would need a separate daemon; this mode does not test it.
+Omit `--desktop-local` to use a separate disposable desktop daemon. Both native
+readers then use independent relay connections; the test checks the desktop's
+outbound route and interrupts each reader while the other keeps receiving.
+The desktop app reaches only its owned daemon socket; the installed host is
+not involved. This three-device setup uses a Patron-tier account in the in-memory
+database. The local desktop plus iPhone setup still uses a Free account.
 
 The relay service can also run under a controller:
 

@@ -56,6 +56,10 @@ start = bridge.index(needle)
 end = bridge.index("\n    }\n", start) + len("\n    }")
 bridge = bridge[:start] + """    static func connect() {
         #if os(macOS)
+        if let socket = ProcessInfo.processInfo.environment["TOKENSTAT_NATIVE_HISTORY_READER_SOCKET"] {
+            adopt(Route(transport: SocketTransport(path: socket), isHosted: true))
+            return
+        }
         if ProcessInfo.processInfo.environment["TOKENSTAT_NATIVE_HISTORY_DESKTOP_LOCAL"] == "1",
            let path = ProcessInfo.processInfo.environment["TOKENSTAT_NATIVE_HISTORY_FIXTURE"],
            let bytes = try? Data(contentsOf: URL(fileURLWithPath: path)),

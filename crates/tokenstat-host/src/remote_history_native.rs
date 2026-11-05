@@ -227,16 +227,14 @@ fn serve_fixture() {
             });
         }
     });
-    std::thread::spawn(move || {
-        loop {
-            match server.accept() {
-                Ok(Ok(connection)) => {
-                    let session = Arc::clone(&session);
-                    std::thread::spawn(move || serve_peer(connection, &session, Route::Direct));
-                }
-                Ok(Err(_)) => {}
-                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+    std::thread::spawn(move || loop {
+        match server.accept() {
+            Ok(Ok(connection)) => {
+                let session = Arc::clone(&session);
+                std::thread::spawn(move || serve_peer(connection, &session, Route::Direct));
             }
+            Ok(Err(_)) => {}
+            Err(_) => std::thread::sleep(Duration::from_millis(20)),
         }
     });
     let attempted = std::time::SystemTime::now()
@@ -266,5 +264,79 @@ fn serve_fixture() {
     assert!(
         root.join("stop").exists(),
         "native fixture deadline expired"
+    );
+}
+
+#[test]
+#[ignore = "owned desktop daemon started by scripts/tests/chat-history-native.py"]
+fn serve_reader() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("TOKENSTAT_NATIVE_HISTORY_ROOT").expect("native fixture root"),
+    );
+    assert!(root.is_absolute() && root.join("fixture.json").is_file());
+    let client = root.join("desktop");
+    for (name, path) in [
+        ("HOME", client.join("home")),
+        ("ZDOTDIR", client.join("home")),
+        ("TOKENSTAT_IDENTITY_DIR", client.join("identity")),
+    ] {
+        assert_eq!(std::env::var_os(name), Some(path.into_os_string()));
+    }
+    tokenstat_paths::configure_mobile(client.join("data"), client.join("cache")).unwrap();
+    let relay: Value =
+        serde_json::from_slice(&std::fs::read(root.join("relay.json")).unwrap()).unwrap();
+    let login =
+        tokenstat_sync::device_start(Some(relay["accountOrigin"].as_str().unwrap())).unwrap();
+    assert!(matches!(
+        tokenstat_sync::device_poll(&login).unwrap(),
+        tokenstat_sync::DeviceStatus::Confirmed(_)
+    ));
+    let session = Arc::new(Mutex::new(Session::open_client(None).unwrap()));
+    register_session(Arc::clone(&session));
+    start_tunnel_if_enabled(Arc::clone(&session), &load_settings());
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !tunnel_is_connected() {
+        assert!(
+            Instant::now() < deadline,
+            "Desktop reader did not connect to relay"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let socket = directory.path().join("reader.sock");
+    let listener = crate::server::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    private_file(
+        &root.join("reader.json"),
+        &serde_json::to_vec(&json!({"socket":socket})).unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(900);
+    while !root.join("stop").exists() && Instant::now() < deadline {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                let session = Arc::clone(&session);
+                std::thread::spawn(move || {
+                    let input = stream.try_clone().unwrap();
+                    let mut output = stream;
+                    for line in BufReader::new(input).lines() {
+                        let Ok(line) = line else { break };
+                        let response = crate::server::respond(&line, &session);
+                        if writeln!(output, "{response}").is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("Desktop reader socket failed: {error}"),
+        }
+    }
+    stop_tunnel();
+    assert!(
+        root.join("stop").exists(),
+        "Desktop reader deadline expired"
     );
 }

@@ -30,14 +30,15 @@ function publicKey(byte) {
   return crypto.createPublicKey(key).export({ format: "der", type: "spki" }).subarray(-32).toString("hex");
 }
 
-async function serveNative(root) {
+async function serveNative(root, tier = "free") {
+  assert.ok(["free", "patron"].includes(tier), "Unsupported fixture tier");
   const fs = require('node:fs');
   assert.ok(path.isAbsolute(root) && fs.statSync(root).isDirectory(), 'A private fixture root is required');
   assert.equal(fs.statSync(root).mode & 0o077, 0, 'Fixture root must be private');
   const ready = path.join(root, 'relay.json');
   assert.ok(!fs.existsSync(ready), 'Use a fresh fixture root');
   const account = 'u_native_history_fixture';
-  db.run("INSERT INTO users (id,tier,created_at) VALUES (?,'free',?)", account, new Date().toISOString());
+  db.run("INSERT INTO users (id,tier,created_at) VALUES (?,?,?)", account, tier, new Date().toISOString());
   const { createAccountServer } = require('../qa/chat-history/account-server.cjs');
   const api = await createAccountServer(sync, account, { approveDeviceCodes: true });
   const relay = createTunnelServer({ port: 0, authenticate: makeAuthenticator({ db }),
@@ -66,7 +67,7 @@ async function serveNative(root) {
 }
 
 async function main() {
-  if (process.argv[2] === '--serve') return serveNative(process.argv[3]);
+  if (process.argv[2] === '--serve') return serveNative(process.argv[3], process.argv[4]);
   // Exercise the account bootstrap the native clients need, using only
   // this in-memory database. Pairing must bind authentication to its user.
   const bootstrapAccount = "u_native_history_bootstrap";

@@ -199,7 +199,7 @@ private struct Fixture: Decodable {
         })
         do {
             if ProcessInfo.processInfo.environment["TOKENSTAT_NATIVE_HISTORY_RELAY"] == "1"
-                && !(role == "desktop" && ProcessInfo.processInfo.environment["TOKENSTAT_NATIVE_HISTORY_DESKTOP_LOCAL"] == "1") {
+                && role != "desktop" {
                 _ = try await Bridge.startLogin()
                 _ = try await Bridge.pollLogin()
             }

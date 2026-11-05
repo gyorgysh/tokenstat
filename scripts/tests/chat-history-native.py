@@ -169,7 +169,7 @@ async def run(args):
     assert ip.is_private and not (ip.is_loopback or ip.is_link_local), "A private local interface is required"
     proxies = {role: Proxy() for role in ["desktop", "phone"]}
     listeners = {}
-    producer = desktop = relay_service = None
+    producer = desktop = relay_service = reader_daemon = None
     relay = None
     phone_started = False
     booted_here = False
@@ -183,7 +183,7 @@ async def run(args):
         return read_json(run_root / role / "state.json")
 
     def live():
-        for name, process in [("producer", producer), ("desktop", desktop), ("relay", relay_service)]:
+        for name, process in [("producer", producer), ("desktop", desktop), ("relay", relay_service), ("reader", reader_daemon)]:
             if process and process.poll() is not None:
                 raise RuntimeError(f"The owned {name} exited; inspect {run_root}")
 
@@ -219,6 +219,16 @@ async def run(args):
         proofs.append(text)
         print("PASS", text, flush=True)
 
+    async def remote_status(socket_path):
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        try:
+            writer.write(b'{"id":1,"method":"remote.status","params":{}}\n')
+            await writer.drain()
+            return json.loads(await asyncio.wait_for(reader.readline(), 10))
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
     try:
         client_addresses = {}
         for role, proxy in proxies.items():
@@ -226,9 +236,11 @@ async def run(args):
             port = listeners[role].sockets[0].getsockname()[1]
             client_addresses[role] = f"{address}:{port}"
         if args.relay:
-            assert args.desktop_local and not args.desktop_only, "Relay QA requires --desktop-local and an iPhone reader"
+            assert not args.desktop_only, "Relay QA requires an iPhone reader"
             log = (run_root / "relay.log").open("w"); handles.append(log)
-            relay_service = subprocess.Popen(["node", "scripts/tests/chat-history-relay.cjs", "--serve", str(run_root)],
+            # A separate reader daemon adds a third device to the disposable account.
+            tier = "free" if args.desktop_local else "patron"
+            relay_service = subprocess.Popen(["node", "scripts/tests/chat-history-relay.cjs", "--serve", str(run_root), tier],
                 cwd=ROOT, stdout=log, stderr=log)
             relay = await wait(lambda: read_json(run_root / "relay.json"))
             endpoint = relay["relayEndpoint"].removeprefix("ws://")
@@ -245,7 +257,8 @@ async def run(args):
         if relay:
             environment.update(TOKENSTAT_NATIVE_HISTORY_RELAY="1", TOKENSTAT_API_BASE=relay["accountOrigin"])
         log = (run_root / "producer.log").open("w"); handles.append(log)
-        producer = subprocess.Popen([producer_binary(run_root), "--exact",
+        binary = producer_binary(run_root)
+        producer = subprocess.Popen([binary, "--exact",
             "remote::history_tests::native::serve_fixture", "--ignored", "--nocapture"],
             cwd=ROOT, env=environment, stdout=log, stderr=log)
         fixture = await wait(lambda: read_json(run_root / "fixture.json"))
@@ -264,6 +277,14 @@ async def run(args):
             if relay:
                 configured.update(TOKENSTAT_NATIVE_HISTORY_RELAY="1", TOKENSTAT_API_BASE=relay["accountOrigin"])
             return configured
+
+        if relay and not args.desktop_local:
+            reader_environment = client_environment("desktop")
+            reader_environment["TOKENSTAT_NATIVE_HISTORY_ROOT"] = str(run_root)
+            log = (run_root / "reader.log").open("w"); handles.append(log)
+            reader_daemon = subprocess.Popen([binary, "--exact", "remote::history_tests::native::serve_reader",
+                "--ignored", "--nocapture"], cwd=ROOT, env=reader_environment, stdout=log, stderr=log)
+            reader_info = await wait(lambda: read_json(run_root / "reader.json"))
 
         probe = r'''
 import ctypes,json,os
@@ -298,8 +319,11 @@ print(json.dumps({'events':len(result['result']['events'])}))
         app = args.mac_app
         executable = plistlib.loads((app / "Contents/Info.plist").read_bytes())["CFBundleExecutable"]
         log = (run_root / "desktop.log").open("w"); handles.append(log)
+        desktop_environment = client_environment("desktop")
+        if reader_daemon:
+            desktop_environment["TOKENSTAT_NATIVE_HISTORY_READER_SOCKET"] = reader_info["socket"]
         desktop = subprocess.Popen([str(app / "Contents/MacOS" / executable)],
-            env=client_environment("desktop"), stdout=log, stderr=log)
+            env=desktop_environment, stdout=log, stderr=log)
         if not args.desktop_only:
             inventory = json.loads(await command("xcrun", "simctl", "list", "devices", "available", "--json"))
             device = next(device for devices in inventory["devices"].values()
@@ -320,18 +344,19 @@ print(json.dumps({'events':len(result['result']['events'])}))
         await wait(lambda: all(state(role) and state(role)["loaded"] for role in roles), 180)
         await visible("network-start")
         if relay:
-            reader, writer = await asyncio.open_unix_connection(fixture["socket"])
-            try:
-                writer.write(b'{"id":1,"method":"remote.status","params":{}}\n')
-                await writer.drain()
-                status = json.loads(await asyncio.wait_for(reader.readline(), 10))
-            finally:
-                writer.close()
-                await writer.wait_closed()
+            status = await remote_status(fixture["socket"])
             atomic_json(run_root / "relay-route.json", status)
             traffic = status["result"]["traffic"]
             assert traffic["relayBytes"] > 0 and traffic["directBytes"] == 0, traffic
-            prove("Host traffic confirms the native iPhone read over relay with no direct payload")
+            prove("Host traffic confirms native reads over relay with no direct payload")
+            if reader_daemon:
+                status = await remote_status(reader_info["socket"])
+                atomic_json(run_root / "desktop-relay-route.json", status)
+                traffic = status["result"]["traffic"]
+                assert traffic["relayBytes"] > 0 and traffic["directBytes"] == 0, traffic
+                assert any(peer.get("peer") == fixture["hostKey"] and peer.get("route") == "relay"
+                    for peer in traffic["peers"]), traffic
+                prove("The desktop reader daemon confirms an outbound relay route to the chat host")
         if args.search_only:
             for call, label in [("qa-search-first", "quartz-search-target"), ("qa-search-second", "amber-second-step")]:
                 emit({"type": "tool_call", "id": call, "toolName": "Bash", "rawInput": {"command": label}})
@@ -365,7 +390,8 @@ print(json.dumps({'events':len(result['result']['events'])}))
             prove("The native Mac view follows two large replies through navigation and completion")
             atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs, "states": {role: state(role) for role in roles}})
             return
-        prove("Mac local view and relay iPhone render the same live chat" if relay else
+        prove("Remote Mac and iPhone render the same live chat through relay" if reader_daemon else
+              "Mac local view and relay iPhone render the same live chat" if relay else
               "Mac local view and encrypted iPhone render the same live chat" if args.desktop_local else
               "Mac and iPhone render the same live chat over distinct pinned encrypted connections")
         if args.serve:
@@ -468,6 +494,16 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     await asyncio.to_thread(producer.wait, timeout=5)
                 except subprocess.TimeoutExpired:
                     producer.kill(); await asyncio.to_thread(producer.wait)
+        if reader_daemon:
+            try:
+                await asyncio.to_thread(reader_daemon.wait, timeout=15)
+            except subprocess.TimeoutExpired:
+                reader_daemon.terminate()
+                try:
+                    await asyncio.to_thread(reader_daemon.wait, timeout=5)
+                except subprocess.TimeoutExpired:
+                    reader_daemon.kill(); await asyncio.to_thread(reader_daemon.wait)
+                cleanup_errors.append("Desktop reader did not stop on request")
         if relay_service:
             try:
                 await asyncio.to_thread(relay_service.wait, timeout=15)
