@@ -30,6 +30,9 @@ use serde_json::{Value, json};
 
 use tokenstat_host::{Session, ownership, server};
 
+#[path = "../hook_preview.rs"]
+mod hook_preview;
+
 #[cfg(any(windows, test))]
 #[path = "../windows_log.rs"]
 mod windows_log;
@@ -638,11 +641,9 @@ fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
         .or_else(|| present("result"))
         .or_else(|| present("output"))
         .or_else(|| present("tool_output"))
-        .and_then(|value| match value {
-            Value::String(text) => Some(text.chars().take(360).collect()),
-            other => serde_json::to_string(other)
-                .ok()
-                .map(|text| text.chars().take(360).collect()),
+        .map(|value| match value {
+            Value::String(text) => text.chars().take(360).collect(),
+            other => hook_preview::json_prefix(other),
         });
     (call_id, ok, detail)
 }
@@ -661,9 +662,8 @@ fn hook_tool(flavor: &str, input: &Value) -> (String, String, Option<String>) {
         .or_else(|| tool.get("input"))
         .or_else(|| tool.get("arguments"))
         .or_else(|| tool.get("args"))
-        .cloned()
-        .unwrap_or(Value::Null);
-    let preview = tool_preview(&detail);
+        .unwrap_or(&Value::Null);
+    let preview = tool_preview(detail);
     let shell_prefix = detail
         .get("command")
         .or_else(|| detail.get("command_line"))
@@ -694,24 +694,22 @@ fn tool_preview(input: &Value) -> String {
         "query",
         "prompt",
     ];
-    let normalise = |key: &str| {
-        key.chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect::<String>()
-    };
     let subject = input.as_object().and_then(|fields| {
         SUBJECTS.iter().find_map(|wanted| {
             fields.iter().find_map(|(key, value)| {
-                (normalise(key) == *wanted)
-                    .then(|| value.as_str())
-                    .flatten()
-                    .map(str::to_owned)
+                value.as_str().filter(|_| {
+                    key.bytes()
+                        .filter(u8::is_ascii_alphanumeric)
+                        .map(|byte| byte.to_ascii_lowercase())
+                        .eq(wanted.bytes())
+                })
             })
         })
     });
-    let subject = subject.unwrap_or_else(|| serde_json::to_string(input).unwrap_or_default());
-    subject.chars().take(360).collect()
+    match subject {
+        Some(text) => text.chars().take(360).collect(),
+        None => hook_preview::json_prefix(input),
+    }
 }
 
 /// Remember only simple argv-shaped commands. Shell operators, substitutions
@@ -966,6 +964,64 @@ mod tests {
                 &json!({"tool_name":"Bash", "tool_input":{"command":command}}),
             );
             assert_eq!(prefix, None, "{command}");
+        }
+    }
+
+    #[test]
+    fn hook_previews_keep_the_exact_json_prefix_for_unicode_and_escapes() {
+        for text in ["plain", "é", "🦀", "\"\\\n\r\t\0"].map(|text| text.repeat(600)) {
+            for value in [
+                json!({"unrecognised": text}),
+                json!([text, {"nested": [null, true, 42, 3.5]}]),
+                json!({text.clone(): "long key"}),
+            ] {
+                let expected: String = serde_json::to_string(&value)
+                    .unwrap()
+                    .chars()
+                    .take(360)
+                    .collect();
+                assert_eq!(tool_preview(&value), expected);
+                assert_eq!(
+                    hook_result("claude", &json!({"id": "call", "result": value}))
+                        .2
+                        .as_deref(),
+                    Some(expected.as_str())
+                );
+            }
+        }
+        // Clipping the permission preview must not hide shell syntax from
+        // the separate remembered-command check.
+        let command = format!("git status {} && rm -rf build", "x".repeat(1000));
+        assert_eq!(
+            hook_tool("claude", &json!({"tool_input": {"command": command}})).2,
+            None
+        );
+    }
+
+    #[test]
+    #[ignore = "manual hook preview timing"]
+    fn benchmark_large_hook_previews() {
+        let text = "image-data".repeat(350_000);
+        let known = json!({"tool_name": "Image", "tool_input": {"prompt": text}});
+        let fallback = json!({"tool_name": "Image", "tool_input": {"payload": text}});
+        let result = json!({"id": "call", "result": {"payload": text}});
+        for (label, input, post) in [
+            ("subject", &known, false),
+            ("fallback", &fallback, false),
+            ("result", &result, true),
+        ] {
+            let mut samples = Vec::new();
+            for _ in 0..15 {
+                let start = std::time::Instant::now();
+                if post {
+                    std::hint::black_box(hook_result("claude", input));
+                } else {
+                    std::hint::black_box(hook_tool("claude", input));
+                }
+                samples.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+            samples.sort_by(f64::total_cmp);
+            eprintln!("hook {label} 3.5 MB: median_ms={:.6}", samples[7]);
         }
     }
 
