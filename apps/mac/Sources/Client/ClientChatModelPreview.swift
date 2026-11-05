@@ -68,14 +68,15 @@ struct ClientChatModelPreview: View {
         failed = false
         guard ["usdz", "usd", "usda", "usdc"].contains(ext), file != nil || data != nil else { failed = true; return }
         let file = file, data = data, id = id, name = name, ext = ext
+        let byteLimit = Self.inlineByteLimit
         let prepared = await Task.detached(priority: .utility) { () -> ModelSceneBox? in
             do {
                 let url: URL
                 if let file {
                     let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                    guard size > 0, size <= Self.inlineByteLimit else { return nil }
+                    guard size > 0, size <= byteLimit else { return nil }
                     url = file
-                } else if let data, !data.isEmpty, data.count <= Self.inlineByteLimit {
+                } else if let data, !data.isEmpty, data.count <= byteLimit {
                     url = try ChatFileStaging.stage(data, id: id, name: name)
                 } else { return nil }
                 guard MDLAsset.canImportFileExtension(ext) else { return nil }

@@ -6,10 +6,29 @@ import WebKit
 /// A profile-free, offline WebGL surface for portable game model files.
 /// The document CSP denies network access and only the selected attachment's
 /// bytes cross into its renderer. File access remains inside the app bundle.
-struct ClientChatModelWebView: ViewRepresentable {
+struct ClientChatModelWebView: View {
     let name: String
     let data: Data?
     let file: URL?
+    @State private var failed = false
+
+    var body: some View {
+        if failed {
+            Label(L10n.text("apple.clientchatmodelpreview.unavailable"), systemImage: "cube")
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ModelWebSurface(name: name, data: data, file: file, onFailure: { failed = true })
+        }
+    }
+}
+
+private struct ModelWebSurface: ViewRepresentable {
+    let name: String
+    let data: Data?
+    let file: URL?
+    let onFailure: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -39,7 +58,7 @@ struct ClientChatModelWebView: ViewRepresentable {
         ModelTouchClaim.attach(to: web)
         #endif
         context.coordinator.start(web: web, name: name, data: data, file: file,
-                                  background: colorScheme == .dark ? "#08070d" : "#fbfbfd")
+                                  background: colorScheme == .dark ? "#08070d" : "#fbfbfd", onFailure: onFailure)
         return web
     }
 
@@ -51,28 +70,46 @@ struct ClientChatModelWebView: ViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         private weak var web: WKWebView?
-        private var bytes: Data?
+        private var payload: String?
         private var task: Task<Void, Never>?
+        private var onFailure: (() -> Void)?
         private var extensionName = ""
         private var background = ""
         private var loaded = false
         private var sent = false
 
-        func start(web: WKWebView, name: String, data: Data?, file: URL?, background: String) {
+        func start(web: WKWebView, name: String, data: Data?, file: URL?, background: String,
+                   onFailure: @escaping () -> Void) {
             self.web = web
+            self.onFailure = onFailure
             self.extensionName = (name as NSString).pathExtension.lowercased()
             self.background = background
-            guard let directory = Bundle.main.url(forResource: "runtime", withExtension: nil) else { return }
-            web.loadFileURL(directory.appendingPathComponent("model.html"), allowingReadAccessTo: directory)
             task = Task { [weak self] in
-                let result = await Task.detached(priority: .utility) { () -> Data? in
-                    if let data { return data.count <= 12 * 1024 * 1024 ? data : nil }
-                    guard let file, let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                          size > 0, size <= 12 * 1024 * 1024 else { return nil }
-                    return try? Data(contentsOf: file, options: .mappedIfSafe)
+                guard !Task.isCancelled else { return }
+                guard let directory = Bundle.main.url(forResource: "runtime", withExtension: nil) else {
+                    self?.fail()
+                    return
+                }
+                self?.web?.loadFileURL(directory.appendingPathComponent("model.html"), allowingReadAccessTo: directory)
+                let result = await Task.detached(priority: .utility) { () -> String? in
+                    let limit = 12 * 1024 * 1024
+                    if let data {
+                        return !data.isEmpty && data.count <= limit ? data.base64EncodedString() : nil
+                    }
+                    guard let file,
+                          let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                          values.isRegularFile == true, let size = values.fileSize,
+                          size > 0, size <= limit,
+                          let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+                    defer { try? handle.close() }
+                    // Bound the read even if the file grows after checking its size.
+                    guard let bytes = try? handle.read(upToCount: limit + 1),
+                          !bytes.isEmpty, bytes.count <= limit else { return nil }
+                    return bytes.base64EncodedString()
                 }.value
                 guard !Task.isCancelled else { return }
-                self?.bytes = result
+                guard let result else { self?.fail(); return }
+                self?.payload = result
                 self?.sendIfReady()
             }
         }
@@ -83,22 +120,46 @@ struct ClientChatModelWebView: ViewRepresentable {
             sendIfReady()
         }
 
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            if self.web === webView { fail() }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            if self.web === webView { fail() }
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            if self.web === webView { fail() }
+        }
+
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             decisionHandler(action.request.url?.isFileURL == true ? .allow : .cancel)
         }
 
         private func sendIfReady() {
-            guard loaded, !sent, let web, let bytes else { return }
+            guard loaded, !sent, let web, let payload else { return }
             sent = true
-            let code = "TokenstatModel.load('\(bytes.base64EncodedString())','\(extensionName)','\(background)')"
-            web.evaluateJavaScript(code, completionHandler: nil)
-            self.bytes = nil
+            let code = "void TokenstatModel.load('\(payload)','\(extensionName)','\(background)')"
+            web.evaluateJavaScript(code) { [weak self, weak web] _, error in
+                guard let self, let web, self.web === web, error != nil else { return }
+                self.fail()
+            }
+            self.payload = nil
+        }
+
+        private func fail() {
+            guard web != nil, let onFailure else { return }
+            self.onFailure = nil
+            task?.cancel()
+            payload = nil
+            onFailure()
         }
 
         func dispose() {
             task?.cancel()
-            bytes = nil
+            payload = nil
+            onFailure = nil
             web?.evaluateJavaScript("window.TokenstatModel?.dispose()", completionHandler: nil)
             web = nil
         }
