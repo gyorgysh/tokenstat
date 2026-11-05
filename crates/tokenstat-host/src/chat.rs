@@ -33,6 +33,8 @@ mod steering;
 
 #[cfg(test)]
 const LEGACY_EVENTS_CAP: u64 = 1024 * 1024;
+#[path = "chat_usage_cache.rs"]
+mod usage_cache;
 /// How many events one page carries when the client does not say.
 const PAGE_EVENTS: usize = 300;
 /// The most a client may ask for in one page. A client that wants more than
@@ -551,6 +553,7 @@ pub struct Store {
     question_attention: Mutex<HashMap<String, HashMap<String, bool>>>,
     /// Short-lived final states for the work overview, independent of push tokens.
     completed_work: Mutex<HashMap<String, CompletedWork>>,
+    usage_cache: Mutex<usage_cache::Cache>,
 }
 
 #[derive(Clone)]
@@ -717,6 +720,7 @@ impl Store {
             parked_answers: Mutex::new(ParkedAnswers::default()),
             question_attention: Mutex::new(HashMap::new()),
             completed_work: Mutex::new(HashMap::new()),
+            usage_cache: Mutex::new(usage_cache::Cache::default()),
         }
     }
 
@@ -778,6 +782,7 @@ impl Store {
             parked_answers: Mutex::new(ParkedAnswers::default()),
             question_attention: Mutex::new(HashMap::new()),
             completed_work: Mutex::new(HashMap::new()),
+            usage_cache: Mutex::new(usage_cache::Cache::default()),
         };
         if recovery.is_some() {
             store.withdraw_orphaned_answers();
@@ -3324,10 +3329,12 @@ impl Store {
         let mut has_muse_session = false;
         let mut current_muse_session = true;
         let mut stored_muse = Ok(crate::work_transcript_identity::UsageTotals::default());
-        let mut totals = usage_totals_visiting(path, |line| {
-            let Some(record) = usage_repair_record(line, muse.is_some(), &mut seen_codex) else {
-                return Ok(());
-            };
+        let mut cache = self
+            .usage_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let archive = cache.visit(path, muse.is_some(), |record| {
+            seen_codex |= record["backend"] == "codex";
             if record["kind"] == "retainedUsage" {
                 retained_turns |= record["usage"]["turns"].as_u64().unwrap_or(0) > 0;
                 retained_since = Some(None);
@@ -3366,6 +3373,13 @@ impl Store {
             }
             Ok(())
         })?;
+        drop(cache);
+        let has_transcript = archive.is_some();
+        let mut totals = archive
+            .unwrap_or_else(|| crate::work_transcript_identity::UsageTotals::default().value());
+        if has_transcript && let Some(directory) = path.parent() {
+            add_usage_value(&mut totals, &sharing::chain_usage(directory)?.value())?;
+        }
         // Only Codex raw output carries `turn.completed`. Without this gate
         // every first-page read of any other chat scanned its raw folder.
         let used_codex =
@@ -7126,16 +7140,20 @@ fn open_transcript(path: &Path) -> Result<Option<fs::File>, String> {
 }
 
 fn usage_totals(path: &Path) -> Result<Value, String> {
-    usage_totals_visiting(path, |_| Ok(()))
-}
-
-fn usage_totals_visiting(
-    path: &Path,
-    mut visit: impl FnMut(&[u8]) -> Result<(), String>,
-) -> Result<Value, String> {
     let Some(file) = open_transcript(path)? else {
         return Ok(crate::work_transcript_identity::UsageTotals::default().value());
     };
+    let mut totals = usage_totals_in_file(file, |_| Ok(()))?;
+    if let Some(directory) = path.parent() {
+        add_usage_value(&mut totals, &sharing::chain_usage(directory)?.value())?;
+    }
+    Ok(totals)
+}
+
+fn usage_totals_in_file(
+    file: fs::File,
+    mut visit: impl FnMut(&[u8]) -> Result<(), String>,
+) -> Result<Value, String> {
     let mut totals = crate::work_transcript_identity::UsageTotals::default();
     visit_transcript_lines(file, |line, _| {
         visit(line)?;
@@ -7149,9 +7167,6 @@ fn usage_totals_visiting(
         }
         Ok(())
     })?;
-    if let Some(directory) = path.parent() {
-        totals.add(&sharing::chain_usage(directory)?)?;
-    }
     Ok(totals.value())
 }
 
@@ -12201,6 +12216,28 @@ mod tests {
             .unwrap();
         assert_eq!(usage["input"], 400);
         assert_eq!(usage["turns"], 3);
+        fs::write(
+            directory.join("session.jsonl"),
+            format!(
+                "{}\n{}\n{}\n",
+                vendor("old", 100),
+                vendor("new", 300),
+                vendor("later", 400)
+            ),
+        )
+        .unwrap();
+        let updated = store
+            .conversation_usage_with_muse_root(
+                &store.get("original").unwrap(),
+                &store.events_path("original"),
+                Some(&root.path().join("muse")),
+            )
+            .unwrap();
+        assert_eq!(
+            updated["input"], 500,
+            "a warm transcript cache must still refresh vendor usage"
+        );
+        assert_eq!(updated["turns"], 4);
     }
 
     #[test]
@@ -15961,5 +15998,65 @@ mod tests {
                 check.join().unwrap();
             }
         });
+    }
+    #[test]
+    #[ignore = "manual long-history opening measurement"]
+    fn measure_long_history_opening() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "opening-memory");
+        store
+            .edit_conversation("opening-memory", |chat| {
+                chat.backend = "claude".into();
+                Ok(())
+            })
+            .unwrap();
+        let path = store.events_path("opening-memory");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&path).unwrap();
+        writeln!(file, "{}", json!({"kind":"user","text":"Original prompt"})).unwrap();
+        let row = json!({"kind":"agent","backend":"claude","event":{"kind":"toolEnd","detail":"x".repeat(512*1024)}});
+        for _ in 0..64 {
+            serde_json::to_writer(&mut file, &row).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        writeln!(file, "{}", json!({"kind":"agent","backend":"claude","event":{"kind":"usage","input":123,"output":45}})).unwrap();
+        drop(file);
+        let mut samples = Vec::new();
+        for _ in 0..7 {
+            let start = std::time::Instant::now();
+            let page = store.event_page("opening-memory", None, 160).unwrap();
+            assert_eq!(page.usage.unwrap()["input"], 123);
+            assert!(page.has_earlier && !page.events.is_empty());
+            samples.push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        eprintln!("32 MiB opening milliseconds: {samples:?}");
+    }
+    #[test]
+    fn cached_transcript_usage_still_refreshes_codex_logs_and_checks_shared_output() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "cache-vendor");
+        let path = store.events_path("cache-vendor");
+        let directory = path.parent().unwrap();
+        fs::create_dir_all(directory.join("raw")).unwrap();
+        fs::write(&path, "{\"kind\":\"agent\",\"backend\":\"codex\",\"event\":{\"kind\":\"text\",\"delta\":\"saved\"}}\n").unwrap();
+        for input in [10, 20, 5] {
+            fs::write(directory.join("raw/1.ndjson"), format!("{}\n", json!({"type":"turn.completed","usage":{"input_tokens":input,"output_tokens":2}}))).unwrap();
+            assert_eq!(
+                store
+                    .event_page("cache-vendor", None, 10)
+                    .unwrap()
+                    .usage
+                    .unwrap()["input"],
+                input
+            );
+        }
+        fs::create_dir_all(directory.join("team-output")).unwrap();
+        fs::write(directory.join("team-output/chain.ndjson"), "broken").unwrap();
+        assert!(
+            store.event_page("cache-vendor", None, 10).is_err(),
+            "cached private usage must not hide a changed shared output chain"
+        );
     }
 }

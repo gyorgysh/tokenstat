@@ -31,6 +31,48 @@ fn words() -> Vec<Event> {
 }
 
 #[test]
+fn shared_usage_updates_while_the_private_transcript_cache_is_warm() {
+    let f = Fixture::new();
+    let prepared = setup(&f);
+    let initial = f
+        .store
+        .event_page(&f.chat.id, None, 10)
+        .unwrap()
+        .usage
+        .unwrap();
+    let transcript = f.store.root.join(&f.chat.id).join("events.ndjson");
+    let before = fs::read(&transcript).unwrap();
+    for batch in 0..2 {
+        f.store
+            .append_owned_output(
+                f.target(),
+                &prepared,
+                batch,
+                vec![Event::Usage {
+                    input: 10,
+                    output: 3,
+                    cache_read: 2,
+                    cache_write: 1,
+                    cost_usd: Some(0.01),
+                }],
+                || Ok(()),
+            )
+            .unwrap();
+        assert_eq!(fs::read(&transcript).unwrap(), before);
+        let usage = f
+            .store
+            .event_page(&f.chat.id, None, 10)
+            .unwrap()
+            .usage
+            .unwrap();
+        assert_eq!(
+            usage["input"].as_u64().unwrap(),
+            initial["input"].as_u64().unwrap() + (batch as u64 + 1) * 10
+        );
+    }
+}
+
+#[test]
 fn canonical_output_has_original_initiator_and_is_idempotent() {
     let f = Fixture::new();
     let prepared = setup(&f);
