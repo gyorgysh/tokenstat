@@ -170,6 +170,19 @@ try {
         $id = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'sidebar.addProject')
         $add = $window.FindFirst($descendants, $id)
         if (!$add -or $add.Current.IsOffscreen) { Open-Place 'Show or hide repositories' }
+        Wait-ForControl 'sidebar.addProject' | Out-Null
+        # Repository disclosure is persisted independently of pane visibility.
+        # Reopening the drawer does not promise that this folder is expanded.
+        $label = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'UI smoke project')
+        $row = $window.FindAll($descendants, $label) | Where-Object { !$_.Current.IsOffscreen } | Select-Object -First 1
+        while ($row -and $row -ne $window) {
+            $expansion = $null
+            if ($row.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expansion)) {
+                if ($expansion.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Collapsed) { $expansion.Expand() }
+                break
+            }
+            $row = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($row)
+        }
     }
     # Seed only the disposable runner. No agent is started or message sent.
     Wait-ForControl 'sidebar.addProject' | Out-Null
@@ -212,13 +225,24 @@ try {
     Open-Place 'Repositories'
     $chatRow = Wait-ForControl "sidebar.chat.$($chats[-1].id)" 65
     Invoke-Control $chatRow
-    $draft = Wait-ForControl 'chat.composer'
-    $value = $draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-    $value.SetValue('Retained unsent smoke draft')
-    $text = $draft.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-    $selectedText = $text.DocumentRange.FindText('unsent', $false, $false)
-    if (!$selectedText) { throw 'The production composer did not expose its unsent text selection' }
-    $selectedText.Select()
+    # Discovery can detach and remount the retained editor between UIA calls.
+    # Retry only a stale automation reference, not a missing draft/selection.
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            $draft = Wait-ForControl 'chat.composer'
+            $value = $draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+            $value.SetValue('Retained unsent smoke draft')
+            $text = $draft.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+            $selectedText = $text.DocumentRange.FindText('unsent', $false, $false)
+            if (!$selectedText) { throw 'The production composer did not expose its unsent text selection' }
+            $selectedText.Select()
+            break
+        } catch {
+            $failure = $_.Exception.GetBaseException()
+            if ($attempt -eq 19 -or ($failure -isnot [System.Windows.Automation.ElementNotAvailableException] -and $failure.HResult -ne -2147220991)) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    }
     Wait-ForControl 'chat.title' | Out-Null
     # Backend/persona discovery can repaint the composer after the transcript
     # opens. Wait for its new native control to finish layout before invoking.

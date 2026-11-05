@@ -2830,10 +2830,13 @@ mod tests {
     fn output_wait_observes_buffered_bytes_and_eof_without_spinning() {
         use std::time::{Duration, Instant};
         let m = Manager::new();
-        let process = stay_busy(&m);
+        let process = spawn(&m, "true", "exit /b 0");
         let session = m.get(&process.id).unwrap();
-        // Drive the reader's publication under its real mutex. Keeping a live
-        // child makes this independent of process-startup timing on CI.
+        // Let the real reader finish before driving publication ourselves.
+        // ConPTY emits terminal setup bytes even for a silent child.
+        assert!(wait_for(|| session.output_closed.load(Ordering::SeqCst)));
+        *session.buffer.lock().unwrap() = Buffer::new();
+        session.output_closed.store(false, Ordering::SeqCst);
         let writer = Arc::clone(&session);
         let publish = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(30));
