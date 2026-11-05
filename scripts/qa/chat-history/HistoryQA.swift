@@ -219,6 +219,19 @@ private struct Fixture: Decodable {
             case "hide": showing = false
             case "show": showing = true
             case "earlier": await model.loadEarlier()
+            case "search-folded-step":
+                ChatDetailPreference.shared.level = .minimal
+                model.setAllGroups(open: false)
+                guard let row = model.displayItems.first(where: {
+                    if case let .tool(tool) = $0.kind { return tool.callId == "qa-search-first" }
+                    return false
+                }), var reference = model.currentReference else { throw CocoaError(.coderValueNotFound) }
+                guard ChatTranscriptFold.owner(of: row.id, in: model.transcriptItems) != nil else {
+                    throw NSError(domain: "HistoryQA", code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "Search fixture target was not folded"])
+                }
+                reference.anchor = row.id
+                guard model.restoreSearchReadingPosition(reference) else { throw CocoaError(.coderInvalidValue) }
             case "snapshot": break
             default: throw CocoaError(.coderInvalidValue)
             }

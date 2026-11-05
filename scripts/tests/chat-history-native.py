@@ -294,10 +294,24 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 if key.startswith("TOKENSTAT_") or key in ["HOME", "ZDOTDIR", "HISTFILE"]:
                     launch_environment["SIMCTL_CHILD_" + key] = value
             phone_started = True
-            await command("xcrun", "simctl", "launch", args.simulator, PHONE, env=launch_environment)
+            await command("xcrun", "simctl", "launch", "--stdout=" + str(run_root / "phone.log"),
+                "--stderr=" + str(run_root / "phone-errors.log"), args.simulator, PHONE, env=launch_environment)
         print("Native QA apps launched:", ", ".join(roles), flush=True)
         await wait(lambda: all(state(role) and state(role)["loaded"] for role in roles), 180)
         await visible("network-start")
+        if args.search_only:
+            for call, label in [("qa-search-first", "quartz-search-target"), ("qa-search-second", "amber-second-step")]:
+                emit({"type": "tool_call", "id": call, "toolName": "Bash", "rawInput": {"command": label}})
+                emit({"type": "tool_call_update", "id": call, "status": "completed", "rawOutput": label})
+            emit({"type": "text", "data": "\n\n" + "later reply padding " * 1000 + "\n\nsearch-finished"})
+            emit({"type": "end", "stopReason": "end_turn"})
+            await wait(lambda: all(state(role) and not state(role)["running"] for role in roles))
+            await visible("search-finished")
+            for role in roles:
+                await native(role, "search-folded-step", "quartz-search-target")
+            prove("Search reveals the first folded tool step and visibly scrolls to it in each native view")
+            atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs, "states": {role: state(role) for role in roles}})
+            return
         if args.desktop_only:
             emit({"type": "text", "data": "\n\nnetwork-alpha"})
             await visible("network-alpha")
@@ -440,6 +454,7 @@ if __name__ == "__main__":
     parser.add_argument("--simulator", required=True, help="Exact simulator UDID; never erased")
     parser.add_argument("--mac-app", type=Path, default=QA / "mac/Build/Products/Debug/HistoryMac.app")
     parser.add_argument("--phone-app", type=Path, default=QA / "phone/Build/Products/Debug-iphonesimulator/HistoryPhone.app")
+    parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--probe-only", action="store_true", help="Verify the producer and encrypted FFI setup before opening apps")
     parser.add_argument("--desktop-only", action="store_true", help="Verify the Mac view before the combined phone run")

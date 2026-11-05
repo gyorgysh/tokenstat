@@ -45,6 +45,13 @@ noise but still requires the marker's characters in the captured image.
 `cleanup.json` separately records whether the owned apps and simulator closed.
 These checks do not establish WAN or relay UI behavior.
 
+Use `--search-only` to check that a search request opens the first step of a
+collapsed tool group and scrolls its text into view. It streams two completed
+tool steps followed by a long reply, then searches back to the first step.
+This mode checks mounted-conversation search placement; it does not exercise
+the search sheet or substitute for the full reconnect run. Add `--desktop-only`
+for a Mac-only check.
+
 `account-server.cjs` provides the loopback account routes needed for native
 relay setup. It uses the website's account functions and the relay fixture's
 in-memory database. Run `node scripts/tests/chat-history-relay.cjs` to check
