@@ -2518,6 +2518,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     var reset = await CallChatAsync("chat.eventPage", new JsonObject
                         { ["id"] = chatId, ["limit"] = 160, ["stablePositions"] = true });
                     if (token.IsCancellationRequested || _openId != chatId) return;
+                    if (historyGeneration != _historyGeneration) continue;
                     ApplyHistoryPage(reset, replace: true);
                     RebuildTranscript(full: true);
                     RefreshCost();
@@ -2530,11 +2531,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 // explicitly so a future ConfigureAwait(false) or a call from a
                 // non-UI context cannot trigger RPC_E_WRONG_THREAD.
                 var approvalVersion = ++_approvalVersion;
-                void ApplyPoll(JsonArray approvals)
-                {
-                    if (!_history.ApplyTail(chunk, historyGeneration)) return;
-                    ApplyApprovalSnapshot(approvals, approvalVersion);
-                }
                 var approvals = AsArray(await CallChatAsync(
                     "chat.approvals", new JsonObject { ["id"] = chatId }));
                 if (token.IsCancellationRequested || _openId != chatId) return;
@@ -2545,23 +2541,30 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 var transcriptChanged = next.Count > 0
                     || approvalVersion == _approvalVersion && !JsonNode.DeepEquals(_approvals, approvals);
 
+                bool ApplyPoll(JsonArray approvals)
+                {
+                    if (token.IsCancellationRequested || _openId != chatId
+                        || !_history.ApplyTail(chunk, historyGeneration)) return false;
+                    ApplyApprovalSnapshot(approvals, approvalVersion);
+                    ApplyOpenChat(chatId, wasBusy, transcriptChanged);
+                    return true;
+                }
+
                 // All UI state is mutated on the DispatcherQueue regardless of
                 // which thread the awaits resumed on.
                 if (!DispatcherQueue.HasThreadAccess)
                 {
-                    var tcs = new TaskCompletionSource();
-                    DispatcherQueue.TryEnqueue(() =>
+                    var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    if (!DispatcherQueue.TryEnqueue(() =>
                     {
-                        ApplyPoll(approvals);
-                        ApplyOpenChat(chatId, wasBusy, transcriptChanged);
-                        tcs.SetResult();
-                    });
-                    await tcs.Task;
+                        try { tcs.SetResult(ApplyPoll(approvals)); }
+                        catch (Exception error) { tcs.SetException(error); }
+                    })) return;
+                    if (!await tcs.Task.WaitAsync(token)) continue;
                 }
                 else
                 {
-                    ApplyPoll(approvals);
-                    ApplyOpenChat(chatId, wasBusy, transcriptChanged);
+                    if (!ApplyPoll(approvals)) continue;
                 }
                 if (!Busy())
                 {
