@@ -16,8 +16,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -26,13 +30,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -47,6 +54,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import java.io.File
+import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
@@ -244,15 +252,21 @@ internal fun decodeChatImage(file: File, maxEdge: Int): android.graphics.Bitmap 
     onPrevious: () -> Unit, onNext: () -> Unit, onDismiss: () -> Unit, onLoad: () -> Unit,
     onOpen: () -> Unit, onSave: () -> Unit,
 ) {
-    var scale by remember(image.attachmentId) { mutableStateOf(1f) }
-    var offset by remember(image.attachmentId) { mutableStateOf(Offset.Zero) }
+    var transform by remember(image.attachmentId) { mutableStateOf(ChatImageTransform()) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    fun zoom(next: Float, pan: Offset = Offset.Zero) {
-        scale = next.coerceIn(1f, 5f)
-        val limitX = viewport.width * (scale - 1) / 2
-        val limitY = viewport.height * (scale - 1) / 2
-        offset = Offset((offset.x + pan.x).coerceIn(-limitX, limitX), (offset.y + pan.y).coerceIn(-limitY, limitY))
+    val bitmap = imageBitmap(file, 2048)
+    val previous by rememberUpdatedState(onPrevious)
+    val next by rememberUpdatedState(onNext)
+    val canGoBack by rememberUpdatedState(index > 0)
+    val canGoForward by rememberUpdatedState(index + 1 < count)
+    val imageSize = bitmap?.let { Size(it.width.toFloat(), it.height.toFloat()) } ?: Size.Zero
+    fun viewportSize() = Size(viewport.width.toFloat(), viewport.height.toFloat())
+    fun zoom(next: Float, anchor: Offset = Offset(viewport.width / 2f, viewport.height / 2f)) {
+        transform = transform.zoomedTo(next, anchor, Offset.Zero, viewportSize(), imageSize)
     }
+    LaunchedEffect(viewport, imageSize) { transform = transform.constrained(viewportSize(), imageSize) }
+    val scale = transform.scale
+    val offset = transform.offset
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = LocalTsColors.current.background) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -263,18 +277,48 @@ internal fun decodeChatImage(file: File, maxEdge: Int): android.graphics.Bitmap 
                     }
                     IconButton(onClick = onDismiss) { Icon(ActionIcon.Dismiss.vector, L10n.text("common.close")) }
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(LocalTsColors.current.panel)
-                    .onSizeChanged { viewport = it }, contentAlignment = Alignment.Center) {
-                    val bitmap = imageBitmap(file, 2048)
+                Box(Modifier.weight(1f).fillMaxWidth().testTag("chat-image-viewport").clip(RoundedCornerShape(8.dp)).background(LocalTsColors.current.panel)
+                    .onSizeChanged { viewport = it }
+                    .pointerInput(image.attachmentId, imageSize) {
+                        val minimumSwipe = 48.dp.toPx()
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            val startScale = transform.scale
+                            var distance = Offset.Zero
+                            var accumulatedZoom = 1f
+                            var multiplePointers = false
+                            var pastSlop = false
+                            var cancelled = false
+                            do {
+                                val event = awaitPointerEvent()
+                                if (event.changes.any { it.isConsumed }) { cancelled = true; break }
+                                multiplePointers = multiplePointers || event.changes.count { it.pressed } > 1
+                                val factor = event.calculateZoom()
+                                val pan = event.calculatePan()
+                                distance += pan
+                                accumulatedZoom *= factor
+                                if (!pastSlop) {
+                                    val zoomMotion = abs(1 - accumulatedZoom) * event.calculateCentroidSize(useCurrent = false)
+                                    pastSlop = zoomMotion > viewConfiguration.touchSlop || distance.getDistance() > viewConfiguration.touchSlop
+                                }
+                                if (pastSlop) {
+                                    if (bitmap != null) transform = transform.zoomedTo(transform.scale * factor,
+                                        event.calculateCentroid(useCurrent = false), pan, viewportSize(), imageSize)
+                                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                }
+                            } while (event.changes.any { it.pressed })
+                            if (!cancelled) when (chatImageSwipeDirection(startScale, transform.scale, multiplePointers,
+                                distance, viewport.width.toFloat(), minimumSwipe)) {
+                                -1 -> if (canGoBack) previous()
+                                1 -> if (canGoForward) next()
+                            }
+                        }
+                    }
+                    .pointerInput(image.attachmentId, imageSize) {
+                        detectTapGestures(onDoubleTap = { point -> if (bitmap != null) zoom(if (transform.scale <= 1.001f) 2f else 1f, point) })
+                    }, contentAlignment = Alignment.Center) {
                     if (bitmap != null) Image(bitmap, image.name,
-                        Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }
-                            .transformable(rememberTransformableState { centroid, factor, pan, _ ->
-                                val next = (scale * factor).coerceIn(1f, 5f)
-                                val pivot = if (centroid.x.isFinite() && centroid.y.isFinite())
-                                    centroid - Offset(viewport.width / 2f, viewport.height / 2f) else Offset.Zero
-                                zoom(next, (offset - pivot) * (next / scale - 1f) + pan)
-                            })
-                            .pointerInput(image.attachmentId) { detectTapGestures(onDoubleTap = { zoom(if (scale == 1f) 2f else 1f) }) },
+                        Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y },
                         contentScale = ContentScale.Fit)
                     else if (busy) CircularProgressIndicator(Modifier.size(28.dp))
                     else Column(horizontalAlignment = Alignment.CenterHorizontally) {
