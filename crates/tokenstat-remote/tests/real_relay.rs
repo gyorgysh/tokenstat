@@ -29,6 +29,10 @@ fn free_devices_exchange_encrypted_messages_through_the_real_relay() {
             handshake_responder(Box::new(transport), &b).expect("responder handshake");
         let request = connection.receive(1 << 20).expect("request");
         connection.send(b"pong").expect("reply");
+        let (reader, writer) = connection.split();
+        let receive = std::thread::spawn(move || reader.read(4 << 20).expect("stream from A"));
+        writer.write(&vec![29; 2 << 20]).expect("stream to A");
+        assert_eq!(receive.join().expect("B reader"), vec![17; 2 << 20]);
         tx.send(request).expect("report request");
     });
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -43,6 +47,10 @@ fn free_devices_exchange_encrypted_messages_through_the_real_relay() {
         .expect("initiator handshake");
     connection.send(b"ping").expect("send");
     assert_eq!(connection.receive(1 << 20).expect("reply"), b"pong");
+    let (reader, writer) = connection.split();
+    let receive = std::thread::spawn(move || reader.read(4 << 20).expect("stream from B"));
+    writer.write(&vec![17; 2 << 20]).expect("stream to B");
+    assert_eq!(receive.join().expect("A reader"), vec![29; 2 << 20]);
     assert_eq!(
         rx.recv_timeout(Duration::from_secs(10)).expect("request"),
         b"ping"

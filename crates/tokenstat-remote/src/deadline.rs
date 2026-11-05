@@ -115,6 +115,15 @@ impl Transport for HandshakeBudget {
     fn is_relay(&self) -> bool {
         self.stream.is_relay()
     }
+
+    fn set_write_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        let timeout = match (timeout, self.left()?) {
+            (Some(timeout), Some(left)) => Some(timeout.min(left)),
+            (timeout, None) => timeout,
+            (None, Some(left)) => Some(left),
+        };
+        self.stream.set_write_timeout(timeout)
+    }
 }
 
 impl Connection {

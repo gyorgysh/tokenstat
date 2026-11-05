@@ -47,6 +47,8 @@ use tokenstat_identity::{MachineIdentity, PeerStore, PublicKey, Trust, fingerpri
 mod deadline;
 #[cfg(test)]
 mod stream_read_tests;
+#[cfg(test)]
+mod stream_write_tests;
 pub use deadline::{handshake_initiator_bounded, handshake_responder_bounded};
 pub mod tunnel;
 
@@ -145,6 +147,14 @@ pub trait Transport: Read + Write + Send {
     /// timeout before any frame bytes means "no data yet", not a failure.
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()>;
 
+    /// Bound individual writes and flushes without changing read deadlines.
+    /// Returning Unsupported preserves the existing blocking write path for
+    /// custom transports. Implementations must retain normal Write semantics:
+    /// an error means no bytes from that call were accepted.
+    fn set_write_timeout(&mut self, _timeout: Option<Duration>) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+
     /// True when this is a multiplexed relay channel rather than a TCP socket.
     ///
     /// Direct is the default. The tunnel overrides it. Handshake copies the
@@ -172,6 +182,10 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
         (**self).set_read_timeout(timeout)
     }
 
+    fn set_write_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        (**self).set_write_timeout(timeout)
+    }
+
     fn is_relay(&self) -> bool {
         (**self).is_relay()
     }
@@ -194,6 +208,10 @@ impl Transport for TcpStream {
 
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         TcpStream::set_read_timeout(self, timeout)
+    }
+
+    fn set_write_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        TcpStream::set_write_timeout(self, timeout)
     }
 }
 
@@ -340,6 +358,10 @@ impl Connection {
             relay,
         };
         let _ = core.stream.set_read_timeout(Some(STREAM_READ_TIMEOUT));
+        let short_writes = core
+            .stream
+            .set_write_timeout(Some(STREAM_WRITE_TIMEOUT))
+            .is_ok();
         let core = Arc::new(Mutex::new(core));
         (
             StreamReader {
@@ -347,7 +369,11 @@ impl Connection {
                 read_ready,
                 reading: Mutex::new(()),
             },
-            StreamWriter { core },
+            StreamWriter {
+                core,
+                writing: Arc::new(Mutex::new(())),
+                short_writes,
+            },
         )
     }
 }
@@ -356,6 +382,10 @@ impl Connection {
 /// or after a spurious readiness notification. Split readers retain partial
 /// bytes across these short waits until the message's stall budget expires.
 const STREAM_READ_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// Yield promptly when both peers are sending and need their reader to drain
+/// input before another socket write can progress.
+const STREAM_WRITE_TIMEOUT: Duration = Duration::from_millis(10);
 
 /// How long a peer may remain silent after a message starts arriving.
 ///
@@ -552,6 +582,8 @@ impl StreamReader {
 #[derive(Clone)]
 pub struct StreamWriter {
     core: Arc<Mutex<Core>>,
+    writing: Arc<Mutex<()>>,
+    short_writes: bool,
 }
 
 impl StreamWriter {
@@ -562,6 +594,100 @@ impl StreamWriter {
 
     /// Send one message. An empty slice is a clean end-of-stream marker.
     pub fn write(&self, payload: &[u8]) -> Result<(), RemoteError> {
+        self.write_with_stall_timeout(payload, MESSAGE_STALL_TIMEOUT)
+    }
+
+    fn write_with_stall_timeout(&self, payload: &[u8], stall: Duration) -> Result<(), RemoteError> {
+        // Writers cannot interleave frames from different messages, even
+        // though the reader may use Core between partial socket writes.
+        let _writing = self.writing.lock().map_err(|_| RemoteError::Closed)?;
+        if !self.short_writes {
+            return self.write_blocking(payload);
+        }
+        let result = self.write_message(payload, stall);
+        let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+        if let Err(error) = result {
+            // The send nonce has advanced. Never retry a failed message on
+            // this connection, even if none of its ciphertext reached the peer.
+            guard.closed.store(true, Ordering::Relaxed);
+            guard.stream.close();
+            return Err(error);
+        }
+        if !guard.permitted() {
+            return Err(RemoteError::Closed);
+        }
+        note_payload(guard.relay, payload.len() as u64);
+        Ok(())
+    }
+
+    fn write_message(&self, payload: &[u8], stall: Duration) -> Result<(), RemoteError> {
+        let total = u32::try_from(payload.len())
+            .map_err(|_| RemoteError::FrameTooLarge(payload.len() as u64, u32::MAX as usize))?;
+        let header = total.to_be_bytes();
+        let mut progress = Instant::now();
+        for plaintext in std::iter::once(header.as_slice()).chain(payload.chunks(MAX_PAYLOAD)) {
+            // Keep the encrypted frame until every byte is accepted. Retrying
+            // encryption would consume another nonce and corrupt the stream.
+            let mut frame = vec![0; plaintext.len() + 20];
+            let length = {
+                let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+                if !guard.permitted() {
+                    return Err(RemoteError::Closed);
+                }
+                guard.noise.write_message(plaintext, &mut frame[4..])?
+            };
+            frame[..4].copy_from_slice(&(length as u32).to_be_bytes());
+            let mut bytes = &frame[..length + 4];
+            while !bytes.is_empty() {
+                let result = {
+                    let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+                    if !guard.permitted() {
+                        return Err(RemoteError::Closed);
+                    }
+                    guard.stream.write(bytes)
+                };
+                match result {
+                    Ok(0) => return Err(std::io::Error::from(std::io::ErrorKind::WriteZero).into()),
+                    Ok(n) => {
+                        progress = Instant::now();
+                        bytes = &bytes[n..];
+                    }
+                    Err(error) if Self::retry_write(&error, progress, stall) => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        loop {
+            let result = {
+                let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+                if !guard.permitted() {
+                    return Err(RemoteError::Closed);
+                }
+                guard.stream.flush()
+            };
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) if Self::retry_write(&error, progress, stall) => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
+    fn retry_write(error: &std::io::Error, progress: Instant, stall: Duration) -> bool {
+        progress.elapsed() < stall
+            && matches!(
+                error.kind(),
+                std::io::ErrorKind::Interrupted
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::WouldBlock
+            )
+    }
+
+    fn write_blocking(&self, payload: &[u8]) -> Result<(), RemoteError> {
         let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
         if !guard.permitted() {
             return Err(RemoteError::Closed);

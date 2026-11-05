@@ -873,8 +873,13 @@ impl Transport for ChannelTransport {
     }
 
     fn set_deadline(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        *self.write_timeout.lock().unwrap_or_else(|e| e.into_inner()) = timeout;
+        self.set_write_timeout(timeout)?;
         self.set_read_timeout(timeout)
+    }
+
+    fn set_write_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        *self.write_timeout.lock().unwrap_or_else(|e| e.into_inner()) = timeout;
+        Ok(())
     }
 
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
