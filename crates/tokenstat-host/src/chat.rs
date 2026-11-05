@@ -3304,36 +3304,66 @@ impl Store {
                     .then_some(chat.resume_token.as_deref())
                     .flatten()
             });
-        let baseline = usage_totals(path)?;
-        let bytes = read_fork_file(
-            path,
-            PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64,
-            true,
-        )?;
-        let records = usage_repair_records(&bytes, muse.is_some());
-        let mut totals = baseline.clone();
+        let mut legacy_codex = None;
+        let mut seen_codex = false;
+        let mut retained_turns = false;
+        let mut retained_since = None;
+        let mut has_muse_session = false;
+        let mut current_muse_session = true;
+        let mut stored_muse = Ok(crate::work_transcript_identity::UsageTotals::default());
+        let mut totals = usage_totals_visiting(path, |line| {
+            let Some(record) = usage_repair_record(line, muse.is_some(), &mut seen_codex) else {
+                return Ok(());
+            };
+            if record["kind"] == "retainedUsage" {
+                retained_turns |= record["usage"]["turns"].as_u64().unwrap_or(0) > 0;
+                retained_since = Some(None);
+            } else if record["kind"] == "user" && retained_since == Some(None) {
+                retained_since = Some(record_at_ms(&record));
+            }
+            if record["backend"] == "codex" && !retained_turns {
+                let recovery = legacy_codex.get_or_insert_with(|| LegacyCodexUsage::load(path));
+                if record["event"]["kind"] == "usage"
+                    && let Some(time) = record_at_ms(&record)
+                    && let Ok(recovery) = recovery
+                {
+                    recovery.record(time);
+                }
+            }
+            if muse.is_some() && record["backend"] == "muse" {
+                if record["event"]["kind"] == "session" {
+                    if !has_muse_session {
+                        // If session markers exist, preceding usage is inherited.
+                        stored_muse = Ok(crate::work_transcript_identity::UsageTotals::default());
+                    }
+                    has_muse_session = true;
+                    current_muse_session = record["event"]["id"].as_str() == muse;
+                }
+                if current_muse_session
+                    && record_at_ms(&record).is_some_and(|at| at >= chat.created_at_ms)
+                    && let Some(record) = record.as_object()
+                    && let Ok(stored) = &mut stored_muse
+                {
+                    let added = crate::work_transcript_identity::UsageTotals::from_record(record)
+                        .and_then(|usage| stored.add(&usage));
+                    if let Err(error) = added {
+                        stored_muse = Err(error);
+                    }
+                }
+            }
+            Ok(())
+        })?;
         // Only Codex raw output carries `turn.completed`. Without this gate
         // every first-page read of any other chat scanned its raw folder.
-        let used_codex = chat.backend == "codex"
-            || chat.resume_tokens.contains_key("codex")
-            || records.iter().any(|row| row["backend"] == "codex");
-        if used_codex
-            && !records.iter().any(|row| {
-                row["kind"] == "retainedUsage" && row["usage"]["turns"].as_u64().unwrap_or(0) > 0
-            })
-        {
-            let times: Vec<i64> = records
-                .iter()
-                .filter(|row| row["backend"] == "codex" && row["event"]["kind"] == "usage")
-                .filter_map(|row| row["at_ms"].as_i64().or_else(|| row["atMs"].as_i64()))
-                .collect();
-            let recovered = legacy_codex_usage(
-                &path.parent().ok_or("invalid transcript path")?.join("raw"),
-                &times,
-            );
+        let used_codex =
+            chat.backend == "codex" || chat.resume_tokens.contains_key("codex") || seen_codex;
+        if used_codex && !retained_turns {
+            let recovery = legacy_codex.get_or_insert_with(|| LegacyCodexUsage::load(path));
             // Vendor logs are optional repair inputs. Their size, permissions
             // or availability must not make a verified transcript unreadable.
-            if let Ok(recovered) = recovered {
+            if let Ok(recovery) = recovery
+                && let Ok(recovered) = recovery.recover()
+            {
                 let _ = add_usage_value(&mut totals, &recovered);
             }
         }
@@ -3350,43 +3380,42 @@ impl Store {
             // it from the full vendor log would count those tokens twice.
             // A partial turn before the first surviving user stays at its
             // recorded total until there is a complete turn to reconcile.
-            let since_ms = records
-                .iter()
-                .rposition(|record| record["kind"] == "retainedUsage")
-                .map(|index| {
-                    records[index + 1..]
-                        .iter()
-                        .filter(|record| record["kind"] == "user")
-                        .find_map(record_at_ms)
-                        .unwrap_or(i64::MAX)
-                })
+            let since_ms = retained_since
+                .map(|at| at.unwrap_or(i64::MAX))
                 .unwrap_or(chat.created_at_ms)
                 .max(chat.created_at_ms);
             if let Some(directory) = directory
                 && let Ok(recovered) = muse_log_usage(&directory, since_ms)
             {
-                let mut stored = crate::work_transcript_identity::UsageTotals::default();
-                // A fork strips old Session markers. The current token's
-                // marker distinguishes inherited records even when their
-                // timestamp equals the fork's creation millisecond. Older
-                // transcripts without markers retain the timestamp fallback.
-                let mut current_session = !records.iter().any(|record| {
-                    record["backend"] == "muse" && record["event"]["kind"] == "session"
-                });
-                for record in &records {
-                    if record["backend"] == "muse" && record["event"]["kind"] == "session" {
-                        current_session = record["event"]["id"].as_str() == Some(token);
-                    }
-                    if current_session
-                        && record["backend"] == "muse"
-                        && record_at_ms(record).is_some_and(|at| at >= since_ms)
-                        && let Some(record) = record.as_object()
-                    {
-                        stored.add(&crate::work_transcript_identity::UsageTotals::from_record(
-                            record,
-                        )?)?;
-                    }
-                }
+                let stored = if retained_since.is_none() {
+                    stored_muse?
+                } else {
+                    // Legacy retention can leave timestamps on either side of
+                    // its surviving user boundary. Resolve that cutoff first,
+                    // then reread without keeping historical records in memory.
+                    let mut stored = crate::work_transcript_identity::UsageTotals::default();
+                    // A fork strips old Session markers. The current token's
+                    // marker distinguishes inherited records even when their
+                    // timestamp equals the fork's creation millisecond. Older
+                    // transcripts without markers retain the timestamp fallback.
+                    let mut current_session = !has_muse_session;
+                    visit_usage_repair_records(path, true, |record| {
+                        if record["backend"] == "muse" && record["event"]["kind"] == "session" {
+                            current_session = record["event"]["id"].as_str() == Some(token);
+                        }
+                        if current_session
+                            && record["backend"] == "muse"
+                            && record_at_ms(&record).is_some_and(|at| at >= since_ms)
+                            && let Some(record) = record.as_object()
+                        {
+                            stored.add(
+                                &crate::work_transcript_identity::UsageTotals::from_record(record)?,
+                            )?;
+                        }
+                        Ok(())
+                    })?;
+                    stored
+                };
                 // A missing or older vendor log does not erase already recorded usage.
                 if let Some(extra) = usage_difference(&recovered, &stored.value())? {
                     let _ = add_usage_value(&mut totals, &extra);
@@ -6633,67 +6662,105 @@ fn usage_difference(total: &Value, recorded: &Value) -> Result<Option<Value>, St
         .then_some(extra))
 }
 
-fn legacy_codex_usage(directory: &Path, recorded_at: &[i64]) -> Result<Value, String> {
-    let mut totals = crate::work_transcript_identity::UsageTotals::default();
-    let mut files = match fs::read_dir(directory) {
-        Ok(entries) => entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let path = entry.path();
-                if path.extension()?.to_str()? != "ndjson" {
-                    return None;
+struct LegacyCodexUsage {
+    files: Vec<(i64, PathBuf)>,
+    recorded: Vec<bool>,
+}
+
+impl LegacyCodexUsage {
+    fn load(transcript: &Path) -> Result<Self, String> {
+        let directory = transcript
+            .parent()
+            .ok_or("invalid transcript path")?
+            .join("raw");
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self {
+                    files: Vec::new(),
+                    recorded: Vec::new(),
+                });
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        let mut files = Vec::new();
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("ndjson") {
+                continue;
+            }
+            let Some(time) = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.parse::<i64>().ok())
+            else {
+                continue;
+            };
+            if files.len() == VENDOR_USAGE_FILES {
+                return Err("saved usage exceeds the reading limit".into());
+            }
+            files.push((time, path));
+        }
+        if files.is_empty() {
+            return Ok(Self {
+                files: Vec::new(),
+                recorded: Vec::new(),
+            });
+        }
+        files.sort_by_key(|(time, _)| *time);
+        let recorded = vec![false; files.len()];
+        Ok(Self { files, recorded })
+    }
+
+    // Mark the bounded set of raw logs already represented in the transcript
+    // instead of retaining every historical usage timestamp.
+    fn record(&mut self, time: i64) {
+        if time == i64::MAX {
+            return;
+        }
+        let index = self.files.partition_point(|(start, _)| *start <= time);
+        if index > 0 {
+            self.recorded[index - 1] = true;
+        }
+    }
+
+    fn recover(&self) -> Result<Value, String> {
+        let mut totals = crate::work_transcript_identity::UsageTotals::default();
+        let mut remaining = VENDOR_USAGE_BYTES;
+        for (index, (_, path)) in self.files.iter().enumerate() {
+            if self.recorded[index] {
+                continue;
+            }
+            let bytes = read_fork_file(path, remaining.min(RAW_CAP), false)?;
+            remaining = remaining.saturating_sub(bytes.len() as u64);
+            for line in bytes.split(|byte| *byte == b'\n') {
+                if !line
+                    .windows(b"turn.completed".len())
+                    .any(|chunk| chunk == b"turn.completed")
+                {
+                    continue;
                 }
-                Some((path.file_stem()?.to_str()?.parse::<i64>().ok()?, path))
-            })
-            .collect::<Vec<_>>(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(totals.value()),
-        Err(error) => return Err(error.to_string()),
-    };
-    if files.len() > VENDOR_USAGE_FILES {
-        return Err("saved usage exceeds the reading limit".into());
-    }
-    files.sort_by_key(|(time, _)| *time);
-    let mut remaining = VENDOR_USAGE_BYTES;
-    for (index, (start, path)) in files.iter().enumerate() {
-        let end = files
-            .get(index + 1)
-            .map(|(time, _)| *time)
-            .unwrap_or(i64::MAX);
-        if recorded_at
-            .iter()
-            .any(|time| *time >= *start && *time < end)
-        {
-            continue;
-        }
-        let bytes = read_fork_file(path, remaining.min(RAW_CAP), false)?;
-        remaining = remaining.saturating_sub(bytes.len() as u64);
-        for line in bytes.split(|byte| *byte == b'\n') {
-            if !line
-                .windows(b"turn.completed".len())
-                .any(|chunk| chunk == b"turn.completed")
-            {
-                continue;
-            }
-            let Ok(value) = serde_json::from_slice::<Value>(line) else {
-                continue;
-            };
-            if value["type"] != "turn.completed" {
-                continue;
-            }
-            let usage = &value["usage"];
-            let Some(input) = usage["input_tokens"].as_u64() else {
-                continue;
-            };
-            let cached = usage["cached_input_tokens"].as_u64().unwrap_or(0);
-            let write = usage["cache_write_input_tokens"].as_u64().unwrap_or(0);
-            let record = json!({"event":Event::Usage { input: input.saturating_sub(cached).saturating_sub(write),
+                let Ok(value) = serde_json::from_slice::<Value>(line) else {
+                    continue;
+                };
+                if value["type"] != "turn.completed" {
+                    continue;
+                }
+                let usage = &value["usage"];
+                let Some(input) = usage["input_tokens"].as_u64() else {
+                    continue;
+                };
+                let cached = usage["cached_input_tokens"].as_u64().unwrap_or(0);
+                let write = usage["cache_write_input_tokens"].as_u64().unwrap_or(0);
+                let record = json!({"event":Event::Usage { input: input.saturating_sub(cached).saturating_sub(write),
                 output: usage["output_tokens"].as_u64().unwrap_or(0), cache_read: cached, cache_write: write, cost_usd: None }});
-            totals.add(&crate::work_transcript_identity::UsageTotals::from_record(
-                record.as_object().ok_or("invalid usage")?,
-            )?)?;
+                totals.add(&crate::work_transcript_identity::UsageTotals::from_record(
+                    record.as_object().ok_or("invalid usage")?,
+                )?)?;
+            }
         }
+        Ok(totals.value())
     }
-    Ok(totals.value())
 }
 
 /// Muse keeps sessions under year/month/day, independently of the project's
@@ -6819,7 +6886,7 @@ fn muse_log_usage(directory: &Path, since_ms: i64) -> Result<Value, String> {
 /// record even if it has no usage: it establishes that legacy raw output may
 /// need recovery after a backend switch. Muse also needs user boundaries and
 /// segment summaries to distinguish retained and inherited turns.
-fn usage_repair_records(bytes: &[u8], muse_history: bool) -> Vec<Value> {
+fn usage_repair_record(line: &[u8], muse_history: bool, seen_codex: &mut bool) -> Option<Value> {
     #[derive(Deserialize)]
     struct EventHeader {
         #[serde(default)]
@@ -6834,35 +6901,55 @@ fn usage_repair_records(bytes: &[u8], muse_history: bool) -> Vec<Value> {
         #[serde(default)]
         event: Option<EventHeader>,
     }
+    if let Ok(header) = serde_json::from_slice::<Header>(line) {
+        let event_kind = header.event.as_ref().map(|event| &event.kind);
+        let codex = header.backend == "codex";
+        let usage = event_kind.is_some_and(|kind| kind == "usage");
+        let muse_boundary = muse_history
+            && (header.kind == "user"
+                || header.kind == "teamAgentSegment"
+                || (header.backend == "muse" && event_kind.is_some_and(|kind| kind == "session")));
+        if header.kind != "retainedUsage"
+            && !(codex && (!*seen_codex || usage))
+            && !(muse_history && usage)
+            && !muse_boundary
+        {
+            return None;
+        }
+    }
+    // Keep the Value parser's handling of unusual envelopes such as
+    // duplicate selectors or non-object events. Only verified records
+    // can establish a previous Codex session.
+    let record: Value = serde_json::from_slice(line).ok()?;
+    *seen_codex |= record["backend"] == "codex";
+    Some(record)
+}
+
+#[cfg(test)]
+fn usage_repair_records(bytes: &[u8], muse_history: bool) -> Vec<Value> {
     let mut seen_codex = false;
     bytes
         .split(|byte| *byte == b'\n')
-        .filter_map(|line| {
-            if let Ok(header) = serde_json::from_slice::<Header>(line) {
-                let event_kind = header.event.as_ref().map(|event| &event.kind);
-                let codex = header.backend == "codex";
-                let usage = event_kind.is_some_and(|kind| kind == "usage");
-                let muse_boundary = muse_history
-                    && (header.kind == "user"
-                        || header.kind == "teamAgentSegment"
-                        || (header.backend == "muse"
-                            && event_kind.is_some_and(|kind| kind == "session")));
-                if header.kind != "retainedUsage"
-                    && !(codex && (!seen_codex || usage))
-                    && !(muse_history && usage)
-                    && !muse_boundary
-                {
-                    return None;
-                }
-            }
-            // Keep the Value parser's handling of unusual envelopes such as
-            // duplicate selectors or non-object events. Only verified records
-            // can establish a previous Codex session.
-            let record: Value = serde_json::from_slice(line).ok()?;
-            seen_codex |= record["backend"] == "codex";
-            Some(record)
-        })
+        .filter_map(|line| usage_repair_record(line, muse_history, &mut seen_codex))
         .collect()
+}
+
+fn visit_usage_repair_records(
+    path: &Path,
+    muse_history: bool,
+    mut visit: impl FnMut(Value) -> Result<(), String>,
+) -> Result<(), String> {
+    let Some(file) = open_transcript(path)? else {
+        return Ok(());
+    };
+    let mut seen_codex = false;
+    visit_transcript_lines(file, |line, _| {
+        if let Some(record) = usage_repair_record(line, muse_history, &mut seen_codex) {
+            visit(record)?;
+        }
+        Ok(())
+    })?;
+    Ok(())
 }
 
 /// Read a transcript with memory bounded by one record. The length captured
@@ -6906,9 +6993,32 @@ fn visit_transcript_lines(
     Ok(offset)
 }
 
-fn usage_totals(path: &Path) -> Result<Value, String> {
-    let file = match fs::File::open(path) {
-        Ok(file) => file,
+fn open_transcript(path: &Path) -> Result<Option<fs::File>, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() => {
+            return Err("conversation transcript is not a regular file".into());
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.to_string()),
+        _ => {}
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    match options.open(path) {
+        Ok(file) => {
+            if !file
+                .metadata()
+                .map_err(|error| error.to_string())?
+                .is_file()
+            {
+                return Err("conversation transcript is not a regular file".into());
+            }
+            Ok(Some(file))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             // A missing transcript is a new conversation, which genuinely has
             // no usage. But an ancestor that exists and is not a directory
@@ -6920,12 +7030,26 @@ fn usage_totals(path: &Path) -> Result<Value, String> {
             if blocked_ancestor(path) {
                 return Err("conversation transcript is not reachable".into());
             }
-            return Ok(crate::work_transcript_identity::UsageTotals::default().value());
+            Ok(None)
         }
-        Err(error) => return Err(error.to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn usage_totals(path: &Path) -> Result<Value, String> {
+    usage_totals_visiting(path, |_| Ok(()))
+}
+
+fn usage_totals_visiting(
+    path: &Path,
+    mut visit: impl FnMut(&[u8]) -> Result<(), String>,
+) -> Result<Value, String> {
+    let Some(file) = open_transcript(path)? else {
+        return Ok(crate::work_transcript_identity::UsageTotals::default().value());
     };
     let mut totals = crate::work_transcript_identity::UsageTotals::default();
     visit_transcript_lines(file, |line, _| {
+        visit(line)?;
         let text = String::from_utf8_lossy(line);
         if text.contains("\"usage\"")
             && let Ok(Value::Object(record)) = serde_json::from_str::<Value>(&text)
@@ -15027,5 +15151,93 @@ mod tests {
             .is_err()
         );
         assert!(!visited);
+    }
+    #[test]
+    fn conversation_usage_reconciles_vendor_logs_for_long_transcripts() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "long-usage");
+        let path = store.events_path("long-usage");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut chat = store.get("long-usage").unwrap();
+        chat.created_at_ms = 0;
+        let tool = json!({"kind":"agent","backend":"claude",
+            "event":{"kind":"toolEnd","detail":"x".repeat(512 * 1024)}});
+        for backend in ["codex", "muse"] {
+            chat.backend = backend.into();
+            chat.resume_token = Some("session-current".into());
+            let mut file = fs::File::create(&path).unwrap();
+            for _ in 0..20 {
+                serde_json::to_writer(&mut file, &tool).unwrap();
+                file.write_all(b"\n").unwrap();
+            }
+            let records = if backend == "codex" {
+                // A boundary timestamp belongs to the next raw log. The
+                // terminal timestamp is outside every half-open interval.
+                vec![
+                    json!({"backend":"codex","event":{"kind":"usage","input":7},"at_ms":199}),
+                    json!({"backend":"codex","event":{"kind":"usage","input":11},"atMs":200}),
+                    json!({"backend":"codex","event":{"kind":"usage","input":13},"at_ms":i64::MAX}),
+                ]
+            } else {
+                // Inherited usage predates the current session marker even
+                // when its timestamp is within the recovered vendor range.
+                vec![
+                    json!({"backend":"muse","event":{"kind":"usage","input":100},"at_ms":300}),
+                    json!({"backend":"muse","event":{"kind":"session","id":"session-current"},"at_ms":200}),
+                    json!({"backend":"muse","event":{"kind":"usage","input":40},"at_ms":300}),
+                ]
+            };
+            for record in records {
+                serde_json::to_writer(&mut file, &record).unwrap();
+                file.write_all(b"\n").unwrap();
+            }
+            drop(file);
+            assert!(fs::metadata(&path).unwrap().len() > 10 * 1024 * 1024);
+            let raw = path.parent().unwrap().join("raw");
+            fs::create_dir_all(&raw).unwrap();
+            for (start, input) in [(100, 10), (200, 20), (300, 30)] {
+                let record = json!({"type":"turn.completed","usage":{"input_tokens":input,"output_tokens":0}});
+                fs::write(raw.join(format!("{start}.ndjson")), format!("{record}\n")).unwrap();
+            }
+            let muse_root = root.path().join("muse");
+            let session = muse_root.join("session-current");
+            fs::create_dir_all(&session).unwrap();
+            let record = json!({"id":"turn-current","recorded_at":300_000,
+                "payload":{"event":{"kind":"model_completed","model":"test-model",
+                "usage":{"input_tokens":60,"output_tokens":0}}}});
+            fs::write(session.join("session.jsonl"), format!("{record}\n")).unwrap();
+            let expected = if backend == "codex" {
+                (61, 4)
+            } else {
+                (160, 2)
+            };
+            let usage = store
+                .conversation_usage_with_muse_root(&chat, &path, Some(&muse_root))
+                .unwrap();
+            assert_eq!(usage["input"], expected.0, "{backend}");
+            assert_eq!(usage["turns"], expected.1, "{backend}");
+            assert_eq!(usage["output"], 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn usage_rejects_symlinks_and_special_files() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("events.ndjson");
+        let target = root.path().join("target.ndjson");
+        fs::write(&target, b"{}\n").unwrap();
+        symlink(&target, &path).unwrap();
+        assert!(usage_totals(&path).is_err());
+        assert!(visit_usage_repair_records(&path, true, |_| Ok(())).is_err());
+        fs::remove_file(&target).unwrap();
+        assert!(usage_totals(&path).is_err());
+        fs::remove_file(&path).unwrap();
+        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(usage_totals(&path).is_err());
+        assert!(visit_usage_repair_records(&path, true, |_| Ok(())).is_err());
     }
 }
