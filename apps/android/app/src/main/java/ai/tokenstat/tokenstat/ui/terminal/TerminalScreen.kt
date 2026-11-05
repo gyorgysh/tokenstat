@@ -187,7 +187,7 @@ fun TerminalScreen(
         bridge.alive = true
         bridge.sessionBound = false
         bridge.onProgress()
-        bridge.webView?.reload()
+        bridge.reloadPage()
     }
 
     fun bind(id: String) {
@@ -844,29 +844,49 @@ class TerminalBridge {
     /// A selection in the emulator leaves for the system clipboard.
     var onCopy: (String) -> Unit = {}
     private val inbound = Channel<String>(capacity = 256)
+    private val inputLock = Any()
     private var readJob: kotlinx.coroutines.Job? = null
     private var inputJob: kotlinx.coroutines.Job? = null
+    @Volatile private var pageEpoch = 0L
 
     fun stopJobs() {
+        // A fresh shell can reuse the WebView. Its pending output and focus
+        // requests still belong to the previous stream.
+        synchronized(inputLock) {
+            pageEpoch++
+            while (inbound.tryReceive().isSuccess) { /* Do not type old input into a new shell. */ }
+        }
         readJob?.cancel()
         inputJob?.cancel()
         readJob = null
         inputJob = null
-        while (inbound.tryReceive().isSuccess) { /* Do not type an old session's input into a new shell. */ }
     }
 
-    val jsApi: JsApi by lazy { JsApi() }
+    val jsApi: JsApi get() = JsApi(pageEpoch)
+
+    fun reloadPage() {
+        webView?.let { view ->
+            view.addJavascriptInterface(jsApi, "TermBridge")
+            view.reload()
+        }
+    }
+
+    private fun ownsPage(view: WebView, epoch: Long): Boolean = webView === view && pageEpoch == epoch
+
+    private fun postToPage(script: () -> String) {
+        val view = webView ?: return
+        val epoch = pageEpoch
+        view.post {
+            if (ownsPage(view, epoch)) view.evaluateJavascript(script(), null)
+        }
+    }
 
     fun writeBase64(base64: String) {
-        webView?.post {
-            webView?.evaluateJavascript("termWriteB64(${kotlinx.serialization.json.JsonPrimitive(base64)});", null)
-        }
+        postToPage { "termWriteB64(${kotlinx.serialization.json.JsonPrimitive(base64)});" }
     }
 
     fun pushTheme(dark: Boolean) {
-        webView?.post {
-            webView?.evaluateJavascript("termSetTheme(${if (dark) "true" else "false"});", null)
-        }
+        postToPage { "termSetTheme(${if (dark) "true" else "false"});" }
     }
 
     /// Ask the page to measure itself again.
@@ -875,9 +895,7 @@ class TerminalBridge {
     /// finally has a height. A WebView inside Compose loads before it is
     /// measured, and a terminal fitted against no height is one row tall.
     fun fit() {
-        webView?.post {
-            webView?.evaluateJavascript("termFit();", null)
-        }
+        postToPage { "termFit();" }
     }
 
     /// Fit to the measured view size, in CSS pixels. The page sizes its
@@ -889,9 +907,7 @@ class TerminalBridge {
             fit()
             return
         }
-        webView?.post {
-            webView?.evaluateJavascript("termViewport($wCss,$hCss);", null)
-        }
+        postToPage { "termViewport($wCss,$hCss);" }
     }
 
     @Volatile var scrolls = false
@@ -899,14 +915,12 @@ class TerminalBridge {
     var onReadingChanged: (Boolean) -> Unit = {}
 
     fun followOutput() {
-        webView?.post { webView?.evaluateJavascript("termFollowLatest();", null) }
+        postToPage { "termFollowLatest();" }
     }
 
     fun setScrolls(on: Boolean) {
         scrolls = on
-        webView?.post {
-            webView?.evaluateJavascript("termSetScrolls(${if (on) "true" else "false"});", null)
-        }
+        postToPage { "termSetScrolls(${if (on) "true" else "false"});" }
     }
 
     fun readInfo(info: JsonObject?) {
@@ -985,9 +999,12 @@ class TerminalBridge {
     /// zero: it appeared, and every keystroke went nowhere.
     fun showKeyboard() {
         val view = webView ?: return
+        val epoch = pageEpoch
         view.post {
+            if (!ownsPage(view, epoch)) return@post
             view.requestFocus()
             view.evaluateJavascript("termFocus();") {
+                if (!ownsPage(view, epoch)) return@evaluateJavascript
                 val imm = view.context
                     .getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
                     as? android.view.inputmethod.InputMethodManager
@@ -1000,7 +1017,9 @@ class TerminalBridge {
 
     fun hideKeyboard() {
         val view = webView ?: return
+        val epoch = pageEpoch
         view.post {
+            if (!ownsPage(view, epoch)) return@post
             val imm = view.context
                 .getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
                 as? android.view.inputmethod.InputMethodManager
@@ -1117,34 +1136,38 @@ class TerminalBridge {
         }
     }
 
-    inner class JsApi {
+    inner class JsApi(private val epoch: Long) {
         @JavascriptInterface
         fun onReadingChanged(reading: Boolean) {
-            main.post { this@TerminalBridge.onReadingChanged(reading) }
+            main.post { if (pageEpoch == epoch) this@TerminalBridge.onReadingChanged(reading) }
         }
 
         @JavascriptInterface
         fun onInput(base64: String) {
+            if (pageEpoch != epoch) return
             // Decoded rather than forwarded, so an armed Ctrl can fold the
             // key that was actually typed.
-            enqueue(runCatching { Base64.decode(base64, Base64.DEFAULT) }.getOrNull() ?: return)
+            val bytes = runCatching { Base64.decode(base64, Base64.DEFAULT) }.getOrNull() ?: return
+            synchronized(inputLock) { if (pageEpoch == epoch) enqueue(bytes) }
         }
 
         @JavascriptInterface
         fun onResize(rows: Int, cols: Int) {
-            inbound.trySend("__resize__:$rows:$cols")
+            synchronized(inputLock) {
+                if (pageEpoch == epoch) inbound.trySend("__resize__:$rows:$cols")
+            }
         }
 
         @JavascriptInterface
         fun onCopy(text: String) {
-            main.post { this@TerminalBridge.onCopy(text) }
+            main.post { if (pageEpoch == epoch) this@TerminalBridge.onCopy(text) }
         }
 
         /// A tap on the emulator asks for the keyboard, the way a tap on any
         /// other text surface does.
         @JavascriptInterface
         fun onWantsKeyboard() {
-            showKeyboard()
+            main.post { if (pageEpoch == epoch) showKeyboard() }
         }
     }
 

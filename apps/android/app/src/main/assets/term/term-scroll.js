@@ -26,6 +26,14 @@
       if (held) marker = term.registerMarker(buffer.viewportY - buffer.baseY - buffer.cursorY);
       setReading(held);
     }
+    function scrollToLine(line) {
+      var target = Math.max(0, Math.min(line, term.buffer.active.baseY));
+      term.scrollToLine(target);
+      // After resize, xterm 6 can have a new buffer offset but the old
+      // scrollbar position. Its first relative scroll reconciles those;
+      // one correction then reaches the requested line without a frame jump.
+      if (term.buffer.active.viewportY !== target) term.scrollToLine(target);
+    }
     function restorePosition() {
       restoring = true;
       try {
@@ -34,10 +42,10 @@
           setReading(false);
         } else if (enabled && reading) {
           // Once the held line ages out, stay at the oldest retained output.
-          term.scrollToLine(marker && !marker.isDisposed ? marker.line : 0);
+          scrollToLine(marker && !marker.isDisposed ? marker.line : 0);
           if (!marker || marker.isDisposed) rememberPosition();
         } else {
-          term.scrollToBottom();
+          scrollToLine(term.buffer.active.baseY);
         }
       } finally { restoring = false; }
     }
