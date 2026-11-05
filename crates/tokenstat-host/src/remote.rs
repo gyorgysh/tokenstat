@@ -3457,22 +3457,16 @@ fn set_relay_fallback(params: &str) -> Result<Value, String> {
 
 fn validate_tunnel_endpoint(raw: &str) -> Result<String, String> {
     let s = raw.trim().trim_end_matches('/');
-    let (scheme, rest) = s
-        .split_once("://")
-        .ok_or_else(|| format!("tunnel endpoint must be a wss:// URL (got {raw})"))?;
-    let scheme = scheme.to_ascii_lowercase();
-    let hostport = rest.split('/').next().unwrap_or(rest);
-    let host = hostport
+    let url =
+        reqwest::Url::parse(s).map_err(|error| format!("invalid tunnel endpoint: {error}"))?;
+    let scheme = url.scheme();
+    let host = url
+        .host_str()
+        .unwrap_or("")
         .trim_start_matches('[')
-        .split(']')
-        .next()
-        .unwrap_or(hostport)
-        .split(':')
-        .next()
-        .unwrap_or(hostport)
-        .to_ascii_lowercase();
+        .trim_end_matches(']');
     let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0";
-    match scheme.as_str() {
+    match scheme {
         "wss" => Ok(s.to_string()),
         "ws" if loopback => Ok(s.to_string()),
         "ws" => Err("ws:// is only allowed for localhost tunnel endpoints; use wss://".into()),
@@ -3578,6 +3572,28 @@ mod history_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_relay_endpoints_accept_ipv6_without_allowing_remote_plaintext() {
+        for endpoint in [
+            "ws://[::1]:8080",
+            "ws://[0:0:0:0:0:0:0:1]:8080",
+            "ws://localhost:8080",
+            "ws://127.0.0.1:8080",
+        ] {
+            assert_eq!(super::validate_tunnel_endpoint(endpoint).unwrap(), endpoint);
+        }
+        for endpoint in [
+            "ws://[2001:db8::1]:8080",
+            "ws://localhost.example:8080",
+            "ws://localhost@remote.example:8080",
+        ] {
+            assert!(
+                super::validate_tunnel_endpoint(endpoint).is_err(),
+                "{endpoint}"
+            );
+        }
+    }
+
     #[test]
     fn an_account_directory_cannot_authorize_a_different_login_or_an_expired_cache() {
         let directory = super::Directory {
