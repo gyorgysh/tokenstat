@@ -3310,7 +3310,7 @@ impl Store {
             PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64,
             true,
         )?;
-        let records = usage_repair_records(&bytes, muse.is_some() || chat.backend == "codex");
+        let records = usage_repair_records(&bytes, muse.is_some());
         let mut totals = baseline.clone();
         // Only Codex raw output carries `turn.completed`. Without this gate
         // every first-page read of any other chat scanned its raw folder.
@@ -6815,36 +6815,52 @@ fn muse_log_usage(directory: &Path, since_ms: i64) -> Result<Value, String> {
     Ok(totals.value())
 }
 
-/// Legacy repairs only need Codex records and retained summaries. Reading a
-/// Claude tool's large argument/result into a JSON tree on every inspector
-/// refresh needlessly copies the entire retained transcript. Inspect its two
-/// top-level selectors while serde skips the other values without allocating.
-/// Muse reconciliation still needs the full sequence, including user/session
-/// boundaries. A current Codex session is also likely to need most records,
-/// so both keep the existing single full projection without a selector pass.
-fn usage_repair_records(bytes: &[u8], full_history: bool) -> Vec<Value> {
+/// Repair needs usage and session boundaries, not tool bodies. Keep one Codex
+/// record even if it has no usage: it establishes that legacy raw output may
+/// need recovery after a backend switch. Muse also needs user boundaries and
+/// segment summaries to distinguish retained and inherited turns.
+fn usage_repair_records(bytes: &[u8], muse_history: bool) -> Vec<Value> {
+    #[derive(Deserialize)]
+    struct EventHeader {
+        #[serde(default)]
+        kind: Value,
+    }
     #[derive(Deserialize)]
     struct Header {
         #[serde(default)]
         kind: Value,
         #[serde(default)]
         backend: Value,
+        #[serde(default)]
+        event: Option<EventHeader>,
     }
+    let mut seen_codex = false;
     bytes
         .split(|byte| *byte == b'\n')
         .filter_map(|line| {
-            if !full_history {
-                let header: Header = match serde_json::from_slice(line) {
-                    Ok(header) => header,
-                    // Preserve the legacy Value parser's permissive handling
-                    // of unusual envelopes such as duplicate selector keys.
-                    Err(_) => return serde_json::from_slice(line).ok(),
-                };
-                if header.backend != "codex" && header.kind != "retainedUsage" {
+            if let Ok(header) = serde_json::from_slice::<Header>(line) {
+                let event_kind = header.event.as_ref().map(|event| &event.kind);
+                let codex = header.backend == "codex";
+                let usage = event_kind.is_some_and(|kind| kind == "usage");
+                let muse_boundary = muse_history
+                    && (header.kind == "user"
+                        || header.kind == "teamAgentSegment"
+                        || (header.backend == "muse"
+                            && event_kind.is_some_and(|kind| kind == "session")));
+                if header.kind != "retainedUsage"
+                    && !(codex && (!seen_codex || usage))
+                    && !(muse_history && usage)
+                    && !muse_boundary
+                {
                     return None;
                 }
             }
-            serde_json::from_slice(line).ok()
+            // Keep the Value parser's handling of unusual envelopes such as
+            // duplicate selectors or non-object events. Only verified records
+            // can establish a previous Codex session.
+            let record: Value = serde_json::from_slice(line).ok()?;
+            seen_codex |= record["backend"] == "codex";
+            Some(record)
         })
         .collect()
 }
@@ -7342,14 +7358,68 @@ mod tests {
         assert_eq!(selected[1], records[3]);
         assert_eq!(selected[2]["backend"], "codex");
         assert_eq!(selected[2]["event"]["input"], 3);
-        let complete = usage_repair_records(&bytes, true);
-        assert_eq!(complete.len(), 6);
-        assert_eq!(&complete[..5], records.as_slice());
+        let muse = usage_repair_records(&bytes, true);
+        assert_eq!(
+            muse,
+            vec![
+                records[0].clone(),
+                records[2].clone(),
+                records[3].clone(),
+                records[4].clone(),
+                selected[2].clone()
+            ]
+        );
         let duplicate = br#"{"kind":"agent","backend":"claude","backend":"codex","event":{"kind":"usage","input":8}}"#;
         assert_eq!(
             usage_repair_records(duplicate, false),
             vec![serde_json::from_slice::<Value>(duplicate).unwrap()]
         );
+    }
+
+    #[test]
+    fn usage_repairs_keep_backend_evidence_and_muse_turn_boundaries() {
+        let rows = [
+            json!({"backend":"codex","event":{"kind":"toolEnd","detail":"first Codex evidence"}}),
+            json!({"backend":"codex","event":{"kind":"toolEnd","detail":"large output".repeat(1000)}}),
+            json!({"backend":"muse","event":{"kind":"session","id":"old"},"atMs":1}),
+            json!({"kind":"user","text":"old turn","atMs":2}),
+            json!({"kind":"retainedUsage","usage":{"turns":1}}),
+            json!({"kind":"user","text":"surviving turn","at_ms":3}),
+            json!({"backend":"muse","event":{"kind":"session","id":"current"},"at_ms":4}),
+            json!({"backend":"muse","event":{"kind":"toolEnd","detail":"large output".repeat(1000)}}),
+            json!({"backend":"muse","event":{"kind":"usage","input":5},"at_ms":5}),
+            json!({"backend":"muse","kind":"teamAgentSegment","usage":{"turns":1},"at_ms":6}),
+            json!({"backend":"codex","event":{"kind":"usage","input":6},"atMs":7}),
+            json!({"backend":"claude","event":{"kind":"usage","input":7},"atMs":8}),
+        ];
+        let bytes = rows
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for (muse, expected) in [
+            (false, vec![0, 4, 10]),
+            (true, vec![0, 2, 3, 4, 5, 6, 8, 9, 10, 11]),
+        ] {
+            assert_eq!(
+                usage_repair_records(bytes.as_bytes(), muse),
+                expected
+                    .into_iter()
+                    .map(|index| rows[index].clone())
+                    .collect::<Vec<_>>()
+            );
+        }
+        // Invalid JSON must not suppress a later valid Codex marker. Duplicate
+        // selectors follow Value's last-key behavior before marking it seen.
+        let unusual = br#"{"backend":"codex", bad}
+{"backend":"muse","backend":"codex","event":{"kind":"toolEnd"}}
+{"backend":"codex","event":{"kind":"toolEnd"}}
+{"backend":"codex","event":{"kind":"text","kind":"usage","input":8}}
+"#;
+        let selected = usage_repair_records(unusual, false);
+        assert_eq!(selected.len(), 2);
+        assert_eq!(selected[0]["backend"], "codex");
+        assert_eq!(selected[1]["event"]["input"], 8);
     }
 
     /// A throwaway archive of `count` records, each a little different in
@@ -7447,6 +7517,54 @@ mod tests {
                 "preview benchmark: archive_bytes={} include_usage={include_usage} mean_ms={:.3}",
                 bytes.len(),
                 start.elapsed().as_secs_f64() * 1000.0 / 20.0
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "manual usage reconciliation measurement"]
+    fn benchmark_usage_repair_on_tool_history() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "usage-benchmark");
+        let path = store.events_path("usage-benchmark");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        for backend in ["codex", "muse"] {
+            let mut chat = store.get("usage-benchmark").unwrap();
+            chat.backend = backend.into();
+            chat.resume_token = Some("fixture-session".into());
+            let mut rows = vec![
+                json!({"kind":"user","text":"fixture","atMs":1}),
+                json!({"kind":"agent","backend":backend,"event":{"kind":"session","id":"fixture-session"},"atMs":2}),
+                json!({"kind":"agent","backend":backend,"event":{"kind":"usage","input":42},"atMs":3}),
+            ];
+            for index in 0..50 {
+                rows.push(json!({"kind":"agent","backend":backend,"event":{"kind":"toolEnd","callId":format!("call-{index}"),"detail":"output 😀 \"line\"\n".repeat(3000)},"atMs":4+index}));
+            }
+            let bytes = rows
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            fs::write(&path, &bytes).unwrap();
+            let expected = usage_totals(&path).unwrap();
+            assert_eq!(expected["input"], 42);
+            let mut times = Vec::new();
+            for _ in 0..21 {
+                let start = std::time::Instant::now();
+                assert_eq!(
+                    store
+                        .conversation_usage_with_muse_root(&chat, &path, None)
+                        .unwrap(),
+                    expected
+                );
+                times.push(start.elapsed());
+            }
+            times.sort();
+            eprintln!(
+                "usage repair {backend}: bytes={} median_ms={:.3}",
+                bytes.len(),
+                times[10].as_secs_f64() * 1000.0
             );
         }
     }
