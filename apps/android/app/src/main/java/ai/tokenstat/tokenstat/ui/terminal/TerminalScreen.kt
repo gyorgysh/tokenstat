@@ -191,6 +191,7 @@ fun TerminalScreen(
     }
 
     fun bind(id: String) {
+        val page = bridge.pageOwner() ?: return
         sessionId = id
         onSessionOpened(id)
         scope.launch {
@@ -199,17 +200,19 @@ fun TerminalScreen(
             // that case with its backoff. But an answer that names a dead
             // session ends here with a way out, instead of the blank
             // terminal a dead attach used to draw.
-            runCatching {
+            bridge.runForPage(page, request = {
                 model.workspaceSection(peer, "pty.info", ptyViewerParams(id))
-            }.onSuccess { element ->
-                bridge.readInfo(element as? JsonObject)
-                if (bridge.exitCode != null || !bridge.alive) {
-                    fail(L10n.text("android.terminalscreen.this_session_has_ended.5ac92537"))
-                    return@launch
+            }) { result ->
+                result.onSuccess { element ->
+                    bridge.readInfo(element as? JsonObject)
+                    if (bridge.exitCode != null || !bridge.alive) {
+                        fail(L10n.text("android.terminalscreen.this_session_has_ended.5ac92537"))
+                        return@runForPage
+                    }
                 }
+                bridge.startReadLoop(model, peer, id, scope)
+                bridge.pumpInput(model, peer, id, scope)
             }
-            bridge.startReadLoop(model, peer, id, scope)
-            bridge.pumpInput(model, peer, id, scope)
         }
     }
 
@@ -331,10 +334,10 @@ fun TerminalScreen(
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
-                            request.url.toString() != "file:///android_asset/term/term.html"
+                            request.url.toString() != bridge.pageUrl()
 
                         override fun onPageFinished(view: WebView, url: String?) {
-                            bridge.webView = view
+                            if (!bridge.acceptPage(view, url)) return
                             bridge.pushTheme(dark)
                             bridge.setScrolls(bridge.scrolls)
                             bridge.fit()
@@ -344,8 +347,9 @@ fun TerminalScreen(
                             if (existing != null) {
                                 bind(existing)
                             } else {
+                                val page = bridge.pageOwner() ?: return
                                 scope.launch {
-                                    runCatching {
+                                    bridge.runForPage(page, request = {
                                         model.workspaceSection(peer, "pty.spawn", buildJsonObject {
                                             put("workspaceId", workspaceId)
                                             put("command", terminalShell(
@@ -360,27 +364,29 @@ fun TerminalScreen(
                                             put("noColor", false)
                                             put("dark", dark)
                                         })
-                                    }.onSuccess { info ->
-                                        val id = (info as? JsonObject)?.get("id")
-                                            ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                                        if (id != null) {
-                                            bind(id)
-                                        } else {
-                                            fail(L10n.text("android.terminalscreen.the_host_would_not_start_a_shell.144768c7"))
+                                    }) { result ->
+                                        result.onSuccess { info ->
+                                            val id = (info as? JsonObject)?.get("id")
+                                                ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                                            if (id != null) {
+                                                bind(id)
+                                            } else {
+                                                fail(L10n.text("android.terminalscreen.the_host_would_not_start_a_shell.144768c7"))
+                                            }
+                                        }.onFailure { error ->
+                                            fail(
+                                                ai.tokenstat.tokenstat.ui.logic.TunnelCopy.display(
+                                                    error.message ?: L10n.text("android.terminalscreen.the_request_failed.db4fb447"),
+                                                    hostLabel,
+                                                ),
+                                            )
                                         }
-                                    }.onFailure { error ->
-                                        fail(
-                                            ai.tokenstat.tokenstat.ui.logic.TunnelCopy.display(
-                                                error.message ?: L10n.text("android.terminalscreen.the_request_failed.db4fb447"),
-                                                hostLabel,
-                                            ),
-                                        )
                                     }
                                 }
                             }
                         }
                     }
-                    loadUrl("file:///android_asset/term/term.html")
+                    loadUrl(bridge.pageUrl())
                 }
             },
             onRelease = { view ->
@@ -635,10 +641,10 @@ fun SshTerminalScreen(
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
-                            request.url.toString() != "file:///android_asset/term/term.html"
+                            request.url.toString() != bridge.pageUrl()
 
                         override fun onPageFinished(view: WebView, url: String?) {
-                            bridge.webView = view
+                            if (!bridge.acceptPage(view, url)) return
                             bridge.pushTheme(dark)
                             bridge.setScrolls(bridge.scrolls)
                             bridge.fit()
@@ -649,7 +655,7 @@ fun SshTerminalScreen(
                             }
                         }
                     }
-                    loadUrl("file:///android_asset/term/term.html")
+                    loadUrl(bridge.pageUrl())
                 }
             },
             onRelease = { view ->
@@ -864,14 +870,36 @@ class TerminalBridge {
 
     val jsApi: JsApi get() = JsApi(pageEpoch)
 
+    internal fun pageUrl(): String = "file:///android_asset/term/term.html?epoch=$pageEpoch"
+
+    internal fun acceptPage(view: WebView, url: String?): Boolean {
+        if (!alive || url != pageUrl()) return false
+        webView = view
+        return true
+    }
+
     fun reloadPage() {
         webView?.let { view ->
             view.addJavascriptInterface(jsApi, "TermBridge")
-            view.reload()
+            view.loadUrl(pageUrl())
         }
     }
 
     private fun ownsPage(view: WebView, epoch: Long): Boolean = webView === view && pageEpoch == epoch
+
+    internal class PageOwner internal constructor(internal val view: WebView, internal val epoch: Long)
+
+    internal fun pageOwner(): PageOwner? = webView?.let { PageOwner(it, pageEpoch) }
+
+    internal suspend fun <T> runForPage(owner: PageOwner, request: suspend () -> T, complete: (Result<T>) -> Unit) {
+        currentCoroutineContext().ensureActive()
+        if (!ownsPage(owner.view, owner.epoch)) return
+        val result = try { Result.success(request()) }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) { Result.failure(error) }
+        currentCoroutineContext().ensureActive()
+        if (ownsPage(owner.view, owner.epoch)) complete(result)
+    }
 
     private fun postToPage(script: () -> String) {
         val view = webView ?: return

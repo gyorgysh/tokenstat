@@ -34,14 +34,14 @@ class TerminalScrollingTest {
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webViewClient = object : android.webkit.WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String) {
-                            bridge.webView = view
+                            if (!bridge.acceptPage(view, url)) return
                             bridge.fit()
                             loads.incrementAndGet()
                         }
                     }
                 }
                 it.setContentView(web)
-                web.loadUrl("file:///android_asset/term/term.html")
+                web.loadUrl(bridge.pageUrl())
             }
             fun await(message: String, condition: () -> Boolean) {
                 val end = SystemClock.uptimeMillis() + 10_000
