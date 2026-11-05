@@ -45,6 +45,8 @@ use thiserror::Error;
 use tokenstat_identity::{MachineIdentity, PeerStore, PublicKey, Trust, fingerprint};
 
 mod deadline;
+#[cfg(test)]
+mod stream_read_tests;
 pub use deadline::{handshake_initiator_bounded, handshake_responder_bounded};
 pub mod tunnel;
 
@@ -287,8 +289,8 @@ impl Connection {
     /// caller's thread and the connection it holds are parked on a machine
     /// that is not coming back within the caller's patience anyway.
     ///
-    /// The budget covers silence, not the whole answer: once the frame starts
-    /// arriving it is read to the end with no deadline.
+    /// The budget covers silence before the answer. Once it starts arriving,
+    /// a separate stall timeout bounds gaps within the message.
     pub fn receive_within(&mut self, max: usize, idle: Duration) -> Result<Vec<u8>, RemoteError> {
         let result = read_one(&mut self.noise, &mut *self.stream, max, Some(idle));
         // `read_one` leaves the idle timeout on the transport for the next
@@ -343,6 +345,7 @@ impl Connection {
             StreamReader {
                 core: Arc::clone(&core),
                 read_ready,
+                reading: Mutex::new(()),
             },
             StreamWriter { core },
         )
@@ -350,11 +353,11 @@ impl Connection {
 }
 
 /// Bound reads on transports without independent readiness notifications,
-/// or when another reader consumed the bytes after notification. Once a frame
-/// starts, its longer stall budget applies and a failure ends the connection.
+/// or after a spurious readiness notification. Split readers retain partial
+/// bytes across these short waits until the message's stall budget expires.
 const STREAM_READ_TIMEOUT: Duration = Duration::from_millis(50);
 
-/// How long the rest of a message may take once its first frame has arrived.
+/// How long a peer may remain silent after a message starts arriving.
 ///
 /// Not the same budget as the wait before a message, and it cannot be: the
 /// short one exists so an idle reader hands the writer the lock, and applying
@@ -389,6 +392,9 @@ impl Core {
 pub struct StreamReader {
     core: Arc<Mutex<Core>>,
     read_ready: Option<ReadReady>,
+    // Keep concurrent callers from consuming pieces of each other's message
+    // while allowing the independent writer to use Core between reads.
+    reading: Mutex<()>,
 }
 
 impl StreamReader {
@@ -396,7 +402,89 @@ impl StreamReader {
     /// simply found no data yet is retried rather than reported, so the caller
     /// sees either bytes, EOF, or a real failure.
     pub fn read(&self, max: usize) -> Result<Vec<u8>, RemoteError> {
-        loop {
+        self.read_with_stall_timeout(max, MESSAGE_STALL_TIMEOUT)
+    }
+
+    fn read_with_stall_timeout(&self, max: usize, stall: Duration) -> Result<Vec<u8>, RemoteError> {
+        let _reading = self.reading.lock().map_err(|_| RemoteError::Closed)?;
+        let result = self.read_message(max, stall);
+        let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+        if result.is_err() {
+            // Partial bytes and receive nonces cannot be retried as a new
+            // message. Retire both halves before another reader can enter.
+            guard.closed.store(true, Ordering::Relaxed);
+        }
+        if !guard.permitted() {
+            return Err(RemoteError::Closed);
+        }
+        if let Ok(ref payload) = result {
+            note_payload(guard.relay, payload.len() as u64);
+        }
+        result
+    }
+
+    fn read_message(&self, max: usize, stall: Duration) -> Result<Vec<u8>, RemoteError> {
+        let mut progress = None;
+        let header = self.read_frame(&mut progress, stall)?;
+        if header.len() != 4 {
+            return Err(RemoteError::Noise(format!(
+                "expected a 4 byte length header, got {}",
+                header.len()
+            )));
+        }
+        let total = u32::from_be_bytes(header[..].try_into().unwrap()) as usize;
+        if total > max {
+            return Err(RemoteError::FrameTooLarge(total as u64, max));
+        }
+        let mut payload = Vec::with_capacity(total.min(MAX_NOISE_MESSAGE));
+        while payload.len() < total {
+            let chunk = self.read_frame(&mut progress, stall)?;
+            if chunk.is_empty() {
+                return Err(RemoteError::Closed);
+            }
+            payload.extend_from_slice(&chunk);
+        }
+        payload.truncate(total);
+        Ok(payload)
+    }
+
+    fn read_frame(
+        &self,
+        progress: &mut Option<Instant>,
+        stall: Duration,
+    ) -> Result<Vec<u8>, RemoteError> {
+        let mut header = [0u8; 4];
+        self.read_bytes(&mut header, progress, stall)?;
+        let len = u32::from_be_bytes(header) as usize;
+        if len > MAX_NOISE_MESSAGE {
+            return Err(RemoteError::FrameTooLarge(len as u64, MAX_NOISE_MESSAGE));
+        }
+        let mut ciphertext = vec![0; len];
+        self.read_bytes(&mut ciphertext, progress, stall)?;
+        let mut plaintext = vec![0; len];
+        let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+        if !guard.permitted() {
+            return Err(RemoteError::Closed);
+        }
+        let n = guard.noise.read_message(&ciphertext, &mut plaintext)?;
+        plaintext.truncate(n);
+        Ok(plaintext)
+    }
+
+    fn read_bytes(
+        &self,
+        mut bytes: &mut [u8],
+        progress: &mut Option<Instant>,
+        stall: Duration,
+    ) -> Result<(), RemoteError> {
+        while !bytes.is_empty() {
+            let remaining = progress.map(|last| stall.saturating_sub(last.elapsed()));
+            let wait_time = remaining
+                .unwrap_or(Duration::from_millis(400))
+                .min(Duration::from_millis(400));
+            // Always inspect queued input before treating an elapsed budget
+            // as a stall: an outgoing write may have held Core in the meantime.
+            // Readiness waits and short fallback reads preserve every byte.
             if let Some(wait) = &self.read_ready {
                 {
                     let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
@@ -404,59 +492,49 @@ impl StreamReader {
                         return Err(RemoteError::Closed);
                     }
                 }
-                // An idle reader must not hold the encryption/transport lock:
-                // the other half can send output while this wait is parked.
-                // Recheck authorization and local close at least every 400 ms.
-                match wait(Duration::from_millis(400)) {
-                    Ok(false) => continue,
+                match wait(wait_time) {
+                    Ok(false) => {
+                        if progress.is_some_and(|last| last.elapsed() >= stall) {
+                            return Err(RemoteError::BrokenMessage);
+                        }
+                        continue;
+                    }
                     Ok(true) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(error) => {
-                        self.close();
-                        return Err(error.into());
-                    }
+                    Err(error) => return Err(error.into()),
                 }
             }
-            let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
-            if !guard.permitted() {
-                return Err(RemoteError::Closed);
-            }
-            let relay = guard.relay;
-            let Core {
-                noise,
-                stream,
-                closed,
-                ..
-            } = &mut *guard;
-            if closed.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err(RemoteError::Closed);
-            }
-            match read_one(noise, &mut **stream, max, Some(STREAM_READ_TIMEOUT)) {
-                // Nothing arrived yet. No bytes were taken off the transport,
-                // so the next pass starts where this one did.
-                Err(RemoteError::Io(e))
-                    if e.kind() == std::io::ErrorKind::TimedOut
-                        || e.kind() == std::io::ErrorKind::WouldBlock => {}
-                // Anything else leaves the stream somewhere it cannot be read
-                // in step from again, so the connection is finished rather
-                // than merely unlucky. Closing here is what stops a later
-                // caller picking it up and reading ciphertext as a header.
-                other => {
-                    if other.is_err() {
-                        closed.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    if !guard.permitted() {
-                        return Err(RemoteError::Closed);
-                    }
-                    if let Ok(ref payload) = other {
-                        note_payload(relay, payload.len() as u64);
-                    }
-                    return other;
+            let result = {
+                let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+                if !guard.permitted() {
+                    return Err(RemoteError::Closed);
                 }
+                guard.stream.read(bytes)
+            };
+            match result {
+                Ok(0) => return Err(RemoteError::Closed),
+                Ok(n) => {
+                    *progress = Some(Instant::now());
+                    bytes = &mut bytes[n..];
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    if progress.is_some_and(|last| last.elapsed() >= stall) {
+                        return Err(RemoteError::BrokenMessage);
+                    }
+                    // Custom transports may report an immediate timeout. Let
+                    // writers run without busy-spinning on those transports.
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error.into()),
             }
-            drop(guard);
-            std::thread::sleep(Duration::from_millis(5));
         }
+        Ok(())
     }
 
     /// Close the underlying stream. Idempotent.
@@ -570,29 +648,11 @@ fn read_one(
         return Err(RemoteError::FrameTooLarge(total as u64, max));
     }
 
-    // The message has started, so the deadline comes off the transport until
-    // it ends.
-    //
-    // `read_framed`'s no-deadline path calls `read_exact`, which *discards the
-    // bytes it already consumed* when it fails. The idle timeout `split` arms
-    // is a property of the transport, not of the call, so without this the
-    // continuation frames were read with a 50 ms deadline still live: one
-    // relay gap inside a large message dropped part of a frame, the stream
-    // never came back into step, and the next four bytes read as a length
-    // header were ciphertext. A 1 MiB video frame is seventeen Noise messages,
-    // which is why the screen stream met this and request/response never did.
-    //
-    // The budget covers silence *before* a message. Inside one there is
-    // nothing to wait for but the rest of it.
+    // Continuation frames use the stall budget, not the caller's idle budget.
+    // A timeout after consuming bytes is terminal: read_exact cannot return
+    // those bytes for a retry. Restore the caller's idle budget afterwards.
     let restore = idle_timeout.is_some();
     if restore {
-        // A long deadline rather than none at all. None would trade the
-        // desynchronised stream for a parked one: the reader on a split
-        // connection holds the shared lock while it waits, so a peer whose
-        // Mac went to sleep half way through a frame would starve the writer
-        // for as long as the socket stayed open. This is long enough that no
-        // healthy link reaches it and short enough that a dead one is noticed,
-        // and hitting it now ends the connection instead of corrupting it.
         stream
             .set_read_timeout(Some(MESSAGE_STALL_TIMEOUT))
             .map_err(RemoteError::Io)?;
@@ -654,12 +714,10 @@ fn read_noise_frame(
 ///
 /// `idle_timeout` bounds the wait before the first byte of the frame. Once a
 /// byte has arrived the frame gets a longer stall timeout, then the idle
-/// timeout is restored. This is what keeps a split stream
-/// honest: the read half uses a short timeout so an idle reader hands the
-/// write half the shared lock, but a timeout in the *middle* of a frame would
-/// leave the stream misaligned and every later read corrupt — which a browser
-/// sees as a connection that opens and then dies ("the network connection was
-/// lost").
+/// timeout is restored. These request/response reads must finish a frame or
+/// fail permanently; retrying after a partial read would interpret remaining
+/// ciphertext as a new header. Split streams use StreamReader::read_bytes to
+/// retain partial input while releasing the shared lock.
 fn read_framed(
     stream: &mut dyn Transport,
     max: usize,
@@ -668,7 +726,7 @@ fn read_framed(
     let mut header = [0u8; 4];
     match idle_timeout {
         Some(timeout) => {
-            // The split-stream path: bound only the wait before the first
+            // With an idle budget, bound only the wait before the first
             // byte. Once a byte has arrived the frame must complete, or the
             // retry would re-read from the middle of it and corrupt the
             // stream. The timeout is restored afterwards.
@@ -1361,7 +1419,7 @@ mod tests {
             .expect("handshake");
             let (reader, writer) = connection.split();
             loop {
-                match reader.read(1 << 20) {
+                match reader.read(8 << 20) {
                     Ok(data) if data.is_empty() => break,
                     Ok(data) => {
                         writer.write(&data).expect("echo write");
@@ -1388,6 +1446,14 @@ mod tests {
         writer.write(b"second").expect("write two");
         assert_eq!(reader.read(1 << 20).expect("read one"), b"first");
         assert_eq!(reader.read(1 << 20).expect("read two"), b"second");
+        let large: Vec<_> = (0..4 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        let started = Instant::now();
+        writer.write(&large).expect("write large message");
+        assert_eq!(reader.read(8 << 20).expect("read large message"), large);
+        eprintln!(
+            "split TCP 4 MiB echo bounded={bounded}: {:?}",
+            started.elapsed()
+        );
         writer.write(&[]).expect("end of stream");
         echo.join().expect("echo thread");
     }
@@ -1755,9 +1821,9 @@ mod tests {
             .set_read_timeout(Some(STREAM_READ_TIMEOUT))
             .expect("arm the deadline");
 
-        // The same loop `StreamReader::read` runs: a timeout before a message
-        // has started is "nothing yet", and is retried. A timeout once one has
-        // started is the failure this test is about.
+        // Request/response reads retry only an idle timeout. A timeout after
+        // consuming part of a frame is terminal because read_exact discards
+        // those bytes, unlike the split reader's incremental buffering.
         let got = loop {
             match read_one(
                 &mut responder,
@@ -1916,7 +1982,7 @@ mod tests {
 
     /// Two Noise transport states that can talk to each other, without a
     /// socket in the way.
-    fn transport_pair() -> (snow::TransportState, snow::TransportState) {
+    pub(super) fn transport_pair() -> (snow::TransportState, snow::TransportState) {
         let initiator_ident = MachineIdentity::from_secret([7u8; 32]);
         let responder_ident = MachineIdentity::from_secret([9u8; 32]);
         let mut initiator = snow::Builder::new(PATTERN.parse().expect("pattern"))

@@ -1574,6 +1574,79 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_channel_can_reply_while_its_incoming_frame_is_partial() {
+        fn endpoint(
+            noise: snow::TransportState,
+        ) -> (
+            Arc<TunnelSession>,
+            Arc<ChannelState>,
+            crate::Connection,
+            mpsc::Receiver<Vec<u8>>,
+        ) {
+            let session = inert_session();
+            let (tx, rx) = mpsc::sync_channel(64);
+            *session.writer.lock().unwrap() = Some(Writer {
+                sender: tx,
+                bytes: Arc::new(AtomicUsize::new(0)),
+            });
+            let state = Arc::new(ChannelState::new(97));
+            session.channels.lock().unwrap().insert(97, state.clone());
+            let connection = crate::Connection {
+                noise,
+                stream: Box::new(ChannelTransport::new(session.clone(), state.clone())),
+                peer: [0; 32],
+                intro_label: String::new(),
+                relay: true,
+            };
+            (session, state, connection, rx)
+        }
+        fn data(session: &Arc<TunnelSession>, bytes: &[u8]) {
+            let mut frame = vec![CH_DATA];
+            frame.extend_from_slice(&97u32.to_be_bytes());
+            frame.extend_from_slice(bytes);
+            dispatch_frame(session, &frame);
+        }
+        let (sender, receiver) = crate::tests::transport_pair();
+        let (sender_session, _, mut sender, from_sender) = endpoint(sender);
+        let (receiver_session, state, receiver, from_receiver) = endpoint(receiver);
+        let expected: Vec<_> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
+        sender.send(&expected).unwrap();
+        let wire: Vec<_> = from_sender
+            .try_iter()
+            .flat_map(|frame| frame[5..].to_vec())
+            .collect();
+        let (reader, writer) = receiver.split();
+        let read = std::thread::spawn(move || reader.read(1 << 20));
+        data(&receiver_session, &wire[..6]);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !state.inner.lock().unwrap().buffer.is_empty() {
+            assert!(Instant::now() < deadline, "reader consumes the prefix");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let (done, completed) = mpsc::channel();
+        let write = std::thread::spawn(move || done.send(writer.write(b"outbound")).unwrap());
+        let sent_while_partial = completed.recv_timeout(Duration::from_millis(200));
+        // Finish with many relay chunks cutting across Noise frame boundaries.
+        for chunk in wire[6..].chunks(997) {
+            data(&receiver_session, chunk);
+        }
+        write.join().unwrap();
+        assert_eq!(read.join().unwrap().unwrap(), expected);
+        sent_while_partial
+            .expect("relay writer runs while input is partial")
+            .unwrap();
+        for frame in from_receiver.try_iter() {
+            dispatch_frame(&sender_session, &frame);
+        }
+        assert_eq!(
+            sender.receive_within(1024, Duration::from_secs(1)).unwrap(),
+            b"outbound"
+        );
+        sender_session.shutdown();
+        receiver_session.shutdown();
+    }
+
+    #[test]
     fn channel_partial_reads_and_refills_preserve_order_through_eof() {
         let session = inert_session();
         let state = Arc::new(ChannelState::new(98));
