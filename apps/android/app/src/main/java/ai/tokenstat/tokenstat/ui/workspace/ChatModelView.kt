@@ -79,7 +79,8 @@ internal fun ChatModelView(name: String, file: File) {
                     onRelease = { it.shutdown() },
                     update = {
                         it.onResult = { message ->
-                            if (message == null) ready = true else failure = message
+                            ready = message == null
+                            failure = message
                         }
                         it.render(result.base64, name.substringAfterLast('.', "").lowercase(), if (dark) "#08070d" else "#fbfbfd")
                     },
@@ -91,14 +92,16 @@ internal fun ChatModelView(name: String, file: File) {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private class ModelWebSurface(context: Context) : WebView(context) {
+internal class ModelWebSurface(context: Context) : WebView(context) {
     var onResult: (String?) -> Unit = {}
     private val main = Handler(Looper.getMainLooper())
     private var loaded = false
     private var pageRequested = false
     private var stopped = false
-    private var script = ""
-    private var rendered = ""
+    private data class Render(val data: String, val extension: String, val background: String)
+    private var pending: Render? = null
+    private var revision = 0L
+    private var renderedRevision = -1L
 
     init {
         setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -111,8 +114,10 @@ private class ModelWebSurface(context: Context) : WebView(context) {
         settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
         settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
         addJavascriptInterface(object {
-            @JavascriptInterface fun report(message: String) {
-                main.post { if (!stopped) onResult(message.ifEmpty { null }) }
+            @JavascriptInterface fun report(loadRevision: Long, message: String) {
+                main.post {
+                    if (!stopped && loadRevision == revision) onResult(message.ifEmpty { null })
+                }
             }
         }, "TokenstatModelHost")
         webViewClient = object : WebViewClient() {
@@ -162,21 +167,31 @@ private class ModelWebSurface(context: Context) : WebView(context) {
 
     fun render(data: String, extension: String, background: String) {
         if (stopped) return
-        script = "$VIEWPORT_SCRIPT TokenstatModel.load('$data','$extension','$background').then(ok => TokenstatModelHost.report(ok ? '' : (document.getElementById('status').textContent || '3D preview failed'))).catch(error => TokenstatModelHost.report(String(error)))"
+        val previous = pending
+        // Compose may update this view for every streamed message. Keep the
+        // unchanged payload instead of rebuilding up to 16 MiB of JavaScript.
+        if (previous?.data == data && previous.extension == extension && previous.background == background) return
+        pending = Render(data, extension, background)
+        revision++
         applyScript()
     }
 
     private fun applyScript() {
-        if (loaded && !stopped && script.isNotEmpty() && script != rendered) {
-            rendered = script
-            evaluateJavascript(script, null)
-        }
+        val request = pending ?: return
+        if (!loaded || stopped || renderedRevision == revision) return
+        renderedRevision = revision
+        val script = "$VIEWPORT_SCRIPT TokenstatModel.load('${request.data}','${request.extension}','${request.background}').then(ok => TokenstatModelHost.report($revision, ok ? '' : (document.getElementById('status').textContent || '3D preview failed'))).catch(error => TokenstatModelHost.report($revision, String(error)))"
+        evaluateJavascript(script, null)
     }
 
     fun shutdown() {
+        if (stopped) return
         stopped = true
+        pending = null
         onResult = {}
+        main.removeCallbacksAndMessages(null)
         stopLoading()
+        removeJavascriptInterface("TokenstatModelHost")
         destroy()
     }
 
