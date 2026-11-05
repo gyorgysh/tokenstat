@@ -229,6 +229,7 @@
   "common.chat.images.load": "Load preview",
   "common.chat.images.save": "Save image",
   "common.chat.images.unavailable": "This image is unavailable.",
+  "common.chat.model.unavailable": "This model cannot be previewed here. Open the original file.",
   "common.chat.images.save_failed": "The image could not be saved.",
   "common.chat.stats.in_context": "{0} tokens in context",
   "common.chat.stats.window_unknown": "Context window not reported",

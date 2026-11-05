@@ -22,6 +22,9 @@ internal sealed class ChatModelView : Grid
     private bool _disposed;
     private bool _configured;
     private long _epoch;
+    private ulong _navigation;
+    private long _navigationEpoch;
+    private const int InlineByteLimit = 12 * 1024 * 1024;
 
     public ChatModelView(string path, string name)
     {
@@ -52,12 +55,16 @@ internal sealed class ChatModelView : Grid
 
     private async Task OpenAsync(long epoch)
     {
+        if (!Current(epoch)) return;
+        _navigation = 0;
         try
         {
-            if (_disposed || !File.Exists(_path) || new FileInfo(_path).Length > 12 * 1024 * 1024) return;
+            CheckFile();
             if (Children.Count != 1 || !ReferenceEquals(Children[0], _web)) { Children.Clear(); Children.Add(_web); }
-            await _web.EnsureCoreWebView2Async(await EnvironmentAsync());
-            if (_disposed || epoch != _epoch || _web.CoreWebView2 is not { } core) return;
+            var environment = await EnvironmentAsync();
+            if (!Current(epoch)) return;
+            await _web.EnsureCoreWebView2Async(environment);
+            if (!Current(epoch) || _web.CoreWebView2 is not { } core) return;
             if (!_configured)
             {
                 _configured = true;
@@ -71,35 +78,67 @@ internal sealed class ChatModelView : Grid
                 core.NavigationStarting += (_, args) =>
                 {
                     if (!string.Equals(args.Uri, PageUri, StringComparison.Ordinal)) args.Cancel = true;
+                    else _navigation = args.NavigationId;
                 };
                 core.SetVirtualHostNameToFolderMapping("models.tokenstat.invalid",
                     Path.Combine(AppContext.BaseDirectory, "Assets", "Charts"), CoreWebView2HostResourceAccessKind.Deny);
                 core.NavigationCompleted += async (_, args) =>
                 {
-                    if (_disposed || !args.IsSuccess) return;
-                    await LoadModelAsync(core, _epoch);
+                    var loadEpoch = _navigationEpoch;
+                    if (!Current(loadEpoch) || args.NavigationId != _navigation) return;
+                    if (!args.IsSuccess) { ShowUnavailable(); return; }
+                    await LoadModelAsync(core, loadEpoch);
                 };
+                core.ProcessFailed += (_, _) => { if (!_disposed) ShowUnavailable(); };
             }
+            _navigationEpoch = epoch;
             core.Navigate(PageUri);
         }
-        catch (Exception error) { ShowError(error); }
+        catch (Exception error) { if (Current(epoch)) ShowError(error); }
     }
 
     private async Task LoadModelAsync(CoreWebView2 core, long epoch)
     {
         try
         {
-            if (_disposed || epoch != _epoch || !File.Exists(_path) || new FileInfo(_path).Length > 12 * 1024 * 1024) return;
-            var encoded = Convert.ToBase64String(await File.ReadAllBytesAsync(_path));
-            if (_disposed || epoch != _epoch) return;
+            if (!Current(epoch)) return;
+            CheckFile();
+            var path = _path;
+            var encoded = await Task.Run(async () =>
+            {
+                using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                var length = file.Length;
+                if (length is <= 0 or > InlineByteLimit) return null;
+                var bytes = new byte[(int)length];
+                await file.ReadExactlyAsync(bytes).ConfigureAwait(false);
+                // Reject growth after opening, without allocating the extra bytes.
+                if (file.ReadByte() != -1) return null;
+                return Convert.ToBase64String(bytes);
+            });
+            if (!Current(epoch)) return;
+            if (encoded is null) { ShowUnavailable(); return; }
             await core.ExecuteScriptAsync($"TokenstatModel.load('{encoded}','{_extension}','{(Theme.IsDark ? "#08070d" : "#fbfbfd")}')");
         }
-        catch (Exception error) { ShowError(error); }
+        catch (Exception error) { if (Current(epoch)) ShowError(error); }
     }
+
+    private bool Current(long epoch) => !_disposed && epoch == _epoch;
+
+    private void CheckFile()
+    {
+        var file = new FileInfo(_path);
+        if (!file.Exists || file.Length is <= 0 or > InlineByteLimit)
+            throw new IOException(L10n.Text("common.chat.model.unavailable"));
+    }
+
+    private void ShowUnavailable() => ShowError(new IOException(L10n.Text("common.chat.model.unavailable")));
 
     private void ShowError(Exception error)
     {
         if (_disposed) return;
+        _epoch++;
+        _navigation = 0;
         Children.Clear();
         Children.Add(new TextBlock { Text = error.Message, TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
