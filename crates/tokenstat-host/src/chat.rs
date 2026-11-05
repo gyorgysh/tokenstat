@@ -6865,8 +6865,48 @@ fn usage_repair_records(bytes: &[u8], muse_history: bool) -> Vec<Value> {
         .collect()
 }
 
-fn usage_totals(path: &Path) -> Result<Value, String> {
+/// Read a transcript with memory bounded by one record. The length captured
+/// at the start is the snapshot boundary; a growing file is left for the next
+/// read, and truncation is an error rather than an incomplete usage total.
+fn visit_transcript_lines(
+    file: fs::File,
+    mut visit: impl FnMut(&[u8], u64) -> Result<(), String>,
+) -> Result<u64, String> {
     use std::io::Read;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("conversation transcript is not a regular file".into());
+    }
+    let length = metadata.len();
+    let maximum = PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64;
+    let mut reader = BufReader::with_capacity(PAGE_CHUNK as usize, file.take(length));
+    let mut line = Vec::new();
+    let mut offset = 0u64;
+    loop {
+        line.clear();
+        let count = reader
+            .by_ref()
+            .take(maximum + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        if count as u64 > maximum {
+            return Err("conversation record exceeds the reading limit".into());
+        }
+        visit(&line, offset)?;
+        offset = offset
+            .checked_add(count as u64)
+            .ok_or("conversation position is exhausted")?;
+    }
+    if offset != length {
+        return Err("conversation transcript changed while reading".into());
+    }
+    Ok(offset)
+}
+
+fn usage_totals(path: &Path) -> Result<Value, String> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -6884,31 +6924,18 @@ fn usage_totals(path: &Path) -> Result<Value, String> {
         }
         Err(error) => return Err(error.to_string()),
     };
-    let maximum = PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64;
-    let metadata = file.metadata().map_err(|error| error.to_string())?;
-    if !metadata.is_file() || metadata.len() > maximum {
-        return Err("conversation transcript is not a bounded regular file".into());
-    }
-    let mut bytes = Vec::new();
-    file.take(maximum + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > maximum {
-        return Err("conversation transcript exceeds the usage reading limit".into());
-    }
-    let text = String::from_utf8_lossy(&bytes);
     let mut totals = crate::work_transcript_identity::UsageTotals::default();
-    for line in text.lines() {
-        if !line.contains("\"usage\"") {
-            continue;
+    visit_transcript_lines(file, |line, _| {
+        let text = String::from_utf8_lossy(line);
+        if text.contains("\"usage\"")
+            && let Ok(Value::Object(record)) = serde_json::from_str::<Value>(&text)
+        {
+            totals.add(&crate::work_transcript_identity::UsageTotals::from_record(
+                &record,
+            )?)?;
         }
-        let Ok(Value::Object(record)) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        totals.add(&crate::work_transcript_identity::UsageTotals::from_record(
-            &record,
-        )?)?;
-    }
+        Ok(())
+    })?;
     if let Some(directory) = path.parent() {
         totals.add(&sharing::chain_usage(directory)?)?;
     }
@@ -7313,21 +7340,22 @@ mod tests {
     }
 
     #[test]
-    fn usage_reader_bounds_files_and_does_not_hide_read_errors() {
+    fn usage_reader_bounds_records_and_does_not_hide_read_errors() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("events.ndjson");
         assert_eq!(usage_totals(&path).unwrap()["turns"], 0);
         fs::write(&path, b"{\"event\":{\"kind\":\"usage\",\"input\":42}}\n").unwrap();
         assert_eq!(usage_totals(&path).unwrap()["input"], 42);
         let maximum = PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64;
+        let oversized = fs::metadata(&path).unwrap().len() + maximum + 1;
         OpenOptions::new()
             .write(true)
             .open(&path)
             .unwrap()
-            .set_len(maximum + 1)
+            .set_len(oversized)
             .unwrap();
         assert!(usage_totals(&path).is_err());
-        assert_eq!(fs::metadata(&path).unwrap().len(), maximum + 1);
+        assert_eq!(fs::metadata(&path).unwrap().len(), oversized);
         fs::remove_file(&path).unwrap();
         fs::create_dir(&path).unwrap();
         assert!(usage_totals(&path).is_err());
@@ -14914,5 +14942,90 @@ mod tests {
                 .is_none(),
             "Local bundle paths must never be persisted"
         );
+    }
+
+    #[test]
+    fn usage_reads_long_transcripts_without_a_whole_file_allocation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("events.ndjson");
+        let mut file = fs::File::create(&path).unwrap();
+        let tool =
+            json!({"kind":"agent", "event":{"kind":"toolEnd", "detail":"x".repeat(512 * 1024)}});
+        for turn in 0..20 {
+            serde_json::to_writer(&mut file, &tool).unwrap();
+            file.write_all(b"\n").unwrap();
+            let usage = json!({"kind":"agent", "event":{"kind":"usage", "input":turn,
+                "output":2, "cache_read":3, "cache_write":4, "cost_usd":0.25}});
+            serde_json::to_writer(&mut file, &usage).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        drop(file);
+        assert!(fs::metadata(&path).unwrap().len() > 10 * 1024 * 1024);
+        assert_eq!(
+            usage_totals(&path).unwrap(),
+            json!({"turns":20,"input":190,"output":40,
+            "cacheRead":60,"cacheWrite":80,"cost":5.0})
+        );
+        let mut largest = 0;
+        let mut rows = 0;
+        visit_transcript_lines(fs::File::open(&path).unwrap(), |row, _| {
+            largest = largest.max(row.len());
+            rows += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(rows, 40);
+        assert!(largest < 513 * 1024);
+    }
+
+    #[test]
+    fn transcript_line_visits_bound_records_and_reject_truncation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("events.ndjson");
+        fs::write(
+            &path,
+            [b"{}\n".as_slice(), &vec![b'x'; 2 * PAGE_CHUNK as usize]].concat(),
+        )
+        .unwrap();
+        let result = visit_transcript_lines(fs::File::open(&path).unwrap(), |_, offset| {
+            if offset == 0 {
+                OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_len(3)
+                    .unwrap();
+            }
+            Ok(())
+        });
+        assert!(result.unwrap_err().contains("changed while reading"));
+        fs::write(&path, b"{}\n").unwrap();
+        let mut visits = 0;
+        let through = visit_transcript_lines(fs::File::open(&path).unwrap(), |_, offset| {
+            assert_eq!(offset, 0);
+            visits += 1;
+            OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(b"{}\n")
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            (visits, through, fs::metadata(&path).unwrap().len()),
+            (1, 3, 6)
+        );
+        fs::write(&path, vec![b'x'; PAGE_RECORD_BYTES as usize + 1024]).unwrap();
+        let mut visited = false;
+        assert!(
+            visit_transcript_lines(fs::File::open(&path).unwrap(), |_, _| {
+                visited = true;
+                Ok(())
+            })
+            .is_err()
+        );
+        assert!(!visited);
     }
 }
