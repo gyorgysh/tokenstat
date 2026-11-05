@@ -512,9 +512,12 @@ fun ChatSection(
         return runCatching {
             model.workspaceSection(peer, "chat.list", buildJsonObject { put("workspaceId", workspace) })
         }.onSuccess {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             applyChatRows((it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList(), listRequest)
             hostReachable = true
         }.onFailure {
+            if (it is CancellationException) throw it
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             hostReachable = false
         }.isSuccess
     }
@@ -1363,8 +1366,10 @@ fun ChatSection(
         val id = openId ?: return@ForegroundEffect
         onChatOpened(id)
         while (true) {
-            val catchUp = loadEvents(id)
-            refreshChats()
+            val catchUp = chatPollReads(
+                events = { loadEvents(id) },
+                status = { refreshChats() },
+            )
             rememberLaunch(chats.firstOrNull { it.str("id") == id })
             // The turn that was in the way may have finished. Read the flag
             // rather than the value composed with this effect: this loop
