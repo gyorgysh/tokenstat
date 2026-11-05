@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
 
 /** A gallery owns its downloads; previews never borrow a foreground transfer. */
 @Composable
@@ -151,10 +152,8 @@ internal fun ChatImageGallery(
         load(image, automatic = false)
     }
     relayAnswer?.let { answer ->
-        AlertDialog(onDismissRequest = { answer.complete(false) }, title = { Text(L10n.text("common.chat_files_relay_title")) },
-            text = { Column { Text(L10n.text("common.chat_files_relay_message", relayItem?.name.orEmpty(), "${(relayItem?.size ?: 0) / 1048576} MB")); relayRemaining?.let { Text(L10n.text("common.chat_files_remaining", "${it / 1048576} MB")) } } },
-            confirmButton = { TextButton(onClick = { answer.complete(true) }) { Text(L10n.text("common.continue")) } },
-            dismissButton = { TextButton(onClick = { answer.complete(false) }) { Text(L10n.text("common.cancel")) } })
+        ChatFileRelayDialog(relayItem?.name.orEmpty(), relayItem?.size, relayRemaining, account,
+            loadAllowance = { model.core("account.status") as? JsonObject }) { answer.complete(it) }
     }
     ChatImageTiles(images, files, loading.keys, compact) { viewer = it }
     if (selected != null && index != null) {

@@ -816,5 +816,13 @@
   "common.plan.free": "Free",
   "common.plan.supporter": "Plus",
   "common.plan.patron": "Pro",
-  "common.plan.legend": "Elite"
+  "common.plan.legend": "Elite",
+  "common.chat_files_relay_explanation": "Your devices cannot transfer this file directly right now. tokenstat servers can forward it instead. This uses your relay allowance.",
+  "common.chat_files_relay_allowance": "Your relay allowance is shared across your devices and counts the past 30 days. Older usage drops out each day.",
+  "common.chat_files_relay_used": "{0} of {1} used",
+  "common.chat_files_relay_available": "{0} remaining",
+  "common.chat_files_relay_usage_unknown": "Allowance details are unavailable. The server will check your allowance during the transfer.",
+  "common.chat_files_relay_reporting": "Recent usage may take a moment to appear. Uploads, downloads and retries all count.",
+  "common.chat_files_relay_usage_label": "Relay allowance used",
+  "common.chat_files_size_unknown": "Size unavailable"
 }

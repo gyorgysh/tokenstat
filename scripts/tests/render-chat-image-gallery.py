@@ -46,9 +46,18 @@ pieces += [declaration(theme_path, marker) for marker in [
 pieces += ['extension View {\n' + declaration(theme_path, '    func themedFieldBox(') + '\n}']
 pieces += [declaration('apps/mac/Sources/Features/Workspaces/Chat/ChatInbox.swift', 'enum ChatThumbnail {')]
 pieces += [declaration('apps/mac/Sources/Features/Workspaces/Chat/ChatFileTransferControls.swift', 'struct ChatFileRelayConsent:')]
+pieces += [declaration('apps/mac/Sources/Features/Workspaces/Chat/ChatFileTransferControls.swift', 'private struct ChatFileRelaySheet:')]
+pieces += [declaration('apps/mac/Sources/Design/ThemedSheet.swift', 'struct SheetOutsideDismiss:')]
+pieces += [(root / 'apps/mac/Sources/Features/Account/RelayUsage.swift').read_text()]
 pieces += ['''
 enum SyntaxKind { case keyword, string, number, constant, comment, type, function, attribute, property, markup, variable, `operator`, punctuation, unknown }
-struct WorkReference: Hashable { let id = "synthetic-gallery"; let itemID: String? = "synthetic-gallery" }
+struct WorkReference: Hashable {
+    let id = "synthetic-gallery"; let itemID: String? = "synthetic-gallery"
+    enum Scope {
+        static func accountIdentity(handle: String?, id: String?) -> String? { "gallery-qa" }
+        static func account(origin: String, handle: String) -> String? { "gallery-qa" }
+    }
+}
 struct ChatAttachment: Hashable, Sendable { let id: String; let name: String; let mediaType: String?; var size: UInt64? = nil }
 struct QAConversation { var backend = "claude"; var model: String? = "synthetic-model"; var runRevision: UInt64? = 1; var running = true }
 @MainActor enum GalleryQAState { static var expanded = false }
@@ -77,6 +86,11 @@ enum WorkCacheAccess { static func canRead(_ reference: WorkReference) -> Bool {
 }
 enum BridgeError: Error { case core(code: String, message: String) }
 enum Bridge {
+    struct QAAccount {
+        var relayUsage: RelayUsage? = nil
+        var signedIn = true; var host = "fixture"; var handle: String? = "fixture"; var accountId: String? = "fixture"
+    }
+    static func account() async throws -> QAAccount { QAAccount() }
     static func chatInspection(id: String, peer: String?) async throws -> ChatInspection {
         let wire = #"{"backend":"claude","model":"synthetic-model","contextUsed":16782,"contextWindow":200000,"contextSource":"lastInput","windowSource":"agent","contextBreakdown":{"input":5782,"cacheRead":11000,"cacheWrite":0},"contextHistory":[{"tokens":8000,"atMs":1},{"tokens":12500,"atMs":2},{"tokens":16782,"atMs":3}],"tools":["Read","Bash","Edit","mcp__design__capture"],"usedTools":["Read","Bash"],"mcpServers":[{"name":"design-tools","status":"connected","source":"agent","tools":["capture"]},{"name":"project-files","status":"connected","source":"agent","tools":["read"]},{"name":"tokenstat","status":"connected","source":"agent","tools":["status"]},{"name":"optional-service","status":"configured","source":"configuration"}],"mcpReported":true,"currentRun":true,"observedAtMs":1792000000000}"#
         return try JSONDecoder().decode(ChatInspection.self, from: Data(wire.utf8))

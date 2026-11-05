@@ -370,10 +370,8 @@ fun ChatSection(
     }
     DisposableEffect(projectOwner) { onDispose { fileRelayAnswer?.complete(false); fileTransferJob?.cancel() } }
     fileRelayPrompt?.let { (name, size) ->
-        androidx.compose.material3.AlertDialog(onDismissRequest = { fileRelayAnswer?.complete(false) },
-            title = { Text(L10n.text("common.chat_files_relay_title")) }, text = { Column { Text(L10n.text("common.chat_files_relay_message", name, "${size / 1048576} MB")); fileRelayRemaining?.let { Text(L10n.text("common.chat_files_remaining", "${it / 1048576} MB")) } } },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { fileRelayAnswer?.complete(true) }) { Text(L10n.text("common.continue")) } },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { fileRelayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) } })
+        ChatFileRelayDialog(name, size, fileRelayRemaining, client.account,
+            loadAllowance = { model.core("account.status") as? JsonObject }) { fileRelayAnswer?.complete(it) }
     }
     val pendingQueue = ChatOutboxRules.pending(queued, deliveringFromComposer)
     val attachmentInputs = rememberChatAttachmentInputs(model, composerKey, ::ownsProject, !sending) { attachError = it }

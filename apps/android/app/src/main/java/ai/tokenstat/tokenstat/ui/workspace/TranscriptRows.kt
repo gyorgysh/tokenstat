@@ -831,20 +831,8 @@ private fun AttachmentRow(
     }
     androidx.compose.runtime.DisposableEffect(item.attachmentId, fileOwner) { onDispose { relayAnswer?.complete(false); job?.cancel() } }
     relayAnswer?.let { answer ->
-        androidx.compose.material3.AlertDialog(onDismissRequest = { answer.complete(false) },
-            title = { Text(L10n.text("common.chat_files_relay_title")) },
-            text = {
-                Column {
-                    Text(L10n.text("common.chat_files_relay_message", item.name,
-                        ai.tokenstat.tokenstat.ui.connection.formatTrafficBytes(item.size ?: 0)))
-                    relayRemaining?.let {
-                        Text(L10n.text("common.chat_files_remaining",
-                            ai.tokenstat.tokenstat.ui.connection.formatTrafficBytes(it)))
-                    }
-                }
-            },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { answer.complete(true) }) { Text(L10n.text("common.continue")) } },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { answer.complete(false) }) { Text(L10n.text("common.cancel")) } })
+        ChatFileRelayDialog(item.name, item.size, relayRemaining, accountState.account,
+            loadAllowance = { model.core("account.status") as? JsonObject }) { answer.complete(it) }
     }
     val isModel = canPreviewModel(item.name)
     LaunchedEffect(item.attachmentId, fileOwner) {
