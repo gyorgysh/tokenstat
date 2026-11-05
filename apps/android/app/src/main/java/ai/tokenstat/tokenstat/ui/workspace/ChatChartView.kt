@@ -50,6 +50,7 @@ import java.io.ByteArrayInputStream
 import java.util.Locale
 
 internal data class ChartExport(val format: String, val mime: String, val data: ByteArray)
+private const val MAX_CHART_SOURCE_BYTES = 256 * 1024
 
 /** The chart owns a bundled page. It never joins a browsing session or makes a network request. */
 @Composable
@@ -63,6 +64,9 @@ internal fun ChatChartView(source: String, pending: Boolean = false) {
     var visible by remember { mutableStateOf(false) }
     var failure by remember(source) { mutableStateOf<String?>(null) }
     var exported by remember { mutableStateOf<ChartExport?>(null) }
+    val tooLarge = remember(source, pending) {
+        !pending && (source.length > MAX_CHART_SOURCE_BYTES || source.toByteArray(Charsets.UTF_8).size > MAX_CHART_SOURCE_BYTES)
+    }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val file = exported
         exported = null
@@ -80,7 +84,7 @@ internal fun ChatChartView(source: String, pending: Boolean = false) {
     }
     if (pending) {
         Text(L10n.text("common.chart.loading"), modifier = Modifier.padding(16.dp), color = colors.textSecondary)
-    } else if (source.toByteArray(Charsets.UTF_8).size > 256 * 1024) {
+    } else if (tooLarge) {
         Text(L10n.text("common.chart.too_large"), modifier = Modifier.padding(16.dp), color = colors.textSecondary)
     } else if (failure != null) {
         Text(L10n.text("common.chart.unavailable") + failure?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty(), modifier = Modifier.padding(16.dp), color = colors.textSecondary)
@@ -126,8 +130,13 @@ internal class ChartWebSurface(context: Context) : WebView(context) {
     private val main = Handler(Looper.getMainLooper())
     private var stopped = false
     private var loaded = false
-    private var script = ""
-    private var rendered = ""
+    private data class Render(val source: String, val encoded: String, val dark: Boolean,
+        val locale: String, val reducedMotion: Boolean, val settings: String)
+    private var pending: Render? = null
+    private var revision = 0L
+    private var renderedRevision = -1L
+    private var wordsLocale: String? = null
+    private var words: JSONObject? = null
 
     init {
         setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -171,27 +180,42 @@ internal class ChartWebSurface(context: Context) : WebView(context) {
     }
 
     fun render(source: String, dark: Boolean) {
-        if (stopped || source.toByteArray(Charsets.UTF_8).size > 256 * 1024) return
-        val encoded = Base64.encodeToString(source.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-        val settings = JSONObject().put("dark", dark).put("locale", Locale.getDefault().toLanguageTag())
-            .put("reducedMotion", Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f)
-            .put("strings", JSONObject(ChartWords.all()))
-        script = "window.TokenstatChart.render(new TextDecoder().decode(Uint8Array.from(atob('$encoded'), c => c.charCodeAt(0))), $settings);"
+        if (stopped) return
+        val locale = Locale.getDefault().toLanguageTag()
+        val reducedMotion = Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        val previous = pending
+        val sameSettings = previous != null && previous.dark == dark && previous.locale == locale && previous.reducedMotion == reducedMotion
+        if (previous != null && previous.source == source && sameSettings) return
+        val encoded = if (previous != null && previous.source == source) previous.encoded else {
+            if (source.length > MAX_CHART_SOURCE_BYTES) return
+            val bytes = source.toByteArray(Charsets.UTF_8)
+            if (bytes.size > MAX_CHART_SOURCE_BYTES) return
+            Base64.encodeToString(bytes, Base64.NO_WRAP)
+        }
+        val settings = if (previous != null && sameSettings) previous.settings else {
+            // The bundled labels depend only on L10n's current locale.
+            if (wordsLocale != locale) { words = JSONObject(ChartWords.all()); wordsLocale = locale }
+            JSONObject().put("dark", dark).put("locale", locale).put("reducedMotion", reducedMotion)
+                .put("strings", words).toString()
+        }
+        pending = Render(source, encoded, dark, locale, reducedMotion, settings)
+        revision++
         applyScript()
     }
 
     private fun applyScript() {
-        if (loaded && !stopped && script.isNotEmpty() && rendered != script) {
-            rendered = script
-            evaluateJavascript(script, null)
-        }
+        val request = pending ?: return
+        if (!loaded || stopped || renderedRevision == revision) return
+        renderedRevision = revision
+        val script = "window.TokenstatChart.render(new TextDecoder().decode(Uint8Array.from(atob('${request.encoded}'), c => c.charCodeAt(0))), Object.assign(${request.settings},{paintToken:$revision}));"
+        evaluateJavascript(script, null)
     }
 
     fun shutdown() {
         if (stopped) return
         stopped = true
         onHeight = {}; onError = {}; onExport = {}
-        script = ""; rendered = ""
+        pending = null; words = null; wordsLocale = null
         main.removeCallbacksAndMessages(null)
         stopLoading()
         removeJavascriptInterface("TokenstatChartHost")
@@ -207,6 +231,7 @@ internal class ChartWebSurface(context: Context) : WebView(context) {
                     val message = JSONObject(raw)
                     when (message.optString("type")) {
                         "height" -> {
+                            if (message.optLong("paintToken", -1L) != revision) return@post
                             val height = message.optDouble("height")
                             if (height.isFinite() && height in 180.0..2200.0) onHeight(height.toFloat())
                         }
