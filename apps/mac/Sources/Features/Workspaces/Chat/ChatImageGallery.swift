@@ -131,6 +131,8 @@ private struct ChatImageRowsLayout: Layout {
 private struct ChatImageSurface: View {
     let resource: ChatImageResource
     var maxPixel: CGFloat = 3072
+    var zoom: Binding<CGFloat>? = nil
+    var move: (Int) -> Void = { _ in }
     @State private var decoded: CGImage?
     @State private var decodedSource: Source?
     private struct Source: Equatable { let data: Data?; let file: URL?; let maxPixel: CGFloat }
@@ -141,9 +143,13 @@ private struct ChatImageSurface: View {
             ZStack {
                 Theme.panel
                 if decodedSource == source, let decoded {
-                    Image(decoded, scale: 1, label: Text(verbatim: resource.attachment.name))
-                        .resizable().scaledToFit()
-                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    if let zoom {
+                        ChatImageViewport(image: decoded, zoom: zoom, move: move)
+                    } else {
+                        Image(decoded, scale: 1, label: Text(verbatim: resource.attachment.name))
+                            .resizable().scaledToFit()
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                    }
                 } else if resource.loading || (resource.available && decodedSource != source) {
                     ProgressView().controlSize(.small)
                 } else {
@@ -200,7 +206,6 @@ private struct ChatImageViewer: View {
     let request: ChatImagePresentation
     @State private var selection = 0
     @State private var zoom: CGFloat = 1
-    @State private var gestureZoom: CGFloat = 1
     @State private var error: String?
     #if os(macOS)
     @State private var enlarged = false
@@ -266,17 +271,9 @@ private struct ChatImageViewer: View {
         }.padding(16)
     }
     private var viewport: some View {
-        GeometryReader { geometry in
-            ScrollView([.horizontal, .vertical]) {
-                ChatImageSurface(resource: resource)
-                    .frame(width: max(1, geometry.size.width) * zoom, height: max(1, geometry.size.height) * zoom)
-                    .accessibilityLabel(attachment.name)
-            }
-            .scrollIndicators(.hidden)
-            .simultaneousGesture(MagnifyGesture().onChanged { value in
-                zoom = min(4, max(1, gestureZoom * value.magnification))
-            }.onEnded { _ in gestureZoom = zoom })
-        }
+        ChatImageSurface(resource: resource, zoom: $zoom, move: move)
+            .id(attachment.id)
+            .accessibilityLabel(attachment.name)
     }
     @ViewBuilder private var downloadNotice: some View {
         if !resource.available, !resource.loading {
@@ -333,7 +330,7 @@ private struct ChatImageViewer: View {
         }
     }
 
-    private func setZoom(_ value: CGFloat) { zoom = min(4, max(1, value)); gestureZoom = zoom }
+    private func setZoom(_ value: CGFloat) { zoom = min(4, max(1, value)) }
     private func move(_ direction: Int) {
         let next = selection + direction
         guard request.attachments.indices.contains(next) else { return }
