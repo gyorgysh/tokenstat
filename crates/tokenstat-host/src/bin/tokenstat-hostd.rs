@@ -633,14 +633,17 @@ fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
         .unwrap_or_else(|| {
             present("error").is_none()
                 && present("error_message").is_none()
-                && input.get("hook_event_name").and_then(Value::as_str)
-                    != Some("postToolUseFailure")
+                && !input
+                    .get("hook_event_name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|event| event.eq_ignore_ascii_case("PostToolUseFailure"))
         });
     let detail = present("error")
         .or_else(|| present("error_message"))
         .or_else(|| present("result"))
         .or_else(|| present("output"))
         .or_else(|| present("tool_output"))
+        .or_else(|| present("tool_response"))
         .map(|value| match value {
             Value::String(text) => text.chars().take(360).collect(),
             other => hook_preview::json_prefix(other),
@@ -1034,6 +1037,52 @@ mod tests {
         assert_eq!(call_id, "tool-7");
         assert!(!ok);
         assert_eq!(detail.as_deref(), Some("permission denied"));
+    }
+
+    #[test]
+    fn claude_post_hooks_keep_documented_responses_and_failure_events() {
+        let response = json!({"filePath": "/repo/file.txt", "type": "create"});
+        let (id, ok, detail) = hook_result(
+            "claude",
+            &json!({
+                "hook_event_name": "PostToolUse", "tool_use_id": "toolu_fixture",
+                "tool_name": "Write", "tool_response": response,
+            }),
+        );
+        assert_eq!(id, "toolu_fixture");
+        assert!(ok);
+        assert_eq!(detail.as_deref(), Some(response.to_string().as_str()));
+        assert_eq!(
+            hook_result("claude", &json!({"tool_response": "raw output"}))
+                .2
+                .as_deref(),
+            Some("raw output")
+        );
+        // Existing hosts/backends keep their established field precedence.
+        assert_eq!(
+            hook_result(
+                "claude",
+                &json!({"result": "old alias", "tool_response": response})
+            )
+            .2
+            .as_deref(),
+            Some("old alias")
+        );
+        assert_eq!(
+            hook_result(
+                "claude",
+                &json!({"error": "failed", "tool_response": response})
+            )
+            .2
+            .as_deref(),
+            Some("failed")
+        );
+        for event in ["PostToolUseFailure", "postToolUseFailure"] {
+            assert!(
+                !hook_result("claude", &json!({"hook_event_name": event, "error": null})).1,
+                "{event} stays failed even without error text"
+            );
+        }
     }
 
     #[test]
