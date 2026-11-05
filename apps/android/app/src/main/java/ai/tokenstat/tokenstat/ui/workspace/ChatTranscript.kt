@@ -401,7 +401,9 @@ fun coalesceTranscript(
                 }
             }
         }
-        for (index in runningIndexes.reversed()) {
+        // LinkedHashSet.reversed() resolves to Java 21's SequencedSet API
+        // with newer compile SDKs, but older Android runtimes lack it.
+        for (index in runningIndexes.toList().asReversed()) {
             when (val item = items[index]) {
                 is ChatDisplayItem.Edit ->
                     if (item.state.backend == backend && item.state.running && (path.isEmpty() || item.state.path == path)) return index

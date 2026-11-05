@@ -3,7 +3,9 @@
 import Foundation
 
 // These tests verify row ownership, not translated display labels.
+#if !TOKENSTAT_TEST
 enum L10n { static func text(_ key: String, _ arguments: String...) -> String { key } }
+#endif
 
 // Two models from Bridge/Models.swift, cut to what a row needs.
 struct ChatAttachment: Hashable { var id: String }
