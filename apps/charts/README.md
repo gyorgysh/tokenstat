@@ -137,6 +137,9 @@ node apps/charts/tests/browser.mjs
 node apps/charts/tests/chart-export-lifecycle.mjs
 node apps/charts/tests/model-lifecycle.mjs
 python3 scripts/tests/check-chat-chart-fences.py
+# macOS: native chart preparation and first-paint checks
+python3 scripts/tests/check-chart-updates.py
+python3 scripts/tests/check-chart-appearance.py
 ```
 
 The browser suite renders every family in Chromium and WebKit at phone,

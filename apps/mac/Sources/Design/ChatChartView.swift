@@ -114,7 +114,8 @@ private struct ChartWebView: ChartRepresentable {
         view.scrollView.isScrollEnabled = false
         #endif
         let surface = ChartSurfaceView(browser: view, size: size)
-        surface.prepare(revision: previewRevision, key: previewKey(width: size.width), panel: panel)
+        let request = coordinator.prepare()
+        surface.prepare(revision: request.revision, key: request.previewKey(width: size.width), panel: panel)
         coordinator.webView = view
         coordinator.surface = surface
         guard let directory = Bundle.main.url(forResource: "runtime", withExtension: nil),
@@ -128,15 +129,6 @@ private struct ChartWebView: ChartRepresentable {
         coordinator.pageURL = directory.appendingPathComponent("index.html")
         view.loadFileURL(directory.appendingPathComponent("index.html"), allowingReadAccessTo: directory)
         return surface
-    }
-
-    private var previewRevision: String {
-        source + "\u{0}" + String(dark) + String(describing: panel) + String(reduceMotion) + Locale.current.identifier + String(describing: ChartWords.all.sorted { $0.key < $1.key })
-    }
-
-    fileprivate func previewKey(width: CGFloat) -> String {
-        SHA256.hash(data: Data((previewRevision + "\u{0}" + String(Int(width.rounded()))).utf8))
-            .map { String(format: "%02x", $0) }.joined()
     }
 
     private func applyNativeAppearance(_ view: WKWebView) {
@@ -172,6 +164,66 @@ private struct ChartWebView: ChartRepresentable {
         """
     }
 
+    fileprivate struct RenderInputs: Equatable {
+        let source: String
+        let dark: Bool
+        let panel: Color.Resolved
+        let reduceMotion: Bool
+        let locale: String
+
+        static func sameSource(_ lhs: String, _ rhs: String) -> Bool {
+            // String equality folds Unicode equivalents; JSON payloads need exact bytes.
+            let equal: Bool? = lhs.utf8.withContiguousStorageIfAvailable { left in
+                rhs.utf8.withContiguousStorageIfAvailable { right in
+                    guard left.count == right.count else { return false }
+                    if left.baseAddress == right.baseAddress || left.isEmpty { return true }
+                    return memcmp(left.baseAddress!, right.baseAddress!, left.count) == 0
+                }
+            } ?? nil
+            return equal ?? lhs.utf8.elementsEqual(rhs.utf8)
+        }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.dark == rhs.dark && lhs.panel == rhs.panel && lhs.reduceMotion == rhs.reduceMotion
+                && lhs.locale == rhs.locale && sameSource(lhs.source, rhs.source)
+        }
+    }
+
+    fileprivate final class RenderRequest {
+        let inputs: RenderInputs
+        let payload: String
+        let revision: String
+        let paintToken: String
+        let settingsText: String?
+        private var lastPreview: (width: Int, key: String)?
+
+        private static func digest(_ text: String) -> String {
+            SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+
+        init(_ inputs: RenderInputs, previous: RenderRequest?) {
+            self.inputs = inputs
+            if let previous, RenderInputs.sameSource(previous.inputs.source, inputs.source) { payload = previous.payload }
+            else { payload = Data(inputs.source.utf8).base64EncodedString() }
+            revision = Self.digest(inputs.source + "\u{0}" + String(inputs.dark) + String(describing: inputs.panel)
+                                   + String(inputs.reduceMotion) + inputs.locale)
+            paintToken = Self.digest(revision + "\u{0}0")
+            let settings: [String: Any] = ["dark": inputs.dark, "reducedMotion": inputs.reduceMotion, "skipEntryAnimation": true,
+                                          "paintToken": paintToken, "locale": inputs.locale.replacingOccurrences(of: "_", with: "-"), "strings": ChartWords.all]
+            settingsText = (try? JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]))
+                .flatMap { String(data: $0, encoding: .utf8) }
+        }
+
+        func previewKey(width: CGFloat) -> String {
+            let width = Int(width.rounded())
+            if width == 0 { return paintToken }
+            if let lastPreview, lastPreview.width == width { return lastPreview.key }
+            let key = Self.digest(revision + "\u{0}" + String(width))
+            lastPreview = (width, key)
+            return key
+        }
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var owner: ChartWebView
         weak var webView: WKWebView?
@@ -181,13 +233,24 @@ private struct ChartWebView: ChartRepresentable {
         var pageURL: URL?
         private var loaded = false
         private var rendered = ""
+        private var renderGeneration = 0
+        private var prepared: RenderRequest?
         fileprivate var stopped = false
         init(_ owner: ChartWebView) { self.owner = owner }
+        fileprivate func prepare() -> RenderRequest {
+            let inputs = RenderInputs(source: owner.source, dark: owner.dark, panel: owner.panel,
+                                      reduceMotion: owner.reduceMotion, locale: Locale.current.identifier)
+            if let prepared, prepared.inputs == inputs { return prepared }
+            let request = RenderRequest(inputs, previous: prepared)
+            prepared = request
+            return request
+        }
         func update(_ owner: ChartWebView) {
             let appearanceChanged = self.owner.dark != owner.dark || self.owner.panel != owner.panel
             self.owner = owner
             if let surface {
-                surface.prepare(revision: owner.previewRevision, key: owner.previewKey(width: surface.bounds.width), panel: owner.panel)
+                let request = prepare()
+                surface.prepare(revision: request.revision, key: request.previewKey(width: surface.bounds.width), panel: owner.panel)
             }
             if appearanceChanged, let webView {
                 owner.applyNativeAppearance(webView)
@@ -204,7 +267,7 @@ private struct ChartWebView: ChartRepresentable {
         }
         func unmount(_ browser: WKWebView) {
             guard webView === browser else { return }
-            loaded = false; rendered = ""; pageURL = nil; webView = nil; surface = nil; capturing = false; pendingCapture = false
+            loaded = false; rendered = ""; prepared = nil; pageURL = nil; webView = nil; surface = nil; capturing = false; pendingCapture = false
             browser.stopLoading()
             browser.configuration.userContentController.removeScriptMessageHandler(forName: "chart")
             browser.navigationDelegate = nil
@@ -234,17 +297,15 @@ private struct ChartWebView: ChartRepresentable {
         }
         private func render() {
             guard loaded, !stopped, let webView, owner.source.utf8.count <= 256 * 1024 else { return }
-            let settings: [String: Any] = ["dark": owner.dark, "reducedMotion": owner.reduceMotion, "skipEntryAnimation": true,
-                                          "paintToken": owner.previewKey(width: 0), "locale": Locale.current.identifier.replacingOccurrences(of: "_", with: "-"), "strings": ChartWords.all]
-            guard let json = try? JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]),
-                  let settingsText = String(data: json, encoding: .utf8) else { return }
-            let payload = Data(owner.source.utf8).base64EncodedString()
-            let revision = payload + settingsText
-            guard revision != rendered else { return }
-            rendered = revision
-            let script = "window.TokenstatChart.render(new TextDecoder().decode(Uint8Array.from(atob('\(payload)'), c => c.charCodeAt(0))), \(settingsText));"
+            let request = prepare()
+            guard request.revision != rendered, let settingsText = request.settingsText else { return }
+            rendered = request.revision
+            renderGeneration += 1
+            let generation = renderGeneration
+            let script = "window.TokenstatChart.render(new TextDecoder().decode(Uint8Array.from(atob('\(request.payload)'), c => c.charCodeAt(0))), \(settingsText));"
             webView.evaluateJavaScript(script) { [weak self, weak webView] _, error in
-                guard let self, !self.stopped, let webView, self.webView === webView else { return }
+                guard let self, !self.stopped, let webView, self.webView === webView,
+                      self.renderGeneration == generation else { return }
                 if let error { self.owner.onError(error.localizedDescription) }
             }
         }
@@ -254,7 +315,7 @@ private struct ChartWebView: ChartRepresentable {
             capturing = true
             pendingCapture = false
             let revision = rendered
-            let key = owner.previewKey(width: webView.bounds.width)
+            let key = prepare().previewKey(width: webView.bounds.width)
             let configuration = WKSnapshotConfiguration()
             configuration.afterScreenUpdates = true
             configuration.snapshotWidth = NSNumber(value: Double(min(webView.bounds.width, 900)))
@@ -287,21 +348,22 @@ private struct ChartWebView: ChartRepresentable {
                   let type = body["type"] as? String else { return }
             switch type {
             case "ready", "error":
-                if let token = body["paintToken"] as? String, token == owner.previewKey(width: 0) {
+                if let token = body["paintToken"] as? String, token == prepared?.paintToken {
                     #if DEBUG && os(macOS)
                     if let surface { ChartPaintDiagnostics.record(surface, event: type) }
                     #endif
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, self.owner.previewKey(width: 0) == token else { return }
+                    DispatchQueue.main.async { [weak self, weak browser = message.webView] in
+                        guard let self, !self.stopped, let browser, self.webView === browser,
+                              self.prepared?.paintToken == token else { return }
                         self.capturePaint()
                     }
                 }
             case "height":
-                guard let token = body["paintToken"] as? String, token == owner.previewKey(width: 0) else { return }
+                guard let token = body["paintToken"] as? String, token == prepared?.paintToken else { return }
                 if let value = body["height"] as? Double, value.isFinite, (180...2200).contains(value) {
                     DispatchQueue.main.async { [weak self, weak browser = message.webView] in
                         guard let self, !self.stopped, let browser, self.webView === browser,
-                              self.owner.previewKey(width: 0) == token else { return }
+                              self.prepared?.paintToken == token else { return }
                         self.owner.height = CGFloat(value)
                     }
                 }
@@ -529,7 +591,8 @@ private enum ChartPaintDiagnostics {
 #endif
 
 private enum ChartWords {
-    static var all: [String: String] { [
+    // L10n's catalog is fixed for the lifetime of the process.
+    static let all: [String: String] = [
         "chart": L10n.text("common.chart.chart"), "data": L10n.text("common.chart.data"),
         "reset": L10n.text("common.chart.reset"), "expand": L10n.text("common.chart.expand"),
         "collapse": L10n.text("common.chart.collapse"), "copy": L10n.text("common.chart.copy"),
@@ -546,5 +609,5 @@ private enum ChartWords {
         "of": L10n.text("common.chart.of"), "copied": L10n.text("common.chart.copied"),
         "exported": L10n.text("common.chart.exported"), "unavailable": L10n.text("common.chart.unavailable"),
         "inspect": L10n.text("common.chart.inspect"), "loading": L10n.text("common.chart.loading")
-    ] }
+    ]
 }
