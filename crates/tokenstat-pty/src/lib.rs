@@ -2830,10 +2830,24 @@ mod tests {
     fn output_wait_observes_buffered_bytes_and_eof_without_spinning() {
         use std::time::{Duration, Instant};
         let m = Manager::new();
-        let process = spawn(&m, "true", "exit /b 0");
+        let process = m
+            .spawn(&Spawn {
+                command: std::env::current_exe().unwrap().display().to_string(),
+                args: vec!["--list".into()],
+                cwd: std::env::temp_dir(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .unwrap();
         let session = m.get(&process.id).unwrap();
         // Let the real reader finish before driving publication ourselves.
-        // ConPTY emits terminal setup bytes even for a silent child.
+        // A hidden process uses pipes on Windows; ConPTY both emits setup
+        // bytes and keeps its output pipe open beyond a silent child's exit.
         assert!(wait_for(|| session.output_closed.load(Ordering::SeqCst)));
         *session.buffer.lock().unwrap() = Buffer::new();
         session.output_closed.store(false, Ordering::SeqCst);
