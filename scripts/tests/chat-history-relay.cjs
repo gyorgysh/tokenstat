@@ -30,7 +30,43 @@ function publicKey(byte) {
   return crypto.createPublicKey(key).export({ format: "der", type: "spki" }).subarray(-32).toString("hex");
 }
 
+async function serveNative(root) {
+  const fs = require('node:fs');
+  assert.ok(path.isAbsolute(root) && fs.statSync(root).isDirectory(), 'A private fixture root is required');
+  assert.equal(fs.statSync(root).mode & 0o077, 0, 'Fixture root must be private');
+  const ready = path.join(root, 'relay.json');
+  assert.ok(!fs.existsSync(ready), 'Use a fresh fixture root');
+  const account = 'u_native_history_fixture';
+  db.run("INSERT INTO users (id,tier,created_at) VALUES (?,'free',?)", account, new Date().toISOString());
+  const { createAccountServer } = require('../qa/chat-history/account-server.cjs');
+  const api = await createAccountServer(sync, account);
+  const relay = createTunnelServer({ port: 0, authenticate: makeAuthenticator({ db }),
+    recheckEntitlement: makeEntitlementRecheck({ db }), logger: { info() {}, log() {}, error() {}, warn() {} } });
+  try {
+    await new Promise((resolve, reject) => { relay.server.once('error', reject); relay.server.listen(0, '127.0.0.1', resolve); });
+    const pairing = {};
+    for (const role of ['host', 'desktop', 'phone']) {
+      pairing[role] = sync.createPairingCode(account).code;
+      assert.ok(pairing[role]);
+    }
+    fs.writeFileSync(ready, JSON.stringify({ accountOrigin: api.origin,
+      relayEndpoint: `ws://127.0.0.1:${relay.server.address().port}`, pairing }), { mode: 0o600, flag: 'wx' });
+    const deadline = Date.now() + 900000;
+    while (!fs.existsSync(path.join(root, 'stop')) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    fs.writeFileSync(path.join(root, 'relay-result.json'), JSON.stringify({
+      stopped: fs.existsSync(path.join(root, 'stop')), bytes: usage.sharedUsedBytes(account),
+    }), { mode: 0o600, flag: 'wx' });
+  } finally {
+    relay.close();
+    await api.close();
+    ledger.close();
+  }
+}
+
 async function main() {
+  if (process.argv[2] === '--serve') return serveNative(process.argv[3]);
   // Exercise the account bootstrap the native clients need, using only
   // this in-memory database. Pairing must bind authentication to its user.
   const bootstrapAccount = "u_native_history_bootstrap";

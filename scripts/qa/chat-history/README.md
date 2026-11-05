@@ -51,3 +51,14 @@ in-memory database. Run `node scripts/tests/chat-history-relay.cjs` to check
 its HTTP pairing, authentication, registration and token minting. This adapter
 is not yet connected to the native app runner; that runner still tests direct
 connections only.
+
+The relay service can also run under a controller:
+
+```sh
+node scripts/tests/chat-history-relay.cjs --serve /absolute/private/fixture-root
+```
+
+The root must already exist with mode 0700. The service writes `relay.json`
+with mode 0600, containing loopback endpoints and disposable pairing codes.
+Creating `stop` in that root closes both listeners and writes relay metering
+to `relay-result.json`. A 15-minute deadline also stops an abandoned fixture.
