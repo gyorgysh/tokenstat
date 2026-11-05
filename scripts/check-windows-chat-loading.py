@@ -89,6 +89,9 @@ class Checks {
     Dictionary<string, bool> _statsExpanded = new();
     TaskCompletionSource _inspectionReply = new(TaskCreationOptions.RunContinuationsAsynchronously);
     int _inspectionCalls;
+    bool _commandUsageOnly;
+    void ResetUsageRead() {}
+    Task RefreshChatLimitsAsync() => Task.CompletedTask;
     string? InspectionOwner() => _activityOwner;
     async Task RefreshInspectionAsync(bool force) { _inspectionCalls++; await _inspectionReply.Task; }
     void RenderCommandStats() {}
@@ -97,6 +100,12 @@ class Checks {
     static class L10n { public static string Text(string text) => text; }
     class StackPanel { public double Spacing { get; set; } }
     class ScrollViewer { public object? Content { get; set; } public double MaxHeight { get; set; } }
+    class DispatcherTimer {
+        public TimeSpan Interval { get; set; }
+        public event EventHandler? Tick;
+        public void Start() {}
+        public void Stop() {}
+    }
     class ContentDialog {
         public object? XamlRoot { get; set; }
         public object? Content { get; set; }

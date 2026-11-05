@@ -252,7 +252,7 @@ class Entry { static void Main(string[] args) { if (args.Length == 0) ChatPage.C
 with tempfile.TemporaryDirectory(prefix='tokenstat-windows-inspector-') as temp:
     folder = Path(temp)
     (folder / 'Program.cs').write_text(code)
-    for name in ['Format', 'ChatActivityData']:
+    for name in ['Format', 'ChatActivityData', 'ChatHistoryBuffer']:
         (folder / (name + '.cs')).write_text((source_root / f'apps/windows/Pages/{name}.cs').read_text())
     (folder / 'Inspector.csproj').write_text('''<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><NoWarn>CS0067;CS0649</NoWarn></PropertyGroup></Project>''')
     subprocess.run(['dotnet', 'build', str(folder / 'Inspector.csproj'), '-c', 'Release', '--nologo', '-v:q'], check=True)
