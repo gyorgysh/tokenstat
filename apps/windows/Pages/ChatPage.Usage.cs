@@ -10,6 +10,7 @@ internal sealed partial class ChatPage
 {
     private bool _commandUsageOnly;
     private JsonObject? _usageLimits;
+    private JsonObject? _usageRenderedTotals;
     private bool _usageReadFailed;
     private long _usageReadVisibility = -1;
     private object? _usageFlight;
@@ -17,7 +18,7 @@ internal sealed partial class ChatPage
 
     private void ResetUsageRead()
     {
-        _usageLimits = null; _usageReadFailed = false; _usageReadVisibility = -1;
+        _usageLimits = null; _usageRenderedTotals = null; _usageReadFailed = false; _usageReadVisibility = -1;
         _usageFlight = null; _usageAttempt = default;
     }
     private async Task RefreshChatLimitsAsync(bool force = false)
@@ -104,6 +105,7 @@ internal sealed partial class ChatPage
         else context.Children.Add(Muted(L10n.Text("common.chat.stats.no_data")));
         target.Children.Add(Chrome.Card(L10n.Text("common.chat.stats.context"), context));
         var totals = new StackPanel { Spacing = Theme.SpaceS };
+        _usageRenderedTotals = _aggregateUsage;
         var usage = ChatUsageTotals.Read(data?["usage"]) ?? _aggregateUsage;
         if (usage is not null && ChatUsageTotals.HasReportedUsage(usage)) AppendUsage(totals, usage);
         else totals.Children.Add(Muted(L10n.Text("common.chat.usage.no_totals")));

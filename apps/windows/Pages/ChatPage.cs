@@ -1754,6 +1754,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private void RefreshCost()
     {
         RenderInspector();
+        if (_commandUsageOnly && _commandDialogOwner == InspectionOwner()
+            && !ReferenceEquals(_usageRenderedTotals, _aggregateUsage)) RenderCommandStats();
     }
 
     /// <summary>

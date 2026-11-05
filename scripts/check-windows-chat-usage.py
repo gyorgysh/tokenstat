@@ -10,7 +10,7 @@ method = source[source.index('    private async Task RefreshChatLimitsAsync'):so
 code = r'''
 using System.Text.Json.Nodes;
 using Tokenstat.Pages;
-static class Format { public static string Text(JsonNode? node, string key) => node?[key]?.GetValue<string>() ?? ""; }
+static class Format { public static bool Flag(JsonNode? node, string key) => node?[key]?.GetValue<bool>() == true; public static string Text(JsonNode? node, string key) => node?[key]?.GetValue<string>() ?? ""; }
 class MainWindow { public bool IsForeground = true; }
 static class App { public static object CurrentWindow = new MainWindow(); }
 class Host {
@@ -115,6 +115,8 @@ class CommandCheck {
     string? _commandDialogOwner;
     bool busy = true;
     int quotaReads, draws;
+    JsonObject? _usageRenderedTotals, _aggregateUsage;
+    void RenderInspector() { }
     TaskCompletionSource<bool> inspection = new(TaskCreationOptions.RunContinuationsAsynchronously);
     bool Busy() => busy;
     void Banner(string value) { throw new Exception(value); }
@@ -124,7 +126,8 @@ class CommandCheck {
     Task RefreshChatLimitsAsync() { quotaReads++; return Task.CompletedTask; }
     void ResetUsageRead() { }
     string InspectionOwner() => _openId;
-    void RenderCommandStats() { draws++; }
+    void RenderCommandStats() { draws++; _usageRenderedTotals = _aggregateUsage; }
+COST
 COMMAND
     static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
     public static async Task Run() {
@@ -135,6 +138,13 @@ COMMAND
         Assert((string?)ContentDialog.Shown[0].Title == "common.chat.usage.title" && DispatcherTimer.Active == 1, "Focused title and quota timer belong to usage");
         await usage.ConsumeCommandAsync();
         Assert(ContentDialog.Shown.Count == 1, "A second command cannot open an overlapping dialog");
+        var beforeTotals = usage.draws;
+        usage.RefreshCost(); Assert(usage.draws == beforeTotals, "Text-only updates do not rebuild usage");
+        usage._aggregateUsage = new JsonObject { ["input"] = 100 };
+        usage.RefreshCost(); Assert(usage.draws == beforeTotals + 1, "Changed history totals refresh even without inspection");
+        usage.RefreshCost(); Assert(usage.draws == beforeTotals + 1, "Unchanged totals do not rebuild usage");
+        usage._aggregateUsage = null; usage.RefreshCost();
+        Assert(usage.draws == beforeTotals + 2, "An invalidated aggregate clears the old displayed total");
         ContentDialog.Shown[0].Closed.SetResult(true); await command.WaitAsync(TimeSpan.FromSeconds(2));
         Assert(usage._draft.Text == "" && usage._commandDialogBody is null && !usage._commandUsageOnly && DispatcherTimer.Active == 0,
             "Closing usage clears command state and retires quota polling");
@@ -153,9 +163,70 @@ COMMAND
     }
 }
 '''.replace('COMMAND', command)
+cost_source = (root / 'apps/windows/Pages/ChatPage.cs').read_text()
+cost_start = cost_source.index('    private void RefreshCost()')
+cost_method = cost_source[cost_start:cost_source.index('\n    }', cost_start) + len('\n    }')]
+command_code = command_code.replace('COST', cost_method)
 code = code.replace('static class AppServices {', 'static class AppServices { public static int AccountGeneration = 0;')
 code = code.replace('        var m = Fresh(); var first', '        await CommandCheck.Run();\n        var m = Fresh(); var first')
 code += command_code
+inspection_source = (root / 'apps/windows/Pages/ChatPage.Stats.cs').read_text()
+inspection = inspection_source[inspection_source.index('    private async Task RefreshInspectionAsync'):inspection_source.index('    private void RenderInspection')]
+inspection_code = r'''
+class InspectionCheck {
+    string? _inspectionOwner, _inspectionFlight, _inspectionUnsupportedFlight;
+    JsonNode? _inspection;
+    bool _inspectionRunning, _inspectionLiveLease, _inspectionPeerAvailable = true, IsLoaded = true;
+    long _inspectionVisibilityGeneration;
+    DateTimeOffset _inspectionAt;
+    readonly Dictionary<string, bool> _statsExpanded = new();
+    readonly Dictionary<string, string> _statsQueries = new();
+    JsonNode _openChat = JsonNode.Parse("""{"backend":"claude","running":false}""")!;
+    string _openId = "chat", owner = "account/chat/claude";
+    int calls;
+    string? code = "unknown_method";
+    Task<JsonNode>? held;
+    class Failure(string code) : Exception { public string Code = code; }
+    static bool IsUnknownMethod(Exception error) => error is Failure { Code: "unknown_method" };
+    string? InspectionOwner() => owner;
+    void RenderInspection() { }
+    Task<JsonNode> CallChatAsync(string method, JsonObject args) {
+        calls++;
+        if (held is not null) return held;
+        return code is null ? Task.FromResult<JsonNode>(JsonNode.Parse("""{"backend":"claude"}""")!) : Task.FromException<JsonNode>(new Failure(code));
+    }
+INSPECTION
+    static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
+    public static async Task Run() {
+        App.CurrentWindow = new MainWindow();
+        var m = new InspectionCheck();
+        for (var i = 0; i < 7; i++) { m._inspectionAt = default; await m.RefreshInspectionAsync(); }
+        Assert(m.calls == 1, "Unsupported hosts should receive one inspection read per visible owner lease, got " + m.calls);
+        await m.RefreshInspectionAsync(force: true);
+        Assert(m.calls == 1, "Opening another inspection panel should not retry a known unsupported method");
+        m._inspectionVisibilityGeneration++; await m.RefreshInspectionAsync(force: true);
+        Assert(m.calls == 2, "Resume or reconnect probes capabilities again");
+        m.owner = "account/new-chat/claude"; await m.RefreshInspectionAsync(force: true);
+        Assert(m.calls == 3, "A different owner gets its own capability probe");
+        m = new InspectionCheck();
+        var held = new TaskCompletionSource<JsonNode>(TaskCreationOptions.RunContinuationsAsynchronously);
+        m.held = held.Task;
+        var old = m.RefreshInspectionAsync(); m._inspectionVisibilityGeneration++;
+        held.SetException(new Failure("unknown_method")); await old.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert(m._inspectionUnsupportedFlight is null, "An obsolete failure cannot disable a new visibility lease");
+        m.held = null; m.code = null; await m.RefreshInspectionAsync(force: true);
+        Assert(m._inspectionLiveLease, "A new lease can recover after an obsolete unsupported response");
+        m = new InspectionCheck { code = "offline" };
+        await m.RefreshInspectionAsync(); m._inspectionAt = default; await m.RefreshInspectionAsync();
+        Assert(m.calls == 2, "Transient errors must keep retrying");
+        m.code = null; m._inspectionAt = default; await m.RefreshInspectionAsync();
+        Assert(m._inspection is not null && m._inspectionLiveLease, "A recovering host renews inspection");
+        Console.WriteLine("Windows inspection: one unsupported-method read per visible owner lease, resume probes and transient recovery pass.");
+    }
+}
+'''.replace('INSPECTION', inspection)
+code += inspection_code
+code = code.replace('        await CommandCheck.Run();', '        await CommandCheck.Run();\n        await InspectionCheck.Run();')
 folder = root / 'target/chat-performance/windows-usage-fixture'
 folder.mkdir(parents=True, exist_ok=True)
 (folder / 'Program.cs').write_text(code)

@@ -33,11 +33,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.*
 import java.text.NumberFormat
 
@@ -146,22 +142,19 @@ internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Bo
         }
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             try {
-                while (true) {
-                    try {
-                        val next = model.workspaceSection(peer, "chat.inspection", buildJsonObject { put("id", id) }) as? JsonObject
-                        currentCoroutineContext().ensureActive()
+                pollChatInspection(
+                    read = { model.workspaceSection(peer, "chat.inspection", buildJsonObject { put("id", id) }) as? JsonObject },
+                    onRead = { next ->
                         if (next?.str("backend") == backend) { inspection = next; liveLease = true }
                         else { liveLease = false }
                         loaded = true
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) {
-                        // Keep the last matching snapshot. A failed poll is not
-                        // an empty conversation, and offline status must settle.
+                    },
+                    onFailure = {
+                        // Keep the last matching snapshot while its live lease expires.
                         liveLease = false
                         loaded = true
-                    }
-                    delay(5000)
-                }
+                    },
+                )
             } finally { liveLease = false }
         }
     }

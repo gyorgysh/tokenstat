@@ -23,6 +23,7 @@ internal sealed partial class ChatPage
     private bool _inspectionRunning;
     private string? _inspectionOwner;
     private string? _inspectionFlight;
+    private string? _inspectionUnsupportedFlight;
     private DateTimeOffset _inspectionAt;
     private readonly Dictionary<string, bool> _statsExpanded = new();
     private readonly Dictionary<string, string> _statsQueries = new();
@@ -147,7 +148,7 @@ internal sealed partial class ChatPage
         var owner = InspectionOwner();
         var visibility = _inspectionVisibilityGeneration;
         var flight = $"{owner}/{visibility}";
-        if (!IsLoaded || !_inspectionPeerAvailable || App.CurrentWindow is MainWindow { IsForeground: false } || owner is null || flight == _inspectionFlight) return;
+        if (!IsLoaded || !_inspectionPeerAvailable || App.CurrentWindow is MainWindow { IsForeground: false } || owner is null || flight == _inspectionFlight || flight == _inspectionUnsupportedFlight) return;
         if (_inspectionOwner != owner)
         {
             _inspectionOwner = owner; _inspection = null; _inspectionLiveLease = false; _inspectionAt = default; _statsExpanded.Clear(); _statsQueries.Clear(); RenderInspection();
@@ -165,7 +166,14 @@ internal sealed partial class ChatPage
                 _inspection = next; _inspectionRunning = running; RenderInspection();
             }
         }
-        catch { if (InspectionOwner() == owner && visibility == _inspectionVisibilityGeneration) { _inspectionAt = DateTimeOffset.UtcNow; _inspection = null; _inspectionLiveLease = false; RenderInspection(); } }
+        catch (Exception error)
+        {
+            if (InspectionOwner() == owner && visibility == _inspectionVisibilityGeneration)
+            {
+                if (IsUnknownMethod(error)) _inspectionUnsupportedFlight = flight;
+                _inspectionAt = DateTimeOffset.UtcNow; _inspection = null; _inspectionLiveLease = false; RenderInspection();
+            }
+        }
         finally { if (_inspectionFlight == flight) _inspectionFlight = null; }
     }
     private void RenderInspection()
