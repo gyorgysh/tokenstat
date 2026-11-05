@@ -498,21 +498,6 @@ struct Handover {
     announce: bool,
 }
 
-/// Which agent ran the previous turn, read off the timeline.
-///
-/// Only `Agent` events carry a backend, so this is the last agent that
-/// actually produced anything, which is the thing a handover is measured
-/// against. `None` means nothing has run yet, and a first turn hands over
-/// nothing.
-fn last_backend(events: &[Value]) -> Option<String> {
-    events.iter().rev().find_map(|event| {
-        event
-            .get("backend")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    })
-}
-
 #[derive(Default, Deserialize, Serialize)]
 struct Index {
     #[serde(default)]
@@ -1542,20 +1527,25 @@ impl Store {
         }
         let at_ms = receipt.event_at_ms?;
         let prefix = crate::chat_question::answer_note(question, "");
-        let (events, _) = self.events(id, 0).ok()?;
-        events
-            .iter()
-            .filter(|row| row["kind"] == "user" && record_at_ms(row) == Some(at_ms))
-            .find_map(|row| row["text"].as_str()?.strip_prefix(&prefix))
-            .map(str::to_owned)
+        let mut answer = None;
+        self.visit_events(id, |row| {
+            if row["kind"] == "user" && record_at_ms(&row) == Some(at_ms) {
+                answer = row["text"]
+                    .as_str()
+                    .and_then(|text| text.strip_prefix(&prefix))
+                    .map(str::to_owned);
+            }
+            Ok(answer.is_none())
+        })
+        .ok()?;
+        answer
     }
 
     /// The text of a question in this conversation that nobody has answered.
     fn open_question(&self, id: &str, question_id: &str) -> Result<String, String> {
-        let (events, _) = self.events(id, 0)?;
         let mut asked = None;
         let mut answered = false;
-        for event in &events {
+        self.visit_events(id, |event| {
             let about_it = event.get("questionId").and_then(Value::as_str) == Some(question_id);
             match event.get("kind").and_then(Value::as_str) {
                 Some("question")
@@ -1571,7 +1561,8 @@ impl Store {
                 Some("answerWithdrawn") if about_it => answered = false,
                 _ => {}
             }
-        }
+            Ok(true)
+        })?;
         if answered {
             return Err("This question already has an answer.".into());
         }
@@ -3105,8 +3096,58 @@ impl Store {
         }
     }
 
-    /// Complete history for host-side readers. Live wire polling uses bounded
-    /// `tail_events_positions` replies and advances through `next_offset`.
+    fn visit_events(
+        &self,
+        id: &str,
+        mut visit: impl FnMut(Value) -> Result<bool, String>,
+    ) -> Result<(), String> {
+        let _guard = self.transcript_guard()?;
+        let chat = self.get(id)?;
+        let path = self.events_path(id);
+        let Some(file) = open_transcript(&path)? else {
+            return if chat.last_message_at_ms.is_some() {
+                Err("conversation transcript is missing".into())
+            } else {
+                Ok(())
+            };
+        };
+        visit_transcript_lines_while(file, |line, offset| {
+            for row in records(line, offset) {
+                if !visit(row)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })?;
+        Ok(())
+    }
+
+    fn visit_events_backwards(
+        &self,
+        id: &str,
+        mut visit: impl FnMut(Value) -> Result<bool, String>,
+    ) -> Result<(), String> {
+        let _guard = self.transcript_guard()?;
+        let chat = self.get(id)?;
+        let path = self.events_path(id);
+        let mut end = transcript_len(&path, chat.last_message_at_ms.is_some())?;
+        while end > 0 {
+            let (start, bytes) = read_back_checked(&path, end, PAGE_EVENTS, true)?;
+            if start >= end {
+                return Err("conversation history could not be read".into());
+            }
+            for row in records(&bytes, start).into_iter().rev() {
+                if !visit(row)? {
+                    return Ok(());
+                }
+            }
+            end = start;
+        }
+        Ok(())
+    }
+
+    /// Full-history fixture reader. Production readers use bounded visitors.
+    #[cfg(test)]
     pub fn events(&self, id: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
         let _guard = self.transcript_guard()?;
         let chat = self.get(id)?;
@@ -3456,8 +3497,14 @@ impl Store {
     /// agent that cannot resume itself needs the summary on every turn, and
     /// saying "handed to" every turn described a switch that never happened.
     fn handover(&self, chat: &Conversation) -> Result<Option<Handover>, String> {
-        let (events, _) = self.events(&chat.id, 0)?;
-        let previous = last_backend(&events);
+        let mut previous = None;
+        self.visit_events_backwards(&chat.id, |event| {
+            previous = event
+                .get("backend")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            Ok(previous.is_none())
+        })?;
         // A resume token proves only that this backend remembers the point at
         // which it last ran. If another backend has spoken since then, that
         // old session is precisely the one that needs a handover. It is current
@@ -3470,16 +3517,33 @@ impl Store {
         let folder = crate::workspaces::folder(&chat.workspace_id)
             .map(|workspace| workspace.path.display().to_string())
             .unwrap_or_default();
-        let mut brief = crate::chat_brain::brief(&events, &folder, crate::chat_brain::BUDGET);
-        if brief.is_empty() {
+        let path = safe_join(&self.root, &chat.id)?.join("history.md");
+        fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
+            .map_err(|error| error.to_string())?;
+        let handover = replace_chat_file_when(&path, |file| {
+            let mut summary = crate::chat_brain::Summary::default();
+            let mut export =
+                crate::chat_brain::HistoryWriter::new(std::io::BufWriter::new(&mut *file), &folder)
+                    .map_err(|error| error.to_string())?;
+            self.visit_events(&chat.id, |event| {
+                summary.push(&event);
+                export.push(&event).map_err(|error| error.to_string())?;
+                Ok(true)
+            })?;
+            let (writer, length) = export.finish().map_err(|error| error.to_string())?;
+            drop(writer);
+            file.set_len(length).map_err(|error| error.to_string())?;
+            let (brief, dropped) = summary.finish(&folder, crate::chat_brain::BUDGET);
+            Ok((!brief.is_empty()).then_some((brief, dropped)))
+        })?;
+        let Some((mut brief, dropped)) = handover else {
             return Ok(None);
-        }
-        let history = crate::chat_brain::export_markdown(&events, &folder);
-        let path = self.write_history(&chat.id, &history)?;
+        };
         brief.push_str(&format!(
-            "\nFull history: {path}. Read it if the summary above is missing what you need.\n"
+            "\nFull history: {}. Read it if the summary above is missing what you need.\n",
+            path.display()
         ));
-        if crate::chat_brain::dropped_turns(&events, &folder, crate::chat_brain::BUDGET) > 0 {
+        if dropped > 0 {
             brief.push_str("Earlier turns were omitted from this inline summary; the full history retains them.\n");
         }
         let sessions = {
@@ -3521,16 +3585,6 @@ impl Store {
         fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
             .map_err(|error| error.to_string())?;
         write_private_file(&path, brief.as_bytes())
-    }
-
-    /// Keep the full export beside the brief it outgrew. Returns the absolute
-    /// path, which is what the handover points the new agent at.
-    fn write_history(&self, id: &str, markdown: &str) -> Result<String, String> {
-        let path = safe_join(&self.root, id)?.join("history.md");
-        fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
-            .map_err(|error| error.to_string())?;
-        write_private_file(&path, markdown.as_bytes())?;
-        Ok(path.display().to_string())
     }
 
     pub fn attach(
@@ -7002,6 +7056,16 @@ fn visit_transcript_lines(
     file: fs::File,
     mut visit: impl FnMut(&[u8], u64) -> Result<(), String>,
 ) -> Result<u64, String> {
+    visit_transcript_lines_while(file, |line, offset| {
+        visit(line, offset)?;
+        Ok(true)
+    })
+}
+
+fn visit_transcript_lines_while(
+    file: fs::File,
+    mut visit: impl FnMut(&[u8], u64) -> Result<bool, String>,
+) -> Result<u64, String> {
     use std::io::Read;
     let metadata = file.metadata().map_err(|error| error.to_string())?;
     if !metadata.is_file() {
@@ -7025,7 +7089,9 @@ fn visit_transcript_lines(
         if count as u64 > maximum {
             return Err("conversation record exceeds the reading limit".into());
         }
-        visit(&line, offset)?;
+        if !visit(&line, offset)? {
+            return Ok(offset + count as u64);
+        }
         offset = offset
             .checked_add(count as u64)
             .ok_or("conversation position is exhausted")?;
@@ -7145,6 +7211,17 @@ fn replace_chat_file_with(
     path: &Path,
     write: impl FnOnce(&mut fs::File) -> Result<(), String>,
 ) -> Result<(), String> {
+    replace_chat_file_when(path, |file| {
+        write(file)?;
+        Ok(Some(()))
+    })
+    .map(|_| ())
+}
+
+fn replace_chat_file_when<T>(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> Result<Option<T>, String>,
+) -> Result<Option<T>, String> {
     let directory = path.parent().ok_or("invalid chat events path")?;
     let temporary =
         ChatTemporary(directory.join(format!(".chat-{:032x}.tmp", rand::random::<u128>())));
@@ -7156,7 +7233,9 @@ fn replace_chat_file_with(
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     let mut file = options.open(&temporary.0).map_err(|e| e.to_string())?;
-    write(&mut file)?;
+    let Some(result) = write(&mut file)? else {
+        return Ok(None);
+    };
     file.sync_all().map_err(|e| e.to_string())?;
     drop(file);
     fs::rename(&temporary.0, path).map_err(|e| e.to_string())?;
@@ -7164,7 +7243,7 @@ fn replace_chat_file_with(
     fs::File::open(directory)
         .and_then(|dir| dir.sync_all())
         .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(Some(result))
 }
 
 fn transcript_len(path: &Path, has_history: bool) -> Result<u64, String> {
@@ -15609,6 +15688,151 @@ mod tests {
             store.events("tail-growth", 0).unwrap().0.len(),
             PAGE_EVENTS_MAX + 4,
             "host-side full-history readers must not silently receive the first wire batch"
+        );
+    }
+    #[test]
+    fn question_readers_preserve_early_answers_and_late_withdrawals_in_long_histories() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let id = "long-questions";
+        conversation_for_receipts(&store, id);
+        let path = store.events_path(id);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&path).unwrap();
+        let question = "Which branch?";
+        writeln!(
+            file,
+            "{}",
+            json!({"kind":"question","id":"q1","question":question})
+        )
+        .unwrap();
+        writeln!(file, "{}", json!({"kind":"user","at_ms":5,"text":crate::chat_question::answer_note(question, "first answer")})).unwrap();
+        writeln!(file, "{}", json!({"kind":"user","at_ms":5,"text":crate::chat_question::answer_note(question, "later duplicate")})).unwrap();
+        let row = json!({"kind":"agent","event":{"kind":"toolEnd","detail":"x".repeat(512*1024)}});
+        for _ in 0..20 {
+            serde_json::to_writer(&mut file, &row).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        writeln!(file, "{}", json!({"kind":"answer","questionId":"q1"})).unwrap();
+        assert!(
+            store
+                .open_question(id, "q1")
+                .unwrap_err()
+                .contains("already has an answer")
+        );
+        writeln!(
+            file,
+            "{}",
+            json!({"kind":"answerWithdrawn","questionId":"q1"})
+        )
+        .unwrap();
+        assert_eq!(store.open_question(id, "q1").unwrap(), question);
+        assert!(
+            store
+                .open_question(id, "missing")
+                .unwrap_err()
+                .contains("no longer")
+        );
+        let receipt = crate::chat_receipts::Receipt {
+            state: crate::chat_receipts::ReceiptState::Accepted,
+            digest: String::new(),
+            at_ms: 5,
+            event_at_ms: Some(5),
+        };
+        assert_eq!(
+            store.delivered_answer(id, question, &receipt).as_deref(),
+            Some("first answer")
+        );
+        let mut forward = Vec::new();
+        store
+            .visit_events(id, |row| {
+                forward.push(row);
+                Ok(true)
+            })
+            .unwrap();
+        let mut backward = Vec::new();
+        store
+            .visit_events_backwards(id, |row| {
+                backward.push(row);
+                Ok(true)
+            })
+            .unwrap();
+        backward.reverse();
+        assert_eq!(
+            forward, backward,
+            "reverse pages must retain every boundary row and position"
+        );
+    }
+
+    #[test]
+    fn incomplete_or_empty_handover_keeps_the_previous_export() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let id = "handover-atomic";
+        conversation_for_receipts(&store, id);
+        let path = store.events_path(id);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let export = path.parent().unwrap().join("history.md");
+        fs::write(&export, "previous export").unwrap();
+        let chat = store.get(id).unwrap();
+        assert!(store.handover(&chat).unwrap().is_none());
+        assert_eq!(fs::read_to_string(&export).unwrap(), "previous export");
+        let mut file = fs::File::create(&path).unwrap();
+        writeln!(file, "{}", json!({"kind":"user","text":"A new task"})).unwrap();
+        file.write_all(&vec![b'x'; PAGE_RECORD_BYTES as usize + 1024])
+            .unwrap();
+        file.write_all(b"\n").unwrap();
+        assert!(
+            store
+                .handover(&chat)
+                .err()
+                .unwrap()
+                .contains("record exceeds")
+        );
+        assert_eq!(fs::read_to_string(&export).unwrap(), "previous export");
+        assert!(!fs::read_dir(path.parent().unwrap()).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    #[ignore = "manual long-history handover memory measurement"]
+    fn measure_long_history_handover() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "handover-memory");
+        let path = store.events_path("handover-memory");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&path).unwrap();
+        writeln!(
+            file,
+            "{}",
+            json!({"kind":"user","text":"Keep the initial request","at_ms":1})
+        )
+        .unwrap();
+        let row = json!({"kind":"agent","backend":"claude","event":{"kind":"toolEnd","detail":"x".repeat(512*1024)},"at_ms":2});
+        for _ in 0..400 {
+            serde_json::to_writer(&mut file, &row).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        writeln!(file, "{}", json!({"kind":"agent","backend":"claude","event":{"kind":"text","delta":"Final answer"},"at_ms":3})).unwrap();
+        drop(file);
+        let chat = store.get("handover-memory").unwrap();
+        let start = std::time::Instant::now();
+        let handover = store.handover(&chat).unwrap().unwrap();
+        assert!(handover.brief.contains("Keep the initial request"));
+        assert!(handover.brief.contains("Final answer"));
+        let exported = fs::read_to_string(path.parent().unwrap().join("history.md")).unwrap();
+        assert_eq!(exported.matches("tool finished:").count(), 400);
+        assert!(exported.contains("Final answer"));
+        eprintln!(
+            "200 MiB handover: elapsed_ms={:.2}, export_bytes={}",
+            start.elapsed().as_secs_f64() * 1000.0,
+            exported.len()
         );
     }
 }

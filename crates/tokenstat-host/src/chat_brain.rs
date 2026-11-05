@@ -49,6 +49,7 @@ struct Folded {
 ///
 /// Returns an empty string when there is nothing worth handing over, so a
 /// caller can treat "no history" and "nothing happened" the same way.
+#[cfg(test)]
 pub fn brief(events: &[Value], folder: &str, budget: usize) -> String {
     let folded = fold(events);
     if folded.turns == 0 {
@@ -57,18 +58,30 @@ pub fn brief(events: &[Value], folder: &str, budget: usize) -> String {
     render(&folded, folder, budget).0
 }
 
-fn fold(events: &[Value]) -> Folded {
-    let mut folded = Folded::default();
-    let mut reply = String::new();
-    for event in events {
+pub(crate) struct Summary {
+    folded: Folded,
+    reply: NormalizedLine,
+}
+
+impl Default for Summary {
+    fn default() -> Self {
+        Self {
+            folded: Folded::default(),
+            reply: NormalizedLine::default(),
+        }
+    }
+}
+
+impl Summary {
+    pub(crate) fn push(&mut self, event: &Value) {
         match event.get("kind").and_then(Value::as_str) {
             Some("user") => {
                 if let Some(text) = event.get("text").and_then(Value::as_str) {
-                    folded.turns += 1;
-                    folded.asks.push(one_line(text, 240));
+                    self.folded.turns += 1;
+                    self.folded.asks.push(one_line(text, 240));
                     // A new question ends the previous answer. Keeping only
                     // the latest is what makes "where it was left" true.
-                    reply.clear();
+                    self.reply.clear();
                 }
             }
             Some("approval") => {
@@ -76,7 +89,7 @@ fn fold(events: &[Value]) -> Folded {
                 if approval.get("decision").and_then(Value::as_str) == Some("deny")
                     && let Some(preview) = approval.get("preview").and_then(Value::as_str)
                 {
-                    push_unique(&mut folded.refused, one_line(preview, 160));
+                    push_unique(&mut self.folded.refused, one_line(preview, 160));
                 }
             }
             Some("agent") => {
@@ -84,7 +97,7 @@ fn fold(events: &[Value]) -> Folded {
                 match agent.get("kind").and_then(Value::as_str) {
                     Some("text") => {
                         if let Some(delta) = agent.get("delta").and_then(Value::as_str) {
-                            reply.push_str(delta);
+                            self.reply.push(delta, TAIL_BUDGET);
                         }
                     }
                     Some("edit") => {
@@ -93,7 +106,7 @@ fn fold(events: &[Value]) -> Folded {
                         let removed = agent.get("removed").and_then(Value::as_u64).unwrap_or(0);
                         if !path.is_empty() {
                             push_unique(
-                                &mut folded.edits,
+                                &mut self.folded.edits,
                                 format!("{} +{added} −{removed}", one_line(path, 240)),
                             );
                         }
@@ -105,7 +118,7 @@ fn fold(events: &[Value]) -> Folded {
                         // read is not: the file it touched says nothing about
                         // what the conversation achieved.
                         if is_shell(verb) && !target.is_empty() {
-                            push_unique(&mut folded.commands, one_line(target, 160));
+                            push_unique(&mut self.folded.commands, one_line(target, 160));
                         }
                     }
                     _ => {}
@@ -114,8 +127,28 @@ fn fold(events: &[Value]) -> Folded {
             _ => {}
         }
     }
-    folded.last_reply = one_line(&reply, TAIL_BUDGET);
-    folded
+
+    fn folded(mut self) -> Folded {
+        self.folded.last_reply = self.reply.finish(TAIL_BUDGET);
+        self.folded
+    }
+
+    pub(crate) fn finish(self, folder: &str, budget: usize) -> (String, usize) {
+        let folded = self.folded();
+        if folded.turns == 0 {
+            return (String::new(), 0);
+        }
+        render(&folded, folder, budget)
+    }
+}
+
+#[cfg(test)]
+fn fold(events: &[Value]) -> Folded {
+    let mut summary = Summary::default();
+    for event in events {
+        summary.push(event);
+    }
+    summary.folded()
 }
 
 pub(crate) fn is_shell(verb: &str) -> bool {
@@ -206,6 +239,7 @@ fn fit(items: &[String], budget: usize, omitted: &str) -> (Vec<String>, usize) {
 
 /// How many early turns the fold leaves out of the brief. The handover
 /// points at a full export exactly then, so depth is one file read away.
+#[cfg(test)]
 pub fn dropped_turns(events: &[Value], folder: &str, budget: usize) -> usize {
     let folded = fold(events);
     if folded.turns == 0 {
@@ -236,6 +270,7 @@ fn push_unique(items: &mut Vec<String>, value: String) {
 /// out, beside `brain.md`, for an agent that needs more than the summary.
 /// Tool output is capped per item: the export is depth on demand, not a
 /// second copy of megabytes of logs.
+#[cfg(test)]
 pub fn export_markdown(events: &[Value], folder: &str) -> String {
     const TEXT_CAP: usize = 4_000;
     const DETAIL_CAP: usize = 2_000;
@@ -381,14 +416,64 @@ pub fn export_markdown(events: &[Value], folder: &str) -> String {
 
 /// Collapse to one line and cap it. A handover is a list, and a list item that
 /// spans forty lines of pasted output is not a list item.
-fn one_line(text: &str, cap: usize) -> String {
-    let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if joined.chars().count() <= cap {
-        return joined;
-    }
-    let kept: String = joined.chars().take(cap).collect();
-    format!("{kept}…")
+#[derive(Default)]
+struct NormalizedLine {
+    text: String,
+    characters: usize,
+    space: bool,
 }
+impl NormalizedLine {
+    fn clear(&mut self) {
+        self.text.clear();
+        self.characters = 0;
+        self.space = false;
+    }
+
+    fn push(&mut self, text: &str, cap: usize) {
+        for character in text.chars() {
+            if self.characters > cap {
+                break;
+            }
+            if character.is_whitespace() {
+                self.space = !self.text.is_empty();
+            } else {
+                if self.space {
+                    self.text.push(' ');
+                    self.characters += 1;
+                    self.space = false;
+                    if self.characters > cap {
+                        break;
+                    }
+                }
+                self.text.push(character);
+                self.characters += 1;
+            }
+        }
+    }
+
+    fn finish(mut self, cap: usize) -> String {
+        if self.characters > cap {
+            let end = self
+                .text
+                .char_indices()
+                .nth(cap)
+                .map_or(self.text.len(), |(at, _)| at);
+            self.text.truncate(end);
+            self.text.push('…');
+        }
+        self.text
+    }
+}
+
+fn one_line(text: &str, cap: usize) -> String {
+    let mut line = NormalizedLine::default();
+    line.push(text, cap);
+    line.finish(cap)
+}
+
+#[path = "chat_brain/export.rs"]
+mod export;
+pub(crate) use export::HistoryWriter;
 
 #[cfg(test)]
 mod tests {
@@ -515,5 +600,96 @@ mod tests {
         let text = brief(&events, "/repo", BUDGET);
         assert!(text.contains("git status"));
         assert!(!text.contains("Read"));
+    }
+    #[test]
+    fn streamed_export_matches_existing_format_across_fragment_boundaries() {
+        let fragments = [
+            "",
+            " ",
+            "\n\t",
+            "  hello  ",
+            "世界\u{2003}",
+            "😀 next\r\n",
+            "x",
+            "y",
+        ];
+        let mut seed = 47u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            seed >> 32
+        };
+        for case in 0..300 {
+            let mut events = Vec::new();
+            for _ in 0..60 {
+                let text = fragments[(next() as usize) % fragments.len()];
+                let mut row = match next() % 12 {
+                    0 => json!({"kind":"user","text":text.repeat(700)}),
+                    1 => {
+                        json!({"kind":"approval","approval":{"decision":"deny","preview":text.repeat(200)}})
+                    }
+                    2 => json!({"kind":"handoff","to":"codex"}),
+                    3 => {
+                        json!({"kind":"agent","event":{"kind":"toolStart","verb":"Bash","target":text}})
+                    }
+                    4 => {
+                        json!({"kind":"agent","event":{"kind":"toolEnd","ok":next()%2==0,"detail":text.repeat(700)}})
+                    }
+                    5 => {
+                        json!({"kind":"agent","event":{"kind":"edit","path":text,"added":2,"removed":1}})
+                    }
+                    6 => json!({"kind":"agent","event":{"kind":"attachment","name":text}}),
+                    7 => json!({"kind":"agent","event":{"kind":"failed","text":text.repeat(500)}}),
+                    8 => json!({"kind":"agent","event":{"kind":"done","status":text}}),
+                    9 => json!({"kind":"agent","event":{"kind":"session","id":"private-session"}}),
+                    kind => {
+                        json!({"kind":"agent","event":{"kind":if kind==10 {"text"} else {"thinking"},"delta":text}})
+                    }
+                };
+                if next() % 3 != 0 {
+                    row["backend"] = json!(if next() % 2 == 0 { "claude" } else { "codex" });
+                }
+                events.push(row);
+            }
+            // Exercise trimming an answer much longer than its last content.
+            events.push(
+                json!({"kind":"agent","backend":"codex","event":{"kind":"text","delta":"  final"}}),
+            );
+            events.push(json!({"kind":"agent","backend":"codex","event":{"kind":"text","delta":" \n\t".repeat(5000)}}));
+            let mut writer =
+                HistoryWriter::new(std::io::Cursor::new(Vec::new()), "folder 😀").unwrap();
+            for row in &events {
+                writer.push(row).unwrap();
+            }
+            let (output, length) = writer.finish().unwrap();
+            let mut bytes = output.into_inner();
+            bytes.truncate(length as usize);
+            assert_eq!(
+                String::from_utf8(bytes).unwrap(),
+                export_markdown(&events, "folder 😀"),
+                "case {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn incremental_summary_normalization_matches_joining_without_retaining_the_reply() {
+        let fragments = [" a", "b ", "\t\n", "世界", " 😀 ", "\u{2003}", "c"];
+        for cap in [0, 1, 17, TAIL_BUDGET] {
+            let mut line = NormalizedLine::default();
+            let mut full = String::new();
+            for index in 0..5000 {
+                let fragment = fragments[index % fragments.len()];
+                full.push_str(fragment);
+                line.push(fragment, cap);
+                assert!(line.text.chars().count() <= cap + 1);
+            }
+            let joined = full.split_whitespace().collect::<Vec<_>>().join(" ");
+            let expected = if joined.chars().count() > cap {
+                format!("{}…", joined.chars().take(cap).collect::<String>())
+            } else {
+                joined
+            };
+            assert_eq!(line.finish(cap), expected);
+        }
     }
 }

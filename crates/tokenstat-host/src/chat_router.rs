@@ -911,11 +911,10 @@ impl Store {
         {
             state.preferred_reset_at_ms = limit.resets_at_ms;
         }
-        let (events, _) = self.events(id, 0)?;
         let mut attachments = Vec::new();
-        for event in events.iter().rev() {
+        self.visit_events_backwards(id, |event| {
             if event["kind"].as_str() == Some("user") {
-                break;
+                return Ok(false);
             }
             if event["event"]["kind"].as_str() == Some("attachment")
                 && let Some(file) = event["event"]["id"].as_str()
@@ -924,7 +923,8 @@ impl Store {
             {
                 attachments.push(file.to_string());
             }
-        }
+            Ok(attachments.len() < 20)
+        })?;
         attachments.reverse();
         state.attachments = attachments.clone();
         let handles = state.policy.handles(&limit)
@@ -1936,6 +1936,18 @@ mod retirement_tests {
                 },
             ],
         );
+        // Bypass append-time retention to exercise a durable long history.
+        // The current file and the user boundary sit behind several pages.
+        let mut archive = OpenOptions::new()
+            .append(true)
+            .open(store.events_path("original"))
+            .unwrap();
+        let row = json!({"kind":"agent","event":{"kind":"toolEnd","detail":"x".repeat(512*1024)}});
+        for _ in 0..20 {
+            serde_json::to_writer(&mut archive, &row).unwrap();
+            archive.write_all(b"\n").unwrap();
+        }
+        drop(archive);
         store
             .router_observe(
                 "original",
