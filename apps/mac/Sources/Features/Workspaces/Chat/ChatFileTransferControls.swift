@@ -62,45 +62,44 @@ private struct ChatFileRelaySheet: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var cancelButton: some View {
-        Button(L10n.text("common.cancel"), role: .cancel) { answer(false) }
+        Button(L10n.text("common.cancel"), .dismiss, role: .cancel) { answer(false) }.buttonStyle(SecondaryButtonStyle())
     }
     private var continueButton: some View {
-        Button(L10n.text("common.continue")) { answer(true) }.buttonStyle(.borderedProminent)
+        Button(L10n.text("common.continue"), .approve) { answer(true) }.buttonStyle(AccentButtonStyle())
     }
 
     var body: some View {
-        VStack(spacing: Theme.Space.m) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text(L10n.text("common.chat_files_relay_title")).font(Theme.headline)
-                    Text(L10n.text("common.chat_files_relay_explanation"))
-                    HStack(alignment: .top) {
-                        Image(systemName: "doc")
-                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            Text(name).font(Theme.body.weight(.semibold)).lineLimit(3).truncationMode(.middle)
-                            Text(size.map(RelayUsage.bytes) ?? L10n.text("common.chat_files_size_unknown"))
-                                .foregroundStyle(.secondary)
-                        }
+        ThemedSheet(title: L10n.text("common.chat_files_relay_title"), subtitle: "",
+                    scrolls: true, fills: true, onClose: { answer(false) }) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                Text(L10n.text("common.chat_files_relay_explanation"))
+                HStack(alignment: .top) {
+                    Image(systemName: "doc")
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text(name).font(Theme.body.weight(.semibold)).lineLimit(3).truncationMode(.middle)
+                        Text(size.map(RelayUsage.bytes) ?? L10n.text("common.chat_files_size_unknown"))
+                            .foregroundStyle(.secondary)
                     }
-                    Divider()
-                    if let usage, usage.isSupported {
-                        Text(L10n.text("common.chat_files_relay_used", RelayUsage.bytes(usage.usedBytes), RelayUsage.bytes(usage.limitBytes)))
-                            .font(Theme.body.weight(.semibold)).monospacedDigit()
-                        ProgressView(value: usage.fraction)
-                            .accessibilityLabel(L10n.text("common.chat_files_relay_usage_label"))
-                        Text(L10n.text("common.chat_files_relay_available", RelayUsage.bytes(usage.remainingBytes)))
-                            .monospacedDigit()
-                        Text(L10n.text("common.chat_files_relay_allowance"))
-                    } else {
-                        if let remaining {
-                            Text(L10n.text("common.chat_files_relay_available", RelayUsage.bytes(remaining)))
-                        }
-                        Text(L10n.text("common.chat_files_relay_usage_unknown"))
+                }
+                ThemeRule()
+                if let usage, usage.isSupported {
+                    Text(L10n.text("common.chat_files_relay_used", RelayUsage.bytes(usage.usedBytes), RelayUsage.bytes(usage.limitBytes)))
+                        .font(Theme.body.weight(.semibold)).monospacedDigit()
+                    ProgressView(value: usage.fraction)
+                        .accessibilityLabel(L10n.text("common.chat_files_relay_usage_label"))
+                    Text(L10n.text("common.chat_files_relay_available", RelayUsage.bytes(usage.remainingBytes)))
+                        .monospacedDigit()
+                    Text(L10n.text("common.chat_files_relay_allowance"))
+                } else {
+                    if let remaining {
+                        Text(L10n.text("common.chat_files_relay_available", RelayUsage.bytes(remaining)))
                     }
-                    Text(L10n.text("common.chat_files_relay_reporting"))
-                        .font(Theme.footnote).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
+                    Text(L10n.text("common.chat_files_relay_usage_unknown"))
+                }
+                Text(L10n.text("common.chat_files_relay_reporting"))
+                    .font(Theme.footnote).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        } actions: {
             if typeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: Theme.Space.s) { cancelButton; continueButton }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -110,9 +109,8 @@ private struct ChatFileRelaySheet: View {
         }
         .font(Theme.body)
         .tint(Theme.accent)
-        .padding(Theme.Space.l)
         #if os(macOS)
-        .frame(width: 420, height: 510)
+        .modalFrame(width: 420, height: 510)
         #else
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
