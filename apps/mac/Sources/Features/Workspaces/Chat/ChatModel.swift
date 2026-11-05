@@ -538,11 +538,12 @@ final class ChatModel {
 
     /// Explicit import is a new local draft, never another device's send.
     /// Compare the snapshot again after metadata resolution so later typing wins.
+    /// Pending local files are not in that snapshot yet; wait for them before replacing it.
     func importHandoffDraft(_ shared: WorkSharedDraft, files: [ChatAttachment],
                             replacing expected: WorkSharedDraft, reference: WorkReference) -> Bool {
         guard currentReference == reference, draftReference == reference,
               reference.scope == WorkSessionContext.shared.scope, savedCopy == nil,
-              !sending, heldSubmission == nil, unconfirmedSend == nil,
+              !sending, stagingAttachments == 0, heldSubmission == nil, unconfirmedSend == nil,
               handoffDraft == expected, files.map(\.id) == shared.attachmentIDs else { return false }
         draftSaveTask?.cancel()
         draftSaveTask = nil

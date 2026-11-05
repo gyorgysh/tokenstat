@@ -160,7 +160,7 @@ struct WorkHandoffSheet: View {
                     importDraft(draft, model: model)
                 }.buttonStyle(AccentButtonStyle())
                     .disabled(loadingFiles || importing || fileError != nil || model.isBusy
-                        || model.canRetryShare || chat.sending || chat.unconfirmedSend != nil)
+                        || model.canRetryShare || chat.sending || chat.stagingAttachments > 0 || chat.unconfirmedSend != nil)
                 Button(L10n.text("apple.workhandoffsheet.copy_shared_text.03b373fb"), .copy) { copy(draft.text); notice = L10n.text("apple.workhandoffsheet.shared_text_copied.358c6857") }
                     .buttonStyle(SecondaryButtonStyle())
             }
@@ -235,7 +235,7 @@ struct WorkHandoffSheet: View {
     }
 
     private func importDraft(_ draft: WorkSharedDraft, model: WorkHandoffModel) {
-        guard !importing, let connection, connection.isCurrent else { return }
+        guard !importing, chat.stagingAttachments == 0, let connection, connection.isCurrent else { return }
         let expected = chat.handoffDraft
         importing = true
         Task {
