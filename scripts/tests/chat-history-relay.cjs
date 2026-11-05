@@ -31,6 +31,24 @@ function publicKey(byte) {
 }
 
 async function main() {
+  // Exercise the account bootstrap the native clients need, using only
+  // this in-memory database. Pairing must bind authentication to its user.
+  const bootstrapAccount = "u_native_history_bootstrap";
+  const bootstrapMachine = "m_0123456789abcde0";
+  db.run("INSERT INTO users (id,tier,created_at) VALUES (?,'free',?)", bootstrapAccount, new Date().toISOString());
+  const pairing = sync.createPairingCode(bootstrapAccount);
+  assert.ok(pairing.code);
+  const redeemed = sync.redeemPairingCode(pairing.code, bootstrapMachine);
+  assert.equal(redeemed.status, 200);
+  const auth = sync.authToken({ headers: { authorization: `Bearer ${redeemed.body.token}` } });
+  assert.equal(auth.user?.id, bootstrapAccount);
+  assert.equal(sync.redeemPairingCode(pairing.code, bootstrapMachine).status, 400);
+  const registered = sync.registerMachine(auth.user.id, bootstrapMachine,
+    { publicIdentity: publicKey(63), label: "Native history bootstrap", kind: "client" });
+  assert.equal(registered.status, 200);
+  assert.equal(sync.mintTunnelToken(auth.user.id, bootstrapMachine).status, 200);
+  console.log("Disposable account pairing, authentication, registration and relay mint passed.");
+
   const account = "u_chat_history_fixture";
   db.run("INSERT INTO users (id,tier,created_at) VALUES (?,'free',?)", account, new Date().toISOString());
   const tokens = [];
