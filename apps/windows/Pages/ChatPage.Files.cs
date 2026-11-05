@@ -41,6 +41,43 @@ internal sealed partial class ChatPage
         };
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
+    private static void PruneUploadReceipts(string directory)
+    {
+        if (!Directory.Exists(directory)) return;
+        var retained = new List<FileInfo>();
+        var cutoff = DateTime.UtcNow.AddDays(-1);
+        bool Active(FileInfo file) => FileClaims.ContainsKey(file.Name[..64]);
+        void Remove(FileInfo file)
+        {
+            if (Active(file)) return;
+            try { file.Delete(); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        try
+        {
+            foreach (var file in new DirectoryInfo(directory).EnumerateFiles())
+            {
+                var owned = file.Name.Length == 69 && file.Name.EndsWith(".json", StringComparison.Ordinal)
+                    || file.Name.Length == 73 && file.Name.EndsWith(".json.tmp", StringComparison.Ordinal);
+                if (!owned || !file.Name[..64].All(Uri.IsHexDigit)) continue;
+                try
+                {
+                    if ((file.Attributes & FileAttributes.ReparsePoint) != 0 || Active(file)) continue;
+                    if (file.LastWriteTimeUtc < cutoff || file.Length >= 8192) Remove(file);
+                    else retained.Add(file);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            // Active uploads are protected separately, including their atomic
+            // write files. Bound the receipts left by completed or failed work.
+            foreach (var file in retained.OrderByDescending(file => file.LastWriteTimeUtc).Skip(128)) Remove(file);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     private async Task<JsonNode> UploadFileAsync(string chat, Windows.Storage.StorageFile file, Func<bool> selected)
     {
         var accountGeneration = AppServices.AccountGeneration;
@@ -57,7 +94,13 @@ internal sealed partial class ChatPage
             if (!current()) throw new OperationCanceledException();
             var request = new JsonObject { ["id"] = chat, ["name"] = file.Name, ["data"] = Convert.ToBase64String(bytes), ["allowRelay"] = false };
             try { return await CallChatAsync("chat.attach", request); }
-            catch (HostException error) when (error.Code == "relay_consent_required") { if (!await ConfirmFileRelayAsync(file.Name, bytes.Length) || !current()) throw new OperationCanceledException(); request["allowRelay"] = true; return await CallChatAsync("chat.attach", request); }
+            catch (HostException error) when (error.Code == "relay_consent_required")
+            {
+                if (!current()) throw new OperationCanceledException();
+                if (!await ConfirmFileRelayAsync(file.Name, bytes.Length) || !current()) throw new OperationCanceledException();
+                request["allowRelay"] = true;
+                return await CallChatAsync("chat.attach", request);
+            }
         }
         if (_fileTransfer is not null) throw new IOException(L10n.Text("common.chat_files_busy"));
         using var cancel = new CancellationTokenSource(); _fileTransfer = cancel;
@@ -79,11 +122,7 @@ internal sealed partial class ChatPage
             }
             if (hashedBytes != expectedSize || stream.Length != expectedSize) throw new IOException("The file changed while reading");
             var hash = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant(); stream.Position = 0;
-            var caps = await CallChatAsync("chat.fileCapabilities", new JsonObject { ["id"] = chat });
-            if (!current()) throw new OperationCanceledException();
-            if (stream.Length > Format.Long(caps, "maxFileBytes")) throw new IOException(L10n.Text("common.chat_files_too_large"));
-            var relay = Format.Flag(caps, "relay");
-            if (relay && !await ConfirmFileRelayAsync(file.Name, stream.Length, caps?["relayRemainingBytes"] is null ? null : Format.Long(caps, "relayRemainingBytes"))) throw new OperationCanceledException();
+            cancel.Token.ThrowIfCancellationRequested();
             if (!current()) throw new OperationCanceledException();
             var account = await AppServices.Host.CallAsync("account.status", new JsonObject());
             if (!current()) throw new OperationCanceledException();
@@ -92,14 +131,36 @@ internal sealed partial class ChatPage
             if (!FileClaims.TryAdd(key, 0)) throw new IOException(L10n.Text("common.chat_files_busy"));
             claim = key;
             var journal = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "file-transfers", key + ".json");
+            await Task.Run(() => PruneUploadReceipts(Path.GetDirectoryName(journal)!));
+            cancel.Token.ThrowIfCancellationRequested();
+            if (!current()) throw new OperationCanceledException();
             JsonNode? previous = null;
-            if (File.Exists(journal) && new FileInfo(journal).Length < 8192)
+            if (File.Exists(journal) && new FileInfo(journal).Length < 8192
+                && File.GetLastWriteTimeUtc(journal) >= DateTime.UtcNow.AddDays(-1))
             {
                 try { var saved = JsonNode.Parse(await File.ReadAllTextAsync(journal)); previous = await CallChatAsync("chat.fileUploadStatus", new JsonObject { ["id"] = chat, ["transferId"] = Format.Text(saved, "transferId") }); } catch (HostException) { }
                 catch (System.Text.Json.JsonException) { File.Delete(journal); }
             }
+            cancel.Token.ThrowIfCancellationRequested();
             if (!current()) throw new OperationCanceledException();
-            if (Format.Flag(previous, "finished") && previous?["attachment"] is JsonNode completed) { File.Delete(journal); return completed.DeepClone(); }
+            if (Format.Flag(previous, "finished") && previous?["attachment"] is JsonNode completed) return completed.DeepClone();
+            var previousOffset = previous is null ? (long?)null : Format.Long(previous, "offset");
+            if (previousOffset < 0 || previousOffset > expectedSize) throw new IOException("Invalid file transfer response");
+            JsonNode? caps = null;
+            var relay = false;
+            // Receipt reuse and finishing already uploaded bytes do not need
+            // another payload channel, route size check or relay prompt.
+            if (previousOffset != expectedSize)
+            {
+                caps = await CallChatAsync("chat.fileCapabilities", new JsonObject { ["id"] = chat });
+                cancel.Token.ThrowIfCancellationRequested();
+                if (!current()) throw new OperationCanceledException();
+                if (expectedSize > Format.Long(caps, "maxFileBytes")) throw new IOException(L10n.Text("common.chat_files_too_large"));
+                relay = Format.Flag(caps, "relay");
+                if (relay && !await ConfirmFileRelayAsync(file.Name, expectedSize, caps?["relayRemainingBytes"] is null ? null : Format.Long(caps, "relayRemainingBytes"))) throw new OperationCanceledException();
+            }
+            cancel.Token.ThrowIfCancellationRequested();
+            if (!current()) throw new OperationCanceledException();
             var start = previous ?? await CallChatAsync("chat.fileUploadStart", new JsonObject { ["id"] = chat, ["name"] = file.Name, ["size"] = stream.Length, ["sha256"] = hash });
             Directory.CreateDirectory(Path.GetDirectoryName(journal)!);
             try
@@ -129,7 +190,10 @@ internal sealed partial class ChatPage
                     try { chunk = await CallChatAsync("chat.fileUploadChunk", request); }
                     catch (HostException error) when (error.Code == "relay_consent_required" && !relay)
                     {
+                        cancel.Token.ThrowIfCancellationRequested();
+                        if (!current()) throw new OperationCanceledException();
                         if (!await ConfirmFileRelayAsync(file.Name, stream.Length, caps?["relayRemainingBytes"] is null ? null : Format.Long(caps, "relayRemainingBytes")) || !current()) throw new OperationCanceledException();
+                        cancel.Token.ThrowIfCancellationRequested();
                         relay = true; request["allowRelay"] = true; chunk = await CallChatAsync("chat.fileUploadChunk", request);
                     }
                     if (Format.Long(chunk, "offset") != offset + count) throw new IOException("Invalid file transfer response");
@@ -138,7 +202,9 @@ internal sealed partial class ChatPage
                 }
                 cancel.Token.ThrowIfCancellationRequested(); if (!current()) throw new OperationCanceledException();
                 var result = await CallChatAsync("chat.fileUploadFinish", new JsonObject { ["id"] = chat, ["transferId"] = transfer });
-                File.Delete(journal); return result;
+                // Another attachment can fail before the message is sent.
+                // Keep this receipt so retrying the message reuses the upload.
+                return result;
             }
             catch (OperationCanceledException)
             {
