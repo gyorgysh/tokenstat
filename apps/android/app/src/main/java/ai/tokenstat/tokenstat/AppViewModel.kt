@@ -168,6 +168,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val tracker = ConnectionTracker()
     private val connectivity = ConnectivityMonitor(app, viewModelScope)
 
+    private val planLimits = ai.tokenstat.tokenstat.ui.logic.PlanLimitsReader(
+        scope = viewModelScope,
+        owner = {
+            UsageWidgetStore.lease()?.takeIf { lease ->
+                !signingOut && lease.owner == state.value.account?.let(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot::owner)
+            }
+        },
+        read = { force ->
+            CoreClient.call("usage.limits", buildJsonObject { put("force", force) }) as? JsonArray
+                ?: throw CoreFailure("invalid_response", L10n.text("common.chat.stats.unavailable"))
+        },
+        publish = { result ->
+            val lease = UsageWidgetStore.lease()
+            result.onSuccess { limits ->
+                if (lease != null) UsageWidgetStore.publishLimits(getApplication(), lease, limits)
+                mutableState.update { it.copy(limits = limits, limitsError = null) }
+            }.onFailure { error ->
+                if (lease != null) UsageWidgetStore.failedLimits(getApplication(), lease)
+                mutableState.update { it.copy(limitsError = error.message ?: L10n.text("common.chat.stats.unavailable")) }
+            }
+        },
+    )
+
+    suspend fun refreshLimits(force: Boolean = false) = planLimits.refresh(force)
+
     init {
         // Every call that leaves this device reports here, and offline ones
         // are refused before they spend their patience budget. Installed
@@ -254,7 +279,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (signingOut || !UsageWidgetStore.verifyForeground(getApplication(), accountObject, widgetEpoch)) return@onSuccess
                 ai.tokenstat.tokenstat.ecosystem.SystemProjects.verify(getApplication(), accountObject)
                 syncWorkspaceAccount(accountObject)
+                val sameOwner = ai.tokenstat.tokenstat.ecosystem.UsageSnapshot.owner(accountObject) ==
+                    state.value.account?.let(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot::owner)
                 mutableState.value = mutableState.value.copy(
+                    limits = if (sameOwner) state.value.limits else JsonArray(emptyList()),
+                    limitsError = if (sameOwner) state.value.limitsError else null,
                     account = accountObject,
                     authChecked = true,
                     authError = null,
@@ -317,7 +346,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 put("weeks", 53); put("scope", "account"); put("force", false)
             })
         }
-        val limits = async { CoreClient.call("usage.limits") }
+        val limits = async { refreshLimits() }
         runCatching { calendar.await() }.onFailure {
             if (it is CancellationException) throw it
         }.onSuccess {
@@ -326,19 +355,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }.onFailure {
             UsageWidgetStore.failed(getApplication(), widgetLease)
         }
-        runCatching { limits.await() }
-            .onSuccess {
-                if (widgetLease != null) UsageWidgetStore.publishLimits(getApplication(), widgetLease, it)
-                mutableState.value = mutableState.value.copy(
-                    limits = it as? JsonArray ?: JsonArray(emptyList()),
-                    limitsError = null,
-                )
-            }
-            .onFailure {
-                if (it is CancellationException) throw it
-                if (widgetLease != null) UsageWidgetStore.failedLimits(getApplication(), widgetLease)
-                mutableState.value = mutableState.value.copy(limitsError = it.message)
-            }
+        limits.await()
     }
 
     // One account-plane breakdown, the way the iOS Insights model loads it:
@@ -460,6 +477,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         UsageWidgetStore.clear(getApplication(), block = true)
         ai.tokenstat.tokenstat.ecosystem.SystemProjects.clear(getApplication())
         try {
+            planLimits.retire()
             signInJob?.cancelAndJoin()
             refreshJob?.cancelAndJoin()
             dashboardJob?.cancelAndJoin()
