@@ -27,6 +27,59 @@ class ChatFileTransferTest {
     private fun protocol() = buildJsonObject { put("protocolVersion", 34) }
     private fun capabilities() = buildJsonObject { put("maxFileBytes", FILE_MAX); put("relay", false) }
 
+    @Test fun legacyDownloadKeepsBytesAndCanRetryWithRelayConsent() = runBlocking {
+        val root = directory()
+        val bytes = ByteArray(128 * 1024 + 17) { (it * 37).toByte() }
+        val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        var attempts = 0
+        var prompts = 0
+        try {
+            val result = withContext(Dispatchers.Main) {
+                downloadChatFile(root, "chat", "legacy", "owner", call = { method, params ->
+                    onMain()
+                    when (method) {
+                        "protocol" -> buildJsonObject { put("protocolVersion", 33) }
+                        "chat.attachment" -> {
+                            attempts++
+                            if (params["allowRelay"]!!.jsonPrimitive.boolean != true) throw CoreFailure("relay_consent_required", "Relay consent required")
+                            buildJsonObject { put("data", encoded); put("attachment", buildJsonObject { put("name", "../../image.png") }) }
+                        }
+                        else -> error("Unexpected legacy request: $method")
+                    }
+                }, confirm = { onMain(); prompts++; true }, progress = {}, byteLimit = bytes.size.toLong())
+            }
+            assertEquals("image.png", result.name)
+            assertEquals(root.canonicalFile, result.parentFile!!.parentFile!!.canonicalFile)
+            assertArrayEquals(bytes, result.readBytes())
+            assertEquals(2, attempts)
+            assertEquals(1, prompts)
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun failedLegacyDownloadDoesNotLeaveATemporaryFolder() = runBlocking {
+        val root = directory()
+        try {
+            try {
+                withContext(Dispatchers.Main) {
+                    downloadChatFile(root, "chat", "legacy", "owner", call = { method, _ ->
+                        onMain()
+                        when (method) {
+                            "protocol" -> buildJsonObject { put("protocolVersion", 33) }
+                            "chat.attachment" -> buildJsonObject {
+                                put("data", Base64.encodeToString(byteArrayOf(1, 2, 3), Base64.NO_WRAP))
+                                // A valid JSON name that the filesystem cannot create.
+                                put("attachment", buildJsonObject { put("name", "x".repeat(300)) })
+                            }
+                            else -> error("Unexpected legacy request: $method")
+                        }
+                    }, confirm = { error("Direct legacy transfer must not prompt") }, progress = {})
+                }
+                fail("A filename beyond the filesystem limit was accepted")
+            } catch (_: java.io.IOException) {}
+            assertTrue("Failed legacy writes remove their private temporary directory", root.listFiles().orEmpty().isEmpty())
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun uploadChunksPreserveBytesAndReuseEncodingAfterRelayFallback() = runBlocking {
         val root = directory()
         val bytes = ByteArray(2 * 512 * 1024 + 17) { (it * 37).toByte() }

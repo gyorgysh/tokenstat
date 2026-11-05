@@ -18,6 +18,36 @@ import org.junit.rules.TemporaryFolder
 class ChatFileTransfersTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun decliningRelayPreservesTheDownloadedPrefix() = runBlocking {
+        val directory = temporary.newFolder()
+        val bytes = "already downloaded prefix".toByteArray()
+        fun sha(value: ByteArray) = MessageDigest.getInstance("SHA-256").digest(value).joinToString("") { "%02x".format(it.toInt() and 255) }
+        val checksum = sha(bytes)
+        val key = sha("owner|chat|attachment|$checksum".toByteArray())
+        val cached = File(File(directory, key).apply { mkdirs() }, "archive.bin").apply { writeBytes(bytes.copyOf(7)) }
+        var prompts = 0
+        repeat(3) { attempt ->
+            try {
+                downloadChatFile(directory, "chat", if (attempt == 2) "new-attachment" else "attachment", "owner", call = { method, _ -> when (method) {
+                    "protocol" -> buildJsonObject { put("protocolVersion", 34) }
+                    "chat.fileCapabilities" -> buildJsonObject { put("maxFileBytes", FILE_MAX); put("relay", true); put("relayRemainingBytes", 1234) }
+                    "chat.fileDownloadInfo" -> buildJsonObject { put("sha256", checksum); put("attachment", buildJsonObject { put("name", "archive.bin"); put("size", bytes.size) }) }
+                    else -> throw AssertionError("Declining must not fetch a chunk: $method")
+                } }, confirm = {
+                    prompts++
+                    assertEquals(1234L, it)
+                    if (attempt == 1) throw kotlinx.coroutines.CancellationException("Dialog dismissed")
+                    false
+                }, progress = { error("Nothing was transferred") })
+                org.junit.Assert.fail("Declined download returned a file")
+            } catch (_: IllegalStateException) {}
+            assertTrue("Declining or dismissing consent keeps the partial file", cached.exists())
+            org.junit.Assert.assertArrayEquals(bytes.copyOf(7), cached.readBytes())
+        }
+        assertEquals(3, prompts)
+        assertEquals("A declined new transfer creates no empty folder", 1, directory.listFiles()!!.size)
+    }
+
     @Test fun completedCachedDownloadDoesNotAskForRelayAgain() = runBlocking {
         val directory = temporary.newFolder()
         val bytes = "a small GLB".toByteArray()

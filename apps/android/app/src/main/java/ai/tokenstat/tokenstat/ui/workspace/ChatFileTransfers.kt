@@ -301,8 +301,23 @@ internal suspend fun downloadChatFile(
                 it.isNotBlank() && it != "." && it != ".."
             } ?: "attachment"
         val folder = File(directory, java.util.UUID.randomUUID().toString())
-        folder.mkdirs()
-        return File(folder, name).also { withContext(Dispatchers.IO) { it.writeBytes(bytes) } }
+        try {
+            return withContext(Dispatchers.IO) {
+                coroutineContext.ensureActive()
+                folder.mkdirs()
+                File(folder, name).also {
+                    it.writeBytes(bytes)
+                    coroutineContext.ensureActive()
+                }
+            }
+        } catch (error: Exception) {
+            // Legacy downloads cannot resume. This also handles cancellation
+            // after the write finishes but before its result reaches the UI.
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                folder.deleteRecursively()
+            }
+            throw error
+        }
     }
     val caps = call("chat.fileCapabilities", buildJsonObject { put("id", chat) }) as JsonObject
     val info =
@@ -331,17 +346,16 @@ internal suspend fun downloadChatFile(
     check(fileTransferClaims.add(key)) { L10n.text("common.chat_files_busy") }
     try {
         val folder = File(directory, key)
-        folder.mkdirs()
         val name =
             File(descriptor.text("name")).name.takeIf { it.isNotBlank() && it != "." && it != ".." }
                 ?: "attachment"
         val target = File(folder, name)
+        val hash = MessageDigest.getInstance("SHA-256")
+        var offset = 0L
         try {
-            val hash = MessageDigest.getInstance("SHA-256")
-            var offset = 0L
-            if (target.exists()) {
-                require(target.length() <= size)
-                withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
+                if (target.exists()) {
+                    require(target.length() <= size)
                     target.inputStream().use { input ->
                         val buffer = ByteArray(FILE_CHUNK)
                         while (true) {
@@ -355,12 +369,19 @@ internal suspend fun downloadChatFile(
                     }
                 }
             }
-            // A verified, completed cache entry needs no transfer and must
-            // not ask to spend relay allowance again after app relaunch.
-            if (offset < size && (caps["relay"] as? JsonPrimitive)?.booleanOrNull == true) {
-                check(confirm((caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull))
-                allowRelay = true
-            }
+        } catch (error: Exception) {
+            discardInvalidDownload(folder, error)
+            throw error
+        }
+        // Ask before starting the transfer: declining or dismissing consent
+        // keeps the downloaded prefix available for another route or retry.
+        // A completed file needs no relay allowance and is checked below.
+        if (offset < size && (caps["relay"] as? JsonPrimitive)?.booleanOrNull == true) {
+            check(confirm((caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull))
+            allowRelay = true
+        }
+        try {
+            withContext(Dispatchers.IO) { folder.mkdirs() }
             java.io.FileOutputStream(target, true).use { output ->
                 while (offset < size) {
                     coroutineContext.ensureActive()
@@ -413,15 +434,19 @@ internal suspend fun downloadChatFile(
             check(digest(hash.digest()) == info.text("sha256")) { "File integrity check failed" }
             return target
         } catch (error: Exception) {
-            if (
-                error is kotlinx.coroutines.CancellationException ||
-                    error is IllegalArgumentException ||
-                    error is IllegalStateException
-            )
-                folder.deleteRecursively()
+            discardInvalidDownload(folder, error)
             throw error
         }
     } finally {
         fileTransferClaims.remove(key)
+    }
+}
+
+private suspend fun discardInvalidDownload(folder: File, error: Exception) {
+    if (error is kotlinx.coroutines.CancellationException ||
+        error is IllegalArgumentException || error is IllegalStateException) {
+        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+            folder.deleteRecursively()
+        }
     }
 }
