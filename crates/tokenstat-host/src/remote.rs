@@ -2294,6 +2294,10 @@ fn candidates_for_peer(peer_hex: &str, remembered: Option<&str>) -> Vec<DirectCa
 /// connect before the relay was asked, on calls that happen on timers.
 const DIRECT_MISS_FLOOR_MS: i64 = 60_000;
 const DIRECT_MISS_CEILING_MS: i64 = 600_000;
+// With no relay fallback, suppressing direct also suppresses the only route.
+// Keep retries bounded without making a brief interruption a minute offline.
+const DIRECT_ONLY_MISS_FLOOR_MS: i64 = 2_000;
+const DIRECT_ONLY_MISS_CEILING_MS: i64 = 8_000;
 
 #[derive(Clone, Copy)]
 struct DirectMiss {
@@ -2312,11 +2316,21 @@ impl DirectMiss {
             .min(DIRECT_MISS_CEILING_MS)
     }
 
+    fn retry_delay_ms(&self, relay_fallback: bool) -> i64 {
+        if relay_fallback {
+            self.ttl_ms()
+        } else {
+            DIRECT_ONLY_MISS_FLOOR_MS
+                .saturating_mul(1i64 << self.strikes.min(4))
+                .min(DIRECT_ONLY_MISS_CEILING_MS)
+        }
+    }
+
     /// Skip the direct attempt for now. Unlike an absence, the first miss
-    /// counts: nothing is hidden by skipping it, because the relay is asked
-    /// either way and answers for the same machine.
-    fn suppresses(&self) -> bool {
-        self.age_ms() < self.ttl_ms()
+    /// counts. Direct-only callers retry sooner because they have no alternate
+    /// route to answer during the cooldown.
+    fn suppresses(&self, relay_fallback: bool) -> bool {
+        self.age_ms() < self.retry_delay_ms(relay_fallback)
     }
 }
 
@@ -2328,31 +2342,46 @@ fn direct_misses() -> &'static Mutex<HashMap<String, DirectMiss>> {
 
 /// Whether the direct address is worth a try right now.
 fn direct_is_worth_trying(peer_hex: &str) -> bool {
+    direct_retry_ready(peer_hex, true)
+}
+
+fn direct_retry_ready(peer_hex: &str, relay_fallback: bool) -> bool {
     let Ok(mut misses) = direct_misses().lock() else {
         return true;
     };
     misses.retain(|_, miss| miss.age_ms() < DIRECT_MISS_CEILING_MS);
-    !misses.get(peer_hex).is_some_and(DirectMiss::suppresses)
+    !misses
+        .get(peer_hex)
+        .is_some_and(|miss| miss.suppresses(relay_fallback))
 }
 
 /// Backoff measures failed attempts, not how often callers use the relay.
 fn try_direct_with_backoff<T>(
     peer_hex: &str,
     has_candidates: bool,
+    relay_fallback: bool,
     dial: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    if !direct_is_worth_trying(peer_hex) {
+    if !direct_retry_ready(peer_hex, relay_fallback) {
         return Err("the direct candidates did not answer recently".into());
     }
     let result = dial();
     if has_candidates && result.is_err() {
-        note_direct_miss(peer_hex);
+        note_direct_miss(peer_hex, relay_fallback);
     }
     result
 }
 
-fn note_direct_miss(peer_hex: &str) {
+fn note_direct_miss(peer_hex: &str, relay_fallback: bool) {
     if let Ok(mut misses) = direct_misses().lock() {
+        // Concurrent RPCs can fail the same route together. They are one failed
+        // round, not successive retries that should extend the cooldown.
+        if misses
+            .get(peer_hex)
+            .is_some_and(|miss| miss.suppresses(relay_fallback))
+        {
+            return;
+        }
         let strikes = misses
             .get(peer_hex)
             .filter(|miss| miss.age_ms() < DIRECT_MISS_CEILING_MS)
@@ -2716,10 +2745,13 @@ impl PeerDialContext {
         // loopback-only addresses that nothing dials is not an attempt. The race
         // below re-checks, since an offer can land between here and the dial.
         candidates.retain(|candidate| direct_candidate_address_is_usable(&candidate.address));
-        let (connection, address) =
-            try_direct_with_backoff(peer_hex, !candidates.is_empty(), || {
-                dial_direct_candidates(peer_hex, candidates, &self.identity, self.key, &self.label)
-            })?;
+        let settings = settings();
+        let (connection, address) = try_direct_with_backoff(
+            peer_hex,
+            !candidates.is_empty(),
+            settings.tunnel && settings.relay_fallback,
+            || dial_direct_candidates(peer_hex, candidates, &self.identity, self.key, &self.label),
+        )?;
         crate::account_session::check_current()?;
         clear_direct_miss(peer_hex);
         // Persistence follows proof: TCP connected and the pinned key
@@ -3691,7 +3723,7 @@ mod tests {
         assert!(!with_refreshing_direct(|| claim_relay_direct_check(
             "pooled-upgrade-nested"
         )));
-        note_direct_miss("pooled-upgrade-cooldown");
+        note_direct_miss("pooled-upgrade-cooldown", true);
         assert!(!claim_relay_direct_check("pooled-upgrade-cooldown"));
         clear_direct_miss("pooled-upgrade-cooldown");
     }
@@ -4683,7 +4715,7 @@ mod tests {
         let peer = "direct-miss-test-peer";
         clear_direct_miss(peer);
         assert!(direct_is_worth_trying(peer), "an unknown peer is tried");
-        note_direct_miss(peer);
+        note_direct_miss(peer, true);
         assert!(
             !direct_is_worth_trying(peer),
             "a remembered address that just failed must not be dialled on every call"
@@ -4699,7 +4731,7 @@ mod tests {
     fn relay_calls_during_direct_backoff_do_not_extend_it() {
         let peer = "direct-backoff-relay-test";
         clear_direct_miss(peer);
-        let failed = try_direct_with_backoff::<()>(peer, true, || Err("offline".into()));
+        let failed = try_direct_with_backoff::<()>(peer, true, true, || Err("offline".into()));
         assert!(failed.is_err());
         let first = *direct_misses()
             .lock()
@@ -4707,7 +4739,7 @@ mod tests {
             .get(peer)
             .expect("miss");
         for _ in 0..20 {
-            let skipped = try_direct_with_backoff::<()>(peer, true, || {
+            let skipped = try_direct_with_backoff::<()>(peer, true, true, || {
                 panic!("cooldown must skip the direct dial")
             });
             assert!(skipped.is_err());
@@ -4725,13 +4757,78 @@ mod tests {
             .get_mut(peer)
             .expect("miss")
             .since_ms -= DIRECT_MISS_FLOOR_MS + 1;
-        assert!(try_direct_with_backoff(peer, true, || Ok(())).is_ok());
+        assert!(try_direct_with_backoff(peer, true, true, || Ok(())).is_ok());
         clear_direct_miss(peer);
-        assert!(try_direct_with_backoff::<()>(peer, false, || Err("no address".into())).is_err());
+        assert!(
+            try_direct_with_backoff::<()>(peer, false, true, || Err("no address".into())).is_err()
+        );
         assert!(
             direct_is_worth_trying(peer),
             "no candidates must not start backoff"
         );
+    }
+
+    #[test]
+    fn direct_only_retries_do_not_wait_for_the_relay_cooldown() {
+        let peer = "direct-only-recovery-test";
+        clear_direct_miss(peer);
+        assert!(
+            try_direct_with_backoff::<()>(peer, true, false, || Err("offline".into())).is_err()
+        );
+        assert!(!direct_retry_ready(peer, false));
+        direct_misses()
+            .lock()
+            .expect("lock")
+            .get_mut(peer)
+            .expect("miss")
+            .since_ms -= DIRECT_ONLY_MISS_FLOOR_MS + 1;
+        assert!(direct_retry_ready(peer, false));
+        assert!(
+            !direct_retry_ready(peer, true),
+            "relay callers still leave failed LAN routes alone"
+        );
+        assert!(try_direct_with_backoff(peer, true, false, || Ok(())).is_ok());
+        clear_direct_miss(peer);
+        for strikes in 0..8 {
+            let miss = DirectMiss {
+                since_ms: jiff::Timestamp::now().as_millisecond(),
+                strikes,
+            };
+            assert_eq!(
+                miss.retry_delay_ms(false),
+                (2_000 * (1 << strikes)).min(8_000)
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_direct_failures_count_as_one_retry_round() {
+        let peer = "concurrent-direct-miss-test";
+        clear_direct_miss(peer);
+        let together = std::sync::Barrier::new(20);
+        std::thread::scope(|scope| {
+            let callers = (0..20)
+                .map(|_| {
+                    scope.spawn(|| {
+                        try_direct_with_backoff::<()>(peer, true, false, || {
+                            together.wait();
+                            Err("same interruption".into())
+                        })
+                    })
+                })
+                .collect::<Vec<_>>();
+            for caller in callers {
+                assert!(caller.join().unwrap().is_err());
+            }
+        });
+        let miss = *direct_misses()
+            .lock()
+            .expect("lock")
+            .get(peer)
+            .expect("miss");
+        assert_eq!(miss.strikes, 0);
+        assert_eq!(miss.retry_delay_ms(false), DIRECT_ONLY_MISS_FLOOR_MS);
+        clear_direct_miss(peer);
     }
 
     #[cfg(feature = "local-host")]
@@ -4750,7 +4847,7 @@ mod tests {
             Some("127.0.0.1:7878"),
             false
         ));
-        note_direct_miss(peer);
+        note_direct_miss(peer, true);
         assert!(!route_available_for_refresh(
             peer,
             Some("192.168.1.5:7878"),
@@ -4947,7 +5044,7 @@ mod tests {
             }],
         );
         assert!(!should_refresh_peer_direct_candidates(peer, None));
-        note_direct_miss(peer);
+        note_direct_miss(peer, true);
         assert!(
             should_refresh_peer_direct_candidates(peer, Some("192.168.1.9:7878")),
             "a cooled-down direct miss should fetch a fresh list through the relay"
@@ -4983,7 +5080,7 @@ mod tests {
     fn offering_candidates_does_not_clear_a_direct_miss() {
         let peer = "offer-does-not-clear-miss";
         clear_direct_miss(peer);
-        let failed = try_direct_with_backoff::<()>(peer, true, || Err("offline".into()));
+        let failed = try_direct_with_backoff::<()>(peer, true, true, || Err("offline".into()));
         assert!(failed.is_err());
         let first = *direct_misses()
             .lock()
@@ -5005,7 +5102,7 @@ mod tests {
             .expect("miss");
         assert_eq!(after.since_ms, first.since_ms);
         assert_eq!(after.strikes, first.strikes);
-        let skipped = try_direct_with_backoff::<()>(peer, true, || {
+        let skipped = try_direct_with_backoff::<()>(peer, true, true, || {
             panic!("cooldown must skip the direct dial after a refreshed list")
         });
         assert!(skipped.is_err());
