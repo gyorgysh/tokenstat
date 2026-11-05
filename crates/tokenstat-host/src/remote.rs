@@ -3540,6 +3540,10 @@ fn forwarded_result(
     }
 }
 
+#[cfg(all(test, feature = "local-host", unix))]
+#[path = "remote_history_tests.rs"]
+mod history_tests;
+
 #[cfg(test)]
 mod tests {
     #[test]
