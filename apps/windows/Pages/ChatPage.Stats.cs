@@ -106,17 +106,35 @@ internal sealed partial class ChatPage
                 }
                 _commandDialogOpening = true;
                 openingInspection = true;
-                await RefreshInspectionAsync(force: true);
+                var usageOnly = text == "/usage";
+                if (!usageOnly) await RefreshInspectionAsync(force: true);
                 if (id != _openId || generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return true;
                 var body = new StackPanel { Spacing = Theme.SpaceM };
                 _commandDialogBody = body;
                 _commandDialogOwner = InspectionOwner();
+                _commandUsageOnly = usageOnly;
+                if (usageOnly) ResetUsageRead();
                 RenderCommandStats();
-                var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = L10n.Text("common.chat.stats.overview"),
+                var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = L10n.Text(usageOnly ? "common.chat.usage.title" : "common.chat.stats.overview"),
                     Content = new ScrollViewer { Content = body, MaxHeight = 600 }, CloseButtonText = L10n.Text("common.done") };
                 _commandDialog = dialog;
-                try { await dialog.ShowAsync(); }
-                finally { _commandDialog = null; _commandDialogBody = null; _commandDialogOwner = null; }
+                var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+                timer.Tick += async (_, _) => await RefreshChatLimitsAsync();
+                try
+                {
+                    if (usageOnly)
+                    {
+                        timer.Start();
+                        _ = RefreshInspectionAsync(force: true);
+                        _ = RefreshChatLimitsAsync();
+                    }
+                    await dialog.ShowAsync();
+                }
+                finally
+                {
+                    timer.Stop(); _commandUsageOnly = false;
+                    _commandDialog = null; _commandDialogBody = null; _commandDialogOwner = null;
+                }
             }
             if (id == _openId && generation == _openGeneration && account == AppServices.AccountGeneration && _draft.Text.Trim() == text) _draft.Text = "";
             return true;
@@ -184,6 +202,7 @@ internal sealed partial class ChatPage
         if (_commandDialogBody is not StackPanel body) return;
         body.Children.Clear();
         if (_commandActivitySection is not null) { body.Children.Add(ActivityCard(CurrentInspection, expanded: true, section: _commandActivitySection)); return; }
+        if (_commandUsageOnly) { AddChatUsage(body); return; }
         AddStats(body);
         body.Children.Add(new TextBlock { Text = L10n.Text("common.chat.commands"), FontWeight = FontWeights.SemiBold });
         foreach (var command in Commands()) body.Children.Add(Muted(command.Name + " · " + command.Detail));
@@ -331,7 +350,7 @@ internal sealed partial class ChatPage
     {
         foreach (var (key, label) in new[] { ("input", "common.chat.stats.input"), ("output", "common.chat.stats.output"),
             ("cacheRead", "common.chat.stats.cache_read"), ("cacheWrite", "common.chat.stats.cache_write") })
-            body.Children.Add(StatsMetric(L10n.Text(label), Math.Max(0, Format.Number(usage, key)).ToString("N0")));
+            body.Children.Add(StatsMetric(L10n.Text(label), ChatUsageTotals.Count(usage[key])?.ToString("N0") ?? "—"));
         var cost = Format.Number(usage, "cost");
         if (cost > 0) body.Children.Add(StatsMetric(L10n.Text("common.chat.stats.cost"), cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))));
     }

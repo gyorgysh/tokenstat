@@ -16,6 +16,18 @@ static class ChatUsageTests
         Json($$$"""{"events":[{{{value}}}],"nextOffset":20}"""), history.Generation);
     public static void Run()
     {
+        var quota = (JsonArray)Json("""[{"source":"claude_code","windows":[{"label":"5-hour","percent":0},{"label":"weekly","percent":68},{"label":"bad","percent":-1},{"label":"bad","percent":"3"},{"label":"bad","percent":1e999},{"percent":10}]},{"source":"codex","windows":[{"label":"weekly","percent":99}]}]""");
+        var claude = ChatQuotaData.Read(quota, "claude");
+        Check(claude?["windows"] is JsonArray { Count: 2 } && claude["windows"]![0]!["percent"]!.GetValue<double>() == 0,
+            "Zero allowance stays zero; malformed or unlabeled windows are omitted");
+        Check(ChatQuotaData.Read(quota, "muse") is null && ChatQuotaData.Read(quota, "shell") is null
+            && ChatQuotaData.Read(quota, "") is null, "Limits never come from a different backend");
+        Check(ChatQuotaData.Read(quota, "codex")?["windows"]?[0]?["percent"]?.GetValue<double>() == 99,
+            "Current backend selects its own quota");
+        claude!["windows"]![0]!["percent"] = 15;
+        Check(quota[0]!["windows"]![0]!["percent"]!.GetValue<double>() == 0, "UI readings do not mutate shared responses");
+        Check(ChatQuotaData.Read((JsonArray)Json("""[null,17,{}, {"source":"muse","windows":[{},null]}]"""), "muse") is null,
+            "Missing vendor readings remain unavailable");
         var overflow = History("9223372036854775807");
         Tail(overflow, """{"event":{"kind":"usage","input":1}}""");
         Check(overflow.Usage?["input"]?.ToJsonString() == "9223372036854775808", "Counters above the signed range must not wrap negative");
