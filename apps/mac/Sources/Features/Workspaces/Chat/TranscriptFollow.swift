@@ -198,6 +198,8 @@ struct TranscriptMetrics: Equatable {
     var distanceFromBottom: CGFloat
     var contentHeight: CGFloat
     var viewportHeight: CGFloat
+    /// Nil on systems without scroll phases; those keep the geometry heuristic.
+    var readerIsScrolling: Bool? = nil
 }
 
 @available(macOS 15.0, iOS 18.0, *)
@@ -218,7 +220,9 @@ extension TranscriptMetrics {
 ///
 /// Content growth and a person scrolling up both increase the distance from
 /// the bottom. Growth is ignored so a stream cannot unpin the view. A height
-/// that did not change, with a larger gap, is a person moving away.
+/// that did not change, with a larger gap, can also be a lazy stack adjusting
+/// its anchors. Use the native scroll phase when available to distinguish it
+/// from a person moving away.
 ///
 /// A reference type, and `showJump`, `paused`, `arrived` and `scrolling` are
 /// the only things on it Observation watches: all four change on
@@ -461,6 +465,7 @@ final class TranscriptFollowState {
         let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
         // Motion only: growth under a still viewport is a stream arriving,
         // not a gesture, and rows stay interactive while it is followed.
+        let readerMoved = moved && metrics.readerIsScrolling != false
         trackScrolling(moved: moved)
 
         if sliceHidesNewest {
@@ -479,7 +484,7 @@ final class TranscriptFollowState {
             // hand on the trackpad. Nothing here may out-argue that: the
             // chase after Jump to latest would otherwise drag somebody back
             // for the length of its budget.
-            let retreated = moved
+            let retreated = readerMoved
                 && !grew
                 && !shrank
                 && (pinned || Date() >= programmaticUntil)
@@ -514,7 +519,7 @@ final class TranscriptFollowState {
         // pushes the end away for a frame or two. Count sustained motion
         // only while far: one such frame is never a hand leaving.
         if metrics.distanceFromBottom > TranscriptFollow.threshold {
-            if moved { farMovedFrames += 1 } else { farMovedFrames = 0 }
+            if readerMoved { farMovedFrames += 1 } else { farMovedFrames = 0 }
             if metrics.distanceFromBottom > prevBottom + 2 {
                 retreatingFrames += 1
             } else {
@@ -536,25 +541,18 @@ final class TranscriptFollowState {
             // wiping its drift is what made scrollback impossible during a
             // stream (every token pin reset the tab before it reached 6pt).
             let retreatingNow = metrics.distanceFromBottom > prevBottom + 2
-            if moved, retreatingNow {
+            if readerMoved, retreatingNow {
                 undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
             } else {
                 undrivenDrift = 0
             }
-        } else if moved {
+        } else if readerMoved {
             undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
         }
-        if grew, !moved {
-            // Growth nobody scrolled for. It must not unpin the view, and if
-            // the view was following the end it has to be put back on it:
-            // the height changed under a viewport that did not move, so the
-            // end is now further down than it was a frame ago.
-            //
-            // Auto-follow is the default: streaming grows this way for
-            // hundreds of frames, and unpinning here is what stalled a reply
-            // mid-screen. Only a person's own scroll below may unpin. The
-            // budget only stops asking the lazy stack for another walk,
-            // never the pin itself.
+        if metrics.distanceFromBottom > TranscriptFollow.threshold,
+           (grew && !moved) || metrics.readerIsScrolling == false {
+            // Layout can move the offset or resize the viewport without
+            // input. Keep following within the existing scroll budget.
             if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold {
                 // One walk per frame is the sluggishness: a streaming turn
                 // grows for hundreds of frames and each repin walks the lazy
@@ -593,7 +591,7 @@ final class TranscriptFollowState {
             // stable and the offset moves up as the bottom recedes, release
             // immediately, including during a driven pin. Keep the sustained
             // motion filter for frames whose content height is changing.
-            let stableRetreat = moved && !grew && !shrank
+            let stableRetreat = readerMoved && !grew && !shrank
                 && metrics.distanceFromTop < prevOffset
                 && metrics.distanceFromBottom > prevBottom + 2
             let userMoved = farMovedFrames >= 4 || (undrivenDrift > 24 && farMovedFrames >= 2)
@@ -609,7 +607,7 @@ final class TranscriptFollowState {
             // Home also clears the drift tab: micro-scrolls from a while ago
             // must not unpin a far frame later.
             undrivenDrift = 0
-            if moved {
+            if readerMoved {
                 paused = false
             }
             if !paused {
@@ -885,6 +883,10 @@ final class TranscriptScrollDelivery {
 /// Report where the transcript is scrolled, by whichever route this system
 /// offers, and name the space its rows measure themselves in.
 private struct TranscriptScrollMetrics: ViewModifier {
+    // Keep phase changes out of view observation: scrolling must not redraw
+    // the transcript on every callback.
+    final class Interaction { var readerIsScrolling = false }
+    @State private var interaction = Interaction()
     let note: (TranscriptMetrics) -> Void
 
     func body(content: Content) -> some View {
@@ -894,6 +896,14 @@ private struct TranscriptScrollMetrics: ViewModifier {
                 .onScrollGeometryChange(for: TranscriptMetrics.self) { geometry in
                     TranscriptMetrics(geometry)
                 } action: { _, metrics in
+                    var metrics = metrics
+                    metrics.readerIsScrolling = interaction.readerIsScrolling
+                    note(metrics)
+                }
+                .onScrollPhaseChange { _, phase, context in
+                    interaction.readerIsScrolling = phase == .interacting || phase == .decelerating
+                    var metrics = TranscriptMetrics(context.geometry)
+                    metrics.readerIsScrolling = interaction.readerIsScrolling
                     note(metrics)
                 }
         } else {

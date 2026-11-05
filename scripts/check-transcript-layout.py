@@ -52,6 +52,59 @@ for driven in [false, true] {
     state.note(metrics(500))
     assert(!state.pinned && state.showJump, "one wheel tick must release follow")
 }
+// Native trace: appending a row in a 150-row slice moved the anchor up
+// 54 points at an unchanged height. Neither pane received a scroll event.
+func native(_ top: CGFloat, _ height: CGFloat, _ bottom: CGFloat,
+            scrolling: Bool, viewport: CGFloat = 519) -> TranscriptMetrics {
+    TranscriptMetrics(distanceFromTop: top, distanceFromBottom: bottom,
+                      contentHeight: height, viewportHeight: viewport,
+                      readerIsScrolling: scrolling)
+}
+let anchor = TranscriptFollowState()
+anchor.note(native(6688.1176, 7240, 32.8824, scrolling: false))
+var anchorPins = 0
+anchor.repin = { anchorPins += 1; return true }
+anchor.note(native(6688, 7270, 63, scrolling: false))
+anchor.note(native(6634, 7270, 117, scrolling: false))
+assert(anchor.pinned && !anchor.showJump, "layout anchor adjustment must not stop following")
+drain()
+assert(anchorPins == 1, "anchor adjustment must coalesce with the growth correction")
+anchor.note(native(6751, 7270, 0, scrolling: false))
+assert(anchor.atEnd && anchor.pinned)
+
+for driven in [false, true] {
+    let gesture = TranscriptFollowState()
+    gesture.note(native(6751, 7270, 0, scrolling: false))
+    if driven { gesture.markDriven() }
+    gesture.note(native(6651, 7270, 100, scrolling: true))
+    assert(!gesture.pinned && gesture.showJump, "native scroll must release follow, including during a pin")
+    gesture.note(native(6751, 7270, 0, scrolling: true))
+    assert(gesture.pinned && !gesture.showJump, "scrolling back to the bottom must resume follow")
+}
+let settlingAnchor = TranscriptFollowState()
+settlingAnchor.note(native(6751, 7270, 0, scrolling: false))
+settlingAnchor.settle(true)
+settlingAnchor.note(native(6651, 7270, 100, scrolling: false))
+assert(!settlingAnchor.abandoned, "layout correction must not abandon opening")
+settlingAnchor.note(native(6551, 7270, 200, scrolling: true))
+assert(settlingAnchor.abandoned, "native scrollback must interrupt opening")
+
+let nativePause = TranscriptFollowState()
+nativePause.note(native(6751, 7270, 0, scrolling: false))
+nativePause.pause()
+nativePause.note(native(6752, 7271, 0, scrolling: false))
+assert(nativePause.paused && !nativePause.pinned, "layout motion at the end must not clear a manual pause")
+nativePause.note(native(6751, 7270, 0, scrolling: true))
+assert(!nativePause.paused && nativePause.pinned, "a reader returning to the end clears a manual pause")
+
+let resize = TranscriptFollowState()
+resize.note(native(6751, 7270, 0, scrolling: false))
+var resizePins = 0
+resize.repin = { resizePins += 1; return true }
+resize.note(native(6751, 7270, 119, scrolling: false, viewport: 400))
+drain()
+assert(resize.pinned && resizePins == 1, "viewport shrink must preserve follow")
+
 let growth = TranscriptFollowState()
 growth.note(metrics(600))
 var repins = 0
@@ -115,7 +168,7 @@ let earlier = (0..<100).map { ChatDisplayItem(id: "p\($0)") } + ids
 assert(TranscriptSlice.holding("0", in: earlier, current: 50) == 50, "a page above must not replace the window")
 assert(TranscriptSlice.range(count: 300, olderOffset: 50) == 100..<250, "held offset after a prepend is the original rows")
 assert(TranscriptSlice.holding("missing", in: ids, current: 50) == 50, "a gone row keeps the last offset")
-print("PASS: deferred/coalesced corrections, no re-entry, cancellation, wheel gestures, growth, departure, pause, estimate resizing, hidden slice, bounded window")
+print("PASS: deferred/coalesced corrections, no re-entry, cancellation, wheel gestures, native phases, anchor shifts, viewport resizing, growth, departure, pause, estimate resizing, hidden slice, bounded window")
 '''
 with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
     path = Path(directory) / "main.swift"
