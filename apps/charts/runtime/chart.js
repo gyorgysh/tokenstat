@@ -8,7 +8,8 @@
         columns = [],
         selected = null,
         page = 0,
-        disposed = false;
+        disposed = false,
+        renderRevision = 0;
     let locale = "en",
         dark = false,
         expanded = false,
@@ -92,6 +93,11 @@
             lastHeight = height;
             host({ type: "height", height, paintToken: activePaintToken });
         }
+    }
+    function actionStatus(message, revision) {
+        if (disposed || revision !== renderRevision) return;
+        $("status").textContent = message;
+        measure();
     }
     function localized(value, decimals = 8) {
         try {
@@ -689,6 +695,7 @@
     async function exportChart(format) {
         if (!spec || !chart || !["json", "csv", "svg", "png"].includes(format))
             throw new Error(t("unavailable"));
+        const revision = renderRevision;
         let content,
             mime,
             base64 = false;
@@ -732,6 +739,7 @@
                 null,
                 { renderer: "svg", width, height },
             );
+            let svg;
             try {
                 const option = options(true);
                 option.backgroundColor = theme.background;
@@ -807,29 +815,30 @@
                     end: zoom[i]?.end ?? item.end,
                 }));
                 imageChart.setOption(option);
-                const svg = imageChart.renderToSVGString();
-                if (format === "svg") {
-                    content = svg;
-                    mime = "image/svg+xml";
-                } else {
-                    const img = new Image();
-                    img.src =
-                        "data:image/svg+xml;charset=utf-8," +
-                        encodeURIComponent(svg);
-                    await img.decode();
-                    const canvas = document.createElement("canvas");
-                    canvas.width = width * 2;
-                    canvas.height = height * 2;
-                    const context = canvas.getContext("2d");
-                    if (!context) throw new Error("Image export unavailable");
-                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    content = canvas.toDataURL("image/png").split(",")[1];
-                    mime = "image/png";
-                    base64 = true;
-                }
+                svg = imageChart.renderToSVGString();
             } finally {
                 imageChart.dispose();
                 element.remove();
+            }
+            if (format === "svg") {
+                content = svg;
+                mime = "image/svg+xml";
+            } else {
+                const img = new Image();
+                img.src =
+                    "data:image/svg+xml;charset=utf-8," +
+                    encodeURIComponent(svg);
+                await img.decode();
+                if (disposed) return;
+                const canvas = document.createElement("canvas");
+                canvas.width = width * 2;
+                canvas.height = height * 2;
+                const context = canvas.getContext("2d");
+                if (!context) throw new Error("Image export unavailable");
+                context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                content = canvas.toDataURL("image/png").split(",")[1];
+                mime = "image/png";
+                base64 = true;
             }
         }
         if (disposed) return;
@@ -858,8 +867,7 @@
             a.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
-        $("status").textContent = t("exported");
-        measure();
+        actionStatus(t("exported"), revision);
     }
     function labels() {
         const buttons = {
@@ -891,6 +899,7 @@
     }
     function render(input, settings = {}) {
         if (disposed) return;
+        renderRevision++;
         if (!fontsReady) {
             pendingRender = [input, settings];
             return;
@@ -1027,24 +1036,24 @@
     };
     $("copy").onclick = async () => {
         if (!selected) return;
+        const revision = renderRevision;
         const text = spec.title + "\n" + selectedText(selected);
         if (!host({ type: "copy", text })) {
             try {
                 await navigator.clipboard.writeText(text);
             } catch {}
         }
-        $("status").textContent = t("copied");
-        measure();
+        actionStatus(t("copied"), revision);
     };
     $("export").onchange = async (event) => {
         const format = event.target.value;
         event.target.value = "";
         if (!format || !spec) return;
+        const revision = renderRevision;
         try {
             await exportChart(format);
         } catch (error) {
-            $("status").textContent = error.message;
-            measure();
+            actionStatus(error.message, revision);
         }
     };
     $("plot").onkeydown = (event) => {
