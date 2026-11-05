@@ -9,6 +9,32 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.12.0]
+
+### Added
+
+- Use `/usage` in chat to see the current agent's available limits, context usage, token counts and reported cost. On phones, tap the small usage ring in the composer to open the details. It shows the five-hour limit when available, then the weekly limit.
+
+### Improved
+
+- Claude and Codex replies appear as they stream. Long replies, tool output and busy terminal sessions reach connected devices with less delay, and long conversations take less work to read and display.
+- Phone composers leave more room for the conversation, with setup controls available in a sheet.
+- Chat attachments support files up to 250 MiB. Large images can load on connected devices, and local images appear without a download-size prompt. Large pasted images on Apple devices stay available in saved drafts.
+- Before a transfer uses relay, Apple and Android clients explain the connection and show the available allowance when known. Direct transfers need no relay confirmation, and retrying a completed transfer reuses the saved bytes.
+- Image viewers keep the point under your fingers when zooming, let you pan a zoomed image, and let you swipe between images at fitted size.
+- Charts and 3D previews avoid repeated loading when their content has not changed and release their rendering resources when closed.
+- New chats use the agent's own instructions by default. Untouched starter personas lose the old built-in brief; custom instructions and existing conversations keep theirs.
+
+### Fixed
+
+- Long private chats no longer discard earlier messages at the old transcript size limit. Clients recover interrupted history reads and keep independent reading positions when the same chat is open on several devices.
+- On Apple devices, following a long reply reaches its end, and opening a search result reveals its message inside a folded group of steps.
+- Chat and terminal agents can run alongside other agents or Git operations in the same checkout without the “checkout is in use” pause.
+- Stopping a Claude or Codex turn remains responsive when input or output backs up. Steering reports acceptance after delivery, and failed turns include the agent's error output.
+- Shared drafts cannot replace local files still being added. Closing the handoff sheet or changing the draft stops an obsolete import.
+- Android terminals and the in-app browser reject late updates from closed or replaced views. A preview or terminal renderer crash shows a recoverable error without closing the rest of the app.
+- Direct-only connections retry sooner after a brief interruption. Windows approval buttons also reject stale replies after switching chats.
+
 ## [1.11.0] - 2026-11-04
 
 ### Improved
