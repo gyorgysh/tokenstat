@@ -58,18 +58,10 @@ pub fn brief(events: &[Value], folder: &str, budget: usize) -> String {
     render(&folded, folder, budget).0
 }
 
+#[derive(Default)]
 pub(crate) struct Summary {
     folded: Folded,
     reply: NormalizedLine,
-}
-
-impl Default for Summary {
-    fn default() -> Self {
-        Self {
-            folded: Folded::default(),
-            reply: NormalizedLine::default(),
-        }
-    }
 }
 
 impl Summary {

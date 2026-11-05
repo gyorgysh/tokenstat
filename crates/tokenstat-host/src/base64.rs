@@ -15,8 +15,8 @@ const DECODE: [u8; 256] = {
 /// Standard base64 with padding (RFC 4648 section 4).
 pub fn encode(input: &[u8]) -> String {
     let mut out = Vec::with_capacity(input.len().div_ceil(3) * 4);
-    let mut chunks = input.chunks_exact(3);
-    for chunk in &mut chunks {
+    let (chunks, tail) = input.as_chunks::<3>();
+    for chunk in chunks {
         let n = ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | chunk[2] as u32;
         out.extend_from_slice(&[
             ALPHABET[(n >> 18) as usize & 63],
@@ -25,7 +25,6 @@ pub fn encode(input: &[u8]) -> String {
             ALPHABET[n as usize & 63],
         ]);
     }
-    let tail = chunks.remainder();
     if let Some(&first) = tail.first() {
         let second = tail.get(1).copied().unwrap_or(0);
         out.extend_from_slice(&[
