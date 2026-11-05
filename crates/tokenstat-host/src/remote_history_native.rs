@@ -88,6 +88,19 @@ fn serve_fixture() {
         Some(root.join("home").into_os_string())
     );
     tokenstat_paths::configure_mobile(root.join("host-data"), root.join("host-cache")).unwrap();
+    let relay: Option<Value> = if std::env::var_os("TOKENSTAT_NATIVE_HISTORY_RELAY").is_some() {
+        Some(serde_json::from_slice(&std::fs::read(root.join("relay.json")).unwrap()).unwrap())
+    } else {
+        None
+    };
+    if let Some(relay) = &relay {
+        let login =
+            tokenstat_sync::device_start(Some(relay["accountOrigin"].as_str().unwrap())).unwrap();
+        assert!(matches!(
+            tokenstat_sync::device_poll(&login).unwrap(),
+            tokenstat_sync::DeviceStatus::Confirmed(_)
+        ));
+    }
     let host = MachineIdentity::load_or_create().unwrap();
     for role in ["desktop", "phone"] {
         let client = root.join(role);
@@ -102,20 +115,29 @@ fn serve_fixture() {
         peers.add_approved(
             &host.public_key(),
             "Native history fixture",
-            addresses[role].as_str(),
+            if relay.is_some() {
+                None
+            } else {
+                addresses[role].as_str()
+            },
             "2026-11-05T00:00:00Z",
         );
         private_file(
             &client.join("identity/peers.json"),
             &serde_json::to_vec(&peers).unwrap(),
         );
-        // Fallback is disabled so a direct-route failure stays within this
-        // fixture instead of consulting a relay or a real account service.
+        // Only relay runs may use the owned loopback account service.
+        // Direct runs have no fallback, and relay peers have no direct address.
         private_file(
             &client.join("identity/remote.json"),
             &serde_json::to_vec(&RemoteSettings {
-                tunnel: false,
-                relay_fallback: false,
+                tunnel: relay.is_some(),
+                relay_fallback: relay.is_some(),
+                tunnel_endpoint: if relay.is_some() {
+                    format!("ws://{}", addresses[role].as_str().unwrap())
+                } else {
+                    RemoteSettings::default().tunnel_endpoint
+                },
                 ..RemoteSettings::default()
             })
             .unwrap(),
@@ -158,13 +180,29 @@ fn serve_fixture() {
     drop(file);
     save_settings(&RemoteSettings {
         tunnel: true,
-        relay_fallback: false,
+        relay_fallback: relay.is_some(),
+        tunnel_endpoint: relay
+            .as_ref()
+            .and_then(|r| r["relayEndpoint"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| RemoteSettings::default().tunnel_endpoint),
         ..RemoteSettings::default()
     })
     .unwrap();
     let server = tokenstat_remote::Server::bind(&listen, &host).unwrap();
     let address = server.local_address().unwrap();
     let session = Arc::new(Mutex::new(Session::open_client(None).unwrap()));
+    if relay.is_some() {
+        start_tunnel_if_enabled(Arc::clone(&session), &load_settings());
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !tunnel_is_connected() {
+            assert!(
+                Instant::now() < deadline,
+                "Fixture host did not connect to relay"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
     let local_directory = tempfile::tempdir().unwrap();
     let socket = local_directory.path().join("history.sock");
     let listener = crate::server::bind(&socket).unwrap();
@@ -222,6 +260,9 @@ fn serve_fixture() {
         std::thread::sleep(Duration::from_millis(50));
     }
     let _ = crate::chat::shared().stop(id);
+    if relay.is_some() {
+        stop_tunnel();
+    }
     assert!(
         root.join("stop").exists(),
         "native fixture deadline expired"

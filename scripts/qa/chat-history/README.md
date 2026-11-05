@@ -60,9 +60,11 @@ relay setup. It uses the website's account functions and the relay fixture's
 in-memory database. Run `node scripts/tests/chat-history-relay.cjs` to check
 its HTTP pairing, device-code approval, authentication, registration and token
 minting. The controller service approves device codes against its disposable
-account, so native QA apps can use their normal device login calls. This adapter
-is not yet connected to the native app runner; that runner still tests direct
-connections only.
+account, so native QA apps can use their normal device login calls. Run `chat-history-native.py --simulator YOUR_SIMULATOR_UDID --relay --desktop-local`
+to connect the iPhone through that relay while the Mac uses its owned host
+socket. The runner starts and stops the service, verifies relay payload with
+zero direct payload, and cuts the phone's relay connection during streaming.
+A remote Mac reader would need a separate daemon; this mode does not test it.
 
 The relay service can also run under a controller:
 

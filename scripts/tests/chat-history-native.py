@@ -169,7 +169,8 @@ async def run(args):
     assert ip.is_private and not (ip.is_loopback or ip.is_link_local), "A private local interface is required"
     proxies = {role: Proxy() for role in ["desktop", "phone"]}
     listeners = {}
-    producer = desktop = None
+    producer = desktop = relay_service = None
+    relay = None
     phone_started = False
     booted_here = False
     handles = []
@@ -182,7 +183,7 @@ async def run(args):
         return read_json(run_root / role / "state.json")
 
     def live():
-        for name, process in [("producer", producer), ("desktop", desktop)]:
+        for name, process in [("producer", producer), ("desktop", desktop), ("relay", relay_service)]:
             if process and process.poll() is not None:
                 raise RuntimeError(f"The owned {name} exited; inspect {run_root}")
 
@@ -224,6 +225,16 @@ async def run(args):
             listeners[role] = await asyncio.start_server(proxy.handle, address, 0)
             port = listeners[role].sockets[0].getsockname()[1]
             client_addresses[role] = f"{address}:{port}"
+        if args.relay:
+            assert args.desktop_local and not args.desktop_only, "Relay QA requires --desktop-local and an iPhone reader"
+            log = (run_root / "relay.log").open("w"); handles.append(log)
+            relay_service = subprocess.Popen(["node", "scripts/tests/chat-history-relay.cjs", "--serve", str(run_root)],
+                cwd=ROOT, stdout=log, stderr=log)
+            relay = await wait(lambda: read_json(run_root / "relay.json"))
+            endpoint = relay["relayEndpoint"].removeprefix("ws://")
+            relay_host, relay_port = endpoint.rsplit(":", 1)
+            for proxy in proxies.values():
+                proxy.destination = (relay_host, int(relay_port))
         environment = dict(os.environ, TOKENSTAT_NATIVE_HISTORY_ROOT=str(run_root),
             TOKENSTAT_NATIVE_HISTORY_CLIENTS=json.dumps(client_addresses),
             TOKENSTAT_NATIVE_HISTORY_LISTEN=f"{address}:0",
@@ -231,22 +242,28 @@ async def run(args):
             TOKENSTAT_IDENTITY_DIR=str(run_root / "host-identity"),
             HOME=str(run_root / "home"), ZDOTDIR=str(run_root / "home"), HISTFILE=os.devnull,
             PATH=str(run_root / "bin") + ":/usr/bin:/bin:/usr/sbin:/sbin")
+        if relay:
+            environment.update(TOKENSTAT_NATIVE_HISTORY_RELAY="1", TOKENSTAT_API_BASE=relay["accountOrigin"])
         log = (run_root / "producer.log").open("w"); handles.append(log)
         producer = subprocess.Popen([producer_binary(run_root), "--exact",
             "remote::history_tests::native::serve_fixture", "--ignored", "--nocapture"],
             cwd=ROOT, env=environment, stdout=log, stderr=log)
         fixture = await wait(lambda: read_json(run_root / "fixture.json"))
         host, port = fixture["address"].rsplit(":", 1)
-        for proxy in proxies.values():
-            proxy.destination = (host, int(port))
+        if not relay:
+            for proxy in proxies.values():
+                proxy.destination = (host, int(port))
 
         def client_environment(role):
             client = run_root / role
-            return dict(os.environ, TOKENSTAT_NATIVE_HISTORY_ROLE=role,
+            configured = dict(os.environ, TOKENSTAT_NATIVE_HISTORY_ROLE=role,
                 TOKENSTAT_NATIVE_HISTORY_FIXTURE=str(run_root / "fixture.json"),
                 TOKENSTAT_NATIVE_HISTORY_DESKTOP_LOCAL="1" if args.desktop_local else "0",
                 TOKENSTAT_DATA_DIR=str(client / "data"), TOKENSTAT_IDENTITY_DIR=str(client / "identity"),
                 HOME=str(client / "home"), ZDOTDIR=str(client / "home"), HISTFILE=os.devnull)
+            if relay:
+                configured.update(TOKENSTAT_NATIVE_HISTORY_RELAY="1", TOKENSTAT_API_BASE=relay["accountOrigin"])
+            return configured
 
         probe = r'''
 import ctypes,json,os
@@ -265,11 +282,14 @@ assert result.get('ok'),result
 assert result['result']['events'],result
 print(json.dumps({'events':len(result['result']['events'])}))
 '''
-        for role in proxies:
-            probe_environment = client_environment(role)
-            probe_environment['TOKENSTAT_NATIVE_HISTORY_FFI'] = str(ROOT / 'target/aarch64-apple-darwin/release-ffi/libtokenstat_ffi.dylib')
-            await command(sys.executable, '-c', probe, env=probe_environment)
-        prove("Both fresh identities read history through the production FFI and pinned encrypted RPCs")
+        if relay:
+            prove("The owned host authenticated and registered on the production relay")
+        else:
+            for role in proxies:
+                probe_environment = client_environment(role)
+                probe_environment['TOKENSTAT_NATIVE_HISTORY_FFI'] = str(ROOT / 'target/aarch64-apple-darwin/release-ffi/libtokenstat_ffi.dylib')
+                await command(sys.executable, '-c', probe, env=probe_environment)
+            prove("Both fresh identities read history through the production FFI and pinned encrypted RPCs")
         if args.probe_only:
             atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs,
                 "proxies": {role: proxy.status() for role, proxy in proxies.items()}})
@@ -299,6 +319,19 @@ print(json.dumps({'events':len(result['result']['events'])}))
         print("Native QA apps launched:", ", ".join(roles), flush=True)
         await wait(lambda: all(state(role) and state(role)["loaded"] for role in roles), 180)
         await visible("network-start")
+        if relay:
+            reader, writer = await asyncio.open_unix_connection(fixture["socket"])
+            try:
+                writer.write(b'{"id":1,"method":"remote.status","params":{}}\n')
+                await writer.drain()
+                status = json.loads(await asyncio.wait_for(reader.readline(), 10))
+            finally:
+                writer.close()
+                await writer.wait_closed()
+            atomic_json(run_root / "relay-route.json", status)
+            traffic = status["result"]["traffic"]
+            assert traffic["relayBytes"] > 0 and traffic["directBytes"] == 0, traffic
+            prove("Host traffic confirms the native iPhone read over relay with no direct payload")
         if args.search_only:
             for call, label in [("qa-search-first", "quartz-search-target"), ("qa-search-second", "amber-second-step")]:
                 emit({"type": "tool_call", "id": call, "toolName": "Bash", "rawInput": {"command": label}})
@@ -332,7 +365,8 @@ print(json.dumps({'events':len(result['result']['events'])}))
             prove("The native Mac view follows two large replies through navigation and completion")
             atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs, "states": {role: state(role) for role in roles}})
             return
-        prove("Mac local view and encrypted iPhone render the same live chat" if args.desktop_local else
+        prove("Mac local view and relay iPhone render the same live chat" if relay else
+              "Mac local view and encrypted iPhone render the same live chat" if args.desktop_local else
               "Mac and iPhone render the same live chat over distinct pinned encrypted connections")
         if args.serve:
             await wait(lambda: (run_root / "stop").exists(), 700)
@@ -434,6 +468,16 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     await asyncio.to_thread(producer.wait, timeout=5)
                 except subprocess.TimeoutExpired:
                     producer.kill(); await asyncio.to_thread(producer.wait)
+        if relay_service:
+            try:
+                await asyncio.to_thread(relay_service.wait, timeout=15)
+            except subprocess.TimeoutExpired:
+                relay_service.terminate()
+                try:
+                    await asyncio.to_thread(relay_service.wait, timeout=5)
+                except subprocess.TimeoutExpired:
+                    relay_service.kill(); await asyncio.to_thread(relay_service.wait)
+                cleanup_errors.append("Relay service did not stop on request")
         if booted_here:
             try:
                 await command("xcrun", "simctl", "shutdown", args.simulator, timeout=30)
@@ -457,6 +501,7 @@ if __name__ == "__main__":
     parser.add_argument("--simulator", required=True, help="Exact simulator UDID; never erased")
     parser.add_argument("--mac-app", type=Path, default=QA / "mac/Build/Products/Debug/HistoryMac.app")
     parser.add_argument("--phone-app", type=Path, default=QA / "phone/Build/Products/Debug-iphonesimulator/HistoryPhone.app")
+    parser.add_argument("--relay", action="store_true", help="Use the owned loopback relay and disposable account")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--probe-only", action="store_true", help="Verify the producer and encrypted FFI setup before opening apps")
