@@ -2874,19 +2874,25 @@ final class ChatModel {
     func keepImportedDraftFiles(_ files: [ChatAttachment], reference: WorkReference, expected: WorkSharedDraft) async throws {
         guard let conversationID = reference.itemID else { throw CancellationError() }
         let targetPeer = peer
-        for file in files {
+        func requireCurrent() throws {
+            try Task.checkCancellation()
             guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
-            if await ChatLocalAttachmentStore.shared.contains(file, reference: reference) { continue }
+        }
+        for file in files {
+            try requireCurrent()
+            let cached = await ChatLocalAttachmentStore.shared.contains(file, reference: reference)
+            try requireCurrent()
+            if cached { continue }
             if (file.size ?? 0) > UInt64(ChatInbox.maxBytes) {
                 let url = try await Bridge.downloadChatFile(id: conversationID, attachmentID: file.id, peer: targetPeer,
                     confirmRelay: { [weak self] remaining in await self?.confirmFileRelay(name: file.name, size: file.size, remaining: remaining) ?? false })
                 defer { try? FileManager.default.removeItem(at: url) }
-                guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
+                try requireCurrent()
                 try await ChatLocalAttachmentStore.shared.keep(file, file: url, reference: reference)
             } else {
                 let payload = try await Bridge.chatAttachment(id: conversationID, attachmentID: file.id, peer: targetPeer, confirmRelay: { [weak self] in await self?.confirmFileRelay(name: file.name, size: file.size) ?? false })
+                try requireCurrent()
                 guard payload.attachment == file, let data = Data(base64Encoded: payload.data) else { throw ChatLocalAttachmentStore.Failure.missing }
-                guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
                 try await ChatLocalAttachmentStore.shared.keep(file, data: data, reference: reference)
             }
         }
