@@ -338,6 +338,231 @@ for line in sys.stdin:
     assert_eq!(rows.iter().filter(|row| row["type"] == "result").count(), 1);
 }
 
+#[test]
+fn stop_retires_providers_and_tools_when_stdout_is_not_consumed() {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::net::UnixStream;
+    struct StalledRunner {
+        child: Child,
+        root: std::path::PathBuf,
+        tool: Option<UnixStream>,
+    }
+    impl Drop for StalledRunner {
+        fn drop(&mut self) {
+            // The owned tool kills its own group on this private connection;
+            // cleanup never signals a PID read from an old status file.
+            let connection = self
+                .tool
+                .take()
+                .or_else(|| UnixStream::connect(self.root.join("tool.sock")).ok());
+            if let Some(mut connection) = connection {
+                let _ = connection.write_all(b"x");
+            }
+            if !self.child.try_wait().is_ok_and(|status| status.is_some()) {
+                let _ = self.child.kill();
+            }
+            let _ = self.child.wait();
+        }
+    }
+    for (backend, finished) in [
+        ("claude", false),
+        ("codex", false),
+        ("claude", true),
+        ("codex", true),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        if finished {
+            fs::write(root.path().join("finished-case"), "").unwrap();
+        }
+        fs::write(
+            root.path().join("tool.py"),
+            r#"import os,socket,sys,pathlib
+root=pathlib.Path(sys.argv[1])
+listener=socket.socket(socket.AF_UNIX)
+listener.bind(str(root/'tool.sock'));listener.listen(1)
+(root/'tool-ready').write_text('true')
+connection,_=listener.accept()
+connection.recv(1)
+os.killpg(os.getpgrp(),9)
+"#,
+        )
+        .unwrap();
+        let fake = root.path().join(format!("fake-{backend}"));
+        fs::write(&fake, r#"#!/usr/bin/env python3
+import sys,json,pathlib,subprocess,time
+root=pathlib.Path(__file__).parent
+backend='codex' if 'codex' in __file__ else 'claude'
+def emit(value): print(json.dumps(value),flush=True)
+def flood():
+ subprocess.Popen([sys.executable,str(root/'tool.py'),str(root)])
+ if (root/'finished-case').exists():
+  text='x'*(1024*1024)
+  if backend=='claude':
+   emit({'type':'assistant','message':{'content':[{'type':'text','text':text}]}})
+   emit({'type':'result','is_error':False})
+  else:
+   emit({'method':'item/agentMessage/delta','params':{'threadId':'session','turnId':'turn','itemId':'reply','delta':text}})
+   emit({'method':'turn/completed','params':{'threadId':'session','turn':{'id':'turn','status':'completed'}}})
+  (root/'provider-finished').write_text('true')
+  sys.exit(0)
+ for index in range(40):
+  text='x'*(1024*1024)
+  if backend=='claude':emit({'type':'assistant','message':{'content':[{'type':'text','text':text}]}})
+  else:emit({'method':'item/agentMessage/delta','params':{'threadId':'session','turnId':'turn','itemId':'reply','delta':text}})
+ time.sleep(60)
+for line in sys.stdin:
+ message=json.loads(line)
+ if backend=='claude':
+  if message.get('type')=='control_request':emit({'type':'control_response','response':{'request_id':message['request_id'],'subtype':'success'}})
+  elif message.get('type')=='user':
+   emit({'type':'system','subtype':'init','session_id':'session'});flood()
+ else:
+  method=message.get('method')
+  if method=='initialize':emit({'id':message['id'],'result':{}})
+  elif method in ('thread/start','thread/resume'):emit({'id':message['id'],'result':{'thread':{'id':'session'}}})
+  elif method=='turn/start':emit({'id':message['id'],'result':{'turn':{'id':'turn'}}});flood()
+"#).unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let argv = if backend == "claude" {
+            json!([fake, "-p", "literal prompt"])
+        } else {
+            json!([
+                fake,
+                "exec",
+                "resume",
+                "session",
+                "--json",
+                "--",
+                "literal prompt"
+            ])
+        };
+        let config = root.path().join("config.json");
+        fs::write(&config, json!({"backend":backend,"argv":argv}).to_string()).unwrap();
+        let child = Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut runner = StalledRunner {
+            child,
+            root: root.path().into(),
+            tool: None,
+        };
+        wait_for(|| root.path().join("tool-ready").exists());
+        let mut tool = UnixStream::connect(root.path().join("tool.sock")).unwrap();
+        tool.set_nonblocking(true).unwrap();
+        runner.tool = Some(tool.try_clone().unwrap());
+        wait_for(|| {
+            let mut available: libc::c_int = 0;
+            // SAFETY: stdout is a live pipe and available points to an int.
+            assert_eq!(
+                unsafe {
+                    libc::ioctl(
+                        runner.child.stdout.as_ref().unwrap().as_raw_fd(),
+                        libc::FIONREAD,
+                        &mut available,
+                    )
+                },
+                0
+            );
+            available > 1024
+        });
+        if finished {
+            wait_for(|| root.path().join("provider-finished").exists());
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let start = Instant::now();
+        fs::write(root.path().join("stop"), "").unwrap();
+        let mut status = None;
+        while start.elapsed() < Duration::from_secs(8) {
+            status = runner.child.try_wait().unwrap();
+            if status.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let mut byte = [0];
+        let tool_exited = loop {
+            match tool.read(&mut byte) {
+                Ok(0) => break true,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) && start.elapsed() < Duration::from_secs(8) =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break true,
+                _ => break false,
+            }
+        };
+        let exited = status.is_some();
+        println!(
+            "{backend} stalled stdout (provider finished={finished}) Stop: {:?}; runner exited={exited}, tool exited={tool_exited}",
+            start.elapsed()
+        );
+        assert!(
+            exited && tool_exited,
+            "Stop must retire the runner, provider and tool while stdout is stalled: {backend}"
+        );
+        assert!(
+            !status.unwrap().success(),
+            "Unwritten output must not be reported as a successful turn"
+        );
+    }
+}
+
+#[test]
+#[ignore = "manual output forwarding throughput measurement"]
+fn provider_output_forwarding_measurement() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-claude");
+    fs::write(&fake, r#"#!/usr/bin/env python3
+import sys,json
+def emit(value): print(json.dumps(value),flush=True)
+for line in sys.stdin:
+ message=json.loads(line)
+ if message.get('type')=='control_request':emit({'type':'control_response','response':{'request_id':message['request_id'],'subtype':'success'}})
+ elif message.get('type')=='user':
+  emit({'type':'system','subtype':'init','session_id':'session'})
+  record=json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':'small streamed reply'}]}})+'\n'
+  batch=record*100
+  for _ in range(300):sys.stdout.write(batch)
+  sys.stdout.flush()
+  emit({'type':'result','is_error':False})
+  break
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"claude","argv":[fake,"-p","literal prompt"]}).to_string(),
+    )
+    .unwrap();
+    let mut samples = Vec::new();
+    for _ in 0..7 {
+        let start = Instant::now();
+        let status = Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+    }
+    samples.sort_by(f64::total_cmp);
+    println!(
+        "Native provider forwarding: 30,000 assistant frames, median of 7 = {} ms",
+        samples[3]
+    );
+}
+
 fn wait_for(mut ready: impl FnMut() -> bool) {
     let until = Instant::now() + Duration::from_secs(8);
     while !ready() {

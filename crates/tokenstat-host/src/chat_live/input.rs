@@ -22,6 +22,27 @@ struct Request {
     charge: usize,
 }
 
+pub(super) struct Frame(Request);
+
+pub(super) fn frame(message: &Value) -> Result<Frame, String> {
+    prepare(message, None)
+}
+
+fn prepare(message: &Value, control: Option<Control>) -> Result<Frame, String> {
+    let mut bytes = serde_json::to_vec(message).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    let charge = if bytes.len() <= SMALL_BYTES {
+        0
+    } else {
+        bytes.len().min(MAX_BYTES)
+    };
+    Ok(Frame(Request {
+        bytes,
+        control,
+        charge,
+    }))
+}
+
 pub(super) enum Failure {
     Expired,
     Write(String),
@@ -43,12 +64,18 @@ pub(super) struct Input {
     failed: Option<String>,
 }
 
-pub(super) fn start(mut writer: impl Write + Send + 'static) -> Input {
+pub(super) fn start(writer: impl Write + Send + 'static) -> Input {
+    start_with(move || writer)
+}
+
+/// Construct thread-local writers, such as StdoutLock, on their owning thread.
+pub(super) fn start_with<W: Write>(writer: impl FnOnce() -> W + Send + 'static) -> Input {
     let (sender, requests) = mpsc::sync_channel::<Request>(MAX_PENDING);
     let (results, receiver) = mpsc::channel();
     let closed = Arc::new(AtomicBool::new(false));
     let cancelled = Arc::clone(&closed);
     std::thread::spawn(move || {
+        let mut writer = writer();
         while let Ok(request) = requests.recv() {
             if cancelled.load(Ordering::Acquire) {
                 break;
@@ -106,13 +133,17 @@ pub(super) fn start(mut writer: impl Write + Send + 'static) -> Input {
 }
 
 impl Input {
+    fn record_completed(&mut self, result: &Completed) {
+        if let Err(Failure::Write(error)) = &result.result {
+            self.failed = Some(error.clone());
+        }
+        self.pending -= 1;
+        self.bytes -= result.charge;
+    }
+
     fn collect(&mut self) {
         while let Ok(result) = self.results.try_recv() {
-            if let Err(Failure::Write(error)) = &result.result {
-                self.failed = Some(error.clone());
-            }
-            self.pending -= 1;
-            self.bytes -= result.charge;
+            self.record_completed(&result);
             self.completed.push_back(result);
         }
     }
@@ -128,30 +159,42 @@ impl Input {
         if self.pending >= MAX_PENDING || self.completed.len() >= MAX_COMPLETED {
             return Ok(false);
         }
-        let mut bytes = serde_json::to_vec(message).map_err(|error| error.to_string())?;
-        bytes.push(b'\n');
+        let mut frame = Some(prepare(message, control)?);
+        self.try_frame(&mut frame)
+    }
+
+    pub(super) fn try_frame(&mut self, frame: &mut Option<Frame>) -> Result<bool, String> {
+        self.collect();
+        if let Some(error) = &self.failed {
+            return Err(error.clone());
+        }
+        if self.closed.load(Ordering::Acquire) {
+            return Err("The agent input was stopped.".into());
+        }
+        let Some(prepared) = frame.as_ref() else {
+            return Ok(true);
+        };
+        if self.pending >= MAX_PENDING || self.completed.len() >= MAX_COMPLETED {
+            return Ok(false);
+        }
         // Include active large writes in the byte budget. Count-bound small
         // messages add at most 32 KiB and can follow a large initial prompt.
         // One larger message can use the whole budget to preserve old payloads.
-        let charge = if bytes.len() <= SMALL_BYTES {
-            0
-        } else {
-            bytes.len().min(MAX_BYTES)
-        };
+        let charge = prepared.0.charge;
         if self.bytes + charge > MAX_BYTES {
             return Ok(false);
         }
-        match self.sender.try_send(Request {
-            bytes,
-            control,
-            charge,
-        }) {
+        let Frame(request) = frame.take().unwrap();
+        match self.sender.try_send(request) {
             Ok(()) => {
                 self.pending += 1;
                 self.bytes += charge;
                 Ok(true)
             }
-            Err(mpsc::TrySendError::Full(_)) => Ok(false),
+            Err(mpsc::TrySendError::Full(request)) => {
+                *frame = Some(Frame(request));
+                Ok(false)
+            }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 Err("The agent input channel closed.".into())
             }
@@ -196,6 +239,18 @@ impl Input {
     pub(super) fn take_completed(&mut self) -> Option<Completed> {
         self.collect();
         self.completed.pop_front()
+    }
+
+    pub(super) fn wait_completed(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<Completed, mpsc::RecvTimeoutError> {
+        if let Some(completed) = self.take_completed() {
+            return Ok(completed);
+        }
+        let completed = self.results.recv_timeout(timeout)?;
+        self.record_completed(&completed);
+        Ok(completed)
     }
 }
 

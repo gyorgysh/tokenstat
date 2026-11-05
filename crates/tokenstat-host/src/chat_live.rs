@@ -13,6 +13,7 @@ use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex, Once, OnceLock, PoisonError, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod emitter;
 mod input;
 mod output;
 
@@ -360,6 +361,7 @@ struct Protocol {
     pending: HashMap<String, Pending>,
     usage: Value,
     deferred_result: Option<Value>,
+    finished: bool,
 }
 
 struct Pending {
@@ -414,16 +416,8 @@ impl CodexUsage {
     }
 }
 
-fn send(input: &mut impl Write, message: &Value) -> Result<(), String> {
-    serde_json::to_writer(&mut *input, message).map_err(|error| error.to_string())?;
-    input
-        .write_all(b"\n")
-        .and_then(|()| input.flush())
-        .map_err(|error| error.to_string())
-}
-
-fn emit(value: &Value) -> Result<(), String> {
-    send(&mut std::io::stdout().lock(), value)
+fn emit(output: &mut emitter::Emitter, value: &Value) -> Result<(), String> {
+    output.emit(value)
 }
 
 /// Convert only CLI launch flags we own. Unknown flags abort before a prompt
@@ -588,6 +582,48 @@ fn read_messages(child: &mut Child) -> Result<output::Messages, String> {
     Ok(read_messages_from(output))
 }
 
+fn kill_agent(child: &mut Child) {
+    #[cfg(windows)]
+    tokenstat_pty::kill_windows_process_tree(child.id());
+    #[cfg(unix)]
+    // SAFETY: this unreaped child owns a fresh process group, so its PID
+    // cannot be reused while we terminate only this turn's descendants.
+    unsafe {
+        libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+    }
+    let _ = child.kill();
+}
+
+fn agent_exited(child: &mut Child) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        // Keep the PID reserved until output and descendant cleanup finish.
+        // waitid(WNOWAIT) observes exit without reaping the provider.
+        // SAFETY: siginfo_t is a C POD; zeroing also handles WNOHANG with no event.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: the child PID and writable siginfo_t belong to this caller.
+        // WNOWAIT leaves an exited child available for the final Child::wait.
+        let status = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id() as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if status != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: waitid supplies SIGCHLD fields, or leaves our zeroed PID.
+        Ok(unsafe { info.si_pid() } != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        // Child retains the Windows process handle and therefore its identity.
+        child.try_wait().map(|status| status.is_some())
+    }
+}
+
 fn read_messages_from(output: impl Read + Send + 'static) -> output::Messages {
     let (tx, rx) = output::channel();
     std::thread::spawn(move || {
@@ -641,8 +677,17 @@ fn read_diagnostics(child: &mut Child) -> (Arc<Mutex<Vec<u8>>>, mpsc::Receiver<(
 }
 
 impl Protocol {
-    fn interrupt(&self, input: &mut input::Input, messages: &output::Messages) {
-        if self.backend != "codex" || self.thread.is_empty() || self.turn.is_empty() {
+    fn interrupt(
+        &self,
+        input: &mut input::Input,
+        messages: &output::Messages,
+        output: &mut emitter::Emitter,
+    ) {
+        if self.backend != "codex"
+            || self.thread.is_empty()
+            || self.turn.is_empty()
+            || self.finished
+        {
             return;
         }
         if input.send(
@@ -671,7 +716,7 @@ impl Protocol {
                     ) =>
                 {
                     if let Some(item) = codex_owned_item(&message, &self.thread, &self.turn) {
-                        let _ = emit(&item);
+                        let _ = emit(output, &item);
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -985,17 +1030,30 @@ pub fn run(path: &Path) -> Result<(), String> {
         .spawn()
         .map_err(|error| error.to_string())?;
     let (diagnostics, diagnostics_finished) = read_diagnostics(&mut child);
-    let result = (|| {
+    let prepared = (|| {
         let rx = read_messages(&mut child)?;
-        let mut input = input::start(child.stdin.take().ok_or("missing agent input")?);
-        let mut protocol = Protocol {
-            backend: config.backend.clone(),
-            thread: String::new(),
-            turn: String::new(),
-            pending: HashMap::new(),
-            usage: Value::Null,
-            deferred_result: None,
-        };
+        let input = input::start(child.stdin.take().ok_or("missing agent input")?);
+        Ok::<_, String>((rx, input))
+    })();
+    let (rx, mut input) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            kill_agent(&mut child);
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    let mut output = emitter::Emitter::new(|| std::io::stdout().lock(), directory);
+    let mut protocol = Protocol {
+        backend: config.backend.clone(),
+        thread: String::new(),
+        turn: String::new(),
+        pending: HashMap::new(),
+        usage: Value::Null,
+        deferred_result: None,
+        finished: false,
+    };
+    let result = (|| {
         let initialize = if config.backend == "codex" {
             json!({"id":"initialize","method":"initialize","params":{"clientInfo":{"name":"tokenstat","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}})
         } else {
@@ -1010,7 +1068,6 @@ pub fn run(path: &Path) -> Result<(), String> {
         let mut started = false;
         loop {
             if stop_requested(directory) {
-                protocol.interrupt(&mut input, &rx);
                 return Err("The turn was stopped.".into());
             }
             protocol.written(&mut input)?;
@@ -1090,18 +1147,20 @@ pub fn run(path: &Path) -> Result<(), String> {
                         }
                         continue;
                     }
-                    emit(&message)?;
+                    protocol.finished = true;
+                    emit(&mut output, &message)?;
                     if message["is_error"] == true {
                         return Err("Claude reported a failed turn.".into());
                     }
                     if initial == "/compact" {
                         emit(
+                            &mut output,
                             &json!({"type":"assistant","message":{"content":[{"type":"text","text":"Context compaction completed."}]}}),
                         )?;
                     }
                     return Ok(());
                 } else {
-                    emit(&message)?;
+                    emit(&mut output, &message)?;
                     if initialized && message["type"] == "system" && message["subtype"] == "init" {
                         write_json(&directory.join("ready.json"), &json!(true))?;
                         started = true;
@@ -1127,8 +1186,14 @@ pub fn run(path: &Path) -> Result<(), String> {
                             .to_string()
                     })?
                     .into();
-                emit(&json!({"type":"thread.started","thread_id":protocol.thread}))?;
-                emit(&json!({"type":"tokenstat.context","model":message["result"]["model"]}))?;
+                emit(
+                    &mut output,
+                    &json!({"type":"thread.started","thread_id":protocol.thread}),
+                )?;
+                emit(
+                    &mut output,
+                    &json!({"type":"tokenstat.context","model":message["result"]["model"]}),
+                )?;
                 let mut params = initial.clone();
                 let compact = params["tokenstatCompact"] == true;
                 params.as_object_mut().unwrap().remove("tokenstatCompact");
@@ -1155,10 +1220,11 @@ pub fn run(path: &Path) -> Result<(), String> {
                 }
             } else if message["id"] == "inspection-mcp" {
                 if let Some(servers) = message["result"]["data"].as_array() {
-                    emit(&codex_mcp_inventory(servers))?;
+                    emit(&mut output, &codex_mcp_inventory(servers))?;
                     mcp_pages += 1;
                     if mcp_pages >= 3 && message["result"]["nextCursor"].is_string() {
                         emit(
+                            &mut output,
                             &json!({"type":"tokenstat.mcp", "servers":[], "inventoryPartial":true}),
                         )?;
                     }
@@ -1171,13 +1237,13 @@ pub fn run(path: &Path) -> Result<(), String> {
             } else if message["id"] == "inspection-goal" {
                 if let Some(activity) = codex_goal_reply(&message, &protocol.thread, goal_notified)
                 {
-                    emit(&activity)?;
+                    emit(&mut output, &activity)?;
                 }
             } else if let Some(activity) =
                 crate::chat_activity::codex_notification(&message, &protocol.thread, &protocol.turn)
             {
                 goal_notified |= activity["kind"] == "goal";
-                emit(&activity)?;
+                emit(&mut output, &activity)?;
             } else if message["method"] == "mcpServer/startupStatus/updated" {
                 let params = &message["params"];
                 if params["threadId"].is_null() || params["threadId"] == protocol.thread {
@@ -1191,6 +1257,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                         _ => "starting",
                     };
                     emit(
+                        &mut output,
                         &json!({"type":"tokenstat.mcp", "servers":[{"name":params["name"], "runtimeStatus":status}]}),
                     )?;
                 }
@@ -1253,19 +1320,25 @@ pub fn run(path: &Path) -> Result<(), String> {
                 {
                     continue;
                 }
+                protocol.finished = true;
                 let completed = turn["status"] == "completed";
                 if !completed {
                     emit(
+                        &mut output,
                         &json!({"type":"error","message":turn["error"]["message"].as_str().unwrap_or("Codex turn failed or was interrupted")}),
                     )?;
                 }
                 if completed && initial["tokenstatCompact"] == true {
                     emit(
+                        &mut output,
                         &json!({"type":"item.completed","item":{"id":"tokenstat-compact-result","type":"agent_message","text":"Context compaction completed."}}),
                     )?;
                 }
                 if completed {
-                    emit(&json!({"type":"turn.completed","usage":protocol.usage}))?;
+                    emit(
+                        &mut output,
+                        &json!({"type":"turn.completed","usage":protocol.usage}),
+                    )?;
                 }
                 // Match exec's subscription cleanup. Closing protocol stdin
                 // afterward shuts down the thread and flushes its rollout.
@@ -1273,8 +1346,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 )?;
                 let until = Instant::now() + Duration::from_secs(3);
                 while Instant::now() < until {
-                    #[cfg(unix)]
-                    if STOPPED.load(std::sync::atomic::Ordering::SeqCst) {
+                    if stop_requested(directory) {
                         return Err("The turn was stopped.".into());
                     }
                     match rx.recv_timeout(Duration::from_millis(40)) {
@@ -1289,15 +1361,15 @@ pub fn run(path: &Path) -> Result<(), String> {
                                 &protocol.turn,
                             ) {
                                 goal_notified |= activity["kind"] == "goal";
-                                emit(&activity)?;
+                                emit(&mut output, &activity)?;
                             } else if let Some(activity) =
                                 codex_goal_reply(&reply, &protocol.thread, goal_notified)
                             {
-                                emit(&activity)?;
+                                emit(&mut output, &activity)?;
                             } else if let Some(item) =
                                 codex_owned_item(&reply, &protocol.thread, &protocol.turn)
                             {
-                                emit(&item)?;
+                                emit(&mut output, &item)?;
                             }
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -1319,6 +1391,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 }
                 let usage = &params["tokenUsage"];
                 emit(
+                    &mut output,
                     &json!({"type":"tokenstat.context", "contextUsed":usage["last"]["inputTokens"],
                     "contextWindow":usage["modelContextWindow"],
                     "contextBreakdown":{
@@ -1335,7 +1408,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 }
             } else if let Some(item) = codex_owned_item(&message, &protocol.thread, &protocol.turn)
             {
-                emit(&item)?;
+                emit(&mut output, &item)?;
             } else if message.get("id").is_some() && message["method"].is_string() {
                 // Match exec's noninteractive contract. Never silently grant a
                 // provider permission request or leave it parked indefinitely.
@@ -1347,31 +1420,56 @@ pub fn run(path: &Path) -> Result<(), String> {
             }
         }
     })();
+    if stop_requested(directory) {
+        protocol.interrupt(&mut input, &rx, &mut output);
+    }
+    drop(input);
+    drop(rx);
     // Closing protocol stdin starts the app-server's thread shutdown. Even a
     // stopped/failed turn needs this bounded grace period to flush its history.
     // On a protocol failure the server also cancels any still-running work.
     let mut exited = false;
+    let mut owned = true;
     if result.is_ok() || config.backend == "codex" {
         let until = Instant::now() + EXIT_TIMEOUT;
         while Instant::now() < until {
-            if child.try_wait().is_ok_and(|status| status.is_some()) {
-                exited = true;
-                break;
+            match agent_exited(&mut child) {
+                Ok(true) => {
+                    exited = true;
+                    break;
+                }
+                Ok(false) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    // Only ECHILD means the PID may already have been reaped.
+                    // Other observation failures must still retire a live child
+                    // before the final, potentially blocking wait.
+                    owned = {
+                        #[cfg(unix)]
+                        {
+                            error.raw_os_error() != Some(libc::ECHILD)
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = error;
+                            true
+                        }
+                    };
+                    break;
+                }
             }
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-    if !exited {
-        #[cfg(windows)]
-        tokenstat_pty::kill_windows_process_tree(child.id());
-        #[cfg(unix)]
-        // SAFETY: this unreaped child owns a fresh process group, so its PID
-        // cannot be reused while we terminate only this turn's descendants.
-        unsafe {
-            libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
-        }
-        let _ = child.kill();
+    let retired = owned && (!exited || result.is_err());
+    if retired {
+        kill_agent(&mut child);
     }
+    let flushed = output.finish();
+    if flushed.is_err() && owned && !retired {
+        kill_agent(&mut child);
+    }
+    let result = result.and(flushed);
     let _ = child.wait();
     result.map_err(|error| {
         let _ = diagnostics_finished.recv_timeout(Duration::from_millis(100));
@@ -1476,7 +1574,32 @@ mod tests {
             pending: HashMap::new(),
             usage: Value::Null,
             deferred_result: None,
+            finished: false,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observing_provider_exit_keeps_it_waitable_until_cleanup() {
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "read value; exit 0"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        assert!(!agent_exited(&mut child).unwrap());
+        drop(child.stdin.take());
+        let until = Instant::now() + Duration::from_secs(2);
+        while !agent_exited(&mut child).unwrap() {
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            agent_exited(&mut child).unwrap(),
+            "Observing exit must not release PID ownership"
+        );
+        assert!(child.wait().unwrap().success());
     }
 
     #[test]
@@ -2086,6 +2209,7 @@ mod tests {
                 )]),
                 usage: Value::Null,
                 deferred_result: None,
+                finished: false,
             };
             assert!(
                 !protocol
