@@ -58,8 +58,9 @@ internal fun ChatModelView(name: String, file: File) {
     LaunchedEffect(file.path, file.lastModified()) {
         payload = withContext(Dispatchers.IO) {
             runCatching {
-                if (file.length() !in 1..12L * 1024 * 1024) ModelPayload.Unavailable
-                else ModelPayload.Ready(Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+                val bytes = readModelPreviewBytes(file)
+                if (bytes == null) ModelPayload.Unavailable
+                else ModelPayload.Ready(Base64.encodeToString(bytes, Base64.NO_WRAP))
             }.getOrDefault(ModelPayload.Unavailable)
         }
     }
