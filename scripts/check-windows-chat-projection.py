@@ -91,6 +91,31 @@ internal sealed partial class ChatPage {
             var before = Snapshot(page.Coalesce(page._events)); page.Draw(detail);
             Check(Snapshot(page.Coalesce(page._events)) == before, "Folding mutated the source projection");
         }
+        // Text and thinking have separate buffers. Switching kinds and ending
+        // tools must retain boundaries, including Unicode split across deltas.
+        var streamed = new JsonArray();
+        void Delta(string kind, string delta) => streamed.Add(new JsonObject {
+            ["kind"] = "agent", ["atMs"] = streamed.Count,
+            ["event"] = new JsonObject { ["kind"] = kind, ["delta"] = delta }
+        });
+        foreach (var kind in new[] { "text", "thinking", "text" }) {
+            Delta(kind, ""); Delta(kind, "  start ");
+            for (var index = 0; index < 2000; index++) Delta(kind, index % 2 == 0 ? "\ud83d" : "\ude00");
+            Delta(kind, " e"); Delta(kind, "\u0301 end  ");
+        }
+        streamed.Add(JsonNode.Parse("""{"kind":"agent","atMs":9000,"event":{"kind":"toolStart","callId":"boundary","verb":"Read"}}"""));
+        streamed.Add(JsonNode.Parse("""{"kind":"agent","atMs":9001,"event":{"kind":"toolEnd","callId":"boundary","ok":true}}"""));
+        Delta("thinking", " after tool ");
+        var streamedPage = new ChatPage(streamed);
+        var projected = streamedPage.Coalesce(streamed);
+        Check(projected.Count == 5, "Stream flushes lost or repeated a row");
+        var expectedText = "start " + string.Concat(Enumerable.Repeat("😀", 1000)) + " e\u0301 end";
+        for (var index = 0; index < 3; index++) {
+            Check(projected[index].Kind == (index == 1 ? ItemKind.Thinking : ItemKind.Assistant), "Stream kind crossed a boundary");
+            Check(projected[index].Text == expectedText, "Stream concatenation changed split Unicode or whitespace");
+        }
+        Check(projected[3].Kind == ItemKind.Tool && !projected[3].Running, "Tool boundary did not finish");
+        Check(projected[4].Kind == ItemKind.Thinking && projected[4].Text == "after tool", "Thinking buffer was not cleared");
         Console.WriteLine("PASS: actual projection preserves streamed text, busy ownership, tail/page/backend invalidation and every detail level");
     }
     public static void Benchmark(string[] paths) {

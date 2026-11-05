@@ -3,6 +3,7 @@
 // Source-available for review, NOT open source. See LICENSE.
 
 using System.Globalization;
+using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.UI;
 using Microsoft.UI.Input;
@@ -2739,32 +2740,32 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var items = new List<DisplayItem>();
         var tools = new ChatToolCalls();
         var questions = new Dictionary<string, int>();
-        var text = "";
+        var text = new StringBuilder();
         var textId = "";
-        var thinking = "";
+        var thinking = new StringBuilder();
         var thinkingId = "";
         var attachmentTurn = "prefix";
 
         void FlushText()
         {
             // The question block is drawn as its own card below the reply.
-            var body = ChatQuestionText.Strip(text, streaming: _running).Trim();
+            var body = ChatQuestionText.Strip(text.ToString(), streaming: _running).Trim();
             if (body.Length > 0)
             {
                 items.Add(new DisplayItem { Id = textId, Kind = ItemKind.Assistant, Text = body });
             }
-            text = "";
+            text.Clear();
             textId = "";
         }
 
         void FlushThinking()
         {
-            var body = thinking.Trim();
+            var body = thinking.ToString().Trim();
             if (body.Length > 0)
             {
                 items.Add(new DisplayItem { Id = thinkingId, Kind = ItemKind.Thinking, Text = body });
             }
-            thinking = "";
+            thinking.Clear();
             thinkingId = "";
         }
 
@@ -2860,12 +2861,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 case "text":
                     FlushThinking();
                     if (text.Length == 0) textId = "text-" + Format.Long(row, "atMs") + "-" + items.Count;
-                    text += Format.Text(ev, "delta");
+                    text.Append(Format.Text(ev, "delta"));
                     break;
                 case "thinking":
                     FlushText();
                     if (thinking.Length == 0) thinkingId = "think-" + Format.Long(row, "atMs") + "-" + items.Count;
-                    thinking += Format.Text(ev, "delta");
+                    thinking.Append(Format.Text(ev, "delta"));
                     break;
                 case "toolStart":
                     FlushText();
