@@ -3652,6 +3652,87 @@ mod tests {
                 text, expected_text,
                 "{backend} changed or repeated its reply"
             );
+            let expected_sessions: &[&str] = match backend {
+                "claude" => &["claude-session"],
+                "codex" => &["codex-thread"],
+                "cursor" => &["11111111-2222-3333-4444-555555555555"],
+                "opencode" => &["opencode-session"],
+                "opencode2" => &["opencode2-session"],
+                "grok" | "agy" => &[], // These records carry no session ID.
+                _ => unreachable!(),
+            };
+            let sessions: Vec<_> = events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Session { id } => Some(id.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                sessions, expected_sessions,
+                "{backend} changed session ownership"
+            );
+
+            let expected_usage: &[(u64, u64, u64, u64, Option<f64>)] = match backend {
+                "claude" => &[(12, 4, 0, 0, None)],
+                "grok" => &[(8, 3, 0, 0, None)],
+                "cursor" => &[(25_665, 262, 43_392, 0, None)],
+                _ => &[], // Missing counters must not become invented usage.
+            };
+            let usage: Vec<_> = events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Usage {
+                        input,
+                        output,
+                        cache_read,
+                        cache_write,
+                        cost_usd,
+                    } => Some((*input, *output, *cache_read, *cache_write, *cost_usd)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(usage, expected_usage, "{backend} changed reported usage");
+
+            // Each call must close exactly once with its original identity,
+            // including providers whose end marker closes unfinished tools.
+            let expected_calls: &[&str] = match backend {
+                "claude" => &["tool-1"],
+                "codex" => &["cmd-1"],
+                "grok" => &["read-1"],
+                "cursor" => &["call-read-1", "call-edit-2", "call-shell-3"],
+                "agy" => &["agy-1"],
+                "opencode" => &["oc-1"],
+                "opencode2" => &["oc2-1"],
+                _ => unreachable!(),
+            };
+            let ends: Vec<_> = events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::ToolEnd { call_id, ok, .. } => Some((call_id.as_str(), *ok)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                ends,
+                expected_calls
+                    .iter()
+                    .map(|id| (*id, true))
+                    .collect::<Vec<_>>(),
+                "{backend} lost, repeated or misattributed a completed tool"
+            );
+            if let Some(expected) = match backend {
+                "codex" => Some("clean"),
+                "opencode" => Some("/tmp"),
+                _ => None,
+            } {
+                assert!(
+                    events.iter().any(|event| matches!(event,
+                    Event::ToolEnd { detail: Some(detail), .. } if detail == expected)),
+                    "{backend} lost the tool output"
+                );
+            }
+
             // Pipes may split any record or deliver several at once. Compare
             // every event field, including tool IDs, results and usage.
             for width in [1, 2, 7, 64, 1024] {
