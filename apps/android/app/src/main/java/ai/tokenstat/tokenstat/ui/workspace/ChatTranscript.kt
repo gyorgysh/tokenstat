@@ -282,6 +282,8 @@ fun coalesceTranscript(
     val approvalIndex = mutableMapOf<String, Int>()
     val questionIndex = mutableMapOf<String, Int>()
     val editRevisions = mutableMapOf<String, Int>()
+    // Row order matters when an edit without a call ID needs its latest open tool.
+    val runningIndexes = linkedSetOf<Int>()
     var text = StringBuilder()
     var textID = ""
     var textBackend: String? = null
@@ -320,7 +322,7 @@ fun coalesceTranscript(
     }
 
     fun closeRunningTools(failed: Boolean, at: Long?, detail: String?) {
-        for (index in items.indices) {
+        for (index in runningIndexes) {
             when (val item = items[index]) {
                 is ChatDisplayItem.Tool -> {
                     if (!item.state.running) continue
@@ -342,6 +344,7 @@ fun coalesceTranscript(
                 else -> continue
             }
         }
+        runningIndexes.clear()
     }
 
     fun nextEditRevision(path: String): Int {
@@ -398,7 +401,7 @@ fun coalesceTranscript(
                 }
             }
         }
-        for (index in items.indices.reversed()) {
+        for (index in runningIndexes.reversed()) {
             when (val item = items[index]) {
                 is ChatDisplayItem.Edit ->
                     if (item.state.backend == backend && item.state.running && (path.isEmpty() || item.state.path == path)) return index
@@ -554,7 +557,11 @@ fun coalesceTranscript(
                 // A bare "tool" event without a start/end pair arrives
                 // already finished; only true starts run open.
                 val isStart = (inner.str("kind") ?: "").lowercase() != "tool"
-                if (ChatToolState.isFileEditVerb(verb)) {
+                val isFileEdit = ChatToolState.isFileEditVerb(verb)
+                if (isStart && (isFileEdit || inner.safeBool("running") != false)) {
+                    runningIndexes.add(items.size)
+                }
+                if (isFileEdit) {
                     val path = target.ifEmpty { L10n.text("android.chattranscript.file.50009ce1") }
                     items.add(
                         ChatDisplayItem.Edit(
@@ -603,6 +610,7 @@ fun coalesceTranscript(
                 val callId = inner.str("callId") ?: inner.str("call_id") ?: ""
                 val index = toolEndIndex(callId, eventBackend)
                 if (index != null && index in items.indices) {
+                    runningIndexes.remove(index)
                     when (val item = items[index]) {
                         is ChatDisplayItem.Tool -> {
                             val presentation = refineMuseToolPresentation(

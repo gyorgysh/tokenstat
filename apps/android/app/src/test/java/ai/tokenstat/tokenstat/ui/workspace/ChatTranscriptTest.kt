@@ -237,6 +237,35 @@ class ChatTranscriptTest {
     }
 
     @Test
+    fun lateEditsAndReusedCallsKeepTheirOwnCompletionState() {
+        fun edit(call: String, patch: String) = buildJsonObject {
+            put("kind", "agent")
+            putJsonObject("event") { put("kind", "edit"); put("callId", call); put("path", "same.txt"); put("patch", patch) }
+        }
+        val items = coalesceTranscript(listOf(
+            toolStart("open-edit", "Edit", "same.txt"),
+            toolStart("closed-edit", "Edit", "same.txt"),
+            toolEnd("closed-edit", "Edit", "+completed"),
+            edit("", "+pending"),
+            toolStart("reuse", "Read", "first"),
+            toolStart("reuse", "Read", "second"),
+            toolEnd("reuse", "Read", "first result"),
+            buildJsonObject { put("kind", "agent"); putJsonObject("event") { put("kind", "done"); put("status", "error") } },
+            edit("closed-edit", "+late"),
+            buildJsonObject { put("kind", "user"); put("text", "next turn") },
+            toolStart("new", "Read", "third"),
+        ))
+        val edits = items.filterIsInstance<ChatDisplayItem.Edit>().map { it.state }
+        assertEquals(listOf("+pending", "+late"), edits.map { it.patch })
+        assertEquals(listOf(true, false), edits.map { it.failed })
+        assertTrue(edits.none { it.running })
+        val tools = items.filterIsInstance<ChatDisplayItem.Tool>().map { it.state }
+        assertEquals(listOf(false, true, false), tools.map { it.failed })
+        assertEquals(listOf(false, false, true), tools.map { it.running })
+        assertEquals("first result", tools[0].detail)
+    }
+
+    @Test
     fun snippetCapsLinesAndColumns() {
         val longLine = "x".repeat(700)
         val detail = (listOf(longLine) + (1..70).map { "line $it" }).joinToString("\n")
