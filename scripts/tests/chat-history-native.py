@@ -357,6 +357,38 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 assert any(peer.get("peer") == fixture["hostKey"] and peer.get("route") == "relay"
                     for peer in traffic["peers"]), traffic
                 prove("The desktop reader daemon confirms an outbound relay route to the chat host")
+        if args.smooth_stream:
+            transcript = Path(fixture["transcript"])
+            start = transcript.stat().st_size
+            words = ["## Smooth streaming\n\n"]
+            words += [(f"word{index}🌍" + ("\n" if index < 48 and index % 12 == 11 else " ")) for index in range(120)]
+            words += ["\n\n```swift\n", "let greeting = ", '"Hello 🌍"', "\n```\n\n", "smooth-idle-tail"]
+            expected = "".join(words)
+            for word in words:
+                emit({"type": "text", "data": word})
+                await asyncio.sleep(0.037)
+            # The final partial line must appear while the producer is still
+            # alive, without depending on a following event or completion.
+            await visible("smooth-idle-tail")
+            assert all(state(role)["running"] for role in roles)
+            with transcript.open("rb") as archive:
+                archive.seek(start)
+                events = [json.loads(line) for line in archive if line.strip()]
+            deltas = [event["event"]["delta"] for event in events
+                if event.get("kind") == "agent" and event.get("event", {}).get("kind") == "text"]
+            assert "".join(deltas) == expected, "Stream batching changed or lost text"
+            assert len(deltas) < len(words) // 2, (len(deltas), len(words))
+            atomic_json(run_root / "stream-updates.json", {"inputUpdates":len(words),
+                "publishedUpdates":len(deltas), "expected":expected, "deltas":deltas})
+            prove(f"Native readers ({', '.join(roles)}) display exact Unicode/Markdown and an idle tail: {len(words)} input updates become {len(deltas)} publications")
+            emit({"type": "text", "data": " final-no-newline"})
+            emit({"type": "end", "stopReason": "end_turn"})
+            await wait(lambda: all(state(role) and not state(role)["running"] for role in roles))
+            await visible("final-no-newline")
+            prove("Turn completion publishes the final partial line to every native reader")
+            atomic_json(run_root / "result.json", {"ok":True, "proofs":proofs,
+                "states":{role:state(role) for role in roles}})
+            return
         if args.search_only:
             for call, label in [("qa-search-first", "quartz-search-target"), ("qa-search-second", "amber-second-step")]:
                 emit({"type": "tool_call", "id": call, "toolName": "Bash", "rawInput": {"command": label}})
@@ -538,6 +570,7 @@ if __name__ == "__main__":
     parser.add_argument("--mac-app", type=Path, default=QA / "mac/Build/Products/Debug/HistoryMac.app")
     parser.add_argument("--phone-app", type=Path, default=QA / "phone/Build/Products/Debug-iphonesimulator/HistoryPhone.app")
     parser.add_argument("--relay", action="store_true", help="Use the owned loopback relay and disposable account")
+    parser.add_argument("--smooth-stream", action="store_true", help="Verify readable streaming batches and idle/completion flushes")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--probe-only", action="store_true", help="Verify the producer and encrypted FFI setup before opening apps")

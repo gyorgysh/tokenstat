@@ -163,7 +163,7 @@ final class AccountModel {
             await WorkCacheCleanupJournal.shared.recover(verifiedScope: verifiedScope,
                 accountKnown: !next.signedIn || verifiedScope != nil,
                 stillValid: { generation == self.accountLoadGeneration && (!self.isSigningOut || afterSignOut) },
-                deleteKey: { WorkCacheKey.delete(for: $0) },
+                deleteKey: { await WorkCacheKey.delete(for: $0) },
                 clear: { _ = try await Bridge.cacheClearScope(scope: $0) })
             guard generation == accountLoadGeneration else { return }
             if let status = try? await Bridge.remoteStatus() {
@@ -501,7 +501,7 @@ final class AccountModel {
             }
             if let purgeScope { WorkAccessStore.shared.clear(scope: purgeScope) }
             await WorkCacheCleanupJournal.shared.recover(verifiedScope: nil, accountKnown: true,
-                deleteKey: { WorkCacheKey.delete(for: $0) },
+                deleteKey: { await WorkCacheKey.delete(for: $0) },
                 clear: { _ = try await Bridge.cacheClearScope(scope: $0) })
             await load(afterSignOut: true)
         } catch {

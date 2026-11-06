@@ -17,7 +17,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Improved
 
-- Claude and Codex replies appear as they stream. Long replies, tool output and busy terminal sessions reach connected devices with less delay, and long conversations take less work to read and display.
+- Replies update in larger pieces, keeping completed lines together so streamed answers are easier to follow. Long replies, tool output and busy terminal sessions reach connected devices with less delay, and long conversations take less work to read and display.
 - Phone composers leave more room for the conversation, with setup controls available in a sheet.
 - Chat attachments support files up to 250 MiB. Large images can load on connected devices, and local images appear without a download-size prompt. Large pasted images on Apple devices stay available in saved drafts.
 - Before a transfer uses relay, Apple and Android clients explain the connection and show the available allowance when known. Direct transfers need no relay confirmation, and retrying a completed transfer reuses the saved bytes.
@@ -27,6 +27,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- Saving offline chats on Apple devices no longer waits for Keychain on the UI thread, which could freeze the conversation.
 - Long private chats no longer discard earlier messages at the old transcript size limit. Clients recover interrupted history reads and keep independent reading positions when the same chat is open on several devices.
 - On Apple devices, following a long reply reaches its end, and opening a search result reveals its message inside a folded group of steps.
 - Chat and terminal agents can run alongside other agents or Git operations in the same checkout without the “checkout is in use” pause.

@@ -60,6 +60,21 @@ import Darwin
         await relaunched.recover(verifiedScope: nil, accountKnown: true,
             deleteKey: { _ in true }, clear: { _ in try journal.prepare(scope: "owner-a") })
         assert(WorkCacheCleanupJournal.blocks("owner-a", file: file), "Old completion cannot remove a new cleanup intent")
+        // Background deletion keeps the durable barrier in place and prevents
+        // a second recovery from clearing records before that deletion ends.
+        try journal.confirm(scope: "owner-a")
+        var backgroundDeleted = false
+        await journal.recover(verifiedScope: nil, accountKnown: true,
+            deleteKey: { _ in
+                await Task.yield()
+                assert(WorkCacheCleanupJournal.blocks("owner-a", file: file))
+                await journal.recover(verifiedScope: nil, accountKnown: true,
+                    deleteKey: { _ in assertionFailure("Duplicate deletion"); return false },
+                    clear: { _ in assertionFailure("Early clear") })
+                backgroundDeleted = true
+                return true
+            }, clear: { _ in assert(backgroundDeleted) })
+        assert(!WorkCacheCleanupJournal.blocks("owner-a", file: file))
         // A separate process exits abruptly after key deletion but before
         // record cleanup, so this checks disk recovery beyond object re-init.
         let crashFile = root.appendingPathComponent("crash/journal.json")

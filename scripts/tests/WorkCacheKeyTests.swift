@@ -61,6 +61,14 @@ enum WorkCacheCleanupJournal {
             }, canCreate: { allowed }, add: add, generate: generate)
             precondition(revoked == nil && added == addsBeforeRevocation)
         }
+        // Creation may finish after sign-out. Never hand that key back to a
+        // caller whose permission changed while the security service waited.
+        allowed = true
+        let revokedCreation = await WorkCacheKey.resolveForSaving(
+            read: { (errSecItemNotFound, nil) }, canCreate: { allowed },
+            add: { _ in await Task.yield(); allowed = false; return errSecSuccess },
+            generate: generate)
+        precondition(revokedCreation == nil)
         let unusedRead = await WorkCacheKey.resolveForSaving(
             read: { preconditionFailure("A denied scope must not read Keychain") },
             canCreate: { false }, add: add, generate: generate
@@ -115,6 +123,33 @@ enum WorkCacheCleanupJournal {
         // A completed key must not be retained as an authorization shortcut.
         _ = await readsQueue.read("slow")
         precondition(count.value == 3)
+        // A slow creation leaves the main actor responsive. A deletion
+        // enqueued behind it must run last, so sign-out cannot recreate a key.
+        let mutations = WorkCacheKeyMutations()
+        let mutationGate = DispatchSemaphore(value: 0)
+        let mutationOrder = ReadCount()
+        let creation = Task {
+            await mutations.run {
+                precondition(!Thread.isMainThread)
+                precondition(mutationOrder.increment() == 1)
+                _ = mutationGate.wait(timeout: .now() + 5)
+                precondition(mutationOrder.increment() == 2)
+                return errSecSuccess
+            }
+        }
+        while mutationOrder.value == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+        let deletion = Task {
+            await mutations.run {
+                precondition(!Thread.isMainThread)
+                precondition(mutationOrder.increment() == 3)
+                return errSecSuccess
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+        precondition(mutationOrder.value == 1)
+        mutationGate.signal()
+        let statuses = await [creation.value, deletion.value]
+        precondition(statuses.allSatisfy { $0 == errSecSuccess } && mutationOrder.value == 3)
         print("Cache keys: atomic creation, revoked async reads, bounded waits, coalescing and retry passed")
     }
 }

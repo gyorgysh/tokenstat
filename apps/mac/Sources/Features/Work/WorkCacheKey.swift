@@ -2,6 +2,7 @@
 
 import Foundation
 import Security
+import LocalAuthentication
 
 /// The per-scope key that seals saved work, held by the system keychain.
 ///
@@ -11,25 +12,33 @@ import Security
 /// this key those rows are sizes and timestamps. Deleting the key is what
 /// makes a sign-out purge unrecoverable rather than merely unlisted.
 enum WorkCacheKey {
+    @MainActor private static var creating: Set<String> = []
     private static let service = "ai.tokenstat.work-cache"
 
     /// Keychain reads may wait for the security service or an unlock prompt.
-    /// Never make the UI executor wait with them. Creation stays on the main
-    /// actor after authorization is checked again, so a sign-out during the
-    /// read cannot recreate the key its cleanup just removed.
+    /// Never make the UI executor wait with them. Creation uses the main
+    /// actor only for authorization checks; mutations share a background queue
+    /// so sign-out deletion cannot be overtaken by an unfinished creation.
     @MainActor
     static func keyForSaving(for scope: String, canCreate: () -> Bool) async -> [UInt8]? {
         await resolveForSaving(
             read: { await readInBackground(scope: scope) },
             canCreate: { canCreate() && !WorkCacheCleanupJournal.blocks(scope) },
-            add: { store(scope: scope, key: $0) }, generate: randomBytes
+            add: { key in
+                guard creating.count < 4, creating.insert(scope).inserted else { return errSecNotAvailable }
+                defer { creating.remove(scope) }
+                return await mutate {
+                    guard !WorkCacheCleanupJournal.blocks(scope) else { return errSecInteractionNotAllowed }
+                    return store(scope: scope, key: key)
+                }
+            }, generate: randomBytes
         )
     }
 
     @MainActor
     static func resolveForSaving(
         read: () async -> (status: OSStatus, key: [UInt8]?),
-        canCreate: () -> Bool, add: ([UInt8]) -> OSStatus,
+        canCreate: () -> Bool, add: ([UInt8]) async -> OSStatus,
         generate: () -> [UInt8]
     ) async -> [UInt8]? {
         guard canCreate(), !Task.isCancelled else { return nil }
@@ -39,7 +48,9 @@ enum WorkCacheKey {
         guard existing.status == errSecItemNotFound else { return nil }
         let fresh = generate()
         guard fresh.count == 32 else { return nil }
-        switch add(fresh) {
+        let status = await add(fresh)
+        guard canCreate(), !Task.isCancelled else { return nil }
+        switch status {
         case errSecSuccess: return fresh
         case errSecDuplicateItem:
             let winner = await read()
@@ -65,13 +76,22 @@ enum WorkCacheKey {
         return await reads.read(scope)
     }
 
+    private static let mutations = WorkCacheKeyMutations()
+
+    private static func mutate(_ operation: @escaping @Sendable () -> OSStatus) async -> OSStatus {
+        await mutations.run(operation)
+    }
+
     @discardableResult
-    static func delete(for scope: String) -> Bool {
-        let status = SecItemDelete([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: scope,
-        ] as CFDictionary)
+    static func delete(for scope: String) async -> Bool {
+        let status = await mutate {
+            SecItemDelete([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: scope,
+                kSecUseAuthenticationContext as String: silentContext(),
+            ] as CFDictionary)
+        }
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
@@ -86,12 +106,19 @@ enum WorkCacheKey {
         return bytes
     }
 
+    private static func silentContext() -> LAContext {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        return context
+    }
+
     private static func load(scope: String) -> (status: OSStatus, key: [UInt8]?) {
         var result: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: scope,
+            kSecUseAuthenticationContext as String: silentContext(),
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ] as CFDictionary, &result)
@@ -107,6 +134,7 @@ enum WorkCacheKey {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: scope,
+            kSecUseAuthenticationContext as String: silentContext(),
             kSecValueData as String: Data(key),
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ] as CFDictionary, nil)
@@ -182,5 +210,17 @@ final class WorkCacheKeyReads: @unchecked Sendable {
         }
         lock.unlock()
         for waiter in waiters { waiter.resume(returning: result) }
+    }
+}
+
+/// Creation and deletion must reach Keychain in order, even when its service
+/// stalls. The cleanup journal blocks new saves until deletion returns.
+final class WorkCacheKeyMutations: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "ai.tokenstat.work-cache.key-mutations", qos: .utility)
+
+    func run(_ operation: @escaping @Sendable () -> OSStatus) async -> OSStatus {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: operation()) }
+        }
     }
 }

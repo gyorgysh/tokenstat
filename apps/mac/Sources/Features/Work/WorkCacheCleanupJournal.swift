@@ -45,7 +45,7 @@ import Darwin
 
     func recover(verifiedScope: String?, accountKnown: Bool,
                  stillValid: () -> Bool = { true },
-                 deleteKey: (String) -> Bool,
+                 deleteKey: (String) async -> Bool,
                  clear: (String) async throws -> Void) async {
         guard accountKnown, stillValid(), let journal = try? Self.read(file) else { return }
         for entry in journal.entries {
@@ -58,9 +58,9 @@ import Darwin
                 continue
             }
             active.insert(entry.scope)
-            // Destroy the key before the first suspension. Failure keeps the
-            // journal and blocks reads until the keychain becomes available.
-            guard deleteKey(entry.scope) else { active.remove(entry.scope); continue }
+            // Keep reads blocked until background key deletion finishes.
+            // Failure retains the journal so cleanup can retry.
+            guard await deleteKey(entry.scope) else { active.remove(entry.scope); continue }
             do {
                 try await clear(entry.scope)
                 try remove(entry)
