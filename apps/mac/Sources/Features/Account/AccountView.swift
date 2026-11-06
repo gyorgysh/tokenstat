@@ -1386,7 +1386,7 @@ private struct UsageKeychainAccessButton: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button(waiting ? L10n.text("apple.usage.keychain.waiting") : L10n.text("apple.usage.keychain.allow")) {
+            Button(waiting ? L10n.text("apple.usage.keychain.waiting") : L10n.text("apple.usage.keychain.allow"), .permissions) {
                 guard !waiting else { return }
                 waiting = true
                 error = nil
