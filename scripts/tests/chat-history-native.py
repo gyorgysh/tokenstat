@@ -378,7 +378,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 assert any(peer.get("peer") == fixture["hostKey"] and peer.get("route") == "relay"
                     for peer in traffic["peers"]), traffic
                 prove("The desktop reader daemon confirms an outbound relay route to the chat host")
-        if args.tall_prose:
+        if args.tall_prose or args.prose_edges:
             assert all(state(role)["smoothStreaming"] for role in roles)
             timings = {}
             cases = [
@@ -386,14 +386,28 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 ("paragraphs", "\n\n".join(["a"] * 2000 + ["paragraphtail"]), "paragraphtail"),
                 ("lines", "\n".join(["a"] * 2000 + ["linetail"]), "linetail"),
             ]
+            if args.prose_edges:
+                for role in roles:
+                    await native(role, "large-text")
+                cases = [
+                    ("quoted lines", "\n".join(["> a"] * 2000 + ["> quotetail"]), "quotetail"),
+                    # A separate marker line avoids Vision treating the ASCII
+                    # label as another glyph in the dense emoji row.
+                    ("unbroken emoji", "🌍" * 6000 + "\ntextdone", "textdone"),
+                ]
             for label, body, marker in cases:
                 began = time.monotonic()
                 emit({"type": "text", "data": "\n\n" + body})
                 await visible(marker)
                 timings[label] = round((time.monotonic() - began) * 1000)
-                prove(f"Both native readers display the tail of 2,000 short {label} while streaming")
+                prove(f"Both native readers display the tail of {label} while streaming")
+            if args.prose_edges:
+                for size in ["normal-text", "extra-large-text", "largest-text"]:
+                    for role in roles:
+                        await native(role, size, "textdone")
+                prove("Changing text size reuses correctly bounded text, including the largest accessibility size")
             for role in roles:
-                await native(role, "smooth-off", "linetail")
+                await native(role, "smooth-off", cases[-1][2])
             prove("Long short-line replies remain visible with smooth streaming disabled")
             assert all(not state(role)["smoothStreaming"] for role in roles)
             emit({"type": "text", "data": "\n\ntalldone"})
@@ -625,6 +639,7 @@ if __name__ == "__main__":
     parser.add_argument("--relay", action="store_true", help="Use the owned loopback relay and disposable account")
     parser.add_argument("--smooth-stream", action="store_true", help="Verify readable streaming batches and idle/completion flushes")
     parser.add_argument("--tall-prose", action="store_true", help="Verify long lists, short paragraphs and explicit line breaks")
+    parser.add_argument("--prose-edges", action="store_true", help="Check tall quotes and unbroken emoji at large accessibility sizes")
     parser.add_argument("--layout", action="store_true", help="Inspect new chat and grouped lists using the shipping phone views")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--serve", action="store_true")

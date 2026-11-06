@@ -162,11 +162,11 @@ private struct Fixture: Decodable {
             observed = try await texts(capture)
             try save(["id": id, "stage": "recognized", "attempt": attempt,
                 "texts": observed, "scrolls": scrollGeometry()], "snapshot-progress.json")
-            // Vision can insert spaces inside a word ("f inished"). Keep
-            // matching literal characters, allowing only whitespace noise.
+            // Vision can insert spaces inside words and split a wrapped token
+            // across observations. Keep matching every literal character.
             if let expected {
                 let marker = expected.filter { !$0.isWhitespace }
-                if observed.contains(where: { $0.filter { !$0.isWhitespace }.contains(marker) }) {
+                if observed.joined().filter({ !$0.isWhitespace }).contains(marker) {
                     return observed
                 }
             } else {
@@ -254,6 +254,8 @@ private struct Fixture: Decodable {
             case "light": layoutScheme = .light
             case "dark": layoutScheme = .dark
             case "large-text": layoutType = .accessibility3
+            case "extra-large-text": layoutType = .xxxLarge
+            case "largest-text": layoutType = .accessibility5
             case "normal-text": layoutType = .large
             case "smooth-off": UserDefaults.standard.set(false, forKey: "chat.smoothStreaming")
             case "smooth-on": UserDefaults.standard.set(true, forKey: "chat.smoothStreaming")

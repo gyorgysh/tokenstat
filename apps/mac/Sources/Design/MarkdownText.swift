@@ -239,7 +239,7 @@ private enum MarkdownCache {
 /// text. Slots hold each row's own last revision, and the shared clock bounds
 /// the total reparses whether one row is streaming or two.
 ///
-/// Touched from the main thread only: `MessageMarkdown.init` reads it while a
+/// Touched from the main thread only: `MessageMarkdownContent.init` reads it while a
 /// token arrives and the live row's task writes the next revision back.
 private final class LiveMarkdown {
     /// How long a parsed revision stays on screen.
@@ -543,6 +543,48 @@ private enum MessageSegment {
 }
 
 struct MessageMarkdown: View {
+    private let markdown: String
+    private let bodyFont: Font
+    private let codeFont: Font
+    private let style: MarkdownStyle
+    private let selectable: Bool
+    private let cacheScope: String
+    private let live: Bool
+    private let liveID: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    init(
+        _ markdown: String,
+        bodyFont: Font = Theme.body,
+        codeFont: Font = Theme.monoText(12, relativeTo: .body),
+        style: MarkdownStyle = .document,
+        selectable: Bool = true,
+        cacheScope: String = "chat",
+        live: Bool = false,
+        liveID: String? = nil
+    ) {
+        self.markdown = markdown
+        self.bodyFont = bodyFont
+        self.codeFont = codeFont
+        self.style = style
+        self.selectable = selectable
+        self.cacheScope = cacheScope
+        self.live = live
+        self.liveID = liveID
+    }
+
+    var body: some View {
+        // Larger glyphs reach native text-surface bounds with fewer characters.
+        let maximum = typeSize.isAccessibilitySize ? 256 : typeSize > .large ? 1024 : 2048
+        MessageMarkdownContent(markdown, bodyFont: bodyFont, codeFont: codeFont, style: style,
+            selectable: selectable, cacheScope: cacheScope, live: live, liveID: liveID,
+            maximumCharacters: maximum)
+            // Discard any pending refresh and fade state built for another size.
+            .id(maximum)
+    }
+}
+
+private struct MessageMarkdownContent: View {
     private let cachedSegments: [MessageSegment]
     private let source: String
     private let liveSlot: String
@@ -551,6 +593,7 @@ struct MessageMarkdown: View {
     private let bodyFont: Font
     private let codeFont: Font
     private let style: MarkdownStyle
+    private let maximumCharacters: Int
     /// Selectable text owns a SelectionOverlay per chain and a hit-test
     /// entry per chain. On the one row that is rewritten on every token
     /// that is rebuilt 2.5x a second for the whole reply; settled rows
@@ -572,7 +615,8 @@ struct MessageMarkdown: View {
         selectable: Bool = true,
         cacheScope: String = "chat",
         live: Bool = false,
-        liveID: String? = nil
+        liveID: String? = nil,
+        maximumCharacters: Int
     ) {
         self.bodyFont = bodyFont
         self.codeFont = codeFont
@@ -580,6 +624,7 @@ struct MessageMarkdown: View {
         self.selectable = selectable
         self.source = markdown
         self.isLive = live
+        self.maximumCharacters = maximumCharacters
         if live, let liveID {
             // A row still being written keeps one revision in its own slot
             // rather than joining the conversation's: its text is a new
@@ -589,7 +634,7 @@ struct MessageMarkdown: View {
             // replaced at most once per `LiveMarkdown.cadence`; a token that
             // arrives sooner keeps the revision on screen and is picked up by
             // the body's task.
-            let slot = "\(liveID.utf8.count):\(liveID):\(cacheScope):\(style.rawValue)"
+            let slot = "\(liveID.utf8.count):\(liveID):\(cacheScope):\(style.rawValue):\(maximumCharacters)"
             self.liveSlot = slot
             let cache = MarkdownCache.live
             if let shown = cache.take(slot: slot, text: markdown) {
@@ -598,7 +643,8 @@ struct MessageMarkdown: View {
             } else {
                 var parser = MarkdownParser(markdown)
                 let parsed = parser.blocks()
-                let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style, streaming: live)
+                let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style,
+                    maximumCharacters: maximumCharacters, streaming: live)
                 cache.store(segments, text: markdown, slot: slot)
                 cachedSegments = segments
                 needsRefresh = false
@@ -613,23 +659,20 @@ struct MessageMarkdown: View {
             // rebuilding every `Text` chain there was the per-edge cost that
             // brought the hitches back. The scope names the caller's font set,
             // which is baked into the chains and cannot be keyed from `Font`.
-            let key = "\(cacheScope):\(style.rawValue):\(markdown)"
+            let key = "\(cacheScope):\(style.rawValue):\(maximumCharacters):\(markdown)"
             self.liveSlot = ""
             needsRefresh = false
             cachedSegments = MarkdownCache.segments.value(for: key) {
-                Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+                Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style,
+                    maximumCharacters: maximumCharacters)
             }
         }
     }
 
-    /// Characters per selectable chain. Long enough that a normal reply is
-    /// one drag, short enough that no single `Text` ever costs a frame.
-    private static let chainCharCap = 8000
-
     private static func makeSegments(
         blocks: [MarkdownBlock],
         bodyFont: Font,
-        style: MarkdownStyle, streaming: Bool = false
+        style: MarkdownStyle, maximumCharacters: Int, streaming: Bool = false
     ) -> [MessageSegment] {
         var out: [MessageSegment] = []
         var wordCount = 0
@@ -653,7 +696,7 @@ struct MessageMarkdown: View {
         }
         func push(_ piece: Text, length: Int, lineBreaks: Int, separator: Text? = nil, links: Bool = false) {
             let gapLines = separator == nil ? 2 : 1
-            if !chain.isEmpty, chainLength + length > Self.chainCharCap ||
+            if !chain.isEmpty, chainLength + length > maximumCharacters ||
                 chainLineBreaks + gapLines + lineBreaks > MarkdownTextChunks.maximumLineBreaks {
                 flush()
             }
@@ -670,7 +713,7 @@ struct MessageMarkdown: View {
             chainHasLinks = chainHasLinks || links
         }
         func chunks(_ text: String) -> [AttributedString] {
-            MarkdownTextChunks.split(MarkdownInline.attributed(text), maximum: Self.chainCharCap)
+            MarkdownTextChunks.split(MarkdownInline.attributed(text), maximum: maximumCharacters)
         }
         func listRow(_ item: MarkdownListItem, text: AttributedString) -> Text {
             var row = Text(String(repeating: "  ", count: item.depth * 2))
@@ -800,7 +843,8 @@ struct MessageMarkdown: View {
             guard !Task.isCancelled else { return }
             var parser = MarkdownParser(source)
             let parsed = parser.blocks()
-            let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style, streaming: true)
+            let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style,
+                maximumCharacters: maximumCharacters, streaming: true)
             MarkdownCache.live.store(segments, text: source, slot: liveSlot)
             refreshed = (source, segments)
         }
