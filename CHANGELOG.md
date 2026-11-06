@@ -23,7 +23,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - The Android usage preview stays in place as usage readings refresh.
 - Floating tool panes on Mac stay within the chat area when the sidebar is open.
-- Long replies, lists and code blocks stay visible, including after changing text size. Fixed an iOS crash while streaming long replies.
+- Long replies, lists and code blocks stay visible, including after changing text size. Very long code lines wrap within the chat. Fixed an iOS crash while streaming long replies.
 - Checking available paste actions on iOS no longer reads copied content in the background.
 - New chat on iOS keeps the composer visible while a computer connects.
 - Old built-in instructions are removed from starter personas even if they were saved again. Custom instructions and existing conversations keep theirs.

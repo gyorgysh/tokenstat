@@ -863,8 +863,9 @@ private struct MarkdownCodeBlock: View {
     var style: MarkdownStyle = .document
     var selectable: Bool = true
 
-    @State private var coloured: [AttributedString]?
+    @State private var coloured: (key: String, chunks: [AttributedString])?
     @State private var hovering = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var isDiff: Bool {
         ["diff", "patch"].contains(language?.lowercased())
@@ -879,12 +880,25 @@ private struct MarkdownCodeBlock: View {
     /// object fits any pane this app opens in. So the scroller is bought only
     /// for a fence wide enough to want it, measured in characters at parse
     /// time, and everything narrower is a plain wrapping `Text`.
+    /// Extremely long lines wrap in bounded pieces as well: an enormous
+    /// native text surface can turn the whole fence blank at large text sizes.
     ///
     /// An aside never gets one. The fixed size inside a scroller is what keeps
     /// a line's shape, and it is also what would propose an unbounded width to
     /// the transcript around it.
     private var needsScroller: Bool {
-        style != .aside && widest > 54
+        style != .aside && widest > 54 && widest <= MarkdownTextChunks.maximumUnwrappedCodeLine
+    }
+
+    private var maximumCharacters: Int {
+        typeSize.isAccessibilitySize ? 256 : typeSize > .large ? 1024 : 2048
+    }
+
+    // Reuse scrolling chunks across sizes, and separate each wrapping budget.
+    private var renderedKey: String { (needsScroller ? "s" : "w\(maximumCharacters)") + key }
+
+    private func chunks(_ value: AttributedString) -> [AttributedString] {
+        MarkdownTextChunks.splitCode(value, scrollsHorizontally: needsScroller, maximum: maximumCharacters)
     }
 
     /// One parsed diff per fence, held across the evaluations a scroll causes.
@@ -901,10 +915,10 @@ private struct MarkdownCodeBlock: View {
     /// before costs one small hash and no string work at all. This used to
     /// build a fresh `Text` chain out of the whole source on every evaluation.
     private var shown: [AttributedString] {
-        if let coloured { return coloured }
-        if let done = MarkdownCache.rendered.stored(for: "c" + key) { return done }
-        return MarkdownCache.rendered.value(for: "p" + key) {
-            MarkdownTextChunks.splitLines(AttributedString(source))
+        if let coloured, coloured.key == renderedKey { return coloured.chunks }
+        if let done = MarkdownCache.rendered.stored(for: "c" + renderedKey) { return done }
+        return MarkdownCache.rendered.value(for: "p" + renderedKey) {
+            chunks(AttributedString(source))
         }
     }
 
@@ -912,11 +926,7 @@ private struct MarkdownCodeBlock: View {
         let chunks = shown
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(chunks.enumerated()), id: \.offset) { index, chunk in
-                // The stack supplies the line boundary between chunks. Keeping
-                // that final newline in Text would add an empty line as well.
-                let text = index < chunks.count - 1
-                    ? AttributedString(chunk[..<chunk.characters.index(before: chunk.endIndex)])
-                    : chunk
+                let text = MarkdownTextChunks.codeText(chunk, isLast: index == chunks.count - 1)
                 Text(text)
                     .font(font)
                     .modifier(MarkdownSelectable(selectable))
@@ -996,14 +1006,14 @@ private struct MarkdownCodeBlock: View {
         .contextMenu {
             Button(L10n.text("apple.markdowntext.copy_code.49a0053f")) { ChatClipboard.copy(source) }
         }
-        .task(id: key) {
+        .task(id: renderedKey) {
             // `ForEach` identifies blocks by their position in one message.
             // When a streaming message edits a fence in place SwiftUI keeps
             // this view's state, so the colour from the old fence must not win
             // over the new source while its own highlight is being fetched.
             coloured = nil
-            if let done = MarkdownCache.rendered.stored(for: "c" + key) {
-                coloured = done
+            if let done = MarkdownCache.rendered.stored(for: "c" + renderedKey) {
+                coloured = (renderedKey, done)
                 return
             }
             guard let path = highlightPath else { return }
@@ -1027,12 +1037,12 @@ private struct MarkdownCodeBlock: View {
             // plain text. Otherwise a fence the highlighter has nothing to say
             // about asks it again every time it scrolls back into view.
             let text = spans.isEmpty
-                ? MarkdownCache.rendered.value(for: "p" + key) {
-                    MarkdownTextChunks.splitLines(AttributedString(source))
+                ? MarkdownCache.rendered.value(for: "p" + renderedKey) {
+                    chunks(AttributedString(source))
                 }
-                : MarkdownTextChunks.splitLines(Self.colouring(source, with: spans))
-            MarkdownCache.rendered.store(text, for: "c" + key)
-            coloured = text
+                : chunks(Self.colouring(source, with: spans))
+            MarkdownCache.rendered.store(text, for: "c" + renderedKey)
+            coloured = (renderedKey, text)
         }
     }
 

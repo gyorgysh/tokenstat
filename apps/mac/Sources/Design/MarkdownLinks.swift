@@ -40,6 +40,20 @@ struct MarkdownLinkAttribute: TextAttribute {
 /// Bound native text views without reparsing fragments of Markdown syntax.
 enum MarkdownTextChunks {
     static let maximumLineBreaks = 64
+    static let maximumUnwrappedCodeLine = 512
+
+    static func splitCode(_ value: AttributedString, scrollsHorizontally: Bool, maximum: Int) -> [AttributedString] {
+        if scrollsHorizontally { return splitLines(value) }
+        // Wrapped code also needs a character bound: a few long logical
+        // lines can occupy thousands of display lines at large text sizes.
+        return value.characters.isEmpty ? [value] : split(value, maximum: maximum)
+    }
+
+    /// The stack supplies a line break between chunks, but not a missing glyph.
+    static func codeText(_ chunk: AttributedString, isLast: Bool) -> AttributedString {
+        guard !isLast, chunk.characters.last?.isNewline == true else { return chunk }
+        return AttributedString(chunk[..<chunk.characters.index(before: chunk.endIndex)])
+    }
 
     /// Keep code lines intact so a wide fence can still scroll horizontally.
     static func splitLines(_ value: AttributedString) -> [AttributedString] {

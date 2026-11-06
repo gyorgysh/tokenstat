@@ -398,7 +398,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 assert any(peer.get("peer") == fixture["hostKey"] and peer.get("route") == "relay"
                     for peer in traffic["peers"]), traffic
                 prove("The desktop reader daemon confirms an outbound relay route to the chat host")
-        if args.tall_prose or args.prose_edges or args.code_edges or args.inline_edges:
+        if args.tall_prose or args.prose_edges or args.code_edges or args.inline_edges or args.unbroken_code:
             assert all(state(role)["smoothStreaming"] for role in roles)
             timings = {}
             cases = [
@@ -421,6 +421,12 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     ("wrapped code", "```text\n" + ("a " * 25 + "\n") * 2000 + "wrappedcodetail\n```", "wrappedcodetail"),
                     ("wide highlighted code", "```swift\n" + ("// " + "a " * 40 + "\n") * 2000 + "let widecodetail = true\n```", "widecodetail"),
                 ]
+            if args.unbroken_code:
+                cases = [
+                    ("unbroken code line", "```text\n" + "a" * args.unbroken_code + "\nlongcodedone\n```", "longcodedone"),
+                    ("unbroken highlighted line", "```swift\nlet line = \"" + "a" * args.unbroken_code + "\"\nlet highlightedcodedone = true\n```", "highlightedcodedone"),
+                    ("wide Unicode line", "```text\n" + "🌍" * min(args.unbroken_code, 512) + "\nunicodecodedone\n```", "unicodecodedone"),
+                ]
             if args.inline_edges:
                 for role in roles:
                     await native(role, "largest-text")
@@ -434,7 +440,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 await visible(marker)
                 timings[label] = round((time.monotonic() - began) * 1000)
                 prove(f"Both native readers display the tail of {label} while streaming")
-                if args.code_edges:
+                if args.code_edges or args.unbroken_code:
                     for size in ["largest-text", "normal-text"]:
                         for role in roles:
                             await native(role, size, marker)
@@ -688,6 +694,8 @@ if __name__ == "__main__":
     parser.add_argument("--tall-prose", action="store_true", help="Verify long lists, short paragraphs and explicit line breaks")
     parser.add_argument("--prose-edges", action="store_true", help="Check tall quotes and unbroken emoji at large accessibility sizes")
     parser.add_argument("--code-edges", action="store_true", help="Check tall code fences with and without horizontal scrolling")
+    parser.add_argument("--unbroken-code", type=int, nargs="?", const=50000, metavar="CHARACTERS",
+                        help="Check a long single-line code fence (default: 50000 characters)")
     parser.add_argument("--inline-edges", action="store_true", help="Check unbroken quotes and table cells at the largest text size")
     parser.add_argument("--layout", action="store_true", help="Inspect new chat and grouped lists using the shipping phone views")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
@@ -700,4 +708,6 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if not 320 <= arguments.desktop_width <= 1600:
         parser.error("--desktop-width must be between 320 and 1600 points")
+    if arguments.unbroken_code is not None and not 1 <= arguments.unbroken_code <= 1000000:
+        parser.error("--unbroken-code must be between 1 and 1000000 characters")
     asyncio.run(run(arguments))

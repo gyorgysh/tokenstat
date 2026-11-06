@@ -66,6 +66,31 @@ struct MarkdownLinksTests {
                 precondition(chunks.count == 1, "Wide lines retain their horizontal layout")
             }
         }
+        for source in ["", String(repeating: "a", count: 50000) + "\nlast-glyph",
+                       String(repeating: "👩🏽‍💻é\r\n\u{2028}", count: 2000)] {
+            var value = AttributedString(source)
+            value.foregroundColor = .purple
+            value.inlinePresentationIntent = .code
+            for maximum in [256, 1024, 2048] {
+                let chunks = MarkdownTextChunks.splitCode(value, scrollsHorizontally: false, maximum: maximum)
+                var restored = AttributedString()
+                for chunk in chunks {
+                    precondition(chunk.characters.count <= maximum)
+                    precondition(chunk.characters.filter(\.isNewline).count <= MarkdownTextChunks.maximumLineBreaks)
+                    restored.append(chunk)
+                }
+                precondition(restored == value, "Wrapped code keeps every source character and syntax attribute")
+            }
+            precondition(MarkdownTextChunks.splitCode(value, scrollsHorizontally: true, maximum: 256)
+                == MarkdownTextChunks.splitLines(value), "Ordinary scrolling fences retain their line layout")
+        }
+        for source in ["", "last-glyph", "last-glyph\r\n", "last-glyph\u{2028}"] {
+            let value = AttributedString(source)
+            precondition(MarkdownTextChunks.codeText(value, isLast: true) == value)
+            let expected = source.last?.isNewline == true ? String(source.dropLast()) : source
+            precondition(String(MarkdownTextChunks.codeText(value, isLast: false).characters) == expected,
+                         "A chunk boundary may replace a newline, never a source glyph")
+        }
         #if os(macOS)
         let action = try AttributedString(markdown: "[Review](tokenstat://workbench/open?workspace=project-a&tool=changes) [Reject](tokenstat://workbench/open?workspace=project-a&tool=terminal&command=echo)")
         let actions = MarkdownLinks.styled(action, color: .purple).runs.compactMap(\.link)
