@@ -28,7 +28,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
-- Connected chat usage views read limits from the chat host, avoiding the extra wait for account sync. Background provider lookups skip Keychain items that would require a password prompt and keep previous readings marked stale when access is unavailable. On Mac, a dismissible notice lets you allow access now or leave it for later in Account settings.
+- Connected chat usage views read limits from the chat host, avoiding the extra wait for account sync.
+- Background usage checks skip Keychain items that need permission and mark previous readings stale. On Mac, a dismissible notice lets you allow access now or do it later in Account → Plan limits. Each permission request reads one saved item and verifies that access is remembered.
 - Saving offline chats on Apple devices no longer waits for Keychain on the UI thread, which could freeze the conversation.
 - Long private chats no longer discard earlier messages at the old transcript size limit. Clients recover interrupted history reads and keep independent reading positions when the same chat is open on several devices.
 - On Apple devices, following a long reply reaches its end, and opening a search result reveals its message inside a folded group of steps.
@@ -38,6 +39,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Android terminals and the in-app browser reject late updates from closed or replaced views. A preview or terminal renderer crash shows a recoverable error without closing the rest of the app.
 - Direct-only connections retry sooner after a brief interruption. Windows approval buttons also reject stale replies after switching chats.
 - Windows direct connections handle large transfers in both directions without resetting the connection.
+- Refreshing a Windows chat keeps unsent drafts, and sidebar actions stay visible while they have keyboard focus.
 
 ## [1.11.0] - 2026-11-04
 
