@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import signal
 import socket
 import subprocess
 import sys
@@ -170,6 +171,7 @@ async def run(args):
     proxies = {role: Proxy() for role in ["desktop", "phone"]}
     listeners = {}
     producer = desktop = relay_service = reader_daemon = None
+    desktop_pid = None
     relay = None
     phone_started = False
     booted_here = False
@@ -317,16 +319,26 @@ print(json.dumps({'events':len(result['result']['events'])}))
             return
 
         app = args.mac_app
-        executable = plistlib.loads((app / "Contents/Info.plist").read_bytes())["CFBundleExecutable"]
         log = (run_root / "desktop.log").open("w"); handles.append(log)
         desktop_environment = client_environment("desktop")
         if reader_daemon:
             desktop_environment["TOKENSTAT_NATIVE_HISTORY_READER_SOCKET"] = reader_info["socket"]
-        desktop = subprocess.Popen([str(app / "Contents/MacOS" / executable)],
-            env=desktop_environment, stdout=log, stderr=log)
-        # Deliver the normal app-open event after launching with the fixture's
-        # private environment. A restored closed window otherwise stays closed.
-        await command("open", "-a", app)
+        # Launch once through AppKit, with an explicit private environment.
+        # A bare executable can restore no windows; a later `open -a` may
+        # start another copy without the fixture environment instead.
+        launch = ["open", "-n", "-F", "-W", "--stdout", str(run_root / "desktop.log"),
+            "--stderr", str(run_root / "desktop.log")]
+        for key in ["TOKENSTAT_NATIVE_HISTORY_ROLE", "TOKENSTAT_NATIVE_HISTORY_FIXTURE",
+                    "TOKENSTAT_NATIVE_HISTORY_DESKTOP_LOCAL", "TOKENSTAT_NATIVE_HISTORY_RTL",
+                    "TOKENSTAT_NATIVE_HISTORY_RELAY", "TOKENSTAT_NATIVE_HISTORY_READER_SOCKET",
+                    "TOKENSTAT_DATA_DIR", "TOKENSTAT_IDENTITY_DIR", "TOKENSTAT_API_BASE",
+                    "HOME", "ZDOTDIR", "HISTFILE", "PATH"]:
+            if key in desktop_environment:
+                launch += ["--env", key + "=" + desktop_environment[key]]
+        desktop = subprocess.Popen(launch + [str(app)], stdout=log, stderr=log)
+        process = await wait(lambda: read_json(run_root / "desktop/process.json"))
+        desktop_pid = process["pid"]
+        assert isinstance(desktop_pid, int) and desktop_pid > 1
         if not args.desktop_only:
             inventory = json.loads(await command("xcrun", "simctl", "list", "devices", "available", "--json"))
             device = next(device for devices in inventory["devices"].values()
@@ -378,7 +390,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 assert any(peer.get("peer") == fixture["hostKey"] and peer.get("route") == "relay"
                     for peer in traffic["peers"]), traffic
                 prove("The desktop reader daemon confirms an outbound relay route to the chat host")
-        if args.tall_prose or args.prose_edges:
+        if args.tall_prose or args.prose_edges or args.code_edges:
             assert all(state(role)["smoothStreaming"] for role in roles)
             timings = {}
             cases = [
@@ -395,12 +407,23 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     # label as another glyph in the dense emoji row.
                     ("unbroken emoji", "🌍" * 6000 + "\ntextdone", "textdone"),
                 ]
+            if args.code_edges:
+                cases = [
+                    ("short-line code", "```text\n" + "a\n" * 2000 + "codetail\n```", "codetail"),
+                    ("wrapped code", "```text\n" + ("a " * 25 + "\n") * 2000 + "wrappedcodetail\n```", "wrappedcodetail"),
+                    ("wide highlighted code", "```swift\n" + ("// " + "a " * 40 + "\n") * 2000 + "let widecodetail = true\n```", "widecodetail"),
+                ]
             for label, body, marker in cases:
                 began = time.monotonic()
                 emit({"type": "text", "data": "\n\n" + body})
                 await visible(marker)
                 timings[label] = round((time.monotonic() - began) * 1000)
                 prove(f"Both native readers display the tail of {label} while streaming")
+                if args.code_edges:
+                    for size in ["largest-text", "normal-text"]:
+                        for role in roles:
+                            await native(role, size, marker)
+                    prove(f"{label.capitalize()} stays visible at the largest text size and after switching back")
             if args.prose_edges:
                 for size in ["normal-text", "extra-large-text", "largest-text"]:
                     for role in roles:
@@ -418,6 +441,8 @@ print(json.dumps({'events':len(result['result']['events'])}))
             atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs,
                 "tailVisibleMs": timings,
                 "states": {role: state(role) for role in roles}})
+            if args.serve:
+                await wait(lambda: (run_root / "stop").exists(), 700)
             return
         if args.smooth_stream:
             transcript = Path(fixture["transcript"])
@@ -562,7 +587,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
             # Capture the owned app before cleanup, especially when its main
             # thread cannot service the fixture's snapshot command.
             with contextlib.suppress(Exception):
-                await command("/usr/bin/sample", desktop.pid, "2", "-file",
+                await command("/usr/bin/sample", desktop_pid or desktop.pid, "2", "-file",
                     run_root / "desktop-sample.txt", timeout=10)
         raise
     finally:
@@ -573,10 +598,17 @@ print(json.dumps({'events':len(result['result']['events'])}))
             except Exception as error:
                 cleanup_errors.append(f"Phone termination: {type(error).__name__}: {error}")
         if desktop and desktop.poll() is None:
-            desktop.terminate()
+            if desktop_pid:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(desktop_pid, signal.SIGTERM)
+            else:
+                desktop.terminate()
             try:
                 await asyncio.to_thread(desktop.wait, timeout=10)
             except subprocess.TimeoutExpired:
+                if desktop_pid:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.kill(desktop_pid, signal.SIGKILL)
                 desktop.kill(); await asyncio.to_thread(desktop.wait)
         (run_root / "stop").touch()
         for proxy in proxies.values():
@@ -640,6 +672,7 @@ if __name__ == "__main__":
     parser.add_argument("--smooth-stream", action="store_true", help="Verify readable streaming batches and idle/completion flushes")
     parser.add_argument("--tall-prose", action="store_true", help="Verify long lists, short paragraphs and explicit line breaks")
     parser.add_argument("--prose-edges", action="store_true", help="Check tall quotes and unbroken emoji at large accessibility sizes")
+    parser.add_argument("--code-edges", action="store_true", help="Check tall code fences with and without horizontal scrolling")
     parser.add_argument("--layout", action="store_true", help="Inspect new chat and grouped lists using the shipping phone views")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--serve", action="store_true")

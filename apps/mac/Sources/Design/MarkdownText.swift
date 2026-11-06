@@ -206,7 +206,7 @@ private enum MarkdownCache {
     /// body. During a scroll that is once a frame per fence, and it is what
     /// made a conversation full of code hitch. The colouring is now done once
     /// and what is kept is the answer.
-    static let rendered = ParsedTextCache<AttributedString>(limit: 600)
+    static let rendered = ParsedTextCache<[AttributedString]>(limit: 600)
     /// Parsed diff fences, keyed by the fence's source.
     static let diffs = ParsedTextCache<FileDiff>(limit: 300)
     /// Finished prose chains per message, keyed by the caller's font set,
@@ -867,7 +867,7 @@ private struct MarkdownCodeBlock: View {
     var style: MarkdownStyle = .document
     var selectable: Bool = true
 
-    @State private var coloured: AttributedString?
+    @State private var coloured: [AttributedString]?
     @State private var hovering = false
 
     private var isDiff: Bool {
@@ -904,10 +904,29 @@ private struct MarkdownCodeBlock: View {
     /// Both are looked up by the short key, so a fence that has been on screen
     /// before costs one small hash and no string work at all. This used to
     /// build a fresh `Text` chain out of the whole source on every evaluation.
-    private var shown: AttributedString {
+    private var shown: [AttributedString] {
         if let coloured { return coloured }
         if let done = MarkdownCache.rendered.stored(for: "c" + key) { return done }
-        return MarkdownCache.rendered.value(for: "p" + key) { AttributedString(source) }
+        return MarkdownCache.rendered.value(for: "p" + key) {
+            MarkdownTextChunks.splitLines(AttributedString(source))
+        }
+    }
+
+    private var codeText: some View {
+        let chunks = shown
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(chunks.enumerated()), id: \.offset) { index, chunk in
+                // The stack supplies the line boundary between chunks. Keeping
+                // that final newline in Text would add an empty line as well.
+                let text = index < chunks.count - 1
+                    ? AttributedString(chunk[..<chunk.characters.index(before: chunk.endIndex)])
+                    : chunk
+                Text(text)
+                    .font(font)
+                    .modifier(MarkdownSelectable(selectable))
+                    .fixedSize(horizontal: needsScroller, vertical: true)
+            }
+        }
     }
 
     var body: some View {
@@ -951,16 +970,10 @@ private struct MarkdownCodeBlock: View {
                     // unbounded width to the transcript around it.
                     if needsScroller {
                         ScrollView(.horizontal) {
-                            Text(shown)
-                                .font(font)
-                                .modifier(MarkdownSelectable(selectable))
-                                .fixedSize(horizontal: true, vertical: false)
-                                .padding(Theme.Space.m)
+                            codeText.padding(Theme.Space.m)
                         }
                     } else {
-                        Text(shown)
-                            .font(font)
-                            .modifier(MarkdownSelectable(selectable))
+                        codeText
                             .padding(Theme.Space.m)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -1018,8 +1031,10 @@ private struct MarkdownCodeBlock: View {
             // plain text. Otherwise a fence the highlighter has nothing to say
             // about asks it again every time it scrolls back into view.
             let text = spans.isEmpty
-                ? MarkdownCache.rendered.value(for: "p" + key) { AttributedString(source) }
-                : Self.colouring(source, with: spans)
+                ? MarkdownCache.rendered.value(for: "p" + key) {
+                    MarkdownTextChunks.splitLines(AttributedString(source))
+                }
+                : MarkdownTextChunks.splitLines(Self.colouring(source, with: spans))
             MarkdownCache.rendered.store(text, for: "c" + key)
             coloured = text
         }

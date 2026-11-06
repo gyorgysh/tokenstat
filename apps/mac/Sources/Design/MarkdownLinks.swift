@@ -41,6 +41,26 @@ struct MarkdownLinkAttribute: TextAttribute {
 enum MarkdownTextChunks {
     static let maximumLineBreaks = 64
 
+    /// Keep code lines intact so a wide fence can still scroll horizontally.
+    static func splitLines(_ value: AttributedString) -> [AttributedString] {
+        let characters = value.characters
+        var pieces: [AttributedString] = []
+        var start = characters.startIndex
+        var end = start
+        var lineBreaks = 0
+        while end < characters.endIndex {
+            if characters[end].isNewline { lineBreaks += 1 }
+            end = characters.index(after: end)
+            if lineBreaks == maximumLineBreaks, end < characters.endIndex {
+                pieces.append(AttributedString(value[start..<end]))
+                start = end
+                lineBreaks = 0
+            }
+        }
+        pieces.append(AttributedString(value[start..<end]))
+        return pieces
+    }
+
     static func split(_ value: AttributedString, maximum: Int) -> [AttributedString] {
         precondition(maximum > 0)
         let characters = value.characters

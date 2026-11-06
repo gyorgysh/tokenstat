@@ -38,6 +38,7 @@ private struct Fixture: Decodable {
             from: Data(contentsOf: URL(fileURLWithPath: environment["TOKENSTAT_NATIVE_HISTORY_FIXTURE"]!)))
         role = environment["TOKENSTAT_NATIVE_HISTORY_ROLE"]!
         output = URL(fileURLWithPath: fixture.root).appendingPathComponent(role)
+        try? save(["pid": ProcessInfo.processInfo.processIdentifier], "process.json")
     }
 
     private func save(_ value: Any, _ name: String) throws {

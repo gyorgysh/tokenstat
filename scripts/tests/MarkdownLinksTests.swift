@@ -47,6 +47,25 @@ struct MarkdownLinksTests {
                 precondition(restored == value, "Splitting must preserve graphemes, whitespace, links and inline formatting")
             }
         }
+        for source in ["", "a\n", String(repeating: "\n", count: 128),
+                       String(repeating: "let é = \"👩🏽‍💻\"\r\n\u{2028}", count: 1000),
+                       String(repeating: "wide", count: 6000)] {
+            var value = AttributedString(source)
+            value.foregroundColor = .purple
+            value.inlinePresentationIntent = .code
+            let chunks = MarkdownTextChunks.splitLines(value)
+            var restored = AttributedString()
+            for chunk in chunks {
+                restored.append(chunk)
+                precondition(chunk.characters.filter(\.isNewline).count <= MarkdownTextChunks.maximumLineBreaks)
+            }
+            precondition(restored == value, "Code chunks preserve source, Unicode and syntax attributes")
+            precondition(chunks.dropLast().allSatisfy { $0.characters.last?.isNewline == true },
+                         "Only a line boundary may split a code fence")
+            if !source.contains(where: \.isNewline) {
+                precondition(chunks.count == 1, "Wide lines retain their horizontal layout")
+            }
+        }
         #if os(macOS)
         let action = try AttributedString(markdown: "[Review](tokenstat://workbench/open?workspace=project-a&tool=changes) [Reject](tokenstat://workbench/open?workspace=project-a&tool=terminal&command=echo)")
         let actions = MarkdownLinks.styled(action, color: .purple).runs.compactMap(\.link)
