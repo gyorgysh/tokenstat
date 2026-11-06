@@ -220,6 +220,13 @@ enum Bridge {
         routeLock.lock()
         route = next
         routeLock.unlock()
+        // Local only, once per adopted transport. Optional diagnostics must
+        // not hold up the handshake or start an account request themselves.
+        DispatchQueue.global(qos: .utility).async {
+            if let data = try? JSONSerialization.data(withJSONObject: ["version": AppInfo.version, "build": AppInfo.build]) {
+                _ = try? next.transport.call(method: "app.identify", params: String(decoding: data, as: UTF8.self), patience: 2)
+            }
+        }
     }
 
     #if os(macOS)

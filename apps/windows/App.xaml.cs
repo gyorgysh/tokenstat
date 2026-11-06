@@ -70,6 +70,14 @@ public partial class App : Application
         _ = Task.Run(async () =>
         {
             HostProcess.EnsureRunning();
+            try
+            {
+                await AppServices.Host.CallAsync("app.identify", new System.Text.Json.Nodes.JsonObject
+                {
+                    ["version"] = Tokenstat.Design.AppInfo.Version,
+                });
+            }
+            catch { /* Older helpers do not report front-end versions. */ }
             await AppServices.Update.CheckAndInstallAsync();
         });
     }

@@ -4905,6 +4905,12 @@ private fun AccountDialog(
                     SyncPrivacyCard()
                 }
             }
+            Text(
+                L10n.text("common.app_version_build", ai.tokenstat.tokenstat.BuildConfig.VERSION_NAME,
+                    ai.tokenstat.tokenstat.BuildConfig.VERSION_CODE.toString()),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
         }
     }
     if (paywall) {

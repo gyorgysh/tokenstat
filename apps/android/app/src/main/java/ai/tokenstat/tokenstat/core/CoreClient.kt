@@ -56,6 +56,13 @@ object CoreClient {
         if (initialized) return
         dataDir.mkdirs(); cacheDir.mkdirs()
         decodeResponse(NativeBridge.nativeInit(dataDir.absolutePath, cacheDir.absolutePath, deviceName))
+        // Optional local metadata; a previous bundled core may not know it.
+        runCatching {
+            NativeBridge.nativeCall("app.identify", buildJsonObject {
+                put("version", ai.tokenstat.tokenstat.BuildConfig.VERSION_NAME)
+                put("build", ai.tokenstat.tokenstat.BuildConfig.VERSION_CODE.toString())
+            }.toString())
+        }
         initialized = true
     }
 

@@ -13,6 +13,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Improved
 
+- Account settings on iOS and Android show the installed version and build number.
 - Chat setup on iOS and Android groups the agent, model, working style and permissions into sections with explanations. Extra settings stay out of the phone composer.
 - Compact composers show the agent icon and model on one line, with full agent and effort choices in the picker. Android moves its actions to another row when space is tight or text is larger.
 - Desktop composers keep the model picker in reach and put working style and permissions in Setup. On Mac, the usage ring opens a preview with a link to full details, and sidebar resize handles match the tool pane.

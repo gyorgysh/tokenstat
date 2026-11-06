@@ -1268,6 +1268,7 @@ fn owner_only_method(method: &str) -> bool {
         || matches!(
             method,
             "open"
+                | "app.identify"
                 | "account.logout"
                 | "account.appleActivate"
                 | "account.appleRenewal"
@@ -3740,6 +3741,15 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
         && let Err(e) = crate::request_context::refuse_remote("account and update methods")
     {
         return Some(Err(e.into()));
+    }
+    if method == "app.identify" {
+        return Some((|| {
+            let info: tokenstat_sync::app_info::AppInfo = serde_json::from_str(params)
+                .map_err(|e| DispatchError::new("invalid_params", e.to_string()))?;
+            tokenstat_sync::app_info::identify(info)
+                .map_err(|e| DispatchError::new("invalid_params", e))?;
+            Ok(json!({"accepted": true}))
+        })());
     }
     // Who is answering, without opening an archive to say it.
     //
@@ -6521,8 +6531,40 @@ mod tests {
     }
 
     #[test]
+    fn app_identity_is_local_metadata_without_an_archive_or_network_request() {
+        let response =
+            call_sessionless("app.identify", r#"{"version":"1.13.0","build":"224"}"#).unwrap();
+        let value: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["result"]["accepted"], true);
+        let before = tokenstat_sync::app_info::current().unwrap();
+        assert_eq!(before.version, "1.13.0");
+        assert_eq!(before.build.as_deref(), Some("224"));
+        for params in [
+            r#"{"version":"bad\r\nheader"}"#,
+            r#"{"version":"2","peer":"other"}"#,
+            "{}",
+        ] {
+            let value: Value =
+                serde_json::from_str(&call_sessionless("app.identify", params).unwrap()).unwrap();
+            assert_eq!(value["ok"], false);
+            assert_eq!(tokenstat_sync::app_info::current().unwrap(), before);
+        }
+    }
+
+    #[test]
     fn a_remote_peer_cannot_log_the_host_out_or_fetch_updates() {
         crate::request_context::with_remote_peer("phone", || {
+            let identify =
+                call_sessionless("app.identify", r#"{"version":"1.13.0","build":"224"}"#).unwrap();
+            let value: Value = serde_json::from_str(&identify).unwrap();
+            assert_eq!(value["ok"], false);
+            assert!(
+                value["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("local-only")
+            );
             let mut s = session();
             let logout: Value =
                 serde_json::from_str(&call(&mut s, "account.logout", "{}")).unwrap();

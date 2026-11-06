@@ -1,5 +1,6 @@
 {
   "common.account": "Account",
+  "common.app_version_build": "Version {0} · Build {1}",
   "common.active": "Active",
   "common.add": "Add",
   "common.add_device": "Add device",

@@ -27,6 +27,7 @@
 
 pub mod antigravity;
 pub mod antigravity_ide;
+pub mod app_info;
 pub mod catalog;
 pub mod claude_limits;
 pub mod config;

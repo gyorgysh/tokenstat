@@ -198,8 +198,23 @@ fn refusal_error(text: &str, status: u16) -> ProfileError {
 }
 
 fn http_client() -> Result<reqwest::blocking::Client, ProfileError> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(app) = crate::app_info::current() {
+        // Validated at the local app boundary. These headers are used only
+        // for this account API, never for vendor requests.
+        if let Ok(version) = reqwest::header::HeaderValue::from_str(&app.version) {
+            headers.insert("x-tokenstat-app-version", version);
+        }
+        if let Some(build) = app
+            .build
+            .and_then(|b| reqwest::header::HeaderValue::from_str(&b).ok())
+        {
+            headers.insert("x-tokenstat-app-build", build);
+        }
+    }
     // No cookie jar: bearer routes must not attach a web session cookie.
     Ok(crate::http::client_builder()
+        .default_headers(headers)
         .timeout(Duration::from_secs(60))
         // A dead network must fail fast, not eat the whole request timeout.
         // `timeout` covers connect, but the OS default connect phase can be
@@ -793,6 +808,7 @@ pub fn register_machine_identity_kind(
         keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
     let client = http_client()?;
     let kind = if kind == "client" { "client" } else { "host" };
+    let app = crate::app_info::current();
     let resp = client
         .put(format!("{host}/api/v1/machines/me"))
         .header("authorization", format!("Bearer {token}"))
@@ -806,6 +822,9 @@ pub fn register_machine_identity_kind(
             // rather than a name, so it is refreshed on every registration
             // while a name somebody typed is not.
             "platform": tokenstat_identity::platform().pretty(),
+            "app_version": app.as_ref().map(|a| &a.version),
+            "app_build": app.as_ref().and_then(|a| a.build.as_deref()),
+            "core_version": env!("CARGO_PKG_VERSION"),
         }))
         .send()?;
     let status = resp.status();
