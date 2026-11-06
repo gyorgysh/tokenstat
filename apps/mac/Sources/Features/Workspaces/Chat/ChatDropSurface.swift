@@ -10,6 +10,12 @@ extension View {
         contentShape(Rectangle())
             .onDrop(of: ChatInbox.dropTypes, delegate: ChatPaneDropDelegate(enabled: enabled, isTargeted: isTargeted, receive: receive))
             .onChange(of: enabled) { _, enabled in if !enabled { isTargeted.wrappedValue = false } }
+            .onDisappear { isTargeted.wrappedValue = false }
+            #if os(macOS)
+            .onReceive(NotificationCenter.default.publisher(for: ChatDragSession.ended)) { _ in
+                isTargeted.wrappedValue = false
+            }
+            #endif
     }
 }
 
@@ -19,10 +25,23 @@ private struct ChatPaneDropDelegate: DropDelegate {
     let receive: ([NSItemProvider]) -> Bool
 
     func validateDrop(info: DropInfo) -> Bool { enabled }
-    func dropEntered(info: DropInfo) { isTargeted = enabled }
+    func dropEntered(info: DropInfo) {
+        isTargeted = enabled
+        #if os(macOS)
+        if enabled { ChatDragSession.shared.begin() }
+        #endif
+    }
     func dropExited(info: DropInfo) { isTargeted = false }
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: enabled ? .copy : .forbidden) }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        #if os(macOS)
+        if enabled { ChatDragSession.shared.begin() }
+        #endif
+        return DropProposal(operation: enabled ? .copy : .forbidden)
+    }
     func performDrop(info: DropInfo) -> Bool {
+        #if os(macOS)
+        defer { ChatDragSession.shared.finish() }
+        #endif
         isTargeted = false
         guard enabled else { return false }
         return receive(info.itemProviders(for: ChatInbox.dropTypes))

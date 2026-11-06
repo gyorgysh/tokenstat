@@ -211,8 +211,12 @@ struct ChatComposer: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: attachments.count)
         .onChange(of: acceptsDrops) { _, accepts in if !accepts { nativeDropTargeted = false } }
         .onChange(of: anyDropTargeted) { _, targeted in
+            #if os(macOS)
+            if targeted { ChatDragSession.shared.begin() }
+            #endif
             onDropTargeted(targeted)
         }
+        .onDisappear { onDropTargeted(false) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(L10n.text("apple.chatcomposer.message.2f77668a"))
     }

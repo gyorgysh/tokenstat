@@ -141,6 +141,9 @@ struct ChatStartPage: View {
             if acceptsDrops && (dropTargeted || composerDropTargeted) { ChatDropExperience() }
         }
         #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: ChatDragSession.ended)) { _ in
+            dropTargeted = false; composerDropTargeted = false
+        }
         .overlay(alignment: .top) {
             if !isFullScreen && titlebarDragHeight > 0 {
                 TitlebarDragArea()

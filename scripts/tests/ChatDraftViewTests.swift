@@ -1,10 +1,32 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ChatDraftView.swift.
+// Compile with ChatDraftView.swift ChatDragSession.swift.
 import AppKit
 import SwiftUI
 struct WorkReference: Equatable { let id: String }
 enum Theme { static let accent = Color.green }
 enum ChatInbox { static func pasteboardHasAttachment() -> Bool { false } }
+@MainActor private final class DraftDrag: NSObject, NSDraggingInfo {
+    let draggingPasteboard: NSPasteboard
+    init(_ pasteboard: NSPasteboard) { draggingPasteboard = pasteboard }
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggingLocation: NSPoint { .zero }
+    var draggedImageLocation: NSPoint { .zero }
+    nonisolated var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    var draggingFormation = NSDraggingFormation.default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?,
+        classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    func resetSpringLoading() {}
+}
+@MainActor private final class DropHover { var pane = true, transcript = true }
 @main struct ChatDraftViewTests {
     @MainActor static func main() async throws {
         _ = NSApplication.shared
@@ -60,6 +82,30 @@ enum ChatInbox { static func pasteboardHasAttachment() -> Bool { false } }
         let tiff = await bytes(providers[1], type: .tiff)
         assert(png == Data([1, 2, 3]) && tiff == Data([4, 5]), "Drop snapshots must survive the source pasteboard being cleared")
         assert(!editor.acceptsAttachmentDrops, "Standalone editors must opt into attachment routing")
-        print("Composer deferred Return, command keys and native multi-item screenshot drop snapshots passed")
+        let item = NSPasteboardItem()
+        item.setString(fileURL, forType: .fileURL)
+        pasteboard.writeObjects([item])
+        let sender = DraftDrag(pasteboard), hover = DropHover()
+        var targeted: [Bool] = []
+        var received = 0
+        editor.isEditable = true; editor.acceptsAttachmentDrops = true
+        editor.attachmentDropTargeted = { targeted.append($0) }
+        editor.dropAttachments = { received += $0.count; return true }
+        let observer = NotificationCenter.default.addObserver(forName: ChatDragSession.ended, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated { hover.pane = false; hover.transcript = false }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        assert(editor.draggingEntered(sender) == .copy)
+        assert(editor.performDragOperation(sender) && received == 1)
+        assert(targeted == [true, false] && !hover.pane && !hover.transcript,
+            "A drop accepted by the native editor must clear ancestor hover flags too")
+        assert(editor.draggingEntered(sender) == .copy)
+        ChatDragSession.shared.finish() // The release watcher can end a drag without a native callback.
+        assert(targeted == [true, false, true, false], "Missing native end callbacks must still clear the editor")
+        assert(editor.draggingEntered(sender) == .copy)
+        editor.draggingEnded(sender)
+        assert(targeted == [true, false, true, false, true, false] && !ChatDragSession.shared.isWatching,
+            "A new drag after cancellation must work and leave no monitor behind")
+        print("Composer Return, command keys, drop snapshots and native drag cleanup passed")
     }
 }

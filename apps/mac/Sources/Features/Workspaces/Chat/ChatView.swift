@@ -472,6 +472,9 @@ struct ChatView: View {
                 .padding(.trailing, Theme.Space.m)
         }
         #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: ChatDragSession.ended)) { _ in
+            paneDropTargeted = false; transcriptDropTargeted = false; composerDropTargeted = false
+        }
         .background {
             ChatNavigationKeys(isActive: isActive && !showingOverview) { step in
                 guard let target = model.adjacentConversation(step) else { return false }

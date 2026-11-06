@@ -28,6 +28,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- The Mac chat “Drop to attach” overlay clears after a drop or canceled drag, including when the message field accepts it. Escape dismisses a stale overlay before stopping a turn.
 - On iPhone and iPad, swipe-delete confirmation points to the selected chat. Deleting it also clears its cached project row and retained readers.
 - The Android usage preview stays in place as usage readings refresh.
 - Floating tool panes on Mac stay within the chat area when the sidebar is open.

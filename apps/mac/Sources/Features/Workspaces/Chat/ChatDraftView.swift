@@ -278,6 +278,7 @@ final class ChatDraftTextView: NSTextView {
     var dropAttachments: (([NSItemProvider]) -> Bool)?
     var attachmentDropTargeted: ((Bool) -> Void)?
     private var attachmentDragIsTargeted = false
+    private var observesDragSession = false
     private(set) var handlingComposition = false
 
     /// Whether this draft view gives up the arrow keys to chat switching:
@@ -336,10 +337,22 @@ final class ChatDraftTextView: NSTextView {
     }
 
     private func setAttachmentDropTargeted(_ targeted: Bool) {
+        if targeted {
+            if !observesDragSession {
+                observesDragSession = true
+                NotificationCenter.default.addObserver(self, selector: #selector(dragSessionEnded),
+                    name: ChatDragSession.ended, object: nil)
+            }
+            ChatDragSession.shared.begin()
+        }
         guard attachmentDragIsTargeted != targeted else { return }
         attachmentDragIsTargeted = targeted
         attachmentDropTargeted?(targeted)
     }
+
+    @objc private func dragSessionEnded(_ notification: Notification) { setAttachmentDropTargeted(false) }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         setAttachmentDropTargeted(false)
@@ -348,6 +361,7 @@ final class ChatDraftTextView: NSTextView {
 
     override func draggingEnded(_ sender: NSDraggingInfo) {
         setAttachmentDropTargeted(false)
+        ChatDragSession.shared.finish()
         super.draggingEnded(sender)
     }
 
@@ -357,8 +371,8 @@ final class ChatDraftTextView: NSTextView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { setAttachmentDropTargeted(false); ChatDragSession.shared.finish() }
         if Self.isAttachmentDrag(sender.draggingPasteboard) {
-            defer { setAttachmentDropTargeted(false) }
             guard attachmentOperation(sender) == .copy else { return false }
             return dropAttachments?(Self.attachmentProviders(from: sender.draggingPasteboard)) ?? false
         }
