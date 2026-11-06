@@ -4,12 +4,11 @@ import SwiftUI
 /// Share spare room between tabs without compressing translated or enlarged labels.
 struct ChatSectionTabs<Content: View>: View {
     @ViewBuilder var content: () -> Content
-    @Environment(\.layoutDirection) private var direction
 
     var body: some View {
         WidthReader { width in
             ScrollView(.horizontal) {
-                ChatSectionTabLayout(minimumWidth: width, direction: direction) { content() }
+                ChatSectionTabLayout(minimumWidth: width) { content() }
             }
             .scrollIndicators(.hidden)
         }
@@ -18,7 +17,6 @@ struct ChatSectionTabs<Content: View>: View {
 
 private struct ChatSectionTabLayout: Layout {
     let minimumWidth: CGFloat
-    let direction: LayoutDirection
     private let spacing: CGFloat = 4
 
     private func widths(_ subviews: Subviews) -> [CGFloat] {
@@ -37,12 +35,12 @@ private struct ChatSectionTabLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = direction == .rightToLeft ? bounds.maxX : bounds.minX
+        // SwiftUI mirrors custom layout positions in right-to-left mode.
+        var x = bounds.minX
         for (view, width) in zip(subviews, widths(subviews)) {
-            if direction == .rightToLeft { x -= width }
             view.place(at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
                        proposal: .init(width: width, height: bounds.height))
-            x += direction == .rightToLeft ? -spacing : width + spacing
+            x += width + spacing
         }
     }
 }

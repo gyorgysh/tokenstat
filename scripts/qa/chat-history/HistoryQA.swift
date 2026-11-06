@@ -312,6 +312,7 @@ private struct Fixture: Decodable {
             #endif
             .background(Theme.background).tint(Theme.accent).preferredColorScheme(session.layoutScheme)
             .dynamicTypeSize(session.layoutType)
+            .environment(\.layoutDirection, ProcessInfo.processInfo.environment["TOKENSTAT_NATIVE_HISTORY_RTL"] == "1" ? .rightToLeft : .leftToRight)
             .environment(account).task { await session.start() }
         }
     }
