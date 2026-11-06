@@ -403,6 +403,8 @@ private struct ClientRecentChatContent: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    @Environment(ClientProjectChats.self) private var projects
+    @Environment(ClientChatSessions.self) private var readers
 
     private var availability: WorkDestinationResolver.Availability {
         WorkDestinationResolver.availability(.init(
@@ -540,17 +542,7 @@ private struct ClientRecentChatContent: View {
                     availableWorkbenchWidth: workbenchWidth,
                     availableWorkbenchHeight: workbenchHeight,
                     onBrowserChange: { updateCompanion(open: $0) },
-                    onDelete: { deleted in
-                        guard visible, deleted.id == chatID else { return }
-                        let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
-                        if let presented = navigation.presentedChat {
-                            if WorkDestinationResolver.sameConversation(presented.reference, reference) {
-                                navigation.presentedChat = nil
-                            }
-                        } else if WorkDestinationResolver.sameConversation(navigation.visibleChat, reference) {
-                            dismiss()
-                        }
-                    }
+                    onDelete: didDeleteChat
                 )
             } else if let error = model.error {
                 ClientErrorCard(message: ClientTunnelCopy.display(error, host: hostName)) {
@@ -575,6 +567,26 @@ private struct ClientRecentChatContent: View {
                 ClientWireframe.Rows(count: 5)
                     .padding(Theme.Space.m)
             }
+        }
+    }
+
+    private func didDeleteChat(_ deleted: ChatConversation) {
+        guard let owner = presentationScope, owner == WorkSessionContext.shared.scope,
+              model.peer == peer, model.workspaceID == workspaceID else { return }
+        projects.entry(peer: peer, workspace: workspaceID).remove(deleted.id)
+        let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: deleted.id)
+        if navigation.requestedChat == reference { navigation.requestedChat = nil }
+        if let presented = navigation.presentedChat {
+            if WorkDestinationResolver.sameConversation(presented.reference, reference) {
+                navigation.presentedChat = nil
+            }
+        } else if visible, deleted.id == chatID,
+                  WorkDestinationResolver.sameConversation(navigation.visibleChat, reference) {
+            dismiss()
+        }
+        Task {
+            guard owner == WorkSessionContext.shared.scope else { return }
+            await readers.removed(deleted.id, peer: peer, workspace: workspaceID)
         }
     }
 
