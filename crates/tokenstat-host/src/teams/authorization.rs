@@ -199,12 +199,14 @@ impl AuthorizedTeamPrincipal {
     }
     #[cfg(all(test, feature = "local-host"))]
     pub(crate) fn storage_fixture(value: TeamPrincipal) -> Self {
+        // Give storage fixtures time for Git setup and repeated reviews on
+        // slow CI workers. Clock-driven authorization tests cover lease expiry.
+        let lifetime = std::time::Duration::from_secs(10 * 60);
         Self {
             value,
-            deadline: Instant::now() + std::time::Duration::from_secs(60),
-            continuous_deadline: Deadline::capture(std::time::Duration::from_secs(60))
-                .expect("supported platform clock"),
-            expires_at: Time::now().wall + 60,
+            deadline: Instant::now() + lifetime,
+            continuous_deadline: Deadline::capture(lifetime).expect("supported platform clock"),
+            expires_at: Time::now().wall + lifetime.as_secs(),
             issuer: "https://accounts.example.test".into(),
             ticket: None,
             #[cfg(feature = "local-host")]
