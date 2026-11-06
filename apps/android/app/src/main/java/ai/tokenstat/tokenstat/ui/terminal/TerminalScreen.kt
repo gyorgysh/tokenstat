@@ -88,6 +88,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -1076,18 +1077,30 @@ class TerminalBridge {
     }
 
     fun startReadLoop(model: AppViewModel, peer: String, id: String, scope: CoroutineScope) {
+        startReadLoop(id, scope, request = { method, params -> model.workspaceSection(peer, method, params) })
+    }
+
+    internal fun startReadLoop(
+        id: String,
+        scope: CoroutineScope,
+        request: suspend (String, JsonObject) -> JsonElement,
+        output: (String) -> Unit = ::writeBase64,
+    ): kotlinx.coroutines.Job {
         readJob?.cancel()
-        readJob = scope.launch {
+        val reading = scope.launch {
             var offset = 0L
             var backoffMs = 50L
             var failures = 0
-            while (alive) {
+            while (true) {
                 awaitForeground()
                 val chunk = runCatching {
-                    model.workspaceSection(peer, "pty.read", ptyViewerParams(id) {
+                    request("pty.read", ptyViewerParams(id) {
                         put("offset", offset); put("waitMs", 250)
                     })
+                }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
                 }.getOrNull()
+                currentCoroutineContext().ensureActive()
                 if (chunk == null) {
                     // A failed read is a transport outage, not proof the
                     // process is gone. Back off like the Apple poll loop, and
@@ -1100,11 +1113,13 @@ class TerminalBridge {
                     }
                     if (failures % 8 == 0) {
                         val info = runCatching {
-                            model.workspaceSection(peer, "pty.info", ptyViewerParams(id))
+                            request("pty.info", ptyViewerParams(id))
+                        }.onFailure {
+                            if (it is kotlinx.coroutines.CancellationException) throw it
                         }.getOrNull() as? JsonObject
+                        currentCoroutineContext().ensureActive()
                         if (info != null) {
                             readInfo(info)
-                            if (exitCode != null || !alive) break
                             if (alive) transportError = null
                             onProgress()
                         }
@@ -1117,7 +1132,7 @@ class TerminalBridge {
                 failures = 0
                 val obj = chunk as? JsonObject ?: continue
                 val data = (obj["data"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
-                if (data.isNotEmpty()) writeBase64(data)
+                if (data.isNotEmpty()) output(data)
                 // The host answers `nextOffset`: asking from any other key
                 // replays the buffer from the wrong place forever.
                 val next = (obj["nextOffset"] as? kotlinx.serialization.json.JsonPrimitive)
@@ -1139,8 +1154,13 @@ class TerminalBridge {
                     transportError = null
                     onProgress()
                 }
+                // Process exit can arrive before the final buffered pages.
+                // Keep the same cursor until one empty read drains the tail.
+                if (data.isEmpty() && (exitCode != null || !alive)) break
             }
         }
+        readJob = reading
+        return reading
     }
 
     fun pumpInput(model: AppViewModel, peer: String, id: String, scope: CoroutineScope) {

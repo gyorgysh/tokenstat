@@ -345,11 +345,11 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         if let code = info.exitCode {
             exitCode = code
             alive = false
-            return false
+            return true
         }
         if info.alive { transportError = nil }
         // EOF can precede reaping, including during tunnel recovery.
-        return info.exitCode == nil
+        return true
     }
 
     private struct Plan: Sendable {
@@ -373,10 +373,11 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     @MainActor
     private func apply(_ chunk: PtyChunk) async -> Bool {
         guard mayOperate else { return true }
+        if transportError != nil { transportError = nil }
         if outputPaused != chunk.paused { outputPaused = chunk.paused }
         if chunk.dropped > 0 { droppedOutput = true }
+        offset = chunk.nextOffset
         if !chunk.bytes.isEmpty {
-            offset = chunk.nextOffset
             hasOutput = true
             // Share the Mac pane's embedded geometry and legacy keyboard
             // policy. See `TerminalOutputFilter`.
@@ -393,7 +394,9 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 }
             }
         }
-        return false
+        // Exit status can arrive while several host pages remain unread.
+        // Stop only after an empty read has consumed the final cursor.
+        return chunk.bytes.isEmpty && exitCode != nil
     }
 
     /// Ask the host whether the process is still running. A clean exit used
@@ -401,6 +404,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     @MainActor
     private func checkLiveness(peer: String, id: String) async -> Bool {
         guard mayOperate else { return false }
+        guard exitCode == nil else { return true }
         guard Date().timeIntervalSince(lastInfoAt) >= 0.25 else { return true }
         lastInfoAt = Date()
         guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
@@ -415,7 +419,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         if let code = info.exitCode {
             exitCode = code
             alive = false
-            return false
+            return true
         }
         if !info.alive {
             alive = false
