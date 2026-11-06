@@ -128,11 +128,12 @@ private struct ChatImageRowsLayout: Layout {
 
 /// Decode a bounded, alpha-preserving image away from the UI executor.
 /// The layout proposal bounds the preview; decoded pixels do not size it.
-private struct ChatImageSurface: View {
+struct ChatImageSurface: View {
     let resource: ChatImageResource
     var maxPixel: CGFloat = 3072
     var zoom: Binding<CGFloat>? = nil
     var move: (Int) -> Void = { _ in }
+    var pagesAtFit = false
     @State private var decoded: CGImage?
     @State private var decodedSource: Source?
     private struct Source: Equatable { let data: Data?; let file: URL?; let maxPixel: CGFloat }
@@ -144,7 +145,7 @@ private struct ChatImageSurface: View {
                 Theme.panel
                 if decodedSource == source, let decoded {
                     if let zoom {
-                        ChatImageViewport(image: decoded, zoom: zoom, move: move)
+                        ChatImageViewport(image: decoded, zoom: zoom, move: move, pagesAtFit: pagesAtFit)
                     } else {
                         Image(decoded, scale: 1, label: Text(verbatim: resource.attachment.name))
                             .resizable().scaledToFit()
@@ -225,6 +226,7 @@ private struct ChatImageViewer: View {
     @State private var savingFile: ChatPreviewedFile?
     #endif
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(model: ChatModel, request: ChatImagePresentation) {
         self.model = model
         self.request = request
@@ -284,11 +286,25 @@ private struct ChatImageViewer: View {
                 .keyboardShortcut(.cancelAction)
         }.padding(16)
     }
-    private var viewport: some View {
+    @ViewBuilder private var viewport: some View {
+        #if os(iOS)
+        if request.attachments.count > 1 {
+            ChatImagePager(resources: model.imageResources(for: request.attachments), selection: selection,
+                           zoom: $zoom, reduceMotion: reduceMotion, onSelect: select)
+                .accessibilityLabel(attachment.name)
+        } else {
+            singleImage
+        }
+        #else
+        singleImage
+        #endif
+    }
+    private var singleImage: some View {
         ChatImageSurface(resource: resource, zoom: $zoom, move: move)
             .id(attachment.id)
             .accessibilityLabel(attachment.name)
     }
+
     @ViewBuilder private var downloadNotice: some View {
         if !resource.available, !resource.loading {
             HStack {
@@ -346,8 +362,10 @@ private struct ChatImageViewer: View {
 
     private func setZoom(_ value: CGFloat) { zoom = min(4, max(1, value)) }
     private func move(_ direction: Int) {
-        let next = selection + direction
-        guard request.attachments.indices.contains(next) else { return }
+        select(selection + direction)
+    }
+    private func select(_ next: Int) {
+        guard request.attachments.indices.contains(next), next != selection else { return }
         fileAction = nil
         selection = next; setZoom(1); error = nil
     }

@@ -19,6 +19,7 @@ private struct Fixture: Decodable {
     var showing = true
     var overview = false
     var phase = "Encrypted history QA"
+    var imageFixtures: [ChatAttachment] = []
     var pickerBackend = "codex"
     var pickerModel = "gpt-6.1-sol"
     var layoutPage: String?
@@ -234,6 +235,73 @@ private struct Fixture: Decodable {
         noteState()
     }
 
+    private func prepareImageFixtures() {
+        #if os(iOS)
+        guard imageFixtures.isEmpty else { return }
+        let colors: [UIColor] = [.systemIndigo, .systemTeal, .systemOrange]
+        for index in 0..<3 {
+            let data = UIGraphicsImageRenderer(size: CGSize(width: 3000, height: 2000)).image { context in
+                context.cgContext.setFillColor(colors[index].cgColor)
+                context.cgContext.fill(CGRect(x: 0, y: 0, width: 3000, height: 2000))
+                ("PAGE \(index + 1)" as NSString).draw(at: CGPoint(x: 600, y: 800),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 250, weight: .bold), .foregroundColor: UIColor.white])
+            }.pngData()!
+            let id = "pager-qa-\(index)"
+            let bytes = try! JSONSerialization.data(withJSONObject: ["id": id, "name": "page-\(index + 1).png",
+                "mediaType": "image/png", "size": data.count])
+            let file = try! JSONDecoder().decode(ChatAttachment.self, from: bytes)
+            model.responseAttachmentData[id] = data
+            imageFixtures.append(file)
+        }
+        #endif
+    }
+
+    private func verifyImagePager() async throws {
+        #if os(iOS)
+        prepareImageFixtures()
+        let resources = model.imageResources(for: imageFixtures)
+        let controller = ChatImagePagingController()
+        var scale: CGFloat = 1
+        var choices: [Int] = []
+        let zoom = Binding<CGFloat>(get: { scale }, set: { scale = $0 })
+        func update(_ index: Int) {
+            controller.update(resources: resources, selection: index, zoom: zoom, reduceMotion: true,
+                              onSelect: { choices.append($0) })
+        }
+        update(0)
+        guard let first = controller.viewControllers?.first,
+              let second = controller.pageViewController(controller, viewControllerAfter: first),
+              controller.pageViewController(controller, viewControllerBefore: first) == nil else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        update(1)
+        guard controller.viewControllers?.first === second,
+              let third = controller.pageViewController(controller, viewControllerAfter: second),
+              controller.pageViewController(controller, viewControllerAfter: third) == nil else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        scale = 2; update(1)
+        guard controller.dataSource == nil else { throw CocoaError(.coderInvalidValue) }
+        scale = 1; update(1)
+        guard controller.dataSource != nil else { throw CocoaError(.coderInvalidValue) }
+        controller.pageViewController(controller, willTransitionTo: [third])
+        update(0)
+        controller.setViewControllers([third], direction: .forward, animated: false)
+        controller.pageViewController(controller, didFinishAnimating: true, previousViewControllers: [second], transitionCompleted: true)
+        guard controller.viewControllers?.first === first, choices.isEmpty else { throw CocoaError(.coderInvalidValue) }
+        controller.pageViewController(controller, willTransitionTo: [third])
+        controller.setViewControllers([third], direction: .forward, animated: false)
+        controller.pageViewController(controller, didFinishAnimating: true, previousViewControllers: [first], transitionCompleted: true)
+        guard choices == [2] else { throw CocoaError(.coderInvalidValue) }
+        controller.pageViewController(controller, willTransitionTo: [second])
+        controller.pageViewController(controller, didFinishAnimating: false, previousViewControllers: [third], transitionCompleted: false)
+        guard choices == [2] else { throw CocoaError(.coderInvalidValue) }
+        controller.deactivate()
+        controller.pageViewController(controller, didFinishAnimating: true, previousViewControllers: [third], transitionCompleted: true)
+        guard choices == [2] else { throw CocoaError(.coderInvalidValue) }
+        #endif
+    }
+
     private func readCommand() async {
         guard let bytes = try? Data(contentsOf: output.appendingPathComponent("command.json")),
               let request = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
@@ -263,6 +331,8 @@ private struct Fixture: Decodable {
                 pickerBackend = request["action"] as? String == "compact-opencode" ? "opencode" : "codex"
                 pickerModel = request["action"] as? String == "compact-default" ? ""
                     : (pickerBackend == "opencode" ? "provider/a-very-long-model-name-with-a-suffix" : "gpt-6.1-sol")
+            case "image-paging": prepareImageFixtures(); layoutPage = "image-paging"
+            case "verify-image-pager": try await verifyImagePager()
             case "snapshot": break
             case "new-chat-layout", "list-layout", "tab-layout", "repository-chats": layoutPage = request["action"] as? String
             case "light": layoutScheme = .light
@@ -311,6 +381,9 @@ private struct Fixture: Decodable {
                         allowsSend: false, showsEmptyComposer: true, requiresHostSelection: true,
                         repositoriesLoading: true, onAdd: {}, onSend: {})
                         .environment(navigation).environment(connectivity)
+                } else if session.layoutPage == "image-paging" {
+                    ChatImageGallery(resources: session.model.imageResources(for: session.imageFixtures))
+                        .padding(16).chatImageViewer(model: session.model)
                 } else if session.layoutPage == "compact-picker" {
                     compactPicker
                 } else if session.layoutPage == "repository-chats" {

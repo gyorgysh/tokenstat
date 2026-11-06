@@ -11,6 +11,7 @@ struct ChatImageViewport {
     let image: CGImage
     @Binding var zoom: CGFloat
     var move: (Int) -> Void
+    var pagesAtFit = false
 }
 
 #if os(macOS)
@@ -135,6 +136,7 @@ final class ChatImageScrollView: NSScrollView {
 extension ChatImageViewport: UIViewRepresentable {
     func makeUIView(context: Context) -> ChatImageScrollView { ChatImageScrollView() }
     func updateUIView(_ view: ChatImageScrollView, context: Context) {
+        view.pagesAtFit = pagesAtFit
         view.onZoom = { zoom = $0 }; view.onMove = move
         view.update(image: image, zoom: zoom)
     }
@@ -147,6 +149,7 @@ final class ChatImageScrollView: UIScrollView, UIScrollViewDelegate {
     private var applying = false
     private var panWasFitted = false
     private var panHadMultipleTouches = false
+    var pagesAtFit = false
     var onZoom: ((CGFloat) -> Void)?
     var onMove: ((Int) -> Void)?
 
@@ -163,6 +166,12 @@ final class ChatImageScrollView: UIScrollView, UIScrollViewDelegate {
         tap.numberOfTapsRequired = 2; addGestureRecognizer(tap)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        // Fitted images hand the drag to the native pager. Pinch and zoomed
+        // image panning keep the scroll view's own gesture handling.
+        if pagesAtFit && gesture === panGestureRecognizer && zoomScale <= 1.001 { return false }
+        return super.gestureRecognizerShouldBegin(gesture)
+    }
     func update(image: CGImage, zoom: CGFloat) {
         applying = true; defer { applying = false }
         if pixels !== image {
