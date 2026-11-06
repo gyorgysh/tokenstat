@@ -39,6 +39,9 @@ struct TerminalOutputFilter {
     private static let finalU = UInt8(ascii: "u")
 
     mutating func filter(_ input: ArraySlice<UInt8>) -> [UInt8] {
+        // Ordinary log output needs no state-machine work. A pending escape
+        // still has to consume this chunk, even when it contains no ESC.
+        if case .text = state, !input.contains(Self.escape) { return Array(input) }
         var out: [UInt8] = []
         out.reserveCapacity(input.count + pending.count)
 

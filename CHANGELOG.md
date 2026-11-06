@@ -20,6 +20,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Streaming replies and switching between long chats use less processing on Mac, iPhone and iPad.
 - Diff previews in iPhone and iPad chats follow the text size setting and fit the available width.
 - Chat no longer pauses to load or prepare larger attachments on Mac, iPhone and iPad.
+- Plain terminal logs take less processing on Mac, iPhone and iPad.
 
 ### Fixed
 
