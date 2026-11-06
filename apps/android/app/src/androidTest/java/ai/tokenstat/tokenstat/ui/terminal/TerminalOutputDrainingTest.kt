@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -27,6 +28,84 @@ import kotlin.coroutines.suspendCoroutine
 
 @RunWith(AndroidJUnit4::class)
 class TerminalOutputDrainingTest {
+    @Test fun unchangedStatusDoesNotRedrawTheTerminal() {
+        val bridge = TerminalBridge()
+        var changes = 0
+        bridge.onProgress = { changes++ }
+        bridge.readInfo(buildJsonObject { put("alive", true) })
+        assertEquals(0, changes)
+        val running = buildJsonObject {
+            put("command", "shell")
+            put("cwd", "/fixture")
+            put("alive", true)
+        }
+        bridge.readInfo(running)
+        assertEquals(1, changes)
+        bridge.readInfo(running)
+        assertEquals(1, changes)
+        bridge.readInfo(endedInfo())
+        assertEquals(2, changes)
+        bridge.readInfo(endedInfo())
+        bridge.readInfo(null)
+        assertEquals(2, changes)
+    }
+
+    @Test fun aNaturalExitIsDetectedAfterSuccessfulReads() = runBlocking {
+        val bridge = TerminalBridge()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        val received = ByteArrayOutputStream()
+        val expected = "Natural exit ✓\n".toByteArray()
+        var infoReads = 0
+        try {
+            val job = bridge.startReadLoop("fixture", scope, request = { method, params ->
+                when (method) {
+                    "pty.info" -> { infoReads++; endedInfo() }
+                    "pty.read" -> {
+                        val offset = (params["offset"] as JsonPrimitive).content.toInt()
+                        if (offset == expected.size) delay(40)
+                        buildJsonObject {
+                            put("data", Base64.encodeToString(expected.copyOfRange(offset, expected.size), Base64.NO_WRAP))
+                            put("nextOffset", expected.size)
+                        }
+                    }
+                    else -> error("Unexpected request $method")
+                }
+            }, output = { received.write(Base64.decode(it, Base64.DEFAULT)) })
+            withTimeout(2_000) { job.join() }
+            assertArrayEquals(expected, received.toByteArray())
+            assertEquals(1, infoReads)
+            assertEquals(0, bridge.exitCode)
+            assertTrue(!bridge.alive)
+        } finally { scope.cancel() }
+    }
+
+    @Test fun failedMetadataIsRetriedWithoutFloodingOrEndingSuccessfulReads() = runBlocking {
+        val bridge = TerminalBridge()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        val infoTimes = mutableListOf<Long>()
+        try {
+            val job = bridge.startReadLoop("fixture", scope, request = { method, _ ->
+                when (method) {
+                    "pty.read" -> {
+                        delay(40)
+                        buildJsonObject { put("data", ""); put("nextOffset", 0) }
+                    }
+                    "pty.info" -> {
+                        infoTimes.add(System.nanoTime())
+                        if (infoTimes.size == 1) throw java.io.IOException("Synthetic metadata failure")
+                        endedInfo()
+                    }
+                    else -> error("Unexpected request $method")
+                }
+            }, output = { error("No output was produced") })
+            withTimeout(4_000) { job.join() }
+            assertEquals(2, infoTimes.size)
+            assertTrue("Metadata checks must stay bounded", infoTimes[1] - infoTimes[0] >= 800_000_000L)
+            assertEquals(0, bridge.exitCode)
+            assertEquals(null, bridge.transportError)
+        } finally { scope.cancel() }
+    }
+
     @Test fun exitedProcessRetainsEveryPageIncludingRecovery() = runBlocking {
         for (failuresAfterExit in listOf(0, 2, 8)) {
             val bridge = TerminalBridge()
@@ -69,50 +148,59 @@ class TerminalOutputDrainingTest {
     }
 
     @Test fun closingThePageCancelsAnOutstandingRead() = runBlocking {
-        val bridge = TerminalBridge()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-        val started = CompletableDeferred<Unit>()
-        var writes = 0
-        var changes = 0
-        bridge.onProgress = { changes++ }
-        try {
-            val job = bridge.startReadLoop("fixture", scope, request = { _, _ ->
-                started.complete(Unit)
-                suspendCancellableCoroutine { }
-            }, output = { writes++ })
-            withTimeout(5_000) { started.await() }
-            bridge.stopJobs()
-            withTimeout(5_000) { job.join() }
-            assertTrue(job.isCancelled)
-            assertEquals(0, writes)
-            assertEquals(0, changes)
-            assertEquals(null, bridge.transportError)
-        } finally { scope.cancel() }
+        for (pendingMethod in listOf("pty.read", "pty.info")) {
+            val bridge = TerminalBridge()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            val started = CompletableDeferred<Unit>()
+            var writes = 0
+            var changes = 0
+            bridge.onProgress = { changes++ }
+            try {
+                val job = bridge.startReadLoop("fixture", scope, request = { method, _ ->
+                    if (method == pendingMethod) {
+                        started.complete(Unit)
+                        suspendCancellableCoroutine { }
+                    } else buildJsonObject { put("data", ""); put("nextOffset", 0) }
+                }, output = { writes++ })
+                withTimeout(5_000) { started.await() }
+                bridge.stopJobs()
+                withTimeout(5_000) { job.join() }
+                assertTrue(job.isCancelled)
+                assertEquals(0, writes)
+                assertEquals(0, changes)
+                assertEquals(null, bridge.exitCode)
+                assertEquals(null, bridge.transportError)
+            } finally { scope.cancel() }
+        }
     }
 
     @Test fun aLateReplyCannotWriteIntoTheReplacementPage() = runBlocking {
-        val bridge = TerminalBridge()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-        val pending = CompletableDeferred<Continuation<kotlinx.serialization.json.JsonElement>>()
-        var writes = 0
-        var changes = 0
-        bridge.onProgress = { changes++ }
-        try {
-            val job = bridge.startReadLoop("fixture", scope, request = { _, _ ->
-                suspendCoroutine { pending.complete(it) }
-            }, output = { writes++ })
-            val release = withTimeout(5_000) { pending.await() }
-            bridge.stopJobs()
-            release.resume(buildJsonObject {
-                put("data", Base64.encodeToString("old output".toByteArray(), Base64.NO_WRAP))
-                put("nextOffset", 10)
-            })
-            withTimeout(5_000) { job.join() }
-            assertTrue(job.isCancelled)
-            assertEquals(0, writes)
-            assertEquals(0, changes)
-            assertEquals(null, bridge.transportError)
-        } finally { scope.cancel() }
+        for (pendingMethod in listOf("pty.read", "pty.info")) {
+            val bridge = TerminalBridge()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            val pending = CompletableDeferred<Continuation<kotlinx.serialization.json.JsonElement>>()
+            var writes = 0
+            var changes = 0
+            bridge.onProgress = { changes++ }
+            try {
+                val job = bridge.startReadLoop("fixture", scope, request = { method, _ ->
+                    if (method == pendingMethod) suspendCoroutine { pending.complete(it) }
+                    else buildJsonObject { put("data", ""); put("nextOffset", 0) }
+                }, output = { writes++ })
+                val release = withTimeout(5_000) { pending.await() }
+                bridge.stopJobs()
+                release.resume(if (pendingMethod == "pty.info") endedInfo() else buildJsonObject {
+                    put("data", Base64.encodeToString("old output".toByteArray(), Base64.NO_WRAP))
+                    put("nextOffset", 10)
+                })
+                withTimeout(5_000) { job.join() }
+                assertTrue(job.isCancelled)
+                assertEquals(0, writes)
+                assertEquals(0, changes)
+                assertEquals(null, bridge.exitCode)
+                assertEquals(null, bridge.transportError)
+            } finally { scope.cancel() }
+        }
     }
 
     private fun endedInfo(): JsonObject = buildJsonObject {

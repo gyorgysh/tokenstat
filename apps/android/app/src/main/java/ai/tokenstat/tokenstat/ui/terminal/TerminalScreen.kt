@@ -963,6 +963,10 @@ class TerminalBridge {
 
     fun readInfo(info: JsonObject?) {
         if (info == null) return
+        val previousCommand = command
+        val previousCwd = cwd
+        val previousAlive = alive
+        val previousExitCode = exitCode
         (info["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { command = it }
         (info["cwd"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { cwd = it }
         (info["alive"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { alive = it == "true" }
@@ -970,7 +974,9 @@ class TerminalBridge {
             exitCode = it
             alive = false
         }
-        onProgress()
+        if (command != previousCommand || cwd != previousCwd ||
+            alive != previousAlive || exitCode != previousExitCode
+        ) onProgress()
     }
 
     /// The armed Ctrl.
@@ -1091,6 +1097,7 @@ class TerminalBridge {
             var offset = 0L
             var backoffMs = 50L
             var failures = 0
+            var lastInfoAt: Long? = null
             while (true) {
                 awaitForeground()
                 val chunk = runCatching {
@@ -1112,6 +1119,7 @@ class TerminalBridge {
                         onProgress()
                     }
                     if (failures % 8 == 0) {
+                        lastInfoAt = System.nanoTime()
                         val info = runCatching {
                             request("pty.info", ptyViewerParams(id))
                         }.onFailure {
@@ -1153,6 +1161,21 @@ class TerminalBridge {
                     // The host answered, so the outage is over.
                     transportError = null
                     onProgress()
+                }
+                // Successful empty reads are also how a quiet command ends.
+                // Bound status checks to once a second while it is idle.
+                val now = System.nanoTime()
+                if (data.isEmpty() && alive && exitCode == null &&
+                    (lastInfoAt == null || now - lastInfoAt >= 1_000_000_000L)
+                ) {
+                    lastInfoAt = now
+                    val info = runCatching {
+                        request("pty.info", ptyViewerParams(id))
+                    }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                    }.getOrNull() as? JsonObject
+                    currentCoroutineContext().ensureActive()
+                    if (info != null) readInfo(info)
                 }
                 // Process exit can arrive before the final buffered pages.
                 // Keep the same cursor until one empty read drains the tail.
