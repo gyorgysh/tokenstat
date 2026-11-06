@@ -37,16 +37,51 @@ struct MarkdownLinkAttribute: TextAttribute {
     let url: URL
 }
 
+/// Bound native text views without reparsing fragments of Markdown syntax.
+enum MarkdownTextChunks {
+    static func split(_ value: AttributedString, maximum: Int) -> [AttributedString] {
+        precondition(maximum > 0)
+        let characters = value.characters
+        var pieces: [AttributedString] = []
+        var start = characters.startIndex
+        while start < characters.endIndex {
+            var end = characters.index(start, offsetBy: maximum, limitedBy: characters.endIndex) ?? characters.endIndex
+            if end < characters.endIndex {
+                // Prefer a word boundary, retaining the whitespace itself.
+                let halfway = characters.index(start, offsetBy: maximum / 2)
+                var boundary = end
+                while boundary > halfway {
+                    let previous = characters.index(before: boundary)
+                    if characters[previous].isWhitespace { end = boundary; break }
+                    boundary = previous
+                }
+            }
+            pieces.append(AttributedString(value[start..<end]))
+            start = end
+        }
+        return pieces
+    }
+}
+
 extension MarkdownLinks {
     /// Keep native link handling and one selectable Text, while giving each
     /// wrapped link run an identity the hover renderer can recognize.
     static func text(_ attributed: AttributedString) -> Text {
         guard attributed.runs.contains(where: { $0.link != nil }) else { return Text(attributed) }
-        return attributed.runs.reduce(Text("")) { result, run in
+        let parts = attributed.runs.map { run -> Text in
             let piece = Text(AttributedString(attributed[run.range]))
-            guard let url = run.link, allows(url) else { return result + piece }
-            return result + piece.customAttribute(MarkdownLinkAttribute(url: url))
+            guard let url = run.link, allows(url) else { return piece }
+            return piece.customAttribute(MarkdownLinkAttribute(url: url))
         }
+        return joined(parts[...])
+    }
+
+    /// SwiftUI resolves concatenation recursively. Balance the tree so a
+    /// long streamed paragraph or many link runs cannot exhaust the stack.
+    static func joined(_ parts: ArraySlice<Text>) -> Text {
+        guard parts.count > 1 else { return parts.first ?? Text("") }
+        let middle = parts.index(parts.startIndex, offsetBy: parts.count / 2)
+        return joined(parts[..<middle]) + joined(parts[middle...])
     }
 }
 

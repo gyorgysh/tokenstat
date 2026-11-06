@@ -636,54 +636,35 @@ struct MessageMarkdown: View {
         func prose(_ value: AttributedString) -> Text {
             streaming ? StreamingWordAttribute.text(value, next: &wordCount) : MarkdownLinks.text(value)
         }
-        var chain: Text? = nil
+        var chain: [Text] = []
         var chainLength = 0
         var chainWordCount = 0
         var chainHasLinks = false
         func gap() -> Text { Text("\n\n").font(bodyFont) }
         func flush() {
-            if let current = chain {
-                out.append(.text(current, hasLinks: chainHasLinks, wordCount: chainWordCount))
-                chain = nil
+            if !chain.isEmpty {
+                out.append(.text(MarkdownLinks.joined(chain[...]), hasLinks: chainHasLinks, wordCount: chainWordCount))
+                chain.removeAll(keepingCapacity: true)
                 chainLength = 0
                 chainHasLinks = false
             }
         }
         func push(_ piece: Text, length: Int, separator: Text? = nil, links: Bool = false) {
-            if chain != nil, chainLength + length > Self.chainCharCap {
+            if !chain.isEmpty, chainLength + length > Self.chainCharCap {
                 flush()
             }
-            if let current = chain {
-                chain = current + (separator ?? gap()) + piece
+            if !chain.isEmpty {
+                chain.append(separator ?? gap())
                 chainLength += length + 2
             } else {
-                chain = piece
                 chainLength = length
             }
+            chain.append(piece)
             chainWordCount = wordCount
             chainHasLinks = chainHasLinks || links
         }
-        /// Split an oversized block on blank lines (then lines), so no
-        /// single piece can blow past the cap on its own.
-        func chunks(_ text: String) -> [String] {
-            if text.count <= Self.chainCharCap { return [text] }
-            var pieces: [String] = []
-            for para in text.components(separatedBy: "\n\n") {
-                if para.count <= Self.chainCharCap {
-                    if !para.isEmpty { pieces.append(para) }
-                    continue
-                }
-                var current = ""
-                for line in para.components(separatedBy: "\n") {
-                    if !current.isEmpty, current.count + 1 + line.count > Self.chainCharCap {
-                        pieces.append(current)
-                        current = ""
-                    }
-                    current = current.isEmpty ? line : current + "\n" + line
-                }
-                if !current.isEmpty { pieces.append(current) }
-            }
-            return pieces.isEmpty ? [text] : pieces
+        func chunks(_ text: String) -> [AttributedString] {
+            MarkdownTextChunks.split(MarkdownInline.attributed(text), maximum: Self.chainCharCap)
         }
         func listRow(_ item: MarkdownListItem, text: AttributedString) -> Text {
             var row = Text(String(repeating: "  ", count: item.depth * 2))
@@ -706,32 +687,29 @@ struct MessageMarkdown: View {
         for block in blocks {
             switch block.kind {
             case let .heading(level, text):
-                push(
-                    prose(MarkdownInline.attributed(text))
-                        .font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
-                    length: text.count, links: MarkdownInline.hasLinks(text)
-                )
+                for chunk in chunks(text) {
+                    push(
+                        prose(chunk).font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
+                        length: chunk.characters.count, links: chunk.runs.contains { $0.link != nil }
+                    )
+                }
             case let .paragraph(text):
                 for chunk in chunks(text) {
                     push(
-                        prose(MarkdownInline.attributed(chunk))
-                            .font(bodyFont),
-                        length: chunk.count, links: MarkdownInline.hasLinks(chunk)
+                        prose(chunk).font(bodyFont),
+                        length: chunk.characters.count, links: chunk.runs.contains { $0.link != nil }
                     )
                 }
             case let .list(items):
                 let total = items.reduce(0) { $0 + $1.text.count }
                 if total <= Self.chainCharCap {
-                    var list: Text? = nil
+                    var list: [Text] = []
                     for item in items {
                         let row = listRow(item, text: MarkdownInline.attributed(item.text))
-                        if let acc = list {
-                            list = acc + Text("\n").font(bodyFont) + row
-                        } else {
-                            list = row
-                        }
+                        if !list.isEmpty { list.append(Text("\n").font(bodyFont)) }
+                        list.append(row)
                     }
-                    if let list { push(list, length: total, links: items.contains { MarkdownInline.hasLinks($0.text) }) }
+                    if !list.isEmpty { push(MarkdownLinks.joined(list[...]), length: total, links: items.contains { MarkdownInline.hasLinks($0.text) }) }
                 } else {
                     // Huge lists chain item by item; a giant item chunks
                     // further, marker on its first piece only.
@@ -739,14 +717,14 @@ struct MessageMarkdown: View {
                         let parts = chunks(item.text)
                         for (part, chunk) in parts.enumerated() {
                             let piece = (part == 0)
-                                ? listRow(item, text: MarkdownInline.attributed(chunk))
-                                : prose(MarkdownInline.attributed(chunk)).font(bodyFont)
+                                ? listRow(item, text: chunk)
+                                : prose(chunk).font(bodyFont)
                             push(
                                 piece,
-                                length: chunk.count,
+                                length: chunk.characters.count,
                                 separator: index == 0 && part == 0
                                     ? nil : Text("\n").font(bodyFont),
-                                links: MarkdownInline.hasLinks(chunk)
+                                links: chunk.runs.contains { $0.link != nil }
                             )
                         }
                     }

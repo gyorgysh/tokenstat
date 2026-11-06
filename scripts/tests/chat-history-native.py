@@ -363,13 +363,16 @@ print(json.dumps({'events':len(result['result']['events'])}))
             words = ["## Smooth streaming\n\n"]
             words += [(f"word{index}🌍" + ("\n" if index < 48 and index % 12 == 11 else " ")) for index in range(120)]
             words += ["\n\n```swift\n", "let greeting = ", '"Hello 🌍"', "\n```\n\n", "smooth-idle-tail"]
+            # A flat chain of per-word Text concatenations exhausted the iOS
+            # stack when a backend delivered a long paragraph in one update.
+            words += ["\n\n" + "long streamed word " * 2000 + "long-stream-tail"]
             expected = "".join(words)
             for word in words:
                 emit({"type": "text", "data": word})
                 await asyncio.sleep(0.037)
             # The final partial line must appear while the producer is still
             # alive, without depending on a following event or completion.
-            await visible("smooth-idle-tail")
+            await visible("long-stream-tail")
             assert all(state(role)["running"] for role in roles)
             with transcript.open("rb") as archive:
                 archive.seek(start)
@@ -380,10 +383,12 @@ print(json.dumps({'events':len(result['result']['events'])}))
             atomic_json(run_root / "stream-updates.json", {"inputUpdates":len(words),
                 "publishedUpdates":len(deltas), "expected":expected, "deltas":deltas})
             prove(f"Native readers ({', '.join(roles)}) display exact Unicode/Markdown and an idle tail: {len(words)} input updates become {len(deltas)} publications")
-            emit({"type": "text", "data": " final-no-newline"})
+            # Use an unhyphenated marker so native line wrapping cannot split
+            # the OCR match while verifying the final unterminated delta.
+            emit({"type": "text", "data": " finaltail"})
             emit({"type": "end", "stopReason": "end_turn"})
             await wait(lambda: all(state(role) and not state(role)["running"] for role in roles))
-            await visible("final-no-newline")
+            await visible("finaltail")
             assert all(not state(role)["failures"] for role in roles), {role: state(role)["failures"] for role in roles}
             prove("Turn completion publishes the final partial line to every native reader")
             atomic_json(run_root / "result.json", {"ok":True, "proofs":proofs,

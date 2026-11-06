@@ -21,6 +21,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - The Android usage preview stays in place as usage readings refresh.
 - Floating tool panes on Mac stay within the chat area when the sidebar is open.
+- Fixed blank paragraphs and an iOS crash when displaying long streamed replies.
 
 ## [1.12.0] - 2026-11-06
 

@@ -28,6 +28,20 @@ struct MarkdownLinksTests {
         for run in styled.runs where run.link == nil {
             precondition(run.underlineStyle == nil, "Plain and rejected links must not appear clickable")
         }
+        for source in ["", "short text", "é👩🏽‍💻", String(repeating: "long streamed word ", count: 2000),
+                       String(repeating: "é👩🏽‍💻", count: 5000)] {
+            var value = AttributedString(source)
+            value.link = URL(string: "https://example.com/full-path")
+            value.inlinePresentationIntent = [.stronglyEmphasized, .code]
+            for maximum in source.count < 32 ? [1, 8000] : [8000] {
+                let chunks = MarkdownTextChunks.split(value, maximum: maximum)
+                precondition(chunks.allSatisfy { !$0.characters.isEmpty && $0.characters.count <= maximum },
+                             "Every rendered chunk must stay bounded, even without line breaks or spaces")
+                var restored = AttributedString()
+                for chunk in chunks { restored.append(chunk) }
+                precondition(restored == value, "Splitting must preserve graphemes, whitespace, links and inline formatting")
+            }
+        }
         #if os(macOS)
         let action = try AttributedString(markdown: "[Review](tokenstat://workbench/open?workspace=project-a&tool=changes) [Reject](tokenstat://workbench/open?workspace=project-a&tool=terminal&command=echo)")
         let actions = MarkdownLinks.styled(action, color: .purple).runs.compactMap(\.link)

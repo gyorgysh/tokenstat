@@ -5,7 +5,7 @@ struct StreamingWordAttribute: TextAttribute {
     let index: Int
 
     static func text(_ value: AttributedString, next: inout Int) -> Text {
-        var result = Text("")
+        var parts: [Text] = []
         let characters = value.characters
         var start = characters.startIndex
         while start < characters.endIndex {
@@ -18,14 +18,14 @@ struct StreamingWordAttribute: TextAttribute {
             let text = MarkdownLinks.text(part)
             let excluded = whitespace || part.runs.contains { $0.link != nil || $0.inlinePresentationIntent?.contains(.code) == true }
             if excluded {
-                result = result + text
+                parts.append(text)
             } else {
-                result = result + text.customAttribute(StreamingWordAttribute(index: next))
+                parts.append(text.customAttribute(StreamingWordAttribute(index: next)))
                 next += 1
             }
             start = end
         }
-        return result
+        return MarkdownLinks.joined(parts[...])
     }
 }
 
