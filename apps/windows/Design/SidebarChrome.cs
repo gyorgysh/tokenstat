@@ -28,8 +28,21 @@ internal static class SidebarChrome
         };
         NavigationRows.Reconciled += (fresh, retained) =>
         {
-            if (ProjectBindings.TryGetValue(fresh, out var project)) BindProject(retained, project.Chevron);
-            if (ActionBindings.TryGetValue(fresh, out var actions)) RevealActions(retained, actions.Actions);
+            if (ReferenceEquals(fresh, retained)) return;
+            if (ProjectBindings.TryGetValue(fresh, out var project))
+            {
+                var chevron = project.Chevron;
+                project.Chevron = null;
+                BindProject(retained, chevron);
+            }
+            if (ActionBindings.TryGetValue(fresh, out var actions))
+            {
+                var controls = actions.Actions;
+                // Queued focus callbacks on the discarded candidate must not
+                // repaint controls now owned by the retained native row.
+                actions.Actions = [];
+                RevealActions(retained, controls);
+            }
         };
     }
 
@@ -238,7 +251,7 @@ internal static class SidebarChrome
             var binding = new ActionBinding();
             void Paint()
             {
-                foreach (var action in binding.Actions) action.Opacity = binding.Pointer || binding.Focused ? 1 : 0;
+                foreach (var action in binding.Actions) action.Opacity = binding.Pointer || binding.Focused || action.FocusState != FocusState.Unfocused ? 1 : 0;
             }
             void RefreshFocus()
             {
@@ -256,7 +269,7 @@ internal static class SidebarChrome
             return binding;
         });
         state.Actions = actions;
-        foreach (var action in state.Actions) action.Opacity = state.Pointer || state.Focused ? 1 : 0;
+        foreach (var action in state.Actions) action.Opacity = state.Pointer || state.Focused || action.FocusState != FocusState.Unfocused ? 1 : 0;
     }
 
     public static Button RailButton(IconElement icon, string label, RoutedEventHandler click)

@@ -796,6 +796,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private async Task OpenCoreAsync(string id, JsonNode? created)
     {
         if (string.IsNullOrEmpty(id)) return;
+        var reloading = _openId == id;
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
@@ -818,8 +819,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         _offset = 0;
         _events = new JsonArray();
-        _attachments.Clear();
-        _draft.Text = "";
+        // Keep a same-chat draft intact while its replacement loads. Native
+        // automation/accessibility can still see the retiring editor until
+        // WinUI finishes detaching it, and a failed refresh must not erase it.
+        if (!reloading)
+        {
+            _attachments.Clear();
+            _draft.Text = "";
+        }
         ResetTranscriptWindow();
         try
         {
@@ -841,11 +848,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _approvals = AsArray(approvals.Result);
             _started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
             _running = Format.Flag(_openChat, "running");
+            _attachments.Clear();
             if (_drafts.TryGetValue(identity.Result, out var draft))
             {
                 _draft.Text = draft.Text;
                 _attachments.AddRange(draft.Attachments);
             }
+            else _draft.Text = "";
             _opening = false;
             PaintConversation();
             _ = RefreshWorkspaceGitAsync();

@@ -11254,7 +11254,14 @@ mod tests {
                 None,
             );
             let reply = store.inspection(id).unwrap();
-            assert_eq!(reply["activity"]["goalReported"], reported);
+            assert_eq!(
+                reply["activity"]["goalReported"],
+                reported,
+                "revision={revision}; process={:?}; raw={:?}; inspection={:?}",
+                tokenstat_pty::manager().info(&process.id),
+                fs::read_to_string(root.path().join(format!("raw-{revision}.ndjson"))),
+                fs::read_to_string(store.root.join(id).join("inspection.json")),
+            );
             match expected {
                 Some(status) => assert_eq!(
                     reply["activity"]["goal"]["status"],
