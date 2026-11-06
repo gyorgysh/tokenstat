@@ -301,10 +301,18 @@ final class TeamStore {
         repeat {
             guard self.owner == owner, phase == .ready, !Task.isCancelled else { return }
             let foreground = active()
-            await TeamAppPresence.shared.publish(foreground, owner: owner, api: api)
+            await publishAppPresence(foreground)
             guard foreground || keepsWatching, !Task.isCancelled else { return }
             do { try await Task.sleep(for: .seconds(15)) } catch { return }
         } while self.owner == owner
+    }
+
+    func publishAppPresence(_ active: Bool) async {
+        guard let owner, phase == .ready, capabilities?.supportsAppPresence == true else { return }
+        // A complete empty directory has nobody who can see our status. A
+        // stale empty window must not publish inactive on behalf of another.
+        guard !active || !organizations.isEmpty || organizationsNextOffset != nil else { return }
+        await TeamAppPresence.shared.publish(active, owner: owner, api: api)
     }
 
     func observePresence(_ members: [TeamMember], organization: String, at: Date) {

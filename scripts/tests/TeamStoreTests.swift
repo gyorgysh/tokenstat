@@ -20,6 +20,8 @@ private actor Fixture {
     var eligible = true
     var ownerRecovery = false
     var paginate = false
+    var emptyOrganizations = false
+    var supportsPresence = false
     var publishing = false
     var failures: [String: String] = [:]
     var presence: [Bool] = []
@@ -34,6 +36,7 @@ private actor Fixture {
     func downgrade() { eligible = false }
     func recoverOwner() { eligible = false; ownerRecovery = true }
     func usePages() { paginate = true }
+    func setPresenceTeams(empty: Bool, supported: Bool = true) { emptyOrganizations = empty; supportsPresence = supported }
     func usePublishing() { publishing = true }
     func fail(_ operation: String, code: String) { failures[operation] = code }
     func succeed(_ operation: String) { failures.removeValue(forKey: operation) }
@@ -48,8 +51,9 @@ private actor Fixture {
         if delayed.contains(key) { return try await withCheckedThrowingContinuation { waiting[key] = $0 } }
         switch operation {
         case "presence.set": return .object(["active": fields["active"]!, "expiresInSeconds": .int(75)])
-        case "capabilities": return .object(["enabled":.bool(enabled), "actorId":.string("fixture-owner"), "ready":.bool(authorized), "version":.int(1), "authorizationRequired":.bool(!authorized), "canPublishCheckouts":.bool(publishing)])
+        case "capabilities": return .object(["enabled":.bool(enabled), "actorId":.string("fixture-owner"), "ready":.bool(authorized), "version":.int(1), "authorizationRequired":.bool(!authorized), "canPublishCheckouts":.bool(publishing), "features":.array(supportsPresence ? [.string("app-presence-v1")] : [])])
         case "organizations.list":
+            if emptyOrganizations { return .object(["organizations":.array([]), "nextOffset":paginate ? .int(100) : .null]) }
             let page = fields["page"]
             if case let .object(values) = page, values["offset"] == .int(100) {
                 return .object(["organizations":.array([organization("org_a", eligible: eligible, ownerRecovery: ownerRecovery), organization("org_c", eligible: eligible, ownerRecovery: ownerRecovery)]), "nextOffset":.null])
@@ -115,10 +119,56 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await projectCatalogRefresh()
         await memberPresence()
         await appPresenceTraffic()
+        await appPresenceMembership()
         avatars()
         try messageAuthors()
         newChatOutsideFirstCatalogPage()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
+    }
+    @MainActor static func appPresenceMembership() async {
+        let fixture = Fixture(), account = owner("presence-membership")
+        await fixture.setPresenceTeams(empty: true)
+        let store = TeamStore(api: await fixture.api())
+        await store.bind(to: account)
+        await store.publishAppPresence(true); await store.publishAppPresence(true)
+        await fixture.checkPresence([], "An account with no teams kept publishing foreground presence")
+
+        await fixture.setPresenceTeams(empty: false)
+        await store.bind(to: account, refresh: true)
+        await store.publishAppPresence(true)
+        await fixture.checkPresence([true], "Joining a team did not enable foreground presence")
+
+        let staleFixture = Fixture()
+        await staleFixture.setPresenceTeams(empty: true)
+        let staleWindow = TeamStore(api: await staleFixture.api())
+        await staleWindow.bind(to: account)
+        await staleWindow.publishAppPresence(true)
+        await staleFixture.checkPresence([], "A stale empty window published an inactive transition")
+        await store.publishAppPresence(true)
+        await fixture.checkPresence([true], "A stale empty window interrupted another window's heartbeat")
+        await staleWindow.publishAppPresence(false)
+        await staleFixture.checkPresence([false], "Backgrounding lost the inactive transition")
+        await store.publishAppPresence(false)
+        await fixture.checkPresence([true], "Two windows repeated an inactive transition")
+        await store.publishAppPresence(true)
+        await fixture.checkPresence([true, true], "Returning to foreground did not restore presence")
+
+        let partialFixture = Fixture()
+        await partialFixture.setPresenceTeams(empty: true); await partialFixture.usePages()
+        let partial = TeamStore(api: await partialFixture.api())
+        await partial.bind(to: owner("presence-partial"))
+        await partial.publishAppPresence(true)
+        await partialFixture.checkPresence([true], "An incomplete directory suppressed presence")
+
+        let oldFixture = Fixture()
+        await oldFixture.setPresenceTeams(empty: false, supported: false)
+        let old = TeamStore(api: await oldFixture.api())
+        await old.bind(to: owner("presence-old-server"))
+        await old.publishAppPresence(true)
+        await oldFixture.checkPresence([], "An older server received an unsupported presence call")
+        await store.bind(to: nil)
+        await store.publishAppPresence(true)
+        await fixture.checkPresence([true, true], "Signing out published another heartbeat")
     }
     @MainActor static func appPresenceTraffic() async {
         let fixture = Fixture(), account = owner("alpha")
