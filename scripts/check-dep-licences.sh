@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 #
-# Fail if a dependency would make tokenstat undistributable.
+# Flag dependency licence expressions outside the project allowlist.
 #
-# Everything in this repository is source-available and shipped only by
-# pueev OÜ: the CLI, the host daemon, the MCP server and the desktop app. That
-# works because pueev owns all of it and can license its own combined work
-# however it likes. It stops working the moment a *third party* copyleft
-# dependency appears in a binary, because then that binary could only ever be
-# conveyed under that party's terms.
-#
-# The failure mode is silent and late: everything builds, tests pass, and the
-# problem only surfaces when someone reads the licence of a transitive crate
-# picked up months earlier. So it is checked here instead.
+# The repository uses a custom source-available licence. pueev OÜ distributes
+# official builds using its own rights and the additional contributor grant.
+# Dependencies must have terms compatible with this distribution model.
+# The allowlist is a conservative screening policy; passing it does not remove
+# third-party attribution, source-disclosure or other licence obligations.
 #
 # MPL-2.0 is deliberately allowed. Its copyleft is per file, and section 3.3
 # explicitly permits combining into a "Larger Work" under other terms. Modified
@@ -19,18 +14,14 @@
 # reason to refuse the dependency.
 #
 # A dual licensed crate passes if any one of its alternatives is clean. A crate
-# offered as "MIT OR Apache-2.0 OR LGPL-2.1-or-later" can simply be taken under
-# MIT, so it is not a problem.
+# offered as "MIT OR Apache-2.0 OR LGPL-2.1-or-later" can be used under MIT.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Resolved first, and checked, rather than piped straight into python. When
-# `cargo metadata` fails the pipeline would otherwise surface as a decode error
-# and exit 1, which reads exactly like a licence violation and sends whoever is
-# debugging it in precisely the wrong direction.
+# Report metadata failures separately from licence-policy failures.
 if ! metadata="$(cargo metadata --format-version 1 --all-features)"; then
     echo "error: cargo metadata failed, so no licence conclusion can be drawn" >&2
     exit 2
@@ -62,7 +53,7 @@ for r in roots:
 problems = []
 for pid in sorted(linked):
     p = packages[pid]
-    # pueev owns these.
+    # Workspace members use the repository licence; review contributions separately.
     if pid in meta["workspace_members"]:
         continue
     lic = p.get("license") or ""
@@ -88,7 +79,7 @@ if [ -z "$count" ]; then
 fi
 
 if [ -n "$problems" ]; then
-    echo "error: dependencies that would make tokenstat undistributable:" >&2
+    echo "error: dependencies requiring licence review:" >&2
     # Read line by line rather than expanding unquoted. An SPDX expression like
     # "Apache-2.0 OR MIT" contains spaces, and word splitting turns one finding
     # into three unreadable ones.
@@ -98,14 +89,14 @@ if [ -n "$problems" ]; then
     done
     cat >&2 <<'MSG'
 
-tokenstat is shipped only by pueev OÜ, which works because pueev owns all of
-it. A third party copyleft dependency removes that: the resulting binary could
-then only be conveyed under that party's terms.
+These dependencies need review for compatibility with tokenstat's custom
+licence and official distribution terms. Their own licence obligations still
+apply; repository ownership and contribution grants do not override them.
 
-Either drop the dependency, or move whatever needs it behind a process
-boundary that no shipped binary links.
+Review the applicable terms before release. Use a compatible dependency or
+obtain the required permissions if the current terms do not allow distribution.
 MSG
     exit 1
 fi
 
-echo "ok: $count packages across the workspace, none block shipping tokenstat"
+echo "ok: $count packages checked; no licence expressions outside the allowlist"

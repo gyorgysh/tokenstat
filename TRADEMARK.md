@@ -1,55 +1,49 @@
 # Trademark notice
 
-**"tokenstat", "tokenstat.ai", and the tokenstat logo and wordmark are
-trademarks of pueev OÜ.** They are not licensed with the source code.
+"tokenstat", "tokenstat.ai", and the tokenstat logo and wordmark are
+trademarks of pueev OÜ. They are not licensed with the source code.
 
 This notice restates section 5 of `LICENSE`, which grants no trademark rights.
 It restricts nothing about the code beyond what that licence already says.
 
-## What you may do
+## Distribution and branding
 
-The code is source-available: you may read it, study it, fork it, modify your
-own copy, and build and run it on your own machines. See `LICENSE` for the full
-terms. None of that requires any use of the marks.
+You may not distribute builds of this software under any name without
+separate written permission from pueev OÜ. Changing the name, logo,
+branding or code does not grant that permission. This applies to original,
+modified and rebranded builds on every platform. See section 4 of
+[LICENSE](LICENSE).
 
-## What the marks do not permit
+This trademark notice grants no permission to distribute software. The
+permissions to share source code and build and run your own copies come
+only from [LICENSE](LICENSE), subject to its conditions.
 
-Without written permission from pueev OÜ, you may not use the tokenstat name,
-logo, or wordmark:
+Without separate written permission from pueev OÜ, you may not use
+"tokenstat" in any capitalization, the tokenstat logo or wordmark, or a
+confusingly similar name or mark as product or service branding, in store
+listings, or as a public package identity. Do not imply that pueev OÜ
+endorses, publishes or supports your version, including through domains or
+account handles. Offering the software as a service to third parties is also
+reserved under section 4, regardless of branding. Personal and internal
+hosting is allowed.
 
-- as the name of a modified version, or of any product or service built from
-  this code,
-- in a way that suggests your version is the official one, is endorsed by
-  pueev OÜ, or is affiliated with it,
-- as, or as part of, the name of an application published to any app store or
-  software marketplace,
-- in a domain name, account handle, or package name that could be mistaken for
-  an official one.
-
-Nominative use stays fine. Saying that your project is "a fork of tokenstat",
-"compatible with tokenstat", or "based on tokenstat" is accurate description,
-not a trademark claim, and needs no permission.
-
-`LICENSE` does not let you distribute a modified version at all. If pueev OÜ
-ever grants written permission for one, it comes with a different name, so
-users can still tell whose build they are running.
-
-## Why this exists
-
-The guarantee tokenstat makes is about data: what is read, what is kept, and
-what may leave the machine. A user can only rely on that guarantee if they can
-tell an official build from a modified one. A name that anyone may apply to any
-build makes the promise unverifiable.
+Accurate descriptions such as "based on tokenstat", "a fork of tokenstat" or
+"compatible with tokenstat" are permitted. Preserve copyright and licence
+notices. Internal source identifiers and technical compatibility references
+may remain where they are not used as product branding. A source fork may
+retain its repository name if clearly identified as unofficial. None of
+these exceptions permits distribution of builds, under tokenstat or any
+other name. Private builds need not be renamed, and official builds may be
+run under their original name.
 
 ## Other people's marks
 
 The desktop app ships the logos of the tools it reads, under
-`apps/mac/Resources/Brands.xcassets`, so a harness is recognisable at a glance.
+`apps/mac/Resources/Brands.xcassets`, to identify each tool.
 
-Those marks belong to their respective owners. They are **not** licensed by
-`LICENSE`, and forking this repository grants no right to use them. They are included as nominative identification of the tool each one
-names, which is what trademark law permits without a licence, and each is the
-owner's own official mark rather than a redrawing.
+Those marks belong to their respective owners. `LICENSE` grants no rights
+to them. They identify the tools named in the interface. Each is the owner's
+official mark.
 
 Do not invent a mark for a tool that has none, do not restyle one, and do not
 use any of them to suggest that the tool's owner is involved with tokenstat.
@@ -66,7 +60,7 @@ Linux, openSUSE, CentOS, Rocky Linux, AlmaLinux, Gentoo, Linux Mint, NixOS,
 Red Hat, SUSE, and generic Linux. They belong to their respective owners
 (Canonical, Software in the Public Interest, Red Hat/IBM, etc.) and are used
 for nominative identification of the OS the host itself reported in
-`/etc/os-release`, which is what trademark law permits without a licence.
+`/etc/os-release`. The asset licence does not itself grant trademark rights.
 
 A distribution with no bundled mark gets the neutral system server glyph,
 never an invented initial and never another distro's logo. Do not add a
