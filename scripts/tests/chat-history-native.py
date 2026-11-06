@@ -426,6 +426,8 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     ("unbroken code line", "```text\n" + "a" * args.unbroken_code + "\nlongcodedone\n```", "longcodedone"),
                     ("unbroken highlighted line", "```swift\nlet line = \"" + "a" * args.unbroken_code + "\"\nlet highlightedcodedone = true\n```", "highlightedcodedone"),
                     ("wide Unicode line", "```text\n" + "🌍" * min(args.unbroken_code, 512) + "\nunicodecodedone\n```", "unicodecodedone"),
+                    # Keep the marker within the preview's first 200 rows.
+                    ("unbroken diff line", "```diff\n@@ -1 +1,2 @@\n-previous\n+" + "a" * min(args.unbroken_code, 50000) + "\n+patchok\n```", "patchok"),
                 ]
             if args.inline_edges:
                 for role in roles:

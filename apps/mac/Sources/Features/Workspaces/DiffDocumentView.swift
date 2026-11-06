@@ -90,17 +90,25 @@ struct DiffDocumentRowView: View {
     var body: some View {
         switch row.content {
         case let .line(line):
+            #if os(iOS)
+            if width > 0 {
+                DiffLineRow(line: line, minWidth: width, continuation: row.continuation)
+            } else {
+                DiffRow(line: line, minWidth: width, continuation: row.continuation)
+            }
+            #else
             DiffRow(line: line, minWidth: width, continuation: row.continuation)
+            #endif
         case let .file(path):
             Label(String(path.unicodeScalars.prefix(DiffDocumentRow.wrappedLineCharacterLimit)), systemImage: "doc.text")
-                .font(Theme.mono(12))
+                .font(codeFont(12))
                 .lineLimit(1)
                 .padding(.horizontal, Theme.Space.m)
                 .frame(minWidth: width, minHeight: 32, alignment: .leading)
                 .background(Theme.sidebar)
         case let .hunk(header):
             Text(String(header.unicodeScalars.prefix(DiffDocumentRow.wrappedLineCharacterLimit)))
-                .font(Theme.mono(11))
+                .font(codeFont(11))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .padding(.horizontal, Theme.Space.m)
@@ -113,5 +121,13 @@ struct DiffDocumentRowView: View {
                 .padding(Theme.Space.m)
                 .frame(minWidth: width, alignment: .leading)
         }
+    }
+
+    private func codeFont(_ size: CGFloat) -> Font {
+        #if os(iOS)
+        Theme.monoText(size)
+        #else
+        Theme.mono(size)
+        #endif
     }
 }

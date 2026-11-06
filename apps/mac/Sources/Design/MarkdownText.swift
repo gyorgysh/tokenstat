@@ -940,6 +940,16 @@ private struct MarkdownCodeBlock: View {
             if language == "tokenstat-chart" || language == "tokenstat-chart-pending" {
                 ChatChartView(source: source, pending: language == "tokenstat-chart-pending")
             } else if isDiff {
+                #if os(iOS)
+                WidthReader { width in
+                    if width > 0 {
+                        DiffBody(diff: Self.parsed(source), minWidth: width, lazy: false)
+                            .padding(.vertical, Theme.Space.xs)
+                    } else {
+                        Color.clear.frame(height: 1)
+                    }
+                }
+                #else
                 MarkdownSideways {
                     // Parsed by the cache rather than here: this ran on every
                     // evaluation, and a fence is evaluated on every measuring
@@ -950,6 +960,7 @@ private struct MarkdownCodeBlock: View {
                     DiffBody(diff: Self.parsed(source), lazy: false)
                         .padding(.vertical, Theme.Space.xs)
                 }
+                #endif
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     if let language {
