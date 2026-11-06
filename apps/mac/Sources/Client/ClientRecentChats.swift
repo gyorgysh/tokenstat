@@ -144,12 +144,11 @@ struct ClientRecentChatsSection: View {
         return ranked.compactMap { byID[$0.id] }
     }
 
-    private var shown: [ChatRecentConversation] {
-        expanded ? visible : Array(visible.prefix(grouped ? 2 : Self.collapsedLimit))
-    }
-
     var body: some View {
-        if !visible.isEmpty || (grouped && !folders.isEmpty) {
+        let ranked = visible
+        let limit = grouped ? 2 : Self.collapsedLimit
+        let rows = expanded ? ranked : Array(ranked.prefix(limit))
+        if !ranked.isEmpty || (grouped && !folders.isEmpty) {
             VStack(alignment: .leading, spacing: grouped ? 0 : Theme.Space.s) {
                 HStack(alignment: .center) {
                     if grouped {
@@ -170,7 +169,7 @@ struct ClientRecentChatsSection: View {
                 .padding(.horizontal, grouped ? Theme.Space.m : 2)
                 .frame(minHeight: grouped ? 48 : 0)
 
-                ForEach(shown) { chat in
+                ForEach(rows) { chat in
                     ClientOwnedNavigationLink {
                         ClientRecentChatView(
                             peer: peer,
@@ -188,19 +187,19 @@ struct ClientRecentChatsSection: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    if grouped, chat.id != shown.last?.id {
+                    if grouped, chat.id != rows.last?.id {
                         ThemeRule().padding(.leading, Theme.Space.m)
                     }
                 }
 
-                if visible.count > (grouped ? 2 : Self.collapsedLimit) {
+                if ranked.count > limit {
                     Button {
                         expanded.toggle()
                     } label: {
                         Label(
                             expanded
                                 ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
-                                : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(visible.count - (grouped ? 2 : Self.collapsedLimit))"),
+                                : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(ranked.count - limit)"),
                             systemImage: expanded ? "chevron.up" : "chevron.down"
                         )
                         .font(ClientType.caption.weight(.semibold))
