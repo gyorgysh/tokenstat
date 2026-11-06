@@ -12,6 +12,7 @@ struct ClientNewChatScreen: View {
     @State private var showingAccessCode = false
     @State private var chosenHostKey: String?
     @State private var addAfterChoosingHost = false
+    @State private var discoveringHosts = true
     private var draft: ChatStartDraft { navigation.newChatDraft }
     private var requestedPeer: String? {
         if let host = navigation.requestedNewChatHostKey { return host }
@@ -105,6 +106,7 @@ struct ClientNewChatScreen: View {
         .task {
             draft.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
             await workspaces.refresh(account: account.account)
+            discoveringHosts = false
             if navigation.requestedNewChatRepositoryID == nil,
                navigation.requestedNewChatHostKey != nil || workspaces.hosts.count > 1 {
                 draft.repositoryID = nil
@@ -148,7 +150,7 @@ struct ClientNewChatScreen: View {
                     action: { Task { await account.load() } }, art: .remoteGate
                 ).padding(.horizontal, 24)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if workspaces.hosts.isEmpty, draft.text.isEmpty, draft.attachments.isEmpty {
+        } else if !discoveringHosts, workspaces.hosts.isEmpty, draft.text.isEmpty, draft.attachments.isEmpty {
             reason(kind: .nothingYet, art: .connect,
                    title: L10n.text("apple.clientnewchatscreen.no_machine_yet.3ea83dc9"),
                    message: L10n.text("apple.clientnewchatscreen.a_conversation_runs_an_agent_on_a_computer.3bed8f6c"),
@@ -158,7 +160,7 @@ struct ClientNewChatScreen: View {
             ChatStartPage(draft: draft, repositories: host == nil ? [] : workspaces.folders,
                           hostPicker: AnyView(hostPicker), allowsSend: workspaces.isConnecting == nil && host != nil,
                           showsEmptyComposer: true, requiresHostSelection: host == nil,
-                          repositoriesLoading: workspaces.isConnecting != nil,
+                          repositoriesLoading: discoveringHosts || workspaces.isConnecting != nil,
                           onAdd: addRepository,
                           onSend: { Task { await send() } })
         }
@@ -228,7 +230,7 @@ struct ClientNewChatScreen: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "desktopcomputer")
-                Text(chosenName ?? host?.name ?? L10n.text("common.new_chat.choose_host"))
+                Text(chosenName ?? host?.name ?? defaultHost?.name ?? L10n.text("common.new_chat.choose_host"))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }

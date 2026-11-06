@@ -150,7 +150,7 @@ struct ClientRecentChatsSection: View {
 
     var body: some View {
         if !visible.isEmpty || (grouped && !folders.isEmpty) {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
+            VStack(alignment: .leading, spacing: grouped ? 0 : Theme.Space.s) {
                 HStack(alignment: .center) {
                     if grouped {
                         Label(L10n.text("apple.clientrecentchats.recent_chats.2ccfecbc"),
@@ -188,6 +188,9 @@ struct ClientRecentChatsSection: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    if grouped, chat.id != shown.last?.id {
+                        ThemeRule().padding(.leading, Theme.Space.m)
+                    }
                 }
 
                 if visible.count > (grouped ? 2 : Self.collapsedLimit) {
@@ -201,10 +204,11 @@ struct ClientRecentChatsSection: View {
                             systemImage: expanded ? "chevron.up" : "chevron.down"
                         )
                         .font(ClientType.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .tint(Theme.accent)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 2)
+                    .padding(.top, grouped ? 0 : 2)
                 }
             }
         }
@@ -267,6 +271,7 @@ private struct ClientRecentChatRow: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
         .frame(maxWidth: .infinity, minHeight: grouped ? 58 : 72, alignment: .leading)
         Group {
             if grouped { row } else { row.cardSurface() }

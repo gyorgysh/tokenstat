@@ -6360,11 +6360,12 @@ fn load_persona_index(root: &Path) -> PersonaIndex {
         if persona.seed == 0 {
             persona.seed = face_seed(&persona.id);
         }
-        // Leave edited and shared personas alone, including edits to the name.
-        // Existing conversations keep their copied brief.
+        // Match the shipped text itself: saving a face or resaving an unchanged
+        // starter also advances updated_at_ms. Neither makes that text custom.
+        // Shared/renamed personas and custom briefs stay intact. Existing
+        // conversations keep their copied brief.
         if persona.workspace_id.is_some()
             && persona.created_at_ms > 0
-            && persona.created_at_ms == persona.updated_at_ms
             && (STARTER_NAMES.contains(&persona.name.as_str())
                 || LEGACY_STARTER_NAMES.contains(&persona.name.as_str()))
             && matches!(
@@ -14965,7 +14966,7 @@ mod tests {
     }
 
     #[test]
-    fn shipped_briefs_are_cleared_only_from_untouched_starters() {
+    fn shipped_briefs_are_cleared_even_after_a_starter_was_resaved() {
         for brief in [PREVIOUS_STARTER_BRIEF, LEGACY_STARTER_BRIEF] {
             for bare_array in [false, true] {
                 let root = tempfile::tempdir().unwrap();
@@ -15013,7 +15014,10 @@ mod tests {
                 let mut expected = original.personas[0].clone();
                 expected.system_prompt.clear();
                 assert_eq!(migrated.personas[0], expected);
-                assert_eq!(migrated.personas[1..], original.personas[1..]);
+                let mut resaved = original.personas[1].clone();
+                resaved.system_prompt.clear();
+                assert_eq!(migrated.personas[1], resaved);
+                assert_eq!(migrated.personas[2..], original.personas[2..]);
                 fs::write(&path, serde_json::to_vec(&migrated).unwrap()).unwrap();
                 assert_eq!(load_persona_index(root.path()).personas, migrated.personas);
             }
@@ -15067,6 +15071,7 @@ mod tests {
         assert_eq!(first.seed, untouched.seed);
         assert!(first.system_prompt.is_empty());
         assert_eq!(migrated.default_by_workspace, original.default_by_workspace);
+        edited_name.system_prompt.clear();
         assert_eq!(migrated.personas[1], edited_name);
         assert_eq!(migrated.personas[2], edited_brief);
         assert_eq!(migrated.personas[3], shared);

@@ -877,18 +877,15 @@ struct ClientChatThread: View {
     }
 
     private var companionTabs: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: Theme.Space.xs) {
-                browserTab(.chat, title: L10n.text("apple.clientchatview.chat.460b3a7d"), icon: "bubble.left")
-                if companion != nil && wideBrowser {
-                    browserTab(.split, title: L10n.text("apple.terminalpane.split.32afaa78"), icon: "rectangle.split.2x1")
-                }
-                companionTab(.changes, title: L10n.text("apple.clientworkspacesections.changes.bbd4b6a8"), icon: "plusminus")
-                companionTab(.terminal, title: L10n.text("apple.clientterminalsession.terminal.e0926fda"), icon: "terminal")
-                companionTab(.browser, title: L10n.text("common.browser"), icon: "globe")
+        ChatSectionTabs {
+            browserTab(.chat, title: L10n.text("apple.clientchatview.chat.460b3a7d"), icon: "bubble.left")
+            if companion != nil && wideBrowser {
+                browserTab(.split, title: L10n.text("apple.terminalpane.split.32afaa78"), icon: "rectangle.split.2x1")
             }
+            companionTab(.changes, title: L10n.text("apple.clientworkspacesections.changes.bbd4b6a8"), icon: "plusminus")
+            companionTab(.terminal, title: L10n.text("apple.clientterminalsession.terminal.e0926fda"), icon: "terminal")
+            companionTab(.browser, title: L10n.text("common.browser"), icon: "globe")
         }
-        .scrollIndicators(.hidden)
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.xs)
         .background(Theme.background)
@@ -904,8 +901,9 @@ struct ClientChatThread: View {
         } label: {
             Label(title, systemImage: icon)
                 .font(ClientType.caption.weight(selected ? .semibold : .regular))
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, Theme.Space.s)
-                .frame(minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background(selected ? Theme.accent.opacity(0.16) : Color.clear,
                             in: RoundedRectangle(cornerRadius: Theme.Space.xs))
                 .contentShape(Rectangle())
@@ -932,8 +930,9 @@ struct ClientChatThread: View {
         } label: {
             Label(title, systemImage: icon)
                 .font(ClientType.caption.weight(companion == choice && browserFocus != .chat ? .semibold : .regular))
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, Theme.Space.s)
-                .frame(minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background(companion == choice && browserFocus != .chat ? Theme.accent.opacity(0.16) : Color.clear,
                             in: RoundedRectangle(cornerRadius: Theme.Space.xs))
                 .contentShape(Rectangle())

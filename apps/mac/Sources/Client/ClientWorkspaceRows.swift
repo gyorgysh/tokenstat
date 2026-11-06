@@ -126,6 +126,7 @@ struct ClientFolderRow: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
         .frame(maxWidth: .infinity, minHeight: grouped ? 58 : 72, alignment: .leading)
         .contentShape(.rect)
         if grouped { row } else { row.cardSurface() }

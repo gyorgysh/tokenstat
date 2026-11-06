@@ -87,10 +87,7 @@ struct ChatStartPage: View {
                 ScrollView {
                     VStack(spacing: 26) {
                         introduction
-                        if requiresHostSelection, let hostPicker {
-                            HStack { hostPicker; Spacer(minLength: 0) }
-                                .chatStartCard()
-                        } else if needsRepository {
+                        if needsRepository {
                             onboarding
                         } else {
                             composer
