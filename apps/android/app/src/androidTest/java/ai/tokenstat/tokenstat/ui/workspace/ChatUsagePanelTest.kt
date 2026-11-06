@@ -46,9 +46,9 @@ class ChatUsagePanelTest {
                     ChatUsagePanel(reading, ChatInspectionSnapshot(data, true), null)
                 }
                 ChatComposer(chat, "", {}, "Message", false, staged = emptyList(), onPick = {}, onRemove = {}, onSend = {}, onStop = {},
-                    onChange = { _, _ -> }, backends = emptyList(), onAgent = {}, launchMode = "execute",
+                    onChange = { _, _ -> }, backends = emptyList(), onAgent = {},
                     quota = { ChatQuotaBadge(reading, onOpen) },
-                    routing = { ChatRoutingControls(chat, emptyList(), { _, _ -> JsonNull }, {}, showNotice = false, showSection = false, showShortcut = true) })
+                    onSetup = {})
             }
         }
         }
@@ -71,8 +71,8 @@ class ChatUsagePanelTest {
         assertTrue(opened)
         compose.onNodeWithText(L10n.text("android.chatpullssections.ask_first.4a9e8cf3")).assertDoesNotExist()
         screenshot("usage-android.png")
-        compose.onNodeWithContentDescription(L10n.text("common.settings")).performClick()
-        compose.onNodeWithText(L10n.text("android.chatpullssections.plan.fa8ed0bd")).assertExists()
+        compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.chat_setup.9fa79d00")).assertIsDisplayed()
+        compose.onNodeWithText(L10n.text("android.chatpullssections.plan.fa8ed0bd")).assertDoesNotExist()
         compose.onNodeWithText(L10n.text("common.chat.stats.cost")).performScrollTo().assertIsDisplayed()
     }
     @Test fun expandingGivesTheDraftFullWidthAndKeepsItsText() {
@@ -83,10 +83,10 @@ class ChatUsagePanelTest {
             Column(Modifier.fillMaxWidth().padding(12.dp)) {
                 ChatComposer(idle, draft, { draft = it }, "Message", false,
                     staged = emptyList(), onPick = {}, onRemove = {}, onSend = {}, onStop = {},
-                    onChange = { _, _ -> }, backends = emptyList(), onAgent = { picked = true }, launchMode = "execute")
+                    onChange = { _, _ -> }, backends = emptyList(), onAgent = { picked = true })
             }
         } }
-        compose.onNodeWithText(chatAgentSummary(emptyList(), idle)).assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription(chatAgentSummary(emptyList(), idle)).assertIsDisplayed().performClick()
         assertTrue(picked)
         val before = compose.onNode(hasSetTextAction()).fetchSemanticsNode().boundsInRoot.width
         compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.expand_the_message_box.c0441a94")).performClick()

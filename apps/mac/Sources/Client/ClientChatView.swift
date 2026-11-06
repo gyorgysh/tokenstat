@@ -2172,21 +2172,22 @@ struct ClientChatThread: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let chat {
-                        ChatSetupSection(title: L10n.text("common.session_identity.title"), icon: .copy, summary: chat.id) {
-                            ChatSessionIdentityDetails(model: model, conversation: chat)
-                        }
-                        ChatContextCard(model: model)
-                        ChatActivityCard(model: model)
-                        ChatDetailSettings(model: model)
-                        ChatSetupHeader(
-                            model: model,
-                            chat: chat,
-                            collapsed: false,
-                            showsIntro: false
-                        )
-                        ChatInstructionsCard(model: model, chat: chat)
+                        ChatSetupHeader(model: model, chat: chat, collapsed: false, showsIntro: false,
+                                        organized: true)
                         Button(L10n.text("apple.clientchatview.personas.fa2ea3fb"), .persona) { showingPersonas = true }
                             .buttonStyle(SecondaryButtonStyle())
+                        DisclosureGroup(L10n.text("common.chat.setup.details")) {
+                            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                                ChatSetupSection(title: L10n.text("common.session_identity.title"), icon: .copy, summary: chat.id) {
+                                    ChatSessionIdentityDetails(model: model, conversation: chat)
+                                }
+                                ChatContextCard(model: model)
+                                ChatActivityCard(model: model)
+                                ChatDetailSettings(model: model)
+                            }
+                            .padding(.top, Theme.Space.s)
+                        }
+                        .font(Theme.callout)
                     }
                 }
                 .padding(Theme.Space.m)

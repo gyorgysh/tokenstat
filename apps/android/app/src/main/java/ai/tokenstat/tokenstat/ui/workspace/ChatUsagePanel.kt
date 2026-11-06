@@ -14,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -29,6 +31,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.*
+import java.text.DateFormat
+import java.util.Date
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -84,6 +88,7 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
     val description = L10n.text("common.chat.usage.allowance", harnessName(reading.str("source").orEmpty()),
         window.str("label").orEmpty(), NumberFormat.getIntegerInstance().format(percent))
     var showingPreview by remember(reading.str("source")) { mutableStateOf(false) }
+    val previewWidth = (LocalConfiguration.current.screenWidthDp.dp - 32.dp).coerceAtMost(320.dp)
     Box {
         IconButton(onClick = { showingPreview = true }, modifier = Modifier.semantics {
             contentDescription = description
@@ -97,15 +102,62 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
             }
         }
         DropdownMenu(expanded = showingPreview, onDismissRequest = { showingPreview = false },
-            modifier = Modifier.widthIn(min = 264.dp, max = 320.dp).heightIn(max = 420.dp)) {
-            Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LimitCard(reading)
+            modifier = Modifier.width(previewWidth).heightIn(max = 420.dp).testTag("chat.usage.preview")) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ChatQuotaPreview(reading)
                 TextButton(onClick = { showingPreview = false; onOpen() }) {
                     Text(L10n.text("common.chat.usage.details"))
                 }
             }
         }
     }
+}
+
+/** A fixed-width preview uses clock times, so second-by-second age labels cannot move it. */
+@Composable private fun ChatQuotaPreview(reading: JsonObject) {
+    val colors = LocalTsColors.current
+    val source = reading.str("source").orEmpty()
+    Text(harnessName(source), style = MaterialTheme.typography.titleSmall, color = colors.textPrimary,
+        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    reading.str("plan")?.takeIf { it.isNotBlank() }?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    }
+    val locale = LocalConfiguration.current.locales[0]
+    val windows = (reading["windows"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().take(2)
+    for (window in windows) {
+        val percent = chatQuotaPercent(window) ?: continue
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(window.str("label").orEmpty(), modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(NumberFormat.getIntegerInstance(locale).format(percent) + "%",
+                    style = MaterialTheme.typography.bodySmall, color = quotaColor(window, percent))
+            }
+            LinearProgressIndicator(progress = { (percent / 100).coerceIn(0.0, 1.0).toFloat() },
+                modifier = Modifier.fillMaxWidth(), color = quotaColor(window, percent), trackColor = colors.border)
+            val resets = (window["resetsAtMs"] as? JsonPrimitive)?.longOrNull
+            if (resets != null && resets > 0) {
+                val resetTime = remember(resets, locale) { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, locale).format(Date(resets)) }
+                Text(L10n.text("common.chat.usage.resets_at", resetTime),
+                    style = MaterialTheme.typography.labelSmall, color = colors.textSecondary,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+        }
+    }
+    val observed = (reading["observedAtMs"] as? JsonPrimitive)?.longOrNull
+    val updated = if (observed != null && observed > 0) {
+        val clockTime = remember(observed, locale) { DateFormat.getTimeInstance(DateFormat.SHORT, locale).format(Date(observed)) }
+        L10n.text("common.chat.usage.updated_at", clockTime)
+    } else L10n.text("android.tokenstatapp.no_date.89be6303")
+    // Keep freshness in one reserved line. Adding a separate stale row made
+    // the popup grow upward every time a refreshed reading changed its lease.
+    val stale = reading.bol("stale")
+    Text(if (stale) L10n.text("common.chat.usage.stale") + " · " + updated else updated,
+        style = MaterialTheme.typography.labelSmall, color = if (stale) colors.warning else colors.textSecondary,
+        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+
 }
 
 @Composable private fun quotaColor(window: JsonObject, percent: Double): Color {

@@ -2012,17 +2012,7 @@ fun ChatSection(
                 },
                 backends = backends,
                 onAgent = { showingAgent = true },
-                routing = {
-                    if (!offline && openChat != null) {
-                        key(projectOwner, openChat.str("id")) {
-                            ChatRoutingControls(openChat, backends,
-                                { method, params -> model.workspaceSection(peer, method, params) },
-                                { scope.launch { refreshChats() } },
-                                showNotice = false, showSection = false, showShortcut = true)
-                        }
-                    }
-                },
-                launchMode = LaunchDefaults.mode(launchChoice.read()),
+                onSetup = { showingSetup = true },
                 launchAutonomy = LaunchDefaults.autonomy(launchChoice.read(), bypassOnly = false),
                 offline = offline,
                 fastModeSaving = fastModeSaveId != null,
@@ -2534,84 +2524,13 @@ private fun ChatSetupDialog(
 
     val colors = LocalTsColors.current
     val chatPersona = personas.firstOrNull { it.id == chat?.str("personaId") }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        // A sheet with a surface under it. Without one the dialog drew its
-        // text straight over the conversation: two paragraphs of instructions
-        // interleaved with the persona and the composer, unreadable, and
-        // nothing on screen said which taps belonged to which layer.
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = colors.background,
-            tonalElevation = 0.dp,
-            shadowElevation = 12.dp,
-            modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.86f),
-        ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(Space.m)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    L10n.text("android.chatpullssections.chat_setup.9fa79d00"),
-                    style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
-                    color = colors.textPrimary,
-                    modifier = Modifier.weight(1f),
-                )
-                TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
-            }
+    ChatSetupSheetFrame(onDismiss) {
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
-            ChatSetupDisclosure(L10n.text("android.chatpullssections.conversation.ccca1817"), chat?.str("title"), chatId, primary = {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    TsSecondaryButton(label = L10n.text("android.chatpullssections.rename_chat.26076241"), icon = ActionIcon.Edit.vector,
-                        small = true, onClick = { editingTitle = true })
-                    TsSecondaryButton(label = L10n.text("android.chatpullssections.edit_personas.a41f17a3"), icon = ActionIcon.Persona.vector,
-                        small = true, onClick = { showingPersonas = true })
-                }
-            }) {
-                Text(L10n.text(if (chat?.bol("running") == true) "common.running" else "common.idle"), style = MaterialTheme.typography.bodySmall)
-                Text(chatAgentSummary(backends, chat), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                ChatSessionIdentifiers(chatId, setupInspection.data, chat?.str("backend"))
-            }
-            ChatSetupDisclosure(L10n.text("android.chatdetail.title"), null, chatId, primary = {
-                ChatSegmented(ChatDetail.entries.map { it.name to chatDetailLabel(it) }, detail.name, enabled = true,
-                    onSelect = { name -> onDetail(ChatDetail.valueOf(name)) }, modifier = Modifier.fillMaxWidth())
-            }) {
-                val explanation = when (detail) {
-                    ChatDetail.Minimal -> L10n.text("common.chat.detail.minimal_help")
-                    ChatDetail.Compact -> L10n.text("common.chat.detail.compact_help")
-                    ChatDetail.Standard -> L10n.text("common.chat.detail.standard_help")
-                    ChatDetail.Detailed -> L10n.text("common.chat.detail.detailed_help")
-                }
-                Text(explanation, style = TsType.caption, color = colors.textSecondary)
-                if (detail != ChatDetail.Detailed) TsSecondaryButton(
-                    label = L10n.text(if (stepsExpanded) "android.chatdetail.collapse_steps" else "android.chatdetail.expand_steps"),
-                    icon = if (stepsExpanded) ActionIcon.Collapse.vector else ActionIcon.Preview.vector,
-                    small = true, onClick = onToggleSteps)
-            }
-            if (chat != null) ChatStatsPanel(model, peer, chat, setupInspection)
-            if (chat != null) {
-                ChatRoutingControls(chat, backends,
-                    { method, params -> model.workspaceSection(peer, method, params) },
-                    onChanged, showNotice = false)
-            }
+            ChatSetupBasics(chat, backends, chat?.bol("running") == true, onPickAgent, { field, value -> updateChat(field, value) })
             if (loading) {
                 Text(L10n.text("android.chatpullssections.loading.ba3bbbe1"), color = colors.textSecondary)
             } else {
-                ChatSetupDisclosure(L10n.text("common.chat_agent_behavior"), null, chatId, primary = {
-                    TsPickerField(summary = chatAgentSummary(backends, chat), onOpen = onPickAgent, modifier = Modifier.fillMaxWidth())
-                }) {
-                // Who answers, in one field. The three settings behind it are
-                // one list with one filter, rather than three dropdowns that
-                // each hold a scroll of their own.
-                // The persona picker, with the chosen one's face beside it.
-                // The face is the point of the row: a name in a list is a
-                // setting, and a character sitting next to it is the thing
-                // you recognise from the transcript.
+                ChatSetupDisclosure(L10n.text("android.chatpullssections.persona.31bdeef9"), chatPersona?.name, chatId) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         SectionLabel(L10n.text("android.chatpullssections.persona.31bdeef9"), modifier = Modifier.weight(1f))
@@ -2642,38 +2561,6 @@ private fun ChatSetupDialog(
                         color = colors.textSecondary,
                     )
                 }
-                // Plan against Execute and Ask against Bypass, the same
-                // controls the composer carries. The iPhone setup edits
-                // them too: settings matter most before you commit.
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    SectionLabel(L10n.text("android.chatpullssections.how_it_works.9c870aa6"))
-                    ChatSegmented(
-                        options = listOf("plan" to L10n.text("android.chatpullssections.plan.fa8ed0bd"), "execute" to L10n.text("android.chatpullssections.execute.e3a67d95")),
-                        selected = chat?.str("mode")?.ifBlank { null } ?: LaunchDefaults.MODE,
-                        enabled = chat?.bol("running") != true,
-                        onSelect = { updateChat("mode", it) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    if (chatAgentForcesBypass(backends, chat?.str("backend").orEmpty())) {
-                        ChatSegmented(
-                            options = listOf("bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
-                            selected = "bypass",
-                            enabled = false,
-                            onSelect = {},
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    } else {
-                        ChatSegmented(
-                            options = listOf("standard" to L10n.text("android.chatpullssections.ask_first.4a9e8cf3"), "bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
-                            selected = if (chat?.str("autonomy") == "bypass") "bypass" else "standard",
-                            enabled = chat?.bol("running") != true,
-                            onSelect = { updateChat("autonomy", it) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-                // What the person wrote, and what tokenstat adds, kept apart:
-                // only one of the two is theirs to change.
                 }
                 ChatSetupDisclosure(L10n.text("android.chatpullssections.brief.ac40ae1e"), brief?.lineSequence()?.firstOrNull(), chatId,
                     expanded = editingBrief, onExpandedChanged = { editingBrief = it }, primary = {
@@ -2762,8 +2649,41 @@ private fun ChatSetupDialog(
                 }
                 }
             }
-        }
-        }
+            ChatSetupDisclosure(L10n.text("android.chatpullssections.conversation.ccca1817"), chat?.str("title"), chatId, primary = {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    TsSecondaryButton(label = L10n.text("android.chatpullssections.rename_chat.26076241"), icon = ActionIcon.Edit.vector,
+                        small = true, onClick = { editingTitle = true })
+                    TsSecondaryButton(label = L10n.text("android.chatpullssections.edit_personas.a41f17a3"), icon = ActionIcon.Persona.vector,
+                        small = true, onClick = { showingPersonas = true })
+                }
+            }) {
+                Text(L10n.text(if (chat?.bol("running") == true) "common.running" else "common.idle"), style = MaterialTheme.typography.bodySmall)
+                Text(chatAgentSummary(backends, chat), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                ChatSessionIdentifiers(chatId, setupInspection.data, chat?.str("backend"))
+            }
+            ChatSetupDisclosure(L10n.text("android.chatdetail.title"), null, chatId, primary = {
+                ChatSegmented(ChatDetail.entries.map { it.name to chatDetailLabel(it) }, detail.name, enabled = true,
+                    onSelect = { name -> onDetail(ChatDetail.valueOf(name)) }, modifier = Modifier.fillMaxWidth())
+            }) {
+                val explanation = when (detail) {
+                    ChatDetail.Minimal -> L10n.text("common.chat.detail.minimal_help")
+                    ChatDetail.Compact -> L10n.text("common.chat.detail.compact_help")
+                    ChatDetail.Standard -> L10n.text("common.chat.detail.standard_help")
+                    ChatDetail.Detailed -> L10n.text("common.chat.detail.detailed_help")
+                }
+                Text(explanation, style = TsType.caption, color = colors.textSecondary)
+                if (detail != ChatDetail.Detailed) TsSecondaryButton(
+                    label = L10n.text(if (stepsExpanded) "android.chatdetail.collapse_steps" else "android.chatdetail.expand_steps"),
+                    icon = if (stepsExpanded) ActionIcon.Collapse.vector else ActionIcon.Preview.vector,
+                    small = true, onClick = onToggleSteps)
+            }
+            if (chat != null) ChatStatsPanel(model, peer, chat, setupInspection)
+            if (chat != null) {
+                ChatRoutingControls(chat, backends,
+                    { method, params -> model.workspaceSection(peer, method, params) },
+                    onChanged, showNotice = false)
+            }
+
     }
     if (editingTitle) NameEditorDialog(L10n.text("android.chatpullssections.rename_chat.26076241"), chat?.str("title").orEmpty(), onDismiss = { editingTitle = false }) { title ->
         editingTitle = false; updateChat("title", title)
@@ -3406,11 +3326,8 @@ internal fun ChatComposer(
     onChange: (String, String) -> Unit,
     backends: List<JsonObject>,
     onAgent: () -> Unit,
-    routing: @Composable () -> Unit = {},
+    onSetup: () -> Unit = onAgent,
     quota: @Composable () -> Unit = {},
-    /// What a new conversation would open in, for the moment before one is
-    /// selected. See `LaunchDefaults`.
-    launchMode: String,
     launchAutonomy: String = LaunchDefaults.AUTONOMY,
     /// Whether this device can reach the host at all.
     offline: Boolean = false,
@@ -3425,9 +3342,6 @@ internal fun ChatComposer(
     sendModifier: Modifier = Modifier,
 ) {
     val colors = LocalTsColors.current
-    // A conversation says what mode it is in. With none open yet, this reads
-    // what a new one would open in, which is the last choice and never plan.
-    val mode = chat?.str("mode")?.ifBlank { null } ?: launchMode
     // The value is "standard", not "ask": the host only treats "standard"
     // as ask-with-approvals, and anything else that is not "bypass" runs
     // without the approval plumbing. The label stays Ask.
@@ -3458,7 +3372,6 @@ internal fun ChatComposer(
             restoreInputFocus = false
         }
     }
-    var setupExpanded by remember(chat?.str("id")) { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     TsCard(Modifier.fillMaxWidth()) {
@@ -3475,63 +3388,8 @@ internal fun ChatComposer(
                     onClick = onQueueWhenConnected,
                 )
             }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                TsPickerField(
-                    summary = chatAgentSummary(backends, chat),
-                    onOpen = onAgent,
-                    enabled = !locked,
-                    modifier = Modifier.weight(1f),
-                )
-                routing()
-                quota()
-                IconButton(onClick = { setupExpanded = !setupExpanded }, modifier = Modifier.semantics {
-                    stateDescription = L10n.text(if (setupExpanded) "common.collapse" else "common.expand")
-                }) {
-                    Icon(ActionIcon.Settings.vector, L10n.text("common.settings"), tint = colors.accent, modifier = Modifier.size(18.dp))
-                }
-                IconButton(onClick = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }) {
-                    Icon(
-                        if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,
-                        if (expanded) L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f") else L10n.text("android.chatpullssections.expand_the_message_box.c0441a94"),
-                        tint = colors.accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-            if (setupExpanded) Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                ChatSegmented(
-                    options = listOf("plan" to L10n.text("android.chatpullssections.plan.fa8ed0bd"), "execute" to L10n.text("android.chatpullssections.execute.e3a67d95")),
-                    selected = mode,
-                    enabled = !locked,
-                    onSelect = { onChange("mode", it) },
-                    modifier = Modifier.weight(1f),
-                )
-                if (bypassOnly) {
-                    // One option, same control. A lone capsule would read as
-                    // something else beside the mode pills, while this is the
-                    // same control with its choice made by the agent. Never
-                    // enabled: there is nothing to switch to.
-                    ChatSegmented(
-                        options = listOf("bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
-                        selected = "bypass",
-                        enabled = false,
-                        onSelect = {},
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    ChatSegmented(
-                        options = listOf("standard" to L10n.text("android.chatpullssections.ask_first.4a9e8cf3"), "bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
-                        selected = autonomy,
-                        enabled = !locked,
-                        onSelect = { onChange("autonomy", it) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
+            ChatComposerToolbar(backends, chat, locked, expanded, onAgent, onSetup,
+                onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota)
             // Staged files sit above the field, each with its own way out, so
             // a wrong pick is one tap to undo rather than a sent message.
             staged.forEach { attachment ->
@@ -3667,7 +3525,7 @@ private fun attachmentSize(bytes: Int): String = when {
 /// bordered capsule with the live half filled, rather than a switch, because
 /// neither side is the "off" one.
 @Composable
-private fun ChatSegmented(
+internal fun ChatSegmented(
     options: List<Pair<String, String>>,
     selected: String,
     enabled: Boolean,

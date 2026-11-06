@@ -89,6 +89,7 @@ class ChatRoutingTest {
                                 showSection = !shortcut,
                                 showShortcut = shortcut,
                             ) }
+                            val setup = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
                             if (shortcut) {
                                 Text("Routing QA · composer preview", style = TsType.caption)
                                 Spacer(Modifier.height(16.dp))
@@ -106,9 +107,9 @@ class ChatRoutingTest {
                                     onChange = { _, _ -> },
                                     backends = backends,
                                     onAgent = {},
-                                    routing = controls,
-                                    launchMode = "execute",
+                                    onSetup = { setup.value = true },
                                 )
+                                if (setup.value) ChatSetupSheetFrame({ setup.value = false }) { controls() }
                             } else {
                                 controls()
                             }
@@ -143,9 +144,11 @@ class ChatRoutingTest {
     }
 
     @Test
-    fun composerShortcutOpensRoutingAndPreservesWaitOnlyPolicy() {
+    fun composerSetupOpensRoutingAndPreservesWaitOnlyPolicy() {
         show(obj("""{"enabled":false,"waitForReset":true,"routes":[]}"""), shortcut = true)
         compose.onNodeWithText(text("common.chat_routing")).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text("common.chat_routing")).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text("android.chatpullssections.chat_setup.9fa79d00")).performClick()
         val shortcut = compose.onNodeWithContentDescription(text("common.chat_routing"))
             .assertIsDisplayed().assertHasClickAction()
         screenshot("routing-shortcut-preview")

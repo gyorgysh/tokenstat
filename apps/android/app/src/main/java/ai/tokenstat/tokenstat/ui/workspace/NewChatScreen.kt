@@ -144,6 +144,7 @@ fun NewChatScreen(
     var catalogAttempt by remember(accountOwner) { mutableIntStateOf(0) }
     var catalogReady by remember(accountOwner) { mutableStateOf(false) }
     var agentMenu by remember(accountOwner) { mutableStateOf(false) }
+    var setupMenu by remember(accountOwner, effectivePeer) { mutableStateOf(false) }
     val inputLease = remember(accountOwner, effectivePeer) { ChatAttachmentInputLease(accountOwner) }
     val currentLease by rememberUpdatedState(inputLease)
     DisposableEffect(inputLease) { onDispose { inputLease.retire() } }
@@ -310,7 +311,7 @@ fun NewChatScreen(
                             onPick = { pickerLease = inputLease; picker.launch(arrayOf("*/*")) },
                             onRemove = { attachment -> if (owns(accountOwner)) { val snapshot = model.chatComposers.snapshot(accountOwner); model.chatComposers.update(accountOwner, snapshot.copy(attachments = snapshot.attachments - attachment)) } },
                             onSend = onSend, onStop = {}, onChange = { field, value -> setup = setup?.changed(field, value, backends); onSetup(setup) },
-                            backends = backends, onAgent = { agentMenu = true }, launchMode = setup?.mode ?: LaunchDefaults.MODE,
+                            backends = backends, onAgent = { agentMenu = true }, onSetup = { setupMenu = true },
                             launchAutonomy = setup?.autonomy ?: LaunchDefaults.autonomy(savedChoice, bypassOnly = false),
                             allowEmpty = true, submitEnabled = effectivePeer != null && !connecting && selected != null && catalogReady && setup?.isAvailable(backends) == true && !reading,
                             attachmentEnabled = selected != null && !connecting && !reading, fieldModifier = Modifier.testTag("newChat.composer"), sendModifier = Modifier.testTag("newChat.send"))
@@ -355,6 +356,12 @@ fun NewChatScreen(
             monospaced = false,
             pick = { folder -> repositoryMenu = false; onRepository(folder.newChatText("id")) },
         )
+    }
+    if (setupMenu) ChatSetupSheetFrame({ setupMenu = false }) {
+        ChatSetupBasics(setup?.chat(), backends, connecting || !catalogReady, { agentMenu = true }) { field, value ->
+            setup = setup?.changed(field, value, backends)
+            onSetup(setup)
+        }
     }
     if (agentMenu) {
         val chat = setup?.chat()

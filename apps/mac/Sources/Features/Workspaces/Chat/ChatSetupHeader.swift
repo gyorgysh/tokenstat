@@ -13,12 +13,15 @@ struct ChatSetupHeader: View {
     /// The in-conversation header explains that settings will move. The
     /// inspector already is that place, so it skips the intro.
     var showsIntro: Bool = true
+    var organized: Bool = false
     var onOpenInspector: (() -> Void)? = nil
 
     var body: some View {
         Group {
             if collapsed {
                 chips
+            } else if organized {
+                ChatSetupForm(model: model, chat: chat, locked: chat.running)
             } else {
                 form
             }
@@ -372,12 +375,7 @@ struct ChatComposerControls<Chrome: View>: View {
                     scrolls: true,
                     onClose: { showingAccessibleSetup = false }
                 ) {
-                    VStack(alignment: .leading, spacing: Theme.Space.m) {
-                        agentField
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            pills(fitsWidth: true)
-                        }
-                    }
+                    ChatSetupForm(model: model, chat: chat, locked: locked) { pickingAgent = true }
                 }
                 .pickerPanelSurface(
                     title: L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"),
@@ -1022,7 +1020,7 @@ struct ChatCompactPills: View {
 
 /// Capture before scheduling so a control cannot apply to a later selection.
 @MainActor
-private func performSetupChange(
+func performSetupChange(
     model: ChatModel, chat: ChatConversation,
     operation: @escaping @MainActor () async -> Void
 ) {

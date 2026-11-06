@@ -837,5 +837,20 @@
   "common.chat.smooth_streaming": "Smooth streaming",
   "common.chat.smooth_streaming_help": "Fade in new words as they arrive. Reduced Motion turns this off.",
   "common.chat.elapsed.seconds": "{0}s",
-  "common.chat.elapsed.minutes": "{0}m"
+  "common.chat.elapsed.minutes": "{0}m",
+  "common.chat.usage.updated_at": "Updated {0}",
+  "common.chat.usage.resets_at": "Resets {0}",
+  "common.chat.setup.intro": "Choose how the next turn runs.",
+  "common.chat.setup.needs_agent": "Choose an available agent to set the working style and permissions.",
+  "common.chat.setup.busy": "Setup can be changed when the current turn finishes.",
+  "common.chat.setup.agent": "Agent and model",
+  "common.chat.setup.agent_help": "Choose who answers and which model to use. Reasoning effort is available for supported models.",
+  "common.chat.setup.permissions": "Permissions",
+  "common.chat.setup.plan_help": "Plan the approach before making changes.",
+  "common.chat.setup.execute_help": "Work on the request using the selected permissions.",
+  "common.chat.setup.ask_help": "Ask for approval before actions that need it.",
+  "common.chat.setup.bypass_help": "Allow supported actions without asking each time. Only use this for work you trust the agent to carry out.",
+  "common.chat.setup.bypass_only_help": "This agent does not support approval requests. It runs without asking.",
+  "common.chat.setup.details": "Conversation details",
+  "common.chat.setup.read_only": "This conversation is read-only on this device."
 }

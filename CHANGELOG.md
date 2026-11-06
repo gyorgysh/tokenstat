@@ -11,6 +11,15 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ## [1.13.0]
 
+### Improved
+
+- Chat setup on iOS and Android groups the agent, model, working style and permissions into sections with explanations. Extra settings stay out of the phone composer.
+- The Android composer gives agent names more room on small screens and with larger text. Routing settings are in Chat setup.
+
+### Fixed
+
+- The Android usage preview stays in place as usage readings refresh.
+
 ## [1.12.0] - 2026-11-06
 
 ### Added

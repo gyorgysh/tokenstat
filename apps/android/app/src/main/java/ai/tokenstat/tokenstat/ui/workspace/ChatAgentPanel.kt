@@ -179,16 +179,19 @@ internal fun chatAgentField(choice: ChatAgentChoice): Pair<String, String> = whe
 internal fun chatAgentForcesBypass(backends: List<JsonObject>, id: String): Boolean =
     backendOf(backends, id)?.str("gateTier") == "bypassOnly"
 
-/// The agent, then only what somebody chose. Naming a default says the
-/// setting was changed when it was not. The panel this opens shows every
-/// setting, defaults included. Effort appears only when this agent offers
-/// one and the conversation has picked one.
-internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): String {
+/// Prefer the host's label, including custom agents, before the built-in name.
+internal fun chatAgentLabel(backends: List<JsonObject>, chat: JsonObject?): String {
     val id = chat?.str("backend").orEmpty()
     val backend = backendOf(backends, id)
-    val agent = backend?.str("label")?.ifBlank { null }
+    return backend?.str("label")?.ifBlank { null }
         ?: id.ifBlank { null }?.let { ai.tokenstat.tokenstat.ui.logic.harnessName(it) }
         ?: L10n.text("common.chat.select_agent")
+}
+
+/// Include selected model and effort; the picker also shows unset defaults.
+internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): String {
+    val agent = chatAgentLabel(backends, chat)
+    val backend = backendOf(backends, chat?.str("backend").orEmpty())
     val parts = mutableListOf(agent)
     chat?.str("model")?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
     val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
