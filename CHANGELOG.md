@@ -28,7 +28,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
-- Connected chat usage views read limits from the chat host, avoiding the extra wait for account sync. Background provider lookups skip Keychain items that would require a password prompt and keep previous readings marked stale when access is unavailable.
+- Connected chat usage views read limits from the chat host, avoiding the extra wait for account sync. Background provider lookups skip Keychain items that would require a password prompt and keep previous readings marked stale when access is unavailable. On Mac, Account settings offers an explicit Keychain access button for affected Claude and Muse readings.
 - Saving offline chats on Apple devices no longer waits for Keychain on the UI thread, which could freeze the conversation.
 - Long private chats no longer discard earlier messages at the old transcript size limit. Clients recover interrupted history reads and keep independent reading positions when the same chat is open on several devices.
 - On Apple devices, following a long reply reaches its end, and opening a search result reveals its message inside a folded group of steps.

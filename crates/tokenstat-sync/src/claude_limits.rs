@@ -641,7 +641,7 @@ fn keychain_blob_for(service: &str, account: &str) -> Option<String> {
 
 /// Service names Claude Code has used on this Mac, historical one first.
 #[cfg(target_os = "macos")]
-fn keychain_services() -> Vec<String> {
+pub(crate) fn keychain_services() -> Vec<String> {
     let mut names = vec![KEYCHAIN_SERVICE.to_string()];
     let out = std::process::Command::new("security")
         .arg("dump-keychain")

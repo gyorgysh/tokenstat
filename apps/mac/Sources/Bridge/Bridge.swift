@@ -1914,6 +1914,13 @@ extension Bridge {
         try await background("usage.limits", ["force": force], patience: Patience.long, as: [ProviderLimits].self)
     }
 
+    #if os(macOS)
+    static func authorizeUsageKeychain(source: String) async throws {
+        _ = try await background("usage.authorizeKeychain", ["source": source],
+                                 patience: Patience.long, as: Bool.self)
+    }
+    #endif
+
     /// Whether this machine posts plan-limit readings after sync / refresh (P2),
     /// which sources are skipped, and the last readings we have on disk.
     static func limitsSync() async throws -> LimitsSyncState {

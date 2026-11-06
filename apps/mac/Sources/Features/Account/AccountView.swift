@@ -560,6 +560,10 @@ struct AccountView: View {
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                if ["claude_code", "muse"].contains(provider.source),
+                   provider.note?.localizedCaseInsensitiveContains("keychain") == true {
+                    UsageKeychainAccessButton(source: provider.source)
+                }
             }
             Spacer(minLength: Theme.Space.m)
             Toggle("", isOn: Binding(
@@ -1372,3 +1376,40 @@ private struct SignInCode: View {
         }
     }
 }
+
+#if os(macOS)
+/// This explicit local action is the only usage read allowed to show macOS authorization.
+private struct UsageKeychainAccessButton: View {
+    let source: String
+    @State private var waiting = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button(waiting ? L10n.text("apple.usage.keychain.waiting") : L10n.text("apple.usage.keychain.allow")) {
+                guard !waiting else { return }
+                waiting = true
+                error = nil
+                Task {
+                    defer { waiting = false }
+                    do {
+                        try await Bridge.authorizeUsageKeychain(source: source)
+                        if PlanLimitsStore.shared.isRefreshing {
+                            try? await PlanLimitsStore.shared.refresh()
+                        }
+                        try await PlanLimitsStore.shared.refresh(force: true)
+                    } catch {
+                        self.error = error.localizedDescription
+                    }
+                }
+            }
+            .disabled(waiting)
+            .font(Theme.caption)
+            Text(error ?? L10n.text("apple.usage.keychain.explanation"))
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+#endif

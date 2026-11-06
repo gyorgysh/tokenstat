@@ -5824,5 +5824,8 @@
   "apple.simulator.android_missing_title": "Android SDK tools are not ready",
   "apple.simulator.get_xcode": "Get Xcode",
   "apple.simulator.get_android_studio": "Get Android Studio",
-  "apple.desktop_actions.unavailable_title": "Could not open this tool"
+  "apple.desktop_actions.unavailable_title": "Could not open this tool",
+  "apple.usage.keychain.allow": "Allow Keychain access",
+  "apple.usage.keychain.waiting": "Waiting for Keychain…",
+  "apple.usage.keychain.explanation": "macOS may ask for permission to read this login. Background checks stay silent."
 }

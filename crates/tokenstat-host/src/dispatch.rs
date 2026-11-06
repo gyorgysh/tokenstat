@@ -1281,6 +1281,7 @@ fn owner_only_method(method: &str) -> bool {
                 | "account.pairingCode"
                 | "local.provider.set"
                 | "config.limitsSync"
+                | "usage.authorizeKeychain"
                 | "push.register"
                 | "push.unregister"
                 | "push.test"
@@ -4056,6 +4057,24 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 }
                 parse::<Params>(params).map(|p| usage_limits(p.force.unwrap_or(true)))
             }
+            "usage.authorizeKeychain" => {
+                #[derive(Default, Deserialize)]
+                struct Params {
+                    source: String,
+                }
+                parse::<Params>(params).and_then(|p| {
+                    #[cfg(target_os = "macos")]
+                    {
+                        tokenstat_sync::quiet_keychain::authorize_usage(&p.source)
+                            .map(|()| json!(true))
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        let _ = p.source;
+                        Err("Keychain authorization is only available on macOS.".into())
+                    }
+                })
+            }
 
             // Call a device on this account something, from any front end. The
             // label lives on the account row rather than on the machine, which is
@@ -6390,6 +6409,7 @@ mod tests {
                 ("open", r#"{"dbPath":"/tmp/elsewhere.db"}"#),
                 ("pricing.seed", r#"{"path":"/etc/hosts"}"#),
                 ("config.limitsSync", r#"{"enabled":true}"#),
+                ("usage.authorizeKeychain", r#"{"source":"claude_code"}"#),
                 ("local.provider.set", r#"{"id":"ollama","port":12345}"#),
                 ("push.register", r#"{"token":"x","platform":"ios"}"#),
                 ("push.unregister", r#"{"token":"x"}"#),
