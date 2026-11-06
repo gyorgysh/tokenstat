@@ -82,7 +82,8 @@ enum ChatInbox {
             || NSImage(pasteboard: pasteboard) != nil
         #else
         let pasteboard = UIPasteboard.general
-        return pasteboard.hasImages || (pasteboard.hasURLs && !(pasteboard.urls ?? []).isEmpty)
+        // Query types here; read copied content only after the Paste action.
+        return pasteboard.hasImages || pasteboard.hasURLs
         #endif
     }
 
