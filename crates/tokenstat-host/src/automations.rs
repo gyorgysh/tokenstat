@@ -834,6 +834,12 @@ pub(crate) fn chat_agent_command_in(
         // beside that setup and must never be used for the user's home.
         let at = command_word_at(&argv, "exec").unwrap_or(argv.len());
         argv.splice(at + 1..at + 1, ["--dangerously-bypass-hook-trust".into()]);
+        if !plan {
+            // A private Codex home has no user sandbox setting, so the CLI
+            // defaults to read-only even after our hook approves a write.
+            // Keep the hook gate and allow edits inside this workspace.
+            extra.extend(["--sandbox".into(), "workspace-write".into()]);
+        }
     }
     if cursor_gated
         && !launch.bypass
@@ -3936,6 +3942,42 @@ mod tests {
             "{grok:?}"
         );
         assert!(grok.windows(2).any(|pair| pair == ["--resume", "sess-1"]));
+    }
+
+    #[test]
+    fn guarded_codex_execute_can_write_approved_workspace_files() {
+        for resume in [None, Some("thread-1")] {
+            for (mode, expected) in [("execute", "workspace-write"), ("plan", "read-only")] {
+                let argv = chat_agent_command(
+                    "codex",
+                    "edit the requested file",
+                    None,
+                    None,
+                    DEFAULT_BUDGET_SECONDS,
+                    ChatLaunch {
+                        resume,
+                        bypass: false,
+                        mode,
+                        hook_helper: Some(Path::new("/tmp/tokenstat-hostd")),
+                        system_append: None,
+                        agy_customization_dir: None,
+                        cursor_plugin_dir: None,
+                        grok_allow_rules: &[],
+                        attachments: &[],
+                    },
+                )
+                .unwrap();
+                assert!(
+                    argv.windows(2).any(|pair| pair == ["--sandbox", expected]),
+                    "{mode} must select its sandbox before starting a new or resumed thread: {argv:?}"
+                );
+                assert!(
+                    !argv
+                        .iter()
+                        .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
+                );
+            }
+        }
     }
 
     #[test]
