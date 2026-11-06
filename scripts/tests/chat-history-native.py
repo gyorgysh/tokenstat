@@ -26,6 +26,26 @@ import uuid
 ROOT = Path(__file__).resolve().parents[2]
 QA = ROOT / "target/chat-performance/history-encrypted-native"
 PHONE = "ai.tokenstat.qa.history.phone"
+DESKTOP = "ai.tokenstat.qa.history.desktop"
+
+
+def owns_desktop_process(pid, executable, marker):
+    try:
+        command = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "comm="],
+            capture_output=True, text=True, timeout=5).stdout.strip()
+        if not command or Path(command).resolve() != executable.resolve():
+            return False
+        arguments = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "args="],
+            capture_output=True, text=True, timeout=5).stdout
+        return marker in arguments.split()
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return False
+
+
+def stop_owned_desktop(pid, executable, marker, sig):
+    if owns_desktop_process(pid, executable, marker):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, sig)
 
 
 def read_json(path):
@@ -172,6 +192,8 @@ async def run(args):
     listeners = {}
     producer = desktop = relay_service = reader_daemon = None
     desktop_pid = None
+    desktop_executable = None
+    desktop_marker = "--tokenstat-fixture-run=" + run_root.name
     relay = None
     phone_started = False
     booted_here = False
@@ -319,6 +341,9 @@ print(json.dumps({'events':len(result['result']['events'])}))
             return
 
         app = args.mac_app
+        metadata = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+        assert metadata.get("CFBundleIdentifier") == DESKTOP, "Use the generated HistoryMac QA app"
+        desktop_executable = app / "Contents/MacOS" / metadata["CFBundleExecutable"]
         log = (run_root / "desktop.log").open("w"); handles.append(log)
         desktop_environment = client_environment("desktop")
         desktop_environment["TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH"] = str(args.desktop_width)
@@ -337,7 +362,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     "HOME", "ZDOTDIR", "HISTFILE", "PATH"]:
             if key in desktop_environment:
                 launch += ["--env", key + "=" + desktop_environment[key]]
-        desktop = subprocess.Popen(launch + [str(app)], stdout=log, stderr=log)
+        desktop = subprocess.Popen(launch + [str(app), "--args", desktop_marker], stdout=log, stderr=log)
         process = await wait(lambda: read_json(run_root / "desktop/process.json"))
         desktop_pid = process["pid"]
         assert isinstance(desktop_pid, int) and desktop_pid > 1
@@ -441,7 +466,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 emit({"type": "text", "data": "\n\n" + body})
                 await visible(marker)
                 timings[label] = round((time.monotonic() - began) * 1000)
-                prove(f"Both native readers display the tail of {label} while streaming")
+                prove(f"Native readers ({', '.join(roles)}) display the tail of {label} while streaming")
                 if args.code_edges or args.unbroken_code:
                     for size in ["largest-text", "normal-text"]:
                         for role in roles:
@@ -454,7 +479,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 prove("Changing text size reuses correctly bounded text, including the largest accessibility size")
             for role in roles:
                 await native(role, "smooth-off", cases[-1][2])
-            prove("Both native readers keep the reply visible with smooth streaming disabled")
+            prove(f"Native readers ({', '.join(roles)}) keep the reply visible with smooth streaming disabled")
             assert all(not state(role)["smoothStreaming"] for role in roles)
             emit({"type": "text", "data": "\n\ntalldone"})
             emit({"type": "end", "stopReason": "end_turn"})
@@ -609,9 +634,10 @@ print(json.dumps({'events':len(result['result']['events'])}))
         if desktop and desktop.poll() is None:
             # Capture the owned app before cleanup, especially when its main
             # thread cannot service the fixture's snapshot command.
-            with contextlib.suppress(Exception):
-                await command("/usr/bin/sample", desktop_pid or desktop.pid, "2", "-file",
-                    run_root / "desktop-sample.txt", timeout=10)
+            if desktop_pid and owns_desktop_process(desktop_pid, desktop_executable, desktop_marker):
+                with contextlib.suppress(Exception):
+                    await command("/usr/bin/sample", desktop_pid, "2", "-file",
+                        run_root / "desktop-sample.txt", timeout=10)
         raise
     finally:
         cleanup_errors = []
@@ -622,16 +648,14 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 cleanup_errors.append(f"Phone termination: {type(error).__name__}: {error}")
         if desktop and desktop.poll() is None:
             if desktop_pid:
-                with contextlib.suppress(ProcessLookupError):
-                    os.kill(desktop_pid, signal.SIGTERM)
+                stop_owned_desktop(desktop_pid, desktop_executable, desktop_marker, signal.SIGTERM)
             else:
                 desktop.terminate()
             try:
                 await asyncio.to_thread(desktop.wait, timeout=10)
             except subprocess.TimeoutExpired:
                 if desktop_pid:
-                    with contextlib.suppress(ProcessLookupError):
-                        os.kill(desktop_pid, signal.SIGKILL)
+                    stop_owned_desktop(desktop_pid, desktop_executable, desktop_marker, signal.SIGKILL)
                 desktop.kill(); await asyncio.to_thread(desktop.wait)
         (run_root / "stop").touch()
         for proxy in proxies.values():

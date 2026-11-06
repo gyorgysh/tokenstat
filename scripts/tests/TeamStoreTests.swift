@@ -29,7 +29,9 @@ private actor Fixture {
     func checkPresenceCount(_ expected: Int, _ message: String) { check(presence.count == expected, message) }
     func api() -> TeamAPI { TeamAPI { method, params, owner in try await self.send(method, params, owner) } }
     func delay(_ key: String) { delayed.insert(key) }
+    func stopDelaying(_ key: String) { delayed.remove(key) }
     func hasWaiter(_ key: String) -> Bool { waiting[key] != nil }
+    func hasPresenceCount(_ count: Int) -> Bool { presence.count >= count }
     func release(_ key: String, value: JSONValue) { waiting.removeValue(forKey: key)?.resume(returning: value) }
     func reject(_ key: String) { waiting.removeValue(forKey: key)?.resume(throwing: TeamRequestFailure(code: "fixture_error", message: "Previous organization failure")) }
     func revoke() { authorized = false }
@@ -100,6 +102,7 @@ private func waitFor(_ key: String, fixture: Fixture) async {
 }
 @main struct TeamStoreTests {
     @MainActor static func main() async throws {
+        await presenceChangeDuringRequest()
         try await lateAccountResponse()
         try await lateOrganizationResponse()
         try await mutationOwnership()
@@ -169,6 +172,27 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await store.bind(to: nil)
         await store.publishAppPresence(true)
         await fixture.checkPresence([true, true], "Signing out published another heartbeat")
+    }
+    @MainActor static func presenceChangeDuringRequest() async {
+        for cancelFirst in [false, true] {
+            let fixture = Fixture(), account = owner("alpha")
+            let api = await fixture.api(), publisher = TeamAppPresence()
+            let key = "alpha|presence.set|"
+            await fixture.delay(key)
+            let first = Task { await publisher.publish(true, owner: account, api: api) }
+            await waitFor(key, fixture: fixture)
+            await publisher.publish(false, owner: account, api: api)
+            if cancelFirst { first.cancel() }
+            await fixture.stopDelaying(key)
+            await fixture.release(key, value: .object(["active": .bool(true)]))
+            await first.value
+            let deadline = Date().addingTimeInterval(3)
+            while !(await fixture.hasPresenceCount(2)) {
+                check(Date() < deadline, "Background transition was dropped while a heartbeat was in flight")
+                await Task.yield()
+            }
+            await fixture.checkPresence([true, false], "The latest visibility did not reach the server")
+        }
     }
     @MainActor static func appPresenceTraffic() async {
         let fixture = Fixture(), account = owner("alpha")

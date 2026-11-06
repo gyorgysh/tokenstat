@@ -284,7 +284,9 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 )
                 let shouldStop = await apply(chunk)
                 if shouldStop { break }
-                if plan.checkAlive, !(await checkLiveness(peer: peer, id: id)) { break }
+                if plan.checkAlive,
+                   !(await checkLiveness(peer: peer, id: id,
+                       minimumInterval: chunk.reportsExitStatus ? 1 : 0.25)) { break }
                 recoveryDelay = 50
                 failedReads = 0
             } catch {
@@ -394,18 +396,22 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 }
             }
         }
-        // Exit status can arrive while several host pages remain unread.
-        // Stop only after an empty read has consumed the final cursor.
-        return chunk.bytes.isEmpty && exitCode != nil
+        if let code = chunk.exitCode { exitCode = code; alive = false }
+        // A descendant can retain output after its parent exits. New hosts
+        // report EOF independently; older hosts keep their empty-read fallback.
+        let drained = !chunk.reportsOutputEnd || chunk.outputEndOffset.map { offset >= $0 } == true
+        return chunk.bytes.isEmpty && exitCode != nil && drained
     }
 
     /// Ask the host whether the process is still running. A clean exit used
     /// to leave this screen saying Running until the next failed read.
     @MainActor
-    private func checkLiveness(peer: String, id: String) async -> Bool {
+    private func checkLiveness(peer: String, id: String, minimumInterval: TimeInterval = 0.25) async -> Bool {
         guard mayOperate else { return false }
         guard exitCode == nil else { return true }
-        guard Date().timeIntervalSince(lastInfoAt) >= 0.25 else { return true }
+        // Read replies can carry process status, but metadata still supplies
+        // negotiated geometry and provider session identities during quiet runs.
+        guard Date().timeIntervalSince(lastInfoAt) >= minimumInterval else { return true }
         lastInfoAt = Date()
         guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
             return true

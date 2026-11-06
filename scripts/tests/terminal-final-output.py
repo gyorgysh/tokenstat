@@ -90,6 +90,10 @@ struct PtyChunk: Sendable {
     var nextOffset: UInt64
     var dropped: UInt64 = 0
     var paused = false
+    var exitCode: Int?
+    var reportsExitStatus = false
+    var outputEndOffset: UInt64?
+    var reportsOutputEnd = false
 }
 @MainActor enum ClientRemote {
     static let output = Data(String(repeating: "café 日本語 terminal output\n", count: 16_000).utf8)
@@ -97,18 +101,31 @@ struct PtyChunk: Sendable {
     static var failuresRemaining = 0
     static var holdInfo = false
     static var waiter: CheckedContinuation<Info, Never>?
+    static var inheritedOutput = false
+    static var infoReads = 0
+    static var nextInfo = Info()
     static func ptyInfo(peer: String, id: String) async throws -> Info {
+        infoReads += 1
         if holdInfo { return await withCheckedContinuation { waiter = $0 } }
-        return Info()
+        return nextInfo
     }
     static func ptyRead(peer: String, id: String, offset: UInt64, waitMs: Int) async throws -> PtyChunk {
         reads += 1
+        if inheritedOutput && reads == 1 {
+            return PtyChunk(bytes: Data(), nextOffset: offset, exitCode: 0,
+                reportsExitStatus: true, reportsOutputEnd: true)
+        }
         if offset > 0 && failuresRemaining > 0 {
             failuresRemaining -= 1
             throw CocoaError(.fileReadUnknown)
         }
         let start = min(Int(offset), output.count), end = min(output.count, Int(offset) + 64 * 1024)
-        return PtyChunk(bytes: output.subdata(in: start..<end), nextOffset: UInt64(end))
+        let empty = start == end
+        return PtyChunk(bytes: output.subdata(in: start..<end), nextOffset: UInt64(end),
+            exitCode: inheritedOutput && empty ? 0 : nil,
+            reportsExitStatus: inheritedOutput && empty,
+            outputEndOffset: inheritedOutput && empty ? UInt64(end) : nil,
+            reportsOutputEnd: inheritedOutput && empty)
     }
     static func ptyList(peer: String) async throws -> [Info] { [Info()] }
 }
@@ -133,6 +150,28 @@ METHOD
 }
 @main struct Test {
     @MainActor static func main() async {
+        ClientRemote.inheritedOutput = true
+        let inherited = Session()
+        inherited.exitCode = 0; inherited.alive = false
+        await inherited.poll(peer: "host", id: "pty")
+        precondition(inherited.view.received == ClientRemote.output,
+            "A parent's exit must not discard output from its still-open inherited handle")
+        ClientRemote.inheritedOutput = false
+        ClientRemote.reads = 0
+        ClientRemote.nextInfo = Info(alive: true, exitCode: nil, sessionIdentities: "quiet-session")
+        let metadata = Session()
+        metadata.lastInfoAt = Date().addingTimeInterval(-0.5)
+        let previousInfoReads = ClientRemote.infoReads
+        _ = await metadata.checkLiveness(peer: "host", id: "pty", minimumInterval: 1)
+        precondition(ClientRemote.infoReads == previousInfoReads, "Piggybacked status avoids repeated metadata requests")
+        metadata.lastInfoAt = Date().addingTimeInterval(-2)
+        _ = await metadata.checkLiveness(peer: "host", id: "pty", minimumInterval: 1)
+        precondition(ClientRemote.infoReads == previousInfoReads + 1 && metadata.sessionIdentities == "quiet-session",
+            "Quiet terminals still refresh negotiated size and provider identity metadata")
+        metadata.lastInfoAt = Date().addingTimeInterval(-0.5)
+        _ = await metadata.checkLiveness(peer: "host", id: "pty")
+        precondition(ClientRemote.infoReads == previousInfoReads + 2, "Older hosts keep their metadata polling cadence")
+        ClientRemote.nextInfo = Info()
         let dropped = Session()
         let stoppedOnDrop = await dropped.apply(PtyChunk(bytes: Data(), nextOffset: 77, dropped: 77))
         precondition(!stoppedOnDrop && dropped.offset == 77 && dropped.droppedOutput,
@@ -167,8 +206,7 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-phone-terminal-review-') as d
     subprocess.run(['swiftc', '-parse-as-library', str(path / 'Fixture.swift'), str(output_filter), '-o', str(path / 'test')], check=True)
     subprocess.run([str(path / 'test')], check=True, timeout=15)
 
-# Existing clients ignore optional status fields while retaining exact bytes
-# and positions. Keep this compiled from the actual decoder, not a replica.
+# Decode both current status fields and legacy replies from the real model.
 models = (root / 'apps/mac/Sources/Bridge/Models.swift').read_text()
 start = models.index('struct PtyChunk:')
 end = models.index('\n}\n', start) + 2
@@ -186,8 +224,15 @@ compatibility = r'''import Foundation
                 let chunk = try JSONDecoder().decode(PtyChunk.self,
                     from: JSONSerialization.data(withJSONObject: payload))
                 precondition(chunk.bytes == original && chunk.nextOffset == 500 && chunk.dropped == 3)
+                precondition(chunk.reportsExitStatus && chunk.exitCode == exit as? Int)
+                precondition(chunk.reportsOutputEnd && chunk.outputEndOffset == (end as? Int).map { UInt64($0) })
             }
         }
+        let legacy: [String: Any] = ["data": original.base64EncodedString(),
+            "nextOffset": 500, "dropped": 0]
+        let old = try JSONDecoder().decode(PtyChunk.self,
+            from: JSONSerialization.data(withJSONObject: legacy))
+        precondition(old.bytes == original && !old.paused && !old.reportsExitStatus && !old.reportsOutputEnd)
         print("Terminal decoder: optional status fields preserve bytes and reading positions")
     }
 }

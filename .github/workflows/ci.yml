@@ -183,6 +183,8 @@ jobs:
 
       - name: Chat navigation and transcript continuity
         run: |
+          python3 scripts/tests/terminal-final-output.py
+          python3 -m unittest discover -s scripts/tests -p test_chat_history_cleanup.py
           python3 scripts/check-chat-navigation.py
           python3 scripts/tests/check-client-chat-deletion.py
           python3 scripts/check-chat-workbench.py

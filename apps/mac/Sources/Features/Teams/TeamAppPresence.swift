@@ -11,6 +11,8 @@ import Foundation
         var nextAttempt: ContinuousClock.Instant?
         var retry: Duration = .seconds(30)
         var inFlight = false
+        var revision: UInt64 = 0
+        var pending: (active: Bool, api: TeamAPI)?
     }
     private var states: [TeamAccountOwner: State] = [:]
     private var owners: [TeamAccountOwner] = []
@@ -25,11 +27,28 @@ import Foundation
             state = State(); states[owner] = state; owners.append(owner)
             if owners.count > 8 { states.removeValue(forKey: owners.removeFirst()) }
         }
-        guard !state.inFlight else { return }
+        state.revision &+= 1
+        if state.inFlight {
+            state.pending = (active, api)
+            return
+        }
         if state.attempted == active, let next = state.nextAttempt, now() < next { return }
         if state.published == active, !active { return }
         state.inFlight = true; state.attempted = active
-        defer { state.inFlight = false }
+        defer {
+            state.inFlight = false
+            if let pending = state.pending {
+                state.pending = nil
+                let revision = state.revision
+                // A background watcher can finish while the preceding call
+                // is still returning. Send its latest state independently of
+                // that caller's cancellation; a newer sample supersedes it.
+                Task { @MainActor [weak self] in
+                    guard let self, self.states[owner] === state, state.revision == revision else { return }
+                    await self.publish(pending.active, owner: owner, api: pending.api)
+                }
+            }
+        }
         do {
             let _: JSONValue = try await api.request(.directory,
                 ["operation": .string("presence.set"), "active": .bool(active)], owner: owner)

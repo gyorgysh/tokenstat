@@ -4367,12 +4367,19 @@ struct PtyChunk: Decodable, Sendable {
     var dropped: UInt64
     /// The host paused its PTY reader because the lossless handoff window is full.
     var paused: Bool
+    var exitCode: Int?
+    var reportsExitStatus: Bool
+    /// A present null means output is still open; absence means an older host.
+    var outputEndOffset: UInt64?
+    var reportsOutputEnd: Bool
 
     private enum CodingKeys: String, CodingKey {
         case data
         case nextOffset
         case dropped
         case paused
+        case exitCode
+        case outputEndOffset
     }
 
     init(from decoder: Decoder) throws {
@@ -4385,6 +4392,10 @@ struct PtyChunk: Decodable, Sendable {
         nextOffset = try container.decode(UInt64.self, forKey: .nextOffset)
         dropped = try container.decode(UInt64.self, forKey: .dropped)
         paused = try container.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+        exitCode = try container.decodeIfPresent(Int.self, forKey: .exitCode)
+        reportsExitStatus = container.contains(.exitCode)
+        outputEndOffset = try container.decodeIfPresent(UInt64.self, forKey: .outputEndOffset)
+        reportsOutputEnd = container.contains(.outputEndOffset)
     }
 }
 
