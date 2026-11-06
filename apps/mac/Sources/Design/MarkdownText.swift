@@ -638,6 +638,7 @@ struct MessageMarkdown: View {
         }
         var chain: [Text] = []
         var chainLength = 0
+        var chainLineBreaks = 0
         var chainWordCount = 0
         var chainHasLinks = false
         func gap() -> Text { Text("\n\n").font(bodyFont) }
@@ -646,18 +647,23 @@ struct MessageMarkdown: View {
                 out.append(.text(MarkdownLinks.joined(chain[...]), hasLinks: chainHasLinks, wordCount: chainWordCount))
                 chain.removeAll(keepingCapacity: true)
                 chainLength = 0
+                chainLineBreaks = 0
                 chainHasLinks = false
             }
         }
-        func push(_ piece: Text, length: Int, separator: Text? = nil, links: Bool = false) {
-            if !chain.isEmpty, chainLength + length > Self.chainCharCap {
+        func push(_ piece: Text, length: Int, lineBreaks: Int, separator: Text? = nil, links: Bool = false) {
+            let gapLines = separator == nil ? 2 : 1
+            if !chain.isEmpty, chainLength + length > Self.chainCharCap ||
+                chainLineBreaks + gapLines + lineBreaks > MarkdownTextChunks.maximumLineBreaks {
                 flush()
             }
             if !chain.isEmpty {
                 chain.append(separator ?? gap())
                 chainLength += length + 2
+                chainLineBreaks += gapLines + lineBreaks
             } else {
                 chainLength = length
+                chainLineBreaks = lineBreaks
             }
             chain.append(piece)
             chainWordCount = wordCount
@@ -690,43 +696,37 @@ struct MessageMarkdown: View {
                 for chunk in chunks(text) {
                     push(
                         prose(chunk).font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
-                        length: chunk.characters.count, links: chunk.runs.contains { $0.link != nil }
+                        length: chunk.characters.count, lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
+                        links: chunk.runs.contains { $0.link != nil }
                     )
                 }
             case let .paragraph(text):
                 for chunk in chunks(text) {
                     push(
                         prose(chunk).font(bodyFont),
-                        length: chunk.characters.count, links: chunk.runs.contains { $0.link != nil }
+                        length: chunk.characters.count, lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
+                        links: chunk.runs.contains { $0.link != nil }
                     )
                 }
             case let .list(items):
-                let total = items.reduce(0) { $0 + $1.text.count }
-                if total <= Self.chainCharCap {
-                    var list: [Text] = []
-                    for item in items {
-                        let row = listRow(item, text: MarkdownInline.attributed(item.text))
-                        if !list.isEmpty { list.append(Text("\n").font(bodyFont)) }
-                        list.append(row)
-                    }
-                    if !list.isEmpty { push(MarkdownLinks.joined(list[...]), length: total, links: items.contains { MarkdownInline.hasLinks($0.text) }) }
-                } else {
-                    // Huge lists chain item by item; a giant item chunks
-                    // further, marker on its first piece only.
-                    for (index, item) in items.enumerated() {
-                        let parts = chunks(item.text)
-                        for (part, chunk) in parts.enumerated() {
-                            let piece = (part == 0)
-                                ? listRow(item, text: chunk)
-                                : prose(chunk).font(bodyFont)
-                            push(
-                                piece,
-                                length: chunk.characters.count,
-                                separator: index == 0 && part == 0
-                                    ? nil : Text("\n").font(bodyFont),
-                                links: chunk.runs.contains { $0.link != nil }
-                            )
-                        }
+                // Short rows can make a text surface too tall long before it
+                // reaches the character cap. Apply both limits to every list.
+                for (index, item) in items.enumerated() {
+                    let parsed = chunks(item.text)
+                    // Empty bullets and checkboxes still have a visible marker.
+                    let parts = parsed.isEmpty ? [AttributedString()] : parsed
+                    for (part, chunk) in parts.enumerated() {
+                        let piece = (part == 0)
+                            ? listRow(item, text: chunk)
+                            : prose(chunk).font(bodyFont)
+                        push(
+                            piece,
+                            length: chunk.characters.count,
+                            lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
+                            separator: index == 0 && part == 0
+                                ? nil : Text("\n").font(bodyFont),
+                            links: chunk.runs.contains { $0.link != nil }
+                        )
                     }
                 }
             case .code, .table, .quote, .rule:
@@ -749,19 +749,16 @@ struct MessageMarkdown: View {
 
     var body: some View {
         let segments = shownSegments
-        let count = segments.reduce(0) { result, segment in
-            if case let .text(_, _, count) = segment { return max(result, count) }
-            return result
+        let ranges = segments.reduce(into: (end: 0, starts: [Int]())) { result, segment in
+            result.starts.append(result.end)
+            if case let .text(_, _, end) = segment { result.end = max(result.end, end) }
         }
-        let arrivals = wordArrivals.update(source: source, count: count, now: ProcessInfo.processInfo.systemUptime, animate: smoothStreaming && !reduceStreamingMotion, identity: liveSlot)
+        let arrivals = wordArrivals.update(source: source, count: ranges.end, now: ProcessInfo.processInfo.systemUptime, animate: smoothStreaming && !reduceStreamingMotion, identity: liveSlot)
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 switch segment {
                 case let .text(chain, hasLinks, wordEnd):
-                    let wordStart = segments[..<index].reduce(0) { result, item in
-                        if case let .text(_, _, end) = item { return max(result, end) }
-                        return result
-                    }
+                    let wordStart = ranges.starts[index]
                     let arriving = arrivals.filter { $0.key >= wordStart && $0.key < wordEnd }
                     Group {
                         if selectable {

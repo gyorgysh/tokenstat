@@ -324,6 +324,9 @@ print(json.dumps({'events':len(result['result']['events'])}))
             desktop_environment["TOKENSTAT_NATIVE_HISTORY_READER_SOCKET"] = reader_info["socket"]
         desktop = subprocess.Popen([str(app / "Contents/MacOS" / executable)],
             env=desktop_environment, stdout=log, stderr=log)
+        # Deliver the normal app-open event after launching with the fixture's
+        # private environment. A restored closed window otherwise stays closed.
+        await command("open", "-a", app)
         if not args.desktop_only:
             inventory = json.loads(await command("xcrun", "simctl", "list", "devices", "available", "--json"))
             device = next(device for devices in inventory["devices"].values()
@@ -342,7 +345,25 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 "--stderr=" + str(run_root / "phone-errors.log"), args.simulator, PHONE, env=launch_environment)
         print("Native QA apps launched:", ", ".join(roles), flush=True)
         await wait(lambda: all(state(role) and state(role)["loaded"] for role in roles), 180)
-        await visible("network-start")
+        if args.layout:
+            assert not args.desktop_only, "Layout QA requires an iPhone"
+            await native("phone", expected="network-start")
+            await native("phone", action="new-chat-layout", expected="Ask anything")
+            prove("The composer is visible before a computer is selected")
+            await native("phone", action="light", expected="Ask anything")
+            await native("phone", action="list-layout", expected="Check chat spacing")
+            await native("phone", action="dark", expected="Check chat spacing")
+            await native("phone", action="large-text")
+            prove("Grouped repository and chat rows render in both themes and large text")
+            await native("phone", action="normal-text")
+            await native("phone", action="tab-layout", expected="Browser")
+            prove("Companion tabs remain readable across the phone's available width")
+            await native("phone", action="conversation", expected="network-start")
+            if not args.serve:
+                atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs})
+                return
+        else:
+            await visible("network-start")
         if relay:
             status = await remote_status(fixture["socket"])
             atomic_json(run_root / "relay-route.json", status)
@@ -357,6 +378,33 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 assert any(peer.get("peer") == fixture["hostKey"] and peer.get("route") == "relay"
                     for peer in traffic["peers"]), traffic
                 prove("The desktop reader daemon confirms an outbound relay route to the chat host")
+        if args.tall_prose:
+            assert all(state(role)["smoothStreaming"] for role in roles)
+            timings = {}
+            cases = [
+                ("list", "\n".join(["- a"] * 2000 + ["- listtail"]), "listtail"),
+                ("paragraphs", "\n\n".join(["a"] * 2000 + ["paragraphtail"]), "paragraphtail"),
+                ("lines", "\n".join(["a"] * 2000 + ["linetail"]), "linetail"),
+            ]
+            for label, body, marker in cases:
+                began = time.monotonic()
+                emit({"type": "text", "data": "\n\n" + body})
+                await visible(marker)
+                timings[label] = round((time.monotonic() - began) * 1000)
+                prove(f"Both native readers display the tail of 2,000 short {label} while streaming")
+            for role in roles:
+                await native(role, "smooth-off", "linetail")
+            prove("Long short-line replies remain visible with smooth streaming disabled")
+            assert all(not state(role)["smoothStreaming"] for role in roles)
+            emit({"type": "text", "data": "\n\ntalldone"})
+            emit({"type": "end", "stopReason": "end_turn"})
+            await wait(lambda: all(state(role) and not state(role)["running"] for role in roles))
+            await visible("talldone")
+            assert all(not state(role)["failures"] for role in roles)
+            atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs,
+                "tailVisibleMs": timings,
+                "states": {role: state(role) for role in roles}})
+            return
         if args.smooth_stream:
             transcript = Path(fixture["transcript"])
             start = transcript.stat().st_size
@@ -576,6 +624,8 @@ if __name__ == "__main__":
     parser.add_argument("--phone-app", type=Path, default=QA / "phone/Build/Products/Debug-iphonesimulator/HistoryPhone.app")
     parser.add_argument("--relay", action="store_true", help="Use the owned loopback relay and disposable account")
     parser.add_argument("--smooth-stream", action="store_true", help="Verify readable streaming batches and idle/completion flushes")
+    parser.add_argument("--tall-prose", action="store_true", help="Verify long lists, short paragraphs and explicit line breaks")
+    parser.add_argument("--layout", action="store_true", help="Inspect new chat and grouped lists using the shipping phone views")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--probe-only", action="store_true", help="Verify the producer and encrypted FFI setup before opening apps")

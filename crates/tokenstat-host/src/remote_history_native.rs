@@ -48,6 +48,10 @@ fn serve_fixture() {
     ] {
         private_directory(&root.join(name));
     }
+    // The controlled provider has no login. An empty store keeps readiness
+    // unknown so the ordinary composer remains available in layout tests.
+    private_directory(&root.join("home/.grok"));
+    private_file(&root.join("home/.grok/auth.json"), b"{}\n");
     private_file(&root.join("provider.ndjson"), b"");
     let provider = format!(
         "#!{python}\n{}",

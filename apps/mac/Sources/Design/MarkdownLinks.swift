@@ -39,16 +39,26 @@ struct MarkdownLinkAttribute: TextAttribute {
 
 /// Bound native text views without reparsing fragments of Markdown syntax.
 enum MarkdownTextChunks {
+    static let maximumLineBreaks = 64
+
     static func split(_ value: AttributedString, maximum: Int) -> [AttributedString] {
         precondition(maximum > 0)
         let characters = value.characters
         var pieces: [AttributedString] = []
         var start = characters.startIndex
         while start < characters.endIndex {
-            var end = characters.index(start, offsetBy: maximum, limitedBy: characters.endIndex) ?? characters.endIndex
+            var end = start
+            var count = 0
+            var lineBreaks = 0
+            while end < characters.endIndex, count < maximum {
+                if characters[end].isNewline { lineBreaks += 1 }
+                end = characters.index(after: end)
+                count += 1
+                if lineBreaks == maximumLineBreaks { break }
+            }
             if end < characters.endIndex {
                 // Prefer a word boundary, retaining the whitespace itself.
-                let halfway = characters.index(start, offsetBy: maximum / 2)
+                let halfway = characters.index(start, offsetBy: count / 2)
                 var boundary = end
                 while boundary > halfway {
                     let previous = characters.index(before: boundary)

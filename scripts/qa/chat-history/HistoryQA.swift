@@ -18,6 +18,9 @@ private struct Fixture: Decodable {
     var showing = true
     var overview = false
     var phase = "Encrypted history QA"
+    var layoutPage: String?
+    var layoutScheme: ColorScheme = .dark
+    var layoutType: DynamicTypeSize = .large
     @ObservationIgnored private var loaded = false
     @ObservationIgnored private var started = false
     @ObservationIgnored private var command = 0
@@ -52,6 +55,7 @@ private struct Fixture: Decodable {
             "uniqueSeq": Set(model.events.compactMap(\.seq)).count,
             "selected": model.selected?.id ?? "", "blankSamples": blankSamples,
             "running": model.selected?.running ?? false,
+            "smoothStreaming": UserDefaults.standard.bool(forKey: "chat.smoothStreaming"),
             "error": model.error ?? "", "failures": errors, "command": command]
         guard let bytes = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]),
               bytes != previousState else { return }
@@ -61,7 +65,11 @@ private struct Fixture: Decodable {
 
     private func image() throws -> CGImage {
         #if os(macOS)
-        guard let view = NSApplication.shared.windows.first(where: { $0.isVisible })?.contentView,
+        try save(NSApplication.shared.windows.map { ["title": $0.title,
+            "visible": $0.isVisible, "width": $0.frame.width, "height": $0.frame.height] }, "windows.json")
+        guard let view = NSApplication.shared.windows.first(where: {
+            $0.isVisible && ($0.contentView?.bounds.height ?? 0) > 100
+        })?.contentView,
               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             throw CocoaError(.fileReadUnknown)
         }
@@ -177,6 +185,7 @@ private struct Fixture: Decodable {
         guard !started else { return }; started = true
         // Each fixture starts from the same presentation, independent of prior runs.
         ChatDetailPreference.shared.level = .standard
+        UserDefaults.standard.set(true, forKey: "chat.smoothStreaming")
         BridgeObserver.report = { [weak self] method, _, error in
             guard let error else { return }
             let message = error.localizedDescription
@@ -241,6 +250,14 @@ private struct Fixture: Decodable {
                 reference.anchor = row.id
                 guard model.restoreSearchReadingPosition(reference) else { throw CocoaError(.coderInvalidValue) }
             case "snapshot": break
+            case "new-chat-layout", "list-layout", "tab-layout": layoutPage = request["action"] as? String
+            case "light": layoutScheme = .light
+            case "dark": layoutScheme = .dark
+            case "large-text": layoutType = .accessibility3
+            case "normal-text": layoutType = .large
+            case "smooth-off": UserDefaults.standard.set(false, forKey: "chat.smoothStreaming")
+            case "smooth-on": UserDefaults.standard.set(true, forKey: "chat.smoothStreaming")
+            case "conversation": layoutPage = nil
             default: throw CocoaError(.coderInvalidValue)
             }
             try await Task.sleep(for: .milliseconds(200))
@@ -259,6 +276,8 @@ private struct Fixture: Decodable {
     #if os(iOS)
     @State private var navigation = ClientNavigationModel()
     @State private var connectivity = ConnectivityModel()
+    @State private var layoutDraft = ChatStartDraft()
+    @State private var teams = TeamStore(api: .live)
     #endif
     init() { AppFonts.register(); Bridge.connect() }
     var body: some Scene {
@@ -267,22 +286,63 @@ private struct Fixture: Decodable {
                 Text(session.phase).font(.caption).padding(6)
                 Button(session.showing ? "Overview" : "Conversation") { session.showing.toggle() }
                     .padding(6)
-                if session.showing, let chat = session.model.selected {
-                    #if os(macOS)
+                #if os(iOS)
+                if session.layoutPage == "new-chat-layout" {
+                    ChatStartPage(draft: layoutDraft, repositories: [],
+                        hostPicker: AnyView(Menu("Choose a computer", systemImage: "desktopcomputer") {}),
+                        allowsSend: false, showsEmptyComposer: true, requiresHostSelection: true,
+                        repositoriesLoading: true, onAdd: {}, onSend: {})
+                        .environment(navigation).environment(connectivity)
+                } else if session.layoutPage == "list-layout" {
+                    layoutLists.environment(teams).environment(navigation)
+                } else {
+                    phoneConversation
+                }
+                #else
+                if session.showing, let _ = session.model.selected {
                     ChatView(model: session.model, workspaceID: session.fixture.workspaceId,
                         showingOverview: $session.overview, loadsWorkspace: false)
-                    #else
-                    ClientChatThread(model: session.model, chatID: chat.id,
-                        folderName: "Native history", hostName: "Disposable host")
-                        .environment(navigation).environment(connectivity)
-                    #endif
                 } else { Text("History overview").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                #endif
             }
             #if os(macOS)
             .frame(width: 760, height: 820)
             #endif
-            .background(Theme.background).tint(Theme.accent).preferredColorScheme(.dark)
+            .background(Theme.background).tint(Theme.accent).preferredColorScheme(session.layoutScheme)
+            .dynamicTypeSize(session.layoutType)
             .environment(account).task { await session.start() }
         }
     }
+
+    #if os(iOS)
+    @ViewBuilder private var phoneConversation: some View {
+        if session.showing, let chat = session.model.selected {
+            ClientChatThread(model: session.model, chatID: chat.id,
+                folderName: "Native history", hostName: "Disposable host",
+                availableWorkbenchWidth: session.layoutPage == "tab-layout" ? 500 : nil)
+                .environment(navigation).environment(connectivity)
+        } else { Text("History overview").frame(maxWidth: .infinity, maxHeight: .infinity) }
+    }
+
+    private var layoutLists: some View {
+        let folder = try! JSONDecoder().decode(WorkspaceFolder.self, from: Data(#"{"id":"layout","path":"/Users/qa/git/tokenstat","name":"tokenstat","addedAtMs":0,"exists":true,"git":{"isRepo":true,"branch":"main","files":[],"ahead":0,"behind":0,"added":0,"removed":0,"partial":false}}"#.utf8))
+        var chats = try! JSONDecoder().decode([ChatRecentConversation].self, from: Data(#"[{"id":"one","workspaceId":"layout","title":"Check chat spacing","backend":"codex"},{"id":"two","workspaceId":"layout","title":"Review the composer","backend":"claude"},{"id":"three","workspaceId":"layout","title":"Test expanded rows","backend":"codex"}]"#.utf8))
+        for index in chats.indices {
+            chats[index].lastMessageAtMs = Int64(Date().timeIntervalSince1970 * 1000) - Int64(index * 1000)
+        }
+        return NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    Text("Repositories").font(ClientType.caption).padding()
+                    ClientFolderRow(folder: folder, grouped: true)
+                    ThemeRule().padding(.leading, Theme.Space.m)
+                    ClientFolderRow(folder: folder, grouped: true)
+                    ThemeRule().padding(.leading, Theme.Space.m)
+                    ClientRecentChatsSection(peer: session.fixture.hostKey, hostName: "QA host",
+                        folders: [folder], chats: chats, onNewChat: {}, grouped: true)
+                }.cardSurface().padding(Theme.Space.m)
+            }
+        }
+    }
+    #endif
 }

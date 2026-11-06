@@ -29,7 +29,9 @@ struct MarkdownLinksTests {
             precondition(run.underlineStyle == nil, "Plain and rejected links must not appear clickable")
         }
         for source in ["", "short text", "é👩🏽‍💻", String(repeating: "long streamed word ", count: 2000),
-                       String(repeating: "é👩🏽‍💻", count: 5000)] {
+                       String(repeating: "é👩🏽‍💻", count: 5000),
+                       String(repeating: "a\n", count: 2000),
+                       String(repeating: "a\r\n\u{2028}", count: 2000)] {
             var value = AttributedString(source)
             value.link = URL(string: "https://example.com/full-path")
             value.inlinePresentationIntent = [.stronglyEmphasized, .code]
@@ -37,6 +39,9 @@ struct MarkdownLinksTests {
                 let chunks = MarkdownTextChunks.split(value, maximum: maximum)
                 precondition(chunks.allSatisfy { !$0.characters.isEmpty && $0.characters.count <= maximum },
                              "Every rendered chunk must stay bounded, even without line breaks or spaces")
+                precondition(chunks.allSatisfy {
+                    $0.characters.filter(\.isNewline).count <= MarkdownTextChunks.maximumLineBreaks
+                }, "Short lines must not create an unbounded native text surface")
                 var restored = AttributedString()
                 for chunk in chunks { restored.append(chunk) }
                 precondition(restored == value, "Splitting must preserve graphemes, whitespace, links and inline formatting")
