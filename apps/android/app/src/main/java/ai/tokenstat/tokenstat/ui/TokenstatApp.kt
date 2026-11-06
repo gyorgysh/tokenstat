@@ -5,6 +5,7 @@ import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import ai.tokenstat.tokenstat.ui.logic.InsightDayAxis
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
+import ai.tokenstat.tokenstat.ui.components.DeviceNotificationsCard
 import ai.tokenstat.tokenstat.ui.components.TsDangerButton
 
 import androidx.compose.ui.draw.shadow
@@ -4732,8 +4733,6 @@ private fun AccountDialog(
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
     var paywall by remember { mutableStateOf(false) }
-    var notifyOn by remember { mutableStateOf(PushRegistrar.isOn()) }
-    var notifyError by remember { mutableStateOf<String?>(null) }
     fun open(url: String) {
         runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) }
     }
@@ -4838,53 +4837,7 @@ private fun AccountDialog(
                     // order the Apple sheet uses, and each in a card with a
                     // mark. The switch used to be a bare row above the cards,
                     // so the pane opened on an unlabelled toggle.
-                    TsCard(title = L10n.text("android.tokenstatapp.notifications.78801183"), mark = "mark_device") {
-                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    L10n.text("android.tokenstatapp.notify_this_device.961006a8"),
-                                    color = colors.textPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TsBrandSwitch(
-                                    checked = notifyOn,
-                                    onCheckedChange = { on ->
-                                        scope.launch {
-                                            runCatching {
-                                                if (on) PushRegistrar.enable() else PushRegistrar.disable()
-                                            }.onSuccess { notifyOn = PushRegistrar.isOn(); notifyError = null }
-                                                .onFailure { notifyError = it.message }
-                                        }
-                                    },
-                                )
-                            }
-                            // Not the iPhone's sentence: there the server names the
-                            // machine in the banner, while here the banner is
-                            // composed on the device from the reason alone and
-                            // never carries a name. Promising "which machine"
-                            // would be promising what never arrives.
-                            Text(
-                                L10n.text("android.tokenstatapp.when_an_agent_run_or_a_chat_on_one_of_your.210bf09c"),
-                                style = TextStyle(fontSize = 13.sp),
-                                color = colors.textSecondary,
-                            )
-                            if (notifyOn) {
-                                TsSecondaryButton(
-                                    label = L10n.text("android.tokenstatapp.send_a_test.edc01436"),
-                                    icon = ActionIcon.Send.vector,
-                                    small = true,
-                                    onClick = {
-                                        scope.launch {
-                                            runCatching { PushRegistrar.test() }
-                                                .onSuccess { notifyError = it }
-                                                .onFailure { notifyError = it.message }
-                                        }
-                                    },
-                                )
-                            }
-                            notifyError?.let { Text(it, color = colors.warning) }
-                        }
-                    }
+                    DeviceNotificationsCard()
                     // This device's tab bar and rail, arranged by the person
                     // holding it, where the other device-local choices live.
                     var tabsOpen by remember { mutableStateOf(false) }

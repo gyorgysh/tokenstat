@@ -117,12 +117,14 @@ fun TsBrandSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = LocalTsColors.current
     Switch(
         checked = checked,
         onCheckedChange = onCheckedChange,
         modifier = modifier,
+        enabled = enabled,
         colors = SwitchDefaults.colors(
             checkedThumbColor = Color.White,
             checkedTrackColor = colors.accent,

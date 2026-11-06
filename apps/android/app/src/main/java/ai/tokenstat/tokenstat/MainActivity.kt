@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -12,10 +10,8 @@ import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import ai.tokenstat.tokenstat.notifications.NotificationOpen
@@ -25,8 +21,6 @@ import ai.tokenstat.tokenstat.ui.logic.SplashHold
 
 class MainActivity : ComponentActivity() {
     private val model: AppViewModel by viewModels()
-    private val askNotifications =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val launchedAt = SystemClock.uptimeMillis()
@@ -39,14 +33,6 @@ class MainActivity : ComponentActivity() {
             installLaunchSplash(launchedAt)
         }
         enableEdgeToEdge()
-        // Without this the agent-attention notifications are dropped in
-        // silence on 13+, which is exactly the delivery the app exists for.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         // A notification tap carries the push reason plus the machine id and
         // nothing else. Chat reasons wait in NotificationOpen until the
         // workspaces screen can resolve them. Anything else is dropped here,

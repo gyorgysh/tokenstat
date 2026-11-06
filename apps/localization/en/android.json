@@ -2677,5 +2677,7 @@
   "android.workspacetaskresult.this_folder_is_no_longer_available_on_the.be3071ed": "This folder is no longer available on the connected computer.",
   "android.workspacetaskresult.this_task_has_no_folder_assign_one_to_revi.ec78820b": "This task has no folder. Assign one to review files and history.",
   "android.workspacetaskresult.uncommitted_files_in_this_folder.9b817339": "Uncommitted files in this folder",
-  "android.workspacetaskresult.working_tree_matches_the_last_commit.419b69e6": "Working tree matches the last commit"
+  "android.workspacetaskresult.working_tree_matches_the_last_commit.419b69e6": "Working tree matches the last commit",
+  "android.notifications.permission_blocked": "Android notifications are off for tokenstat. Allow them in system settings to receive alerts.",
+  "android.notifications.open_settings": "Open notification settings"
 }
