@@ -36,7 +36,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Mac file cards discard pending Open actions when their content changes.
 - Closing “Continue on another device” cancels draft preparation and uploads it no longer needs. Original files remain available for retry.
 - Chat captures the final output from agents that exit quickly on Mac, including short replies and error messages.
-- Remote terminals on iOS and Android keep the final output after a command exits, including when it spans several pages or the connection briefly drops. Android now shows when a command finishes. Closing an Android terminal discards late replies and connection errors from that page.
+- Remote terminals on iOS and Android keep the final output after a command exits, including when it spans several pages or the connection briefly drops. Android shows when commands finish and uses fewer status requests with updated computers. Closing an Android terminal discards late replies and connection errors from that page.
 - Android asks for notification permission when you turn on “Notify this device”. Declining no longer brings the prompt back when you rotate or reopen the app. If Android blocks notifications, the setting explains how to allow them.
 
 ## [1.12.0] - 2026-11-06

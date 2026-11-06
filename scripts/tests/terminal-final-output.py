@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-"""Exercise the production terminal exit/read method with an inert paged host."""
+"""Exercise terminal readers and backwards-compatible output replies."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -166,3 +166,34 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-phone-terminal-review-') as d
     output_filter = root / 'apps/mac/Sources/Features/Terminals/TerminalOutputFilter.swift'
     subprocess.run(['swiftc', '-parse-as-library', str(path / 'Fixture.swift'), str(output_filter), '-o', str(path / 'test')], check=True)
     subprocess.run([str(path / 'test')], check=True, timeout=15)
+
+# Existing clients ignore optional status fields while retaining exact bytes
+# and positions. Keep this compiled from the actual decoder, not a replica.
+models = (root / 'apps/mac/Sources/Bridge/Models.swift').read_text()
+start = models.index('struct PtyChunk:')
+end = models.index('\n}\n', start) + 2
+decoder = models[start:end]
+compatibility = r'''import Foundation
+''' + decoder + r'''
+@main struct Check {
+    static func main() throws {
+        let original = Data("café 日本語 ✓".utf8)
+        for exit: Any in [NSNull(), 0, 23] {
+            for end: Any in [NSNull(), 0, 500] {
+                let payload: [String: Any] = ["data": original.base64EncodedString(),
+                    "nextOffset": 500, "dropped": 3, "paused": true,
+                    "exitCode": exit, "outputEndOffset": end]
+                let chunk = try JSONDecoder().decode(PtyChunk.self,
+                    from: JSONSerialization.data(withJSONObject: payload))
+                precondition(chunk.bytes == original && chunk.nextOffset == 500 && chunk.dropped == 3)
+            }
+        }
+        print("Terminal decoder: optional status fields preserve bytes and reading positions")
+    }
+}
+'''
+with tempfile.TemporaryDirectory(prefix='tokenstat-terminal-compatibility-') as directory:
+    path = Path(directory)
+    (path / 'Check.swift').write_text(compatibility)
+    subprocess.run(['swiftc', '-parse-as-library', str(path / 'Check.swift'), '-o', str(path / 'test')], check=True)
+    subprocess.run([str(path / 'test')], check=True)

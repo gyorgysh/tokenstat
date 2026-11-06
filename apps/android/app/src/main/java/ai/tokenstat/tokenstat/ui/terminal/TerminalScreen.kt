@@ -89,6 +89,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -1146,6 +1147,14 @@ class TerminalBridge {
                 val next = (obj["nextOffset"] as? kotlinx.serialization.json.JsonPrimitive)
                     ?.content?.toLongOrNull()
                 if (next != null && next > offset) offset = next
+                val readExit = obj["exitCode"]
+                val reportsExit = readExit == JsonNull ||
+                    (readExit as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() != null
+                if (reportsExit) readInfo(obj)
+                val readEnd = obj["outputEndOffset"]
+                val outputEnd = (readEnd as? kotlinx.serialization.json.JsonPrimitive)
+                    ?.content?.toLongOrNull()?.takeIf { it >= 0 }
+                val reportsEnd = readEnd == JsonNull || outputEnd != null
                 val dropped = (obj["dropped"] as? kotlinx.serialization.json.JsonPrimitive)
                     ?.content?.toLongOrNull() ?: 0L
                 if (dropped > 0 && !droppedOutput) {
@@ -1165,7 +1174,7 @@ class TerminalBridge {
                 // Successful empty reads are also how a quiet command ends.
                 // Bound status checks to once a second while it is idle.
                 val now = System.nanoTime()
-                if (data.isEmpty() && alive && exitCode == null &&
+                if (data.isEmpty() && !reportsExit && alive && exitCode == null &&
                     (lastInfoAt == null || now - lastInfoAt >= 1_000_000_000L)
                 ) {
                     lastInfoAt = now
@@ -1178,8 +1187,9 @@ class TerminalBridge {
                     if (info != null) readInfo(info)
                 }
                 // Process exit can arrive before the final buffered pages.
-                // Keep the same cursor until one empty read drains the tail.
-                if (data.isEmpty() && (exitCode != null || !alive)) break
+                // New hosts report output EOF; older hosts use the first empty read.
+                val outputDrained = !reportsEnd || (outputEnd != null && offset >= outputEnd)
+                if (data.isEmpty() && (exitCode != null || !alive) && outputDrained) break
             }
         }
         readJob = reading

@@ -4298,12 +4298,30 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                         chunk = read_chunk()?;
                     }
                 }
-                Ok(json!({
+                let mut reply = json!({
                     "data": crate::base64::encode(&chunk.bytes),
                     "nextOffset": chunk.next_offset,
                     "dropped": chunk.dropped,
                     "paused": chunk.paused,
-                }))
+                });
+                if chunk.bytes.is_empty() {
+                    // Optional idle status avoids a separate info request.
+                    // Process exit and output EOF remain independent: an
+                    // inherited output handle can outlive the direct child.
+                    let info = manager.info(&p.id).map_err(|e| e.to_string())?;
+                    reply["exitCode"] = json!(info.exit_code);
+                    if manager
+                        .can_observe_output_end(&p.id)
+                        .map_err(|e| e.to_string())?
+                    {
+                        reply["outputEndOffset"] = json!(
+                            manager
+                                .output_end_offset(&p.id)
+                                .map_err(|e| e.to_string())?
+                        );
+                    }
+                }
+                Ok(reply)
             })
         }
 
@@ -5382,7 +5400,9 @@ mod tests {
             .unwrap();
         let _session = Session(info.id.clone());
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while manager.output_end_offset(&info.id).unwrap().is_none() {
+        while manager.output_end_offset(&info.id).unwrap().is_none()
+            || manager.info(&info.id).unwrap().exit_code.is_none()
+        {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -5394,10 +5414,82 @@ mod tests {
         .unwrap();
         assert_eq!(reply["data"], "");
         assert_eq!(reply["nextOffset"], 0);
+        assert_eq!(reply["exitCode"], 0);
+        assert_eq!(reply["outputEndOffset"], 0);
         assert!(
             started.elapsed() >= Duration::from_millis(80),
             "Older clients use held empty reads to pace their polling after output closes"
         );
+    }
+
+    #[cfg(all(feature = "local-host", unix))]
+    #[test]
+    fn terminal_read_status_keeps_process_exit_separate_from_output_eof() {
+        struct Session(String);
+        impl Drop for Session {
+            fn drop(&mut self) {
+                let _ = tokenstat_pty::manager().close(&self.0);
+            }
+        }
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join("child.py"),
+            "import time\nfrom pathlib import Path\nwhile not Path('release').exists(): time.sleep(0.01)\nprint('late output', flush=True)\n",
+        )
+        .unwrap();
+        let manager = tokenstat_pty::manager();
+        let (info, _process) = manager
+            .spawn_piped_owned_checked(
+                &tokenstat_pty::Spawn {
+                    command: "/usr/bin/python3".into(),
+                    args: vec![
+                        "-c".into(),
+                        "import subprocess, sys; subprocess.Popen([sys.executable, 'child.py'])"
+                            .into(),
+                    ],
+                    cwd: folder.path().into(),
+                    workspace_id: None,
+                    hidden: true,
+                    rows: 24,
+                    cols: 80,
+                    no_color: true,
+                    dark: None,
+                    environment: Vec::new(),
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        let _session = Session(info.id.clone());
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while manager.info(&info.id).unwrap().exit_code.is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let read = |offset| {
+            terminal_call(
+                "pty.read",
+                &json!({"id":info.id,"offset":offset}).to_string(),
+            )
+            .unwrap()
+        };
+        let early = read(0);
+        assert_eq!(early["data"], "");
+        assert_eq!(early["exitCode"], 0);
+        assert!(early.as_object().unwrap().contains_key("outputEndOffset"));
+        assert!(early["outputEndOffset"].is_null());
+        std::fs::write(folder.path().join("release"), b"ready").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while manager.output_end_offset(&info.id).unwrap().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let late = read(0);
+        assert_eq!(late["data"], crate::base64::encode(b"late output\n"));
+        assert!(!late.as_object().unwrap().contains_key("exitCode"));
+        let end = read(12);
+        assert_eq!(end["data"], "");
+        assert_eq!(end["exitCode"], 0);
+        assert_eq!(end["outputEndOffset"], 12);
     }
 
     /// The whole peer lifecycle over the real store, in one process.

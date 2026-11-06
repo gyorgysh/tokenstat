@@ -1064,6 +1064,26 @@ impl Manager {
         Ok(Some(buffer.total))
     }
 
+    /// ConPTY retains its output pipe with the console handle, independently
+    /// of child exit. Only advertise EOF tracking where it is observable.
+    pub fn can_observe_output_end(&self, id: &str) -> Result<bool, PtyError> {
+        #[cfg(windows)]
+        {
+            let session = self.get(id)?;
+            let supported = session
+                .master
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_none();
+            Ok(supported)
+        }
+        #[cfg(not(windows))]
+        {
+            self.get(id)?;
+            Ok(true)
+        }
+    }
+
     /// Wait for unread bytes or newly observed EOF without polling the buffer.
     /// Pass the EOF state returned by the previous wait (initially false).
     /// Once observed, EOF no longer wakes the caller: a child may close stdout
@@ -2818,6 +2838,41 @@ mod tests {
             environment: Vec::new(),
         })
         .expect("spawn")
+    }
+
+    #[test]
+    fn output_end_support_matches_the_actual_transport() {
+        let manager = Manager::new();
+        let terminal = spawn(&manager, "exit 0", "exit 0");
+        assert_eq!(
+            manager.can_observe_output_end(&terminal.id).unwrap(),
+            !cfg!(windows)
+        );
+        manager.close(&terminal.id).unwrap();
+        let (command, args) = if cfg!(windows) {
+            ("cmd.exe", vec!["/D".into(), "/C".into(), "exit 0".into()])
+        } else {
+            ("/bin/sh", vec!["-c".into(), "exit 0".into()])
+        };
+        let (piped, _process) = manager
+            .spawn_piped_owned_checked(
+                &Spawn {
+                    command: command.into(),
+                    args,
+                    cwd: std::env::temp_dir(),
+                    workspace_id: None,
+                    hidden: false,
+                    rows: 24,
+                    cols: 80,
+                    no_color: true,
+                    dark: None,
+                    environment: Vec::new(),
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(manager.can_observe_output_end(&piped.id).unwrap());
+        manager.close(&piped.id).unwrap();
     }
 
     /// A script that stays busy for roughly a minute without needing input.
