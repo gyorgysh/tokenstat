@@ -111,12 +111,45 @@ final class FrameCounter: @unchecked Sendable {
         peer.feedOutput("\r\n" + longURL + "\r\n")
         require(peer.visibleTextSnapshot().contains(longURL), "soft-wrapped links remain contiguous in copied screen text")
         view.isHidden = true
+        await settle()
+        let hiddenStart = frames.value
+        for batch in 0..<30 {
+            view.feedOutput("hidden batch \(batch)\r\n")
+            try? await Task.sleep(nanoseconds: 16_000_000)
+        }
+        await settle()
+        let hiddenFrames = frames.value - hiddenStart
+        print("Hidden terminal: \(hiddenFrames) frames during 30 output batches")
+        require(hiddenFrames == 0, "hidden terminal output does not present GPU frames")
         view.feedOutput("hidden output\r\n")
         view.isHidden = false
         view.requestRedraw()
         window.setContentSize(NSSize(width: 800, height: 480))
         await settle()
         require(view.visibleRowsText(0..<view.terminalDimensions.rows).joined().contains("hidden output"), "hidden output survives reveal and resize")
+        window.contentView!.isHidden = true
+        await settle()
+        let coveredStart = frames.value
+        for batch in 0..<30 {
+            view.feedOutput("covered batch \(batch)\r\n")
+            try? await Task.sleep(nanoseconds: 16_000_000)
+        }
+        await settle()
+        let coveredFrames = frames.value - coveredStart
+        print("Hidden container: \(coveredFrames) frames during 30 output batches")
+        let settledCoveredStart = frames.value
+        for batch in 30..<90 {
+            view.feedOutput("covered batch \(batch)\r\n")
+            try? await Task.sleep(nanoseconds: 16_000_000)
+        }
+        await settle()
+        let settledCoveredFrames = frames.value - settledCoveredStart
+        print("Settled hidden container: \(settledCoveredFrames) frames during 60 more output batches")
+        require(settledCoveredFrames == 0, "a hidden terminal container stops presenting frames after pending work drains")
+        window.contentView!.isHidden = false
+        view.requestRedraw()
+        await settle()
+        require(view.visibleTextSnapshot().contains("covered batch 89"), "revealing a terminal retains output received under a hidden container")
         let streamStarted = Date()
         for batch in 0..<60 {
             view.feedOutput((0..<40).map { "stream \(batch):\($0)\r\n" }.joined())
