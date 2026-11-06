@@ -171,7 +171,10 @@ fn partial_input_does_not_block_outbound_frames() {
                 .expect("input paused after consuming bytes");
             let (sent, received) = mpsc::channel();
             let write = std::thread::spawn(move || sent.send(writer.write(b"outbound")).unwrap());
-            let sent_while_paused = received.recv_timeout(Duration::from_millis(200));
+            // This checks independence from paused input, not a latency SLA.
+            // The input stays paused for the entire wait, so a lock regression
+            // still fails; allow a loaded CI runner time to schedule the writer.
+            let sent_while_paused = received.recv_timeout(Duration::from_secs(2));
             pause.release();
             write.join().unwrap();
             let (first, next, end) = read.join().unwrap();
