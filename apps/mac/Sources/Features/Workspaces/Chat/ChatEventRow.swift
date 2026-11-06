@@ -474,13 +474,13 @@ private struct ChatResponseAttachment: View {
             defer { if opening == ticket { opening = nil } }
             do {
                 let url = try await ChatFileStaging.prepare(data, id: attachment.id, name: attachment.name,
-                                                           canUse: canOpen)
-                guard !Task.isCancelled, canOpen() else { return }
+                                                           canUse: { canFinishOpening(ticket) })
+                guard !Task.isCancelled, canFinishOpening(ticket) else { return }
                 if !NSWorkspace.shared.open(url) { NSSound.beep() }
                 Task { await ChatAttachmentCache.shared.maintain() }
             } catch is CancellationError {
             } catch {
-                if canOpen() { NSSound.beep() }
+                if canFinishOpening(ticket) { NSSound.beep() }
             }
             #endif
         }
@@ -538,6 +538,10 @@ private struct ChatResponseAttachment: View {
         if type == "application/pdf" { return "doc.richtext" }
         if type.hasPrefix("text/") || type.contains("json") { return "doc.text" }
         return "doc"
+    }
+
+    private func canFinishOpening(_ ticket: UUID) -> Bool {
+        opening == ticket && canOpen()
     }
 
     private func open() {

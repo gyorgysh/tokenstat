@@ -8,6 +8,11 @@ import tempfile
 root = Path(__file__).resolve().parents[2]
 client = (root / "apps/mac/Sources/Client/ClientChatView.swift").read_text()
 gallery = (root / "apps/mac/Sources/Features/Workspaces/Chat/ChatImageGallery.swift").read_text()
+card = (root / "apps/mac/Sources/Features/Workspaces/Chat/ChatEventRow.swift").read_text()
+card_guard = card[card.index("    private func canFinishOpening("):
+                  card.index("    private func open()", card.index("    private func canFinishOpening("))]
+assert "canUse: { canFinishOpening(ticket) }" in card
+assert "guard !Task.isCancelled, canFinishOpening(ticket) else { return }" in card
 client_guard = client[client.index("    private func canOpen(_ request: PendingFileOpen)"):
                       client.index("    private func prepareFileOpen(")]
 gallery_guard = gallery[gallery.index("    private func canPerform(_ action: FileAction)"):
@@ -51,6 +56,13 @@ CLIENT_GUARD
 GALLERY_GUARD
     func allows(_ action: FileAction) -> Bool { canPerform(action) }
 }
+@MainActor final class CardPolicy {
+    var opening: UUID?
+    var permitted = true
+    func canOpen() -> Bool { permitted }
+CARD_GUARD
+    func allows(_ ticket: UUID) -> Bool { canFinishOpening(ticket) }
+}
 @main enum FileOpeningTests {
     @MainActor static func main() {
         let request = PendingFileOpen(), action = FileAction()
@@ -92,10 +104,19 @@ GALLERY_GUARD
         precondition(!client.allows(request) && !gallery.allows(action), "Revoked access blocks completed work")
         WorkCacheAccess.permitted = true
         precondition(client.allows(request) && gallery.allows(action), "Current readable files remain available")
-        print("File opening: current tickets allowed; stale navigation, image, owner and access refused")
+        let card = CardPolicy(), ticket = UUID()
+        card.opening = ticket
+        precondition(card.allows(ticket))
+        card.opening = nil
+        precondition(!card.allows(ticket), "A cleared card cannot open before task cancellation is delivered")
+        card.opening = UUID()
+        precondition(!card.allows(ticket), "An older completion cannot open a replacement request")
+        card.opening = ticket; card.permitted = false
+        precondition(!card.allows(ticket), "Current tickets still need access")
+        print("File opening: current tickets allowed; cleared/replaced card, stale navigation, image, owner and access refused")
     }
 }
-'''.replace("CLIENT_GUARD", client_guard).replace("GALLERY_GUARD", gallery_guard)
+'''.replace("CLIENT_GUARD", client_guard).replace("GALLERY_GUARD", gallery_guard).replace("CARD_GUARD", card_guard)
 
 with tempfile.TemporaryDirectory(prefix="tokenstat-file-opening-") as directory:
     work = Path(directory)
