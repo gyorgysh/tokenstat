@@ -6,6 +6,59 @@ import Darwin
 enum ChatFileIO {
     static let maximumBytes: UInt64 = 256 * 1024 * 1024
     static let chunkBytes = 512 * 1024
+
+    enum DataSource: Sendable {
+        case file(URL)
+        case base64(String)
+    }
+
+    /// Small attachments stay in memory; file-backed large transfers do not
+    /// use this path. Keep both file I/O and legacy decoding off the UI actor.
+    static func data(from source: DataSource, maximum: Int) async throws -> Data {
+        guard maximum > 0, maximum <= Int(maximumBytes) else { throw CocoaError(.fileReadTooLarge) }
+        try Task.checkCancellation()
+        let worker = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let result: Data
+            switch source {
+            case let .file(url):
+                let input = try FileHandle(forReadingFrom: url)
+                defer { try? input.close() }
+                // URL resource values may describe an earlier file at this
+                // path. Validate the descriptor that will actually be read.
+                var metadata = stat()
+                guard Darwin.fstat(input.fileDescriptor, &metadata) == 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                guard metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), metadata.st_size > 0,
+                      metadata.st_size <= off_t(maximum) else { throw CocoaError(.fileReadTooLarge) }
+                let size = Int(metadata.st_size)
+                var bytes = Data()
+                bytes.reserveCapacity(size)
+                while bytes.count <= size {
+                    try Task.checkCancellation()
+                    let chunk = try input.read(upToCount: min(chunkBytes, size + 1 - bytes.count)) ?? Data()
+                    if chunk.isEmpty { break }
+                    bytes.append(chunk)
+                }
+                guard bytes.count == size else { throw CocoaError(.fileReadCorruptFile) }
+                result = bytes
+            case let .base64(encoded):
+                guard encoded.utf8.count <= ((maximum + 2) / 3) * 4,
+                      let decoded = Data(base64Encoded: encoded), !decoded.isEmpty,
+                      decoded.count <= maximum else { throw CocoaError(.fileReadCorruptFile) }
+                result = decoded
+            }
+            try Task.checkCancellation()
+            return result
+        }
+        let result = try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: { worker.cancel() }
+        try Task.checkCancellation()
+        return result
+    }
+
     /// Copy into a new private file without allocating the whole original.
     static func copy(_ source: URL, to destination: URL) throws {
         let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])

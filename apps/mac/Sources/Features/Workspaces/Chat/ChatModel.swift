@@ -4674,11 +4674,10 @@ final class ChatModel {
                     responseAttachmentFiles[attachment.id] = cached
                     return
                 }
-                data = try Data(contentsOf: url)
+                data = try await ChatFileIO.data(from: .file(url), maximum: ChatInbox.maxBytes)
             } else {
                 let payload = try await Bridge.chatAttachment(id: id, attachmentID: attachment.id, peer: targetPeer, confirmRelay: { [weak self] in guard userInitiated else { return false }; return await self?.confirmFileRelay(name: attachment.name, size: attachment.size) ?? false })
-                guard let decoded = Data(base64Encoded: payload.data), !decoded.isEmpty, decoded.count <= ChatInbox.maxBytes else { throw CocoaError(.fileReadCorruptFile) }
-                data = decoded
+                data = try await ChatFileIO.data(from: .base64(payload.data), maximum: ChatInbox.maxBytes)
             }
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference,
                   WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else { return }
