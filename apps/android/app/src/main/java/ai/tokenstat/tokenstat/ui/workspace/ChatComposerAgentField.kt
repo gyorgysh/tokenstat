@@ -4,6 +4,7 @@ package ai.tokenstat.tokenstat.ui.workspace
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.localization.L10n
+import ai.tokenstat.tokenstat.ui.marks.HarnessMark
 import androidx.compose.material3.IconButton
 import androidx.compose.ui.platform.LocalDensity
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -26,7 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonObject
 
-/** The agent name keeps its own line; a long model must never consume it. */
+/** Keep the compact model on one line; the picker and spoken label include the full setup. */
 @Composable
 internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject?, onOpen: () -> Unit,
                                     enabled: Boolean, modifier: Modifier = Modifier) {
@@ -37,15 +39,11 @@ internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject
         .semantics { contentDescription = chatAgentSummary(backends, chat) }
         .heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(chatAgentLabel(backends, chat), style = TsType.callout.copy(fontWeight = FontWeight.Medium),
-                color = if (enabled) colors.textPrimary else colors.textTertiary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            chat?.str("model")?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = TsType.caption2, color = colors.textSecondary,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
+        Box(Modifier.clearAndSetSemantics {}) { HarnessMark(chat?.str("backend").orEmpty(), size = 16.dp) }
+        Text(chat?.str("model")?.takeIf { it.isNotBlank() } ?: chatAgentLabel(backends, chat),
+            modifier = Modifier.weight(1f), style = TsType.callout.copy(fontWeight = FontWeight.Medium),
+            color = if (enabled) colors.textPrimary else colors.textTertiary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
     }
 }
@@ -68,7 +66,7 @@ internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, 
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        // Keep native touch targets without squeezing longer agent names.
+        // Give the picker a full row when controls or larger text need it.
         if (maxWidth < 300.dp || LocalDensity.current.fontScale > 1.3f) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ChatComposerAgentField(backends, chat, onAgent, !locked, Modifier.fillMaxWidth())

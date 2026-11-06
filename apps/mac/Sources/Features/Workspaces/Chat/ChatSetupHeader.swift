@@ -429,7 +429,7 @@ struct ChatComposerControls<Chrome: View>: View {
         } else if compact && condensed {
             HStack(spacing: Theme.Space.xs) {
                 if showCompactAgent {
-                    ChatAgentField(model: model, chat: chat, locked: locked) { pickingAgent = true }
+                    ChatAgentField(model: model, chat: chat, locked: locked, compactLabel: true) { pickingAgent = true }
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
                 Button { showingAccessibleSetup = true } label: {
@@ -694,6 +694,11 @@ struct ChatAgentChoices {
     /// The agent, then only what somebody chose. "Codex · Default · Effort:
     /// Default" said three times that nothing was changed; the panel this
     /// opens shows every setting, defaults included.
+    var compactSummary: String {
+        if let name = chat.model, !name.isEmpty { return name }
+        return agentLabel
+    }
+
     var summary: String {
         let agent = agentLabel
         var parts = [agent]
@@ -717,18 +722,20 @@ struct ChatAgentField: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var locked: Bool
+    var compactLabel = false
     var onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: 6) {
-                Text(choices.summary)
+                if compactLabel { HarnessMark(id: chat.backend, size: 16).accessibilityHidden(true) }
+                Text(compactLabel ? choices.compactSummary : choices.summary)
                     #if os(macOS)
                     .font(Theme.font(12, weight: .medium))
                     #else
                     .font(Theme.callout.weight(.medium))
                     #endif
-                    .lineLimit(2)
+                    .lineLimit(compactLabel ? 1 : 2)
                     .truncationMode(.middle)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Theme.fixed(8, weight: .semibold))

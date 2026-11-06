@@ -33,8 +33,8 @@ class MobileChatSetupTest {
     private fun json(value: String) = Json.parseToJsonElement(value).jsonObject
     private val chat = json("""{"id":"mobile-layout","backend":"codex","model":"gpt-6.1-sol","mode":"execute","autonomy":"bypass","running":false}""")
     private val reading = json("""{"source":"codex","plan":"Plus","observedAtMs":1793934000000,"windows":[{"label":"5-hour","percent":36},{"label":"weekly","percent":86,"resetsAtMs":1794460000000}]}""")
-    @Composable private fun Screen(large: Boolean = false, content: @Composable () -> Unit) {
-        DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 740.dp))) {
+    @Composable private fun Screen(large: Boolean = false, width: Int = 320, content: @Composable () -> Unit) {
+        DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(width.dp, 740.dp))) {
             DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(if (large) 2f else 1f)) {
                 TsTheme(DarkColors) { MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
                     Surface(Modifier.fillMaxSize().systemBarsPadding(), color = DarkColors.background) { content() }
@@ -49,14 +49,14 @@ class MobileChatSetupTest {
         File(instrumentation.targetContext.getExternalFilesDir(null), name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
     }
-    private fun assertUnclippedAgent(name: String) {
+    private fun assertUnclippedLabel(name: String) {
         val layouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithText(name, useUnmergedTree = true).assertIsDisplayed()
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         assertEquals(1, layouts.single().lineCount)
-        assertFalse("The full agent name must fit", layouts.single().isLineEllipsized(0))
+        assertFalse("The compact label must fit", layouts.single().isLineEllipsized(0))
     }
-    @Test fun narrowComposerKeepsAgentNamesAndSetupReachable() {
+    @Test fun narrowComposerKeepsModelAndSetupReachable() {
         var setup = false
         var current by mutableStateOf(chat)
         compose.setContent { Screen {
@@ -66,15 +66,32 @@ class MobileChatSetupTest {
                     onSetup = { setup = true }, quota = { ChatQuotaBadge(reading) {} })
             }
         } }
-        assertUnclippedAgent("Codex")
+        assertUnclippedLabel("gpt-6.1-sol")
+        compose.onNodeWithContentDescription(chatAgentSummary(emptyList(), chat)).assertIsDisplayed()
         compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.chat_setup.9fa79d00")).performClick()
         assertTrue(setup)
         compose.onNodeWithText(L10n.text("android.chatpullssections.plan.fa8ed0bd")).assertDoesNotExist()
         screenshot("composer-small-codex.png")
         compose.runOnIdle { current = JsonObject(chat + ("backend" to JsonPrimitive("claude"))) }
-        assertUnclippedAgent("Claude Code")
+        assertUnclippedLabel("gpt-6.1-sol")
     }
-    @Test fun largeTextKeepsTheWholeAgentName() {
+    @Test fun standardPhoneKeepsModelAndActionsOnOneRow() {
+        compose.setContent { Screen(width = 360) {
+            Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.Bottom) {
+                ChatComposer(chat, "", {}, "Message", false, staged = emptyList(), onPick = {}, onRemove = {},
+                    onSend = {}, onStop = {}, onChange = { _, _ -> }, backends = emptyList(), onAgent = {},
+                    onSetup = {}, quota = { ChatQuotaBadge(reading) {} })
+            }
+        } }
+        assertUnclippedLabel("gpt-6.1-sol")
+        val modelBounds = compose.onNodeWithText("gpt-6.1-sol", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val setupBounds = compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.chat_setup.9fa79d00")).getUnclippedBoundsInRoot()
+        assertEquals("Normal small phones keep the picker and actions on one row",
+            (modelBounds.top.value + modelBounds.bottom.value) / 2f,
+            (setupBounds.top.value + setupBounds.bottom.value) / 2f, 1f)
+        screenshot("composer-standard-codex.png")
+    }
+    @Test fun largeTextKeepsTheModelReadable() {
         val claude = JsonObject(chat + ("backend" to JsonPrimitive("claude")))
         compose.setContent { Screen(large = true) {
             Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.Bottom) {
@@ -82,8 +99,24 @@ class MobileChatSetupTest {
                     onChange = { _, _ -> }, backends = emptyList(), onAgent = {}, quota = { ChatQuotaBadge(reading) {} })
             }
         } }
-        assertUnclippedAgent("Claude Code")
+        assertUnclippedLabel("gpt-6.1-sol")
         screenshot("composer-large-agent.png")
+    }
+    @Test fun longProviderModelsStayOnOneLineAndOpenThePicker() {
+        val longChat = JsonObject(chat + mapOf("backend" to JsonPrimitive("opencode"),
+            "model" to JsonPrimitive("provider/some-very-long-model-name"), "effort" to JsonPrimitive("medium")))
+        var opened = false
+        compose.setContent { Screen {
+            Row(Modifier.width(200.dp).padding(8.dp)) {
+                ChatComposerAgentField(emptyList(), longChat, { opened = true }, true)
+            }
+        } }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("provider/some-very-long-model-name", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(1, layouts.single().lineCount)
+        compose.onNodeWithContentDescription(chatAgentSummary(emptyList(), longChat)).performClick()
+        assertTrue(opened)
     }
     private fun screenBounds(text: String): Rect {
         fun find(node: AccessibilityNodeInfo?): Rect? {

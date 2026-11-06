@@ -19,6 +19,8 @@ private struct Fixture: Decodable {
     var showing = true
     var overview = false
     var phase = "Encrypted history QA"
+    var pickerBackend = "codex"
+    var pickerModel = "gpt-6.1-sol"
     var layoutPage: String?
     var layoutScheme: ColorScheme = .dark
     var layoutType: DynamicTypeSize = .large
@@ -256,6 +258,11 @@ private struct Fixture: Decodable {
                 }
                 reference.anchor = row.id
                 guard model.restoreSearchReadingPosition(reference) else { throw CocoaError(.coderInvalidValue) }
+            case "compact-codex", "compact-opencode", "compact-default":
+                layoutPage = "compact-picker"
+                pickerBackend = request["action"] as? String == "compact-opencode" ? "opencode" : "codex"
+                pickerModel = request["action"] as? String == "compact-default" ? ""
+                    : (pickerBackend == "opencode" ? "provider/a-very-long-model-name-with-a-suffix" : "gpt-6.1-sol")
             case "snapshot": break
             case "new-chat-layout", "list-layout", "tab-layout", "repository-chats": layoutPage = request["action"] as? String
             case "light": layoutScheme = .light
@@ -304,6 +311,8 @@ private struct Fixture: Decodable {
                         allowsSend: false, showsEmptyComposer: true, requiresHostSelection: true,
                         repositoriesLoading: true, onAdd: {}, onSend: {})
                         .environment(navigation).environment(connectivity)
+                } else if session.layoutPage == "compact-picker" {
+                    compactPicker
                 } else if session.layoutPage == "repository-chats" {
                     NavigationStack {
                         ClientChatView(peer: session.fixture.hostKey, workspaceID: session.fixture.workspaceId,
@@ -342,6 +351,23 @@ private struct Fixture: Decodable {
                 availableWorkbenchWidth: session.layoutPage == "tab-layout" ? 500 : nil)
                 .environment(navigation).environment(connectivity)
         } else { Text("History overview").frame(maxWidth: .infinity, maxHeight: .infinity) }
+    }
+
+    @ViewBuilder private var compactPicker: some View {
+        if var chat = session.model.selected {
+            let _ = { chat.backend = session.pickerBackend; chat.model = session.pickerModel; chat.effort = "medium" }()
+            VStack {
+                Spacer()
+                ChatComposerControls(model: session.model, chat: chat, locked: false, compact: true, condensed: true) {
+                    Circle().strokeBorder(Theme.accent, lineWidth: 3).frame(width: 22, height: 22)
+                    Button {} label: { Image(systemName: "keyboard").frame(width: 44, height: 44) }
+                    Button {} label: { Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 44, height: 44) }
+                }
+                .padding(16)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 20))
+            }
+            .padding(12)
+        }
     }
 
     private var layoutLists: some View {
