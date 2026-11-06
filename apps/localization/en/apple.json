@@ -5827,5 +5827,10 @@
   "apple.desktop_actions.unavailable_title": "Could not open this tool",
   "apple.usage.keychain.allow": "Allow Keychain access",
   "apple.usage.keychain.waiting": "Waiting for Keychain…",
-  "apple.usage.keychain.explanation": "macOS may ask for permission to read this login. Background checks stay silent."
+  "apple.usage.keychain.explanation": "macOS may ask for permission to read this login. Background checks stay silent.",
+  "apple.usage.keychain.notice.title": "Usage needs Keychain access",
+  "apple.usage.keychain.notice.detail": "To update {0} usage, allow access to its saved login. macOS may ask for permission.",
+  "apple.usage.keychain.notice.later": "Later",
+  "apple.usage.keychain.notice.settings_hint": "You can allow access later in Account → Plan limits.",
+  "apple.usage.keychain.notice.allowed": "Keychain access was allowed. You can manage usage in Account → Plan limits."
 }

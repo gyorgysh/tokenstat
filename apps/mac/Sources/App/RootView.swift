@@ -631,6 +631,12 @@ struct RootView: View {
             }
             .allowsHitTesting(false)
         }
+        .overlay(alignment: .bottomTrailing) {
+            UsageKeychainNotice {
+                UserDefaults.standard.set("planLimits", forKey: "account.settingsPane")
+                navigate(to: .global(.account))
+            }
+        }
         .onChange(of: isLiveResizing) { _, resizing in
             if resizing { heatmapHover.update(nil) }
         }
