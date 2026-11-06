@@ -31,6 +31,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - New chat on iOS keeps the composer visible while a computer connects.
 - Old built-in instructions are removed from starter personas even if they were saved again. Custom instructions and existing conversations keep theirs.
 - Mac update checks compare against the running app, and installation rejects an older version than the one already installed.
+- Fixed attachment errors when a previously inspected file had been edited.
 
 ## [1.12.0] - 2026-11-06
 

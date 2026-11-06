@@ -22,17 +22,9 @@ enum ChatFileIO {
             let result: Data
             switch source {
             case let .file(url):
-                let input = try FileHandle(forReadingFrom: url)
+                let (input, expected) = try openFile(url, maximum: UInt64(maximum))
                 defer { try? input.close() }
-                // URL resource values may describe an earlier file at this
-                // path. Validate the descriptor that will actually be read.
-                var metadata = stat()
-                guard Darwin.fstat(input.fileDescriptor, &metadata) == 0 else {
-                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-                }
-                guard metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), metadata.st_size > 0,
-                      metadata.st_size <= off_t(maximum) else { throw CocoaError(.fileReadTooLarge) }
-                let size = Int(metadata.st_size)
+                let size = Int(expected)
                 var bytes = Data()
                 bytes.reserveCapacity(size)
                 while bytes.count <= size {
@@ -59,11 +51,35 @@ enum ChatFileIO {
         return result
     }
 
+    /// Validate the opened file, since URL metadata can outlive a rewrite.
+    /// Nonblocking open also lets us reject pipes without waiting for a writer.
+    private static func openFile(_ url: URL, maximum: UInt64) throws -> (FileHandle, UInt64) {
+        guard url.isFileURL else { throw CocoaError(.fileReadUnsupportedScheme) }
+        try Task.checkCancellation()
+        let descriptor = url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { errno = EINVAL; return Int32(-1) }
+            return Darwin.open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        }
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        do {
+            var metadata = stat()
+            guard Darwin.fstat(descriptor, &metadata) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            guard metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), metadata.st_size > 0,
+                  UInt64(metadata.st_size) <= maximum else { throw CocoaError(.fileReadTooLarge) }
+            return (file, UInt64(metadata.st_size))
+        } catch {
+            try? file.close()
+            throw error
+        }
+    }
+
     /// Copy into a new private file without allocating the whole original.
     static func copy(_ source: URL, to destination: URL) throws {
-        let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-        guard values.isRegularFile == true, let expected = values.fileSize, expected > 0,
-              UInt64(expected) <= maximumBytes else { throw CocoaError(.fileReadTooLarge) }
+        let (input, expected) = try openFile(source, maximum: maximumBytes)
+        defer { try? input.close() }
         // The existence check and creation must be one operation: another
         // store/process may retain this same original at the same time.
         let descriptor = Darwin.open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
@@ -71,23 +87,19 @@ enum ChatFileIO {
         let output = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? output.close() }
         do {
-            let input = try FileHandle(forReadingFrom: source); defer { try? input.close() }
             var count: UInt64 = 0
             while let chunk = try input.read(upToCount: chunkBytes), !chunk.isEmpty {
                 try Task.checkCancellation()
                 count += UInt64(chunk.count)
-                guard count <= UInt64(expected) else { throw CocoaError(.fileReadCorruptFile) }
+                guard count <= expected else { throw CocoaError(.fileReadCorruptFile) }
                 try output.write(contentsOf: chunk)
             }
-            guard count == UInt64(expected) else { throw CocoaError(.fileReadCorruptFile) }
+            guard count == expected else { throw CocoaError(.fileReadCorruptFile) }
             try output.synchronize()
         } catch { try? FileManager.default.removeItem(at: destination); throw error }
     }
     static func hash(_ file: URL) throws -> (UInt64, String) {
-        let values = try file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-        guard values.isRegularFile == true, let size = values.fileSize, size > 0,
-              UInt64(size) <= maximumBytes else { throw CocoaError(.fileReadTooLarge) }
-        let handle = try FileHandle(forReadingFrom: file)
+        let (handle, size) = try openFile(file, maximum: maximumBytes)
         defer { try? handle.close() }
         var hash = SHA256()
         var count: UInt64 = 0
@@ -97,7 +109,7 @@ enum ChatFileIO {
             guard count <= maximumBytes else { throw CocoaError(.fileReadTooLarge) }
             hash.update(data: data)
         }
-        guard count == UInt64(size) else { throw CocoaError(.fileReadCorruptFile) }
+        guard count == size else { throw CocoaError(.fileReadCorruptFile) }
         return (count, hash.finalize().map { String(format: "%02x", $0) }.joined())
     }
 }
