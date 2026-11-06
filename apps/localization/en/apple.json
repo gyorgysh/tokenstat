@@ -157,6 +157,7 @@
   "apple.appinfo.ai_native_product_engineer.e8e5f442": "AI-native product engineer",
   "apple.appinfo.gyorgy.cdb983c1": "Gyorgy",
   "apple.appinfo.pueev_o_all_rights_reserved.b1734f76": "© pueev OÜ. All rights reserved.",
+  "apple.appinstaller.older_version": "This update cannot replace a newer or unrecognized version of tokenstat.",
   "apple.appinstaller.it_was_signed_by_somebody_else.8cf77a94": "it was signed by somebody else",
   "apple.appinstaller.macos_refused_the_download_0.b81bebd3": "macOS refused the download: {0}",
   "apple.appinstaller.no_mount_point_in_hdiutil_s_output.95266b5d": "no mount point in hdiutil's output",

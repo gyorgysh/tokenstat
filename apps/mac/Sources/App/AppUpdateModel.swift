@@ -37,6 +37,11 @@ final class AppUpdateModel {
     private(set) var stage: Stage = .idle
     private(set) var retryAfter: Date?
     private(set) var failureDismissed = false
+    private let runningVersion: String
+
+    init(runningVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") {
+        self.runningVersion = runningVersion
+    }
 
     var isRateLimited: Bool { retryAfter.map { $0 > Date() } ?? false }
 
@@ -46,9 +51,12 @@ final class AppUpdateModel {
         checkNotice = nil
     }
 
-    var isAvailable: Bool { release?.isAvailable == true }
+    var isAvailable: Bool {
+        guard let release else { return false }
+        return release.isAvailable && AppUpdateVersion.isNewer(release.latest, than: runningVersion)
+    }
     var latest: String { release?.latest ?? "" }
-    var current: String { release?.current ?? "" }
+    var current: String { runningVersion }
     var htmlURL: String { release?.htmlURL ?? "" }
     var downloadURL: URL? { release?.downloadURL }
 
@@ -133,7 +141,7 @@ final class AppUpdateModel {
             release = found
             // Compare the skip against the fresh release, so skipping one
             // version still lets automatic checks discover later versions.
-            guard found.isAvailable, !isSkipped else {
+            guard isAvailable, !isSkipped else {
                 stage = .idle
                 return
             }
@@ -148,10 +156,11 @@ final class AppUpdateModel {
         do {
             let downloaded = try await Bridge.appUpdateDownload()
             stage = .installing
+            let runningVersion = self.runningVersion
             // Off the main actor: mounting an image and copying a bundle would
             // otherwise freeze the window for the whole of it.
             try await Task.detached(priority: .utility) {
-                try AppInstaller.install(imagePath: downloaded.path)
+                try AppInstaller.install(imagePath: downloaded.path, runningVersion: runningVersion)
             }.value
             stage = .readyToRelaunch
         } catch {
@@ -198,5 +207,33 @@ final class AppUpdateModel {
         guard let latest = release?.latest, !latest.isEmpty else { return }
         UserDefaults.standard.set(latest, forKey: Self.skippedKey)
         stage = .idle
+    }
+}
+
+/// Marketing versions use numeric components. Unknown formats never authorize an update.
+enum AppUpdateVersion {
+    static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult? {
+        func components(_ version: String) -> [UInt64]? {
+            let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+            guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
+            let values = parts.compactMap { UInt64($0) }
+            return values.count == parts.count ? values : nil
+        }
+        guard let left = components(lhs), let right = components(rhs) else { return nil }
+        for index in 0..<max(left.count, right.count) {
+            let a = index < left.count ? left[index] : 0
+            let b = index < right.count ? right[index] : 0
+            if a != b { return a < b ? .orderedAscending : .orderedDescending }
+        }
+        return .orderedSame
+    }
+
+    static func isNewer(_ offered: String, than current: String) -> Bool {
+        compare(offered, current) == .orderedDescending
+    }
+
+    static func canInstall(offered: String, running: String, installed: String) -> Bool {
+        isNewer(offered, than: running) &&
+            [.orderedSame, .orderedDescending].contains(compare(offered, installed))
     }
 }

@@ -20,7 +20,7 @@ enum TestFailure: Error { case offline, download, installation }
     static func appUpdateDownload() async throws -> DownloadedFile { try download() }
 }
 enum AppInstaller {
-    static func install(imagePath: String) throws {
+    static func install(imagePath: String, runningVersion: String) throws {
         if imagePath == "fail" { throw TestFailure.installation }
     }
     static func relaunch() {}
@@ -28,7 +28,28 @@ enum AppInstaller {
 
 @main struct AppUpdateModelTests {
     @MainActor static func main() async {
-        let offline = AppUpdateModel()
+        assert(AppUpdateVersion.isNewer("1.13.0", than: "1.12.0"))
+        assert(AppUpdateVersion.isNewer("1.10", than: "1.9"))
+        assert(!AppUpdateVersion.isNewer("1.13", than: "1.13.0"))
+        for malformed in ["", "1..13", "1.13-beta", "9999999999999999999999999", "1.１２"] {
+            assert(!AppUpdateVersion.isNewer(malformed, than: "1.0"))
+            assert(!AppUpdateVersion.isNewer("2.0", than: malformed))
+        }
+        assert(AppUpdateVersion.canInstall(offered: "1.13", running: "1.12", installed: "1.13.0"))
+        assert(!AppUpdateVersion.canInstall(offered: "1.13", running: "1.12", installed: "1.14"))
+        assert(!AppUpdateVersion.canInstall(offered: "1.13", running: "1.13", installed: "1.12"))
+        assert(!AppUpdateVersion.canInstall(offered: "1.13", running: "1.12", installed: ""))
+        // An older daemon can call a release newer even when the UI is ahead.
+        for release in ["1.12.0", "1.13.0", "invalid"] {
+            let development = AppUpdateModel(runningVersion: "1.13.0")
+            Bridge.check = { AppUpdate(current: "1.11.0", latest: release) }
+            Bridge.download = { fatalError("An equal, older or invalid release must never download") }
+            await development.checkAndInstall()
+            assert(development.stage == .idle && !development.isAvailable)
+            assert(development.current == "1.13.0")
+        }
+        Bridge.download = { DownloadedFile(path: "test") }
+        let offline = AppUpdateModel(runningVersion: "1.0")
         Bridge.check = { throw TestFailure.offline }
         let manual = Task { await offline.checkNow() }
         while offline.failure == nil { await Task.yield() }
@@ -45,7 +66,7 @@ enum AppInstaller {
         assert(offline.stage == .idle && offline.failure == nil)
         assert(!offline.failureDismissed)
 
-        let limited = AppUpdateModel()
+        let limited = AppUpdateModel(runningVersion: "1.0")
         Bridge.check = { AppUpdate(retryAt: Date().addingTimeInterval(600).timeIntervalSince1970) }
         await limited.checkAndInstall()
         assert(limited.isRateLimited && limited.failure != nil && !limited.isAvailable)
@@ -58,7 +79,7 @@ enum AppInstaller {
         assert(!limited.failureDismissed && limited.failure != nil)
         assert(limited.checkNotice != AppUpdateModel.upToDateMessage)
 
-        let expired = AppUpdateModel()
+        let expired = AppUpdateModel(runningVersion: "1.0")
         Bridge.check = { AppUpdate(retryAt: Date().addingTimeInterval(-1).timeIntervalSince1970) }
         await expired.checkAndInstall()
         assert(!expired.isRateLimited)
@@ -67,7 +88,7 @@ enum AppInstaller {
         assert(expired.failure == nil && expired.retryAfter == nil)
 
         #if os(macOS)
-        let success = AppUpdateModel()
+        let success = AppUpdateModel(runningVersion: "1.0")
         Bridge.check = {
             assert(success.stage == .checking && success.isChecking)
             return AppUpdate()
@@ -82,7 +103,7 @@ enum AppInstaller {
         await success.checkNow()
         assert(success.isReady)
 
-        let failedDownload = AppUpdateModel()
+        let failedDownload = AppUpdateModel(runningVersion: "1.0")
         Bridge.check = { AppUpdate() }
         Bridge.download = { throw TestFailure.download }
         await failedDownload.checkAndInstall()

@@ -43,6 +43,7 @@ enum AppInstaller {
         case rejectedByGatekeeper(String)
         case authorizationFailed(String)
         case replaceFailed(String)
+        case olderVersion
 
         var errorDescription: String? {
             switch self {
@@ -53,6 +54,7 @@ enum AppInstaller {
             case .authorizationFailed(let why):
                 return L10n.text("apple.appinstaller.the_update_needs_your_mac_password_to_repl.b47c6644", "\(why)")
             case .replaceFailed(let why): return L10n.text("apple.appinstaller.the_update_could_not_be_put_in_place_0.1c64b8f4", "\(why)")
+            case .olderVersion: return L10n.text("apple.appinstaller.older_version")
             }
         }
     }
@@ -62,7 +64,7 @@ enum AppInstaller {
     /// Off the main actor: it mounts a disk image and copies tens of megabytes,
     /// and doing that on the main thread would freeze the window for the whole
     /// of it.
-    static func install(imagePath: String) throws {
+    static func install(imagePath: String, runningVersion: String) throws {
         let mountPoint = try attach(imagePath)
         defer { detach(mountPoint) }
 
@@ -72,6 +74,11 @@ enum AppInstaller {
         }
 
         try verify(mounted)
+        let offered = bundleVersion(at: mounted)
+        let installed = bundleVersion(at: Bundle.main.bundleURL)
+        guard AppUpdateVersion.canInstall(offered: offered, running: runningVersion, installed: installed) else {
+            throw Failure.olderVersion
+        }
         try replaceRunningBundle(with: mounted)
         // The Dock and LaunchServices cache a bundle's icon and identity the
         // first time they see it. Replacing the bundle in place leaves that
@@ -330,6 +337,11 @@ enum AppInstaller {
         let plist = bundle.appendingPathComponent("Contents/Info.plist")
         guard let dict = NSDictionary(contentsOf: plist) as? [String: Any] else { return nil }
         return dict["CFBundleIdentifier"] as? String
+    }
+
+    private static func bundleVersion(at bundle: URL) -> String {
+        let plist = bundle.appendingPathComponent("Contents/Info.plist")
+        return (NSDictionary(contentsOf: plist) as? [String: Any])?["CFBundleShortVersionString"] as? String ?? ""
     }
 
     /// Re-register the bundle with LaunchServices.
