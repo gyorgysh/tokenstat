@@ -1,6 +1,6 @@
 ### Text: SwiftTerm
 
-Applies to: SwiftTerm 1.99.2
+Applies to: SwiftTerm 1.99.3
 
 MIT License
 

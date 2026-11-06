@@ -124,7 +124,7 @@ sources = [
     {'path': str(fixture), 'buildPhase': 'resources'},
 ]
 project = {'name': 'DesktopDemo', 'options': {'deploymentTarget': {'macOS': '14.0'}},
-           'packages': {'SwiftTerm': {'url': 'https://github.com/migueldeicaza/SwiftTerm.git', 'exactVersion': '1.99.2'}},
+           'packages': {'SwiftTerm': {'url': 'https://github.com/migueldeicaza/SwiftTerm.git', 'exactVersion': '1.99.3'}},
            'settings': {'base': {'SWIFT_VERSION': '5.0', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'DEBUG WORKBENCH_QA',
                                  'CODE_SIGN_IDENTITY': '-', 'MARKETING_VERSION': '1.7.0', 'CURRENT_PROJECT_VERSION': '1'}},
            'targets': {'DesktopDemo': {'type': 'application', 'platform': 'macOS', 'sources': sources,

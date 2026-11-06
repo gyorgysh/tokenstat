@@ -1039,7 +1039,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         return value.hasPrefix("/") ? value : nil
     }
     nonisolated func scrolled(source: TerminalView, position: Double) {}
-    nonisolated func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    nonisolated func requestOpenLink(source: TerminalView, request: TerminalLinkRequest) {}
     nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
     nonisolated func clipboardCopy(source: TerminalView, content: Data) {
         guard Thread.isMainThread, let text = String(data: content, encoding: .utf8) else { return }

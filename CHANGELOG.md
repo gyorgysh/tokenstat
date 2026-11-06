@@ -21,7 +21,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Streaming replies and switching between long chats use less processing on Mac, iPhone and iPad.
 - Diff previews in iPhone and iPad chats follow the text size setting and fit the available width.
 - Chat stays responsive while preparing larger attachments on Mac, iPhone and iPad.
-- Plain terminal logs take less processing on Mac, iPhone and iPad.
+- Terminals on Mac, iPhone and iPad use less CPU and memory when processing text and scrolling.
 - Remote terminals display new output with less delay.
 - Team online status uses fewer requests while the app is open and stops repeating updates while it is hidden. Accounts with no teams skip foreground status requests.
 - On iPhone and iPad, images slide between pages in the viewer, with zoomed images keeping their own pan gestures. Zoom stays responsive after using Next or Previous.

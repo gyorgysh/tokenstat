@@ -20,7 +20,7 @@ final class FrameCounter: @unchecked Sendable {
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     nonisolated func scrolled(source: TerminalView, position: Double) {}
-    nonisolated func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    nonisolated func requestOpenLink(source: TerminalView, request: TerminalLinkRequest) {}
     nonisolated func bell(source: TerminalView) {}
     nonisolated func clipboardCopy(source: TerminalView, content: Data) {}
     nonisolated func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}

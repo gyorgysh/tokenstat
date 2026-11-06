@@ -121,6 +121,14 @@ private struct ClientAccountContent: View {
                     case .legal:
                         legalPane
                     }
+
+                    Text(L10n.text("common.app_version_build", AppInfo.version, AppInfo.build))
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, Theme.Space.s)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("account.appVersion")
                 }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.s)

@@ -47,7 +47,7 @@ sources = [
 ]
 project = {
     "name": "RoutingQA", "options": {"deploymentTarget": {"iOS": "17.0", "macOS": "14.0"}},
-    "packages": {"SwiftTerm": {"url": "https://github.com/migueldeicaza/SwiftTerm.git", "exactVersion": "1.99.2"}},
+    "packages": {"SwiftTerm": {"url": "https://github.com/migueldeicaza/SwiftTerm.git", "exactVersion": "1.99.3"}},
     "settings": {"base": {"SWIFT_VERSION": "5.0", "CODE_SIGNING_ALLOWED": "NO",
                           "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "DEBUG WORKBENCH_QA"}},
     "targets": {

@@ -556,7 +556,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     nonisolated func scrolled(source: TerminalView, position: Double) {}
 
-    nonisolated func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    nonisolated func requestOpenLink(source: TerminalView, request: TerminalLinkRequest) {}
 
     nonisolated func clipboardCopy(source: TerminalView, content: Data) {
         if let text = String(data: content, encoding: .utf8) {

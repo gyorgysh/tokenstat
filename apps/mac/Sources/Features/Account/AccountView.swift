@@ -116,13 +116,7 @@ struct AccountView: View {
                     notificationsCard
                     licensesCard
                     deleteAccountCard
-                    Group {
-                        privacyNote
-                        Text(L10n.text("common.app_version_build", AppInfo.version, AppInfo.build))
-                            .font(Theme.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
+                    privacyNote
                     #endif
                 }
                 .padding(Theme.Space.m)

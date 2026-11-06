@@ -28,7 +28,7 @@ packages:
   # is enabled by the command-line build scripts and CI.
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
-    exactVersion: 1.99.2
+    exactVersion: 1.99.3
 
 settings:
   base:
@@ -286,8 +286,8 @@ settings:
     # 212 is spent on the 1.9.0 relay tint fix. 213 went up as 1.10.0.
     # 214 is 1.10.0 again, with the 3D model drag and access card fixes.
     # 215 is 1.11.0.
-    # 225 is the last TestFlight checkpoint; 226 carries the reviewed release.
-    CURRENT_PROJECT_VERSION: "226"
+    # 226 is uploaded; 227 adds the SwiftTerm update and the iOS version footer.
+    CURRENT_PROJECT_VERSION: "227"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
