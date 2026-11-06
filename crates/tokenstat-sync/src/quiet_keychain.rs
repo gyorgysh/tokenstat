@@ -17,11 +17,14 @@ struct Request {
 pub(crate) struct Reply {
     pub status: i32,
     pub data: Option<Vec<u8>>,
+    #[serde(default)]
+    pub has_login: bool,
 }
 fn unavailable() -> Reply {
     Reply {
         status: -25291,
         data: None,
+        has_login: false,
     }
 }
 
@@ -81,13 +84,11 @@ fn serve(interactive: bool) -> Option<u8> {
         get_generic_password(&request.service, &request.account).map(Some)
     };
     let reply = match result {
-        Ok(data) => Reply {
-            status: 0,
-            data: if interactive { None } else { data },
-        },
+        Ok(data) => successful_reply(&request.service, data, interactive),
         Err(error) => Reply {
             status: error.code(),
             data: None,
+            has_login: false,
         },
     };
     let output = serde_json::to_vec(&reply).ok()?;
@@ -203,27 +204,66 @@ pub fn authorize_usage(source: &str) -> Result<(), String> {
         "muse" => (vec!["ai.meta.dev.credentials".into()], "meta".into()),
         _ => return Err("This provider does not support Keychain authorization.".into()),
     };
-    let mut readable = false;
+    authorize_items(&services, &account, |service, interactive| {
+        request_mode(service, &account, None, interactive)
+    })
+}
+
+fn successful_reply(service: &str, data: Option<Vec<u8>>, interactive: bool) -> Reply {
+    let has_login = data
+        .as_deref()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+        .is_some_and(|value| {
+            let token = if service.starts_with("Claude Code-credentials") {
+                value.pointer("/claudeAiOauth/accessToken")
+            } else if service == "ai.meta.dev.credentials" {
+                value.get("access_token")
+            } else {
+                None
+            };
+            token
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.trim().is_empty())
+        });
+    Reply {
+        status: 0,
+        data: if interactive { None } else { data },
+        has_login,
+    }
+}
+
+fn authorize_items(
+    services: &[String],
+    account: &str,
+    mut read: impl FnMut(&str, bool) -> Reply,
+) -> Result<(), String> {
+    let mut denied = Vec::new();
     for service in services {
-        if !authorization_target(&service, &account) {
+        if !authorization_target(service, account) {
             continue;
         }
-        // Missing items need no dialog. An existing accessible item needs no grant.
-        match request(&service, &account, None).status {
-            -25300 => continue,
-            0 => {
-                readable = true;
-                continue;
-            }
-            _ => {}
+        let reply = read(service, false);
+        match reply.status {
+            0 if reply.has_login => return Ok(()),
+            0 | -25300 => {}
+            _ => denied.push(service),
         }
-        return authorization_result(request_mode(&service, &account, None, true).status);
     }
-    if readable {
-        Ok(())
-    } else {
-        Err("No saved login was found. Sign in with the provider first.".into())
+    for service in denied {
+        let reply = read(service, true);
+        authorization_result(reply.status)?;
+        if !reply.has_login {
+            continue;
+        }
+        // Allow Once only grants this short-lived child access. Verify a new
+        // silent reader can use the login before claiming authorization stuck.
+        let remembered = read(service, false);
+        if remembered.status == 0 && remembered.has_login {
+            return Ok(());
+        }
+        return Err("Access was allowed for this check only. Choose Always Allow in the macOS prompt to remember access for background usage checks.".into());
     }
+    Err("The saved items contain no usable login. Sign in with the provider, then try again in Account → Plan limits.".into())
 }
 
 fn authorization_result(status: i32) -> Result<(), String> {
@@ -250,6 +290,62 @@ mod tests {
         assert!(!authorization_target("Claude Code-credentials", ""));
         assert!(authorize_usage("codex").is_err());
     }
+    #[test]
+    fn plugin_credentials_never_count_as_authorized_login() {
+        let reply = successful_reply(
+            "Claude Code-credentials",
+            Some(br#"{"mcpOAuth":{"plugin":"fixture"}}"#.to_vec()),
+            true,
+        );
+        assert!(!reply.has_login);
+        assert!(reply.data.is_none());
+        let reply = successful_reply(
+            "Claude Code-credentials",
+            Some(br#"{"claudeAiOauth":{"accessToken":"fixture"}}"#.to_vec()),
+            true,
+        );
+        assert!(reply.has_login);
+        assert!(
+            reply.data.is_none(),
+            "interactive authorization must not return credentials"
+        );
+    }
+
+    #[test]
+    fn authorization_requires_a_usable_login_in_a_fresh_silent_child() {
+        let services = vec!["ai.meta.dev.credentials".into()];
+        let mut calls = Vec::new();
+        let result = authorize_items(&services, "meta", |_, interactive| {
+            calls.push(interactive);
+            if calls.len() == 1 {
+                return unavailable();
+            }
+            successful_reply(
+                "ai.meta.dev.credentials",
+                Some(br#"{"access_token":"fixture"}"#.to_vec()),
+                interactive,
+            )
+        });
+        assert!(result.is_ok());
+        assert_eq!(calls, vec![false, true, false]);
+        let once = authorize_items(&services, "meta", |_, interactive| {
+            if interactive {
+                successful_reply(
+                    "ai.meta.dev.credentials",
+                    Some(br#"{"access_token":"fixture"}"#.to_vec()),
+                    true,
+                )
+            } else {
+                unavailable()
+            }
+        });
+        assert!(once.unwrap_err().contains("Always Allow"));
+        let plugins = authorize_items(&services, "meta", |_, interactive| {
+            successful_reply("ai.meta.dev.credentials", Some(b"{}".to_vec()), interactive)
+        });
+        assert!(plugins.is_err());
+    }
+
     #[test]
     fn cancellation_and_missing_items_fail_closed() {
         assert!(authorization_result(0).is_ok());
