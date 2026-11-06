@@ -39,7 +39,8 @@ struct StreamingText: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if #available(macOS 15, iOS 18, *), live && enabled && !reduceMotion {
+        // Settled chunks do not need a timeline or a custom text renderer.
+        if #available(macOS 15, iOS 18, *), live && enabled && !reduceMotion && !arrivals.isEmpty {
             StreamingWordText(text: text, arrivals: arrivals, revision: revision)
         } else {
             text
