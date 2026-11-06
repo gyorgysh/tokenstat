@@ -116,8 +116,8 @@ impl Guard {
     ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
         self.spawn_with_io(request, false)
     }
-    #[cfg(all(test, unix))]
-    fn spawn_piped(
+    /// Structured, noninteractive agent output must survive a quick child exit.
+    pub fn spawn_piped(
         &mut self,
         request: &tokenstat_pty::Spawn,
     ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {

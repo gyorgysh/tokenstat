@@ -1020,8 +1020,8 @@ pub fn run(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // The wrapper stays in its PTY; the CLI's own group contains only
-        // this turn's children. Stop retires that group before the wrapper.
+        // The CLI's own group contains only this turn's children.
+        // Stop retires that group before the wrapper.
         command.process_group(0);
         // SAFETY: the standalone runner is single-threaded here. The handler
         // only stores an atomic flag and does not touch allocation or I/O.

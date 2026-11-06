@@ -1370,8 +1370,7 @@ fn spawn_session_process(
         // a hidden session: it is never listed, so no client can type into
         // it. A pipe left open instead made Claude wait three seconds for
         // input on every turn and then print a warning, which arrived in the
-        // reply because stderr shares the output pipe. On a Mac the PTY is a
-        // terminal, so Claude never waited there.
+        // reply because stderr shares the output pipe.
         process
             .stdin(Stdio::null())
             .stderr(output.try_clone()?)
@@ -3575,6 +3574,31 @@ mod tests {
         assert_eq!(m.output_end_offset(&process.id).unwrap(), Some(end));
         m.close(&process.id).unwrap();
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn piped_output_survives_exit_before_the_reader_starts() {
+        let expected = "{\"type\":\"system\",\"session_id\":\"quick-session\"}\n{\"type\":\"text\",\"data\":\"café 日本語 ✓\"}\n";
+        let mut command = CommandBuilder::new("/usr/bin/printf");
+        command.args(["%s", expected]);
+        let (_, mut child, mut reader, _) = spawn_session_process(
+            command,
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(child.wait().unwrap().success());
+        // The producer is already gone before any output is consumed.
+        let mut actual = Vec::new();
+        reader.read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, expected.as_bytes());
     }
 
     #[test]

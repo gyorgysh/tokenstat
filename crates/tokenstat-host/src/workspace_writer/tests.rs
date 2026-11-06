@@ -36,6 +36,28 @@ fn request(folder: &Path, script: &str) -> tokenstat_pty::Spawn {
 }
 
 #[test]
+fn structured_runs_use_closed_input_and_preserve_raw_output() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut writer = Guard::acquire(temp.path()).unwrap();
+    let info = writer.spawn_piped(&request(temp.path(),
+        "if [ -t 0 ] || [ -t 1 ] || [ -t 2 ]; then exit 7; fi; if read -r input; then exit 8; fi; printf 'raw café 日本語 ✓\\n'; printf 'error details\\n' >&2; exit 23"
+    )).unwrap();
+    let _session = Session(info.id.clone());
+    let manager = tokenstat_pty::manager();
+    wait_until("structured output EOF", || {
+        manager.output_end_offset(&info.id).unwrap().is_some()
+    });
+    wait_until("structured process exit", || {
+        !manager.info(&info.id).unwrap().alive
+    });
+    assert_eq!(manager.info(&info.id).unwrap().exit_code, Some(23));
+    assert_eq!(
+        manager.read(&info.id, 0).unwrap().bytes,
+        "raw café 日本語 ✓\nerror details\n".as_bytes()
+    );
+}
+
+#[test]
 fn closed_output_and_a_dropped_guard_keep_observing_a_live_process() {
     let temp = tempfile::tempdir().unwrap();
     let mut writer = Guard::acquire(temp.path()).unwrap();

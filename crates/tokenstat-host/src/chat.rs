@@ -4278,7 +4278,7 @@ impl Store {
         let spawn_argv = live_speed.as_ref().map_or(&argv, |live| &live.argv);
         tokenstat_sync::push::begin_activity(id, activity_revision);
         let info = match writer
-            .spawn(&tokenstat_pty::Spawn {
+            .spawn_piped(&tokenstat_pty::Spawn {
                 command: crate::launcher::spawn_command(&spawn_argv[0]),
                 args: spawn_argv[1..].to_vec(),
                 cwd: workspace.path,
@@ -11227,8 +11227,9 @@ mod tests {
             if let Some(goal_status) = goal_status {
                 record.push_str(&json!({"type":"tool_call","subtype":"completed","tool_call":{"updateGoalToolCall":{"args":{"status":goal_status},"result":{"success":{"status":goal_status}}}}}).to_string());
             }
-            let process = tokenstat_pty::manager()
-                .spawn(&tokenstat_pty::Spawn {
+            let mut writer = crate::workspace_writer::Guard::acquire(root.path()).unwrap();
+            let process = writer
+                .spawn_piped(&tokenstat_pty::Spawn {
                     command: "/usr/bin/printf".into(),
                     args: vec!["%s\n".into(), record],
                     cwd: root.path().into(),
