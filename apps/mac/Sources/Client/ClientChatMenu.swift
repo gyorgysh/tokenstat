@@ -104,10 +104,9 @@ struct ClientChatMenu: View {
         .confirmationDialog(
             L10n.text("apple.clientchatview.delete_this_chat.848dad9b"),
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-            titleVisibility: .visible
-        ) {
+            titleVisibility: .visible, presenting: pendingDelete
+        ) { chat in
             Button(L10n.text("apple.clientchatview.delete_chat.93291d9c"), role: .destructive) {
-                guard let chat = pendingDelete else { return }
                 pendingDelete = nil
                 removing = true
                 let ticket = navigation.chatActionTicket()
@@ -115,12 +114,14 @@ struct ClientChatMenu: View {
                     defer { removing = false }
                     guard visible, ownsProject, navigation.acceptsChatAction(ticket) else { return }
                     let removed = await model.remove(chat, in: workspaceID)
-                    guard removed, visible, ownsProject, navigation.acceptsChatAction(ticket) else { return }
+                    // The completed deletion must retire sibling caches even
+                    // if selecting the next chat already changed navigation.
+                    guard removed, ownsProject else { return }
                     onDelete?(chat)
                 }
             }
             Button(L10n.text("apple.clientchatview.keep_it.fdce5da2"), role: .cancel) { pendingDelete = nil }
-        } message: {
+        } message: { _ in
             Text(L10n.text("apple.clientchatview.the_transcript_stays_on_0_until_you_delete.2ccfbdf7",
                            hostName.isEmpty ? L10n.text("apple.clientchatview.the_computer.da52d93a") : hostName))
         }

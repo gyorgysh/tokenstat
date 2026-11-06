@@ -51,6 +51,8 @@ private struct ClientChatContent: View {
     @State private var viewer = UUID()
     @State private var visible = false
     @Environment(\.clientChatPresentationID) private var presentationID
+    @Environment(ClientChatSessions.self) private var readers
+    @Environment(ClientProjectChats.self) private var projects
     private var model: ChatModel { session.model }
     private var loaded: Bool {
         get { session.loaded }
@@ -411,37 +413,7 @@ private struct ClientChatContent: View {
             if filteredChats.isEmpty {
                 Text(L10n.text("apple.clientchatview.no_matching_conversations_adjust_your_sear.37233882")).font(ClientType.label).foregroundStyle(.secondary).clientCardRow()
             }
-            ForEach(filteredChats) { chat in
-                HStack {
-                    Button {
-                        guard visible, publicationLayout == navigation.stackGeneration else { return }
-                        navigation.chooseWithinChat(session: session, presentationID: presentationID)
-                        publicationIntent = navigation.chatHandoff.intent
-                        publicationLayout = navigation.stackGeneration
-                        opened = chat
-                    } label: {
-                        row(chat, draft: model.draftReference(for: chat.id, in: workspaceID))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(.plain)
-                    ClientChatMenu(model: model, conversation: chat, peer: peer, workspaceID: workspaceID,
-                                   hostName: hostName,
-                                   onFork: { copied in
-                                       guard visible, publicationLayout == navigation.stackGeneration,
-                                             opened == nil else { return }
-                                       navigation.chooseWithinChat(session: session, presentationID: presentationID)
-                                       publicationIntent = navigation.chatHandoff.intent
-                                       publicationLayout = navigation.stackGeneration
-                                       opened = copied
-                                   }, onDelete: didDeleteChat)
-                }
-                .clientCardRow()
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(L10n.text("common.delete"), role: .destructive) {
-                        pendingDeleteOwner = WorkSessionContext.shared.scope
-                        pendingDelete = chat
-                    }
-                }
-            }
+            ForEach(filteredChats) { chat in conversationRow(chat) }
         }
         .searchable(text: $search, prompt: L10n.text("apple.clientchatview.titles_agents_or_models.b7ffdc79"))
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -501,37 +473,82 @@ private struct ClientChatContent: View {
         } message: {
             Text(L10n.text("apple.clientchatview.every_chat_in_this_project_on_0_will_be_de.8c6b8cf6", "\(hostName.isEmpty ? L10n.text("apple.clientchatview.the_computer.da52d93a") : hostName)"))
         }
+
+    }
+
+    private func conversationRow(_ chat: ChatConversation) -> some View {
+        HStack {
+            Button {
+                guard visible, publicationLayout == navigation.stackGeneration else { return }
+                navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                publicationIntent = navigation.chatHandoff.intent
+                publicationLayout = navigation.stackGeneration
+                opened = chat
+            } label: {
+                row(chat, draft: model.draftReference(for: chat.id, in: workspaceID))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }.buttonStyle(.plain)
+            ClientChatMenu(model: model, conversation: chat, peer: peer, workspaceID: workspaceID,
+                           hostName: hostName,
+                           onFork: { copied in
+                               guard visible, publicationLayout == navigation.stackGeneration,
+                                     opened == nil else { return }
+                               navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                               publicationIntent = navigation.chatHandoff.intent
+                               publicationLayout = navigation.stackGeneration
+                               opened = copied
+                           }, onDelete: didDeleteChat)
+        }
+        .clientCardRow()
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(L10n.text("common.delete")) {
+                pendingDeleteOwner = WorkSessionContext.shared.scope
+                pendingDelete = chat
+            }.tint(Theme.danger)
+        }
         .confirmationDialog(
             L10n.text("apple.clientchatview.delete_this_chat.848dad9b"),
             isPresented: Binding(
-                get: { pendingDelete != nil },
+                get: { pendingDelete?.id == chat.id },
                 set: { if !$0 { pendingDelete = nil } }
             ),
-            titleVisibility: .visible
-        ) {
+            titleVisibility: .visible, presenting: chat
+        ) { target in
             Button(L10n.text("apple.clientchatview.delete_chat.93291d9c"), role: .destructive) {
-                if let chat = pendingDelete {
-                    let owner = pendingDeleteOwner
-                    Task {
-                        guard owner != nil, owner == WorkSessionContext.shared.scope,
-                              model.peer == peer, model.workspaceID == workspaceID else { return }
-                        let removed = await model.remove(chat, in: workspaceID)
-                        guard removed, owner == WorkSessionContext.shared.scope,
-                              model.peer == peer, model.workspaceID == workspaceID else { return }
-                        didDeleteChat(chat)
-                    }
+                let owner = pendingDeleteOwner
+                Task {
+                    guard owner != nil, owner == WorkSessionContext.shared.scope,
+                          model.peer == peer, model.workspaceID == workspaceID else { return }
+                    let removed = await model.remove(target, in: workspaceID)
+                    guard removed, owner == WorkSessionContext.shared.scope,
+                          model.peer == peer, model.workspaceID == workspaceID else { return }
+                    didDeleteChat(target)
                 }
                 pendingDelete = nil
             }
             Button(L10n.text("apple.clientchatview.keep_it.fdce5da2"), role: .cancel) { pendingDelete = nil }
-        } message: {
+        } message: { _ in
             Text(L10n.text("apple.clientchatview.the_transcript_stays_on_0_until_you_delete.2ccfbdf7", "\(hostName.isEmpty ? L10n.text("apple.clientchatview.the_computer.da52d93a") : hostName)"))
         }
     }
 
     private func didDeleteChat(_ deleted: ChatConversation) {
+        guard let owner = WorkSessionContext.shared.scope,
+              model.peer == peer, model.workspaceID == workspaceID else { return }
         if opened?.id == deleted.id { opened = nil }
         if retainedThread?.id == deleted.id { retainedThread = nil }
+        projects.entry(peer: peer, workspace: workspaceID).remove(deleted.id)
+        if let shown = navigation.presentedChat,
+           shown.peer == peer, shown.workspaceID == workspaceID, shown.chatID == deleted.id {
+            navigation.presentedChat = nil
+        }
+        if navigation.requestedChat == navigation.reference(peer: peer, workspaceID: workspaceID, chatID: deleted.id) {
+            navigation.requestedChat = nil
+        }
+        Task {
+            guard owner == WorkSessionContext.shared.scope else { return }
+            await readers.removed(deleted.id, peer: peer, workspace: workspaceID)
+        }
     }
 
     private func row(_ chat: ChatConversation, draft: WorkReference?) -> some View {

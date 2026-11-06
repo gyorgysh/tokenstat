@@ -14,7 +14,8 @@ private struct Fixture: Decodable {
 }
 
 @MainActor @Observable private final class HistorySession {
-    let model = ChatModel()
+    let reader = ClientChatSession()
+    var model: ChatModel { reader.model }
     var showing = true
     var overview = false
     var phase = "Encrypted history QA"
@@ -256,7 +257,7 @@ private struct Fixture: Decodable {
                 reference.anchor = row.id
                 guard model.restoreSearchReadingPosition(reference) else { throw CocoaError(.coderInvalidValue) }
             case "snapshot": break
-            case "new-chat-layout", "list-layout", "tab-layout": layoutPage = request["action"] as? String
+            case "new-chat-layout", "list-layout", "tab-layout", "repository-chats": layoutPage = request["action"] as? String
             case "light": layoutScheme = .light
             case "dark": layoutScheme = .dark
             case "large-text": layoutType = .accessibility3
@@ -286,6 +287,8 @@ private struct Fixture: Decodable {
     @State private var connectivity = ConnectivityModel()
     @State private var layoutDraft = ChatStartDraft()
     @State private var teams = TeamStore(api: .live)
+    @State private var readers = ClientChatSessions()
+    @State private var projects = ClientProjectChats()
     #endif
     init() { AppFonts.register(); Bridge.connect() }
     var body: some Scene {
@@ -301,6 +304,14 @@ private struct Fixture: Decodable {
                         allowsSend: false, showsEmptyComposer: true, requiresHostSelection: true,
                         repositoriesLoading: true, onAdd: {}, onSend: {})
                         .environment(navigation).environment(connectivity)
+                } else if session.layoutPage == "repository-chats" {
+                    NavigationStack {
+                        ClientChatView(peer: session.fixture.hostKey, workspaceID: session.fixture.workspaceId,
+                            folderName: "Disposable QA project", hostName: "Disposable QA host",
+                            retainedSession: session.reader)
+                    }
+                    .environment(readers).environment(projects)
+                    .environment(navigation).environment(connectivity)
                 } else if session.layoutPage == "list-layout" {
                     layoutLists.environment(teams).environment(navigation)
                 } else {

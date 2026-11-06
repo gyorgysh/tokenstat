@@ -25,6 +25,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- On iPhone and iPad, swipe-delete confirmation points to the selected chat. Deleting it also clears its cached project row and retained readers.
 - The Android usage preview stays in place as usage readings refresh.
 - Floating tool panes on Mac stay within the chat area when the sidebar is open.
 - Long replies, lists and code blocks stay visible, including after changing text size. Very long code lines wrap within the chat. Fixed an iOS crash while streaming long replies.
