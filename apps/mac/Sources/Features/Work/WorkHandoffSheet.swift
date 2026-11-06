@@ -18,6 +18,7 @@ struct WorkHandoffSheet: View {
     @State private var loadingFiles = false
     @State private var importing = false
     @State private var importTask: Task<Void, Never>?
+    @State private var shareTask: Task<Void, Never>?
     @State private var preparingDraft = false
     @State private var notice: String?
     @State private var fileError: String?
@@ -205,15 +206,19 @@ struct WorkHandoffSheet: View {
         let name = ClientDeviceName.marketing
         #endif
         preparingDraft = true
-        Task {
-            defer { preparingDraft = false }
+        shareTask = Task {
+            defer { preparingDraft = false; shareTask = nil }
             do {
+                guard !Task.isCancelled, model.phase != .invalidated, connection?.isCurrent == true else { return }
                 let prepared: WorkSharedDraft?
                 if let draft { prepared = try await chat.prepareHandoffDraft(draft) }
                 else { prepared = nil }
-                guard connection?.isCurrent == true else { return }
+                guard !Task.isCancelled, model.phase != .invalidated, connection?.isCurrent == true else { return }
                 await model.share(deviceName: name, draft: prepared, anchor: anchor)
-            } catch { notice = error.localizedDescription }
+            } catch {
+                guard !Task.isCancelled, model.phase != .invalidated, connection?.isCurrent == true else { return }
+                notice = error.localizedDescription
+            }
         }
     }
 
@@ -281,6 +286,8 @@ struct WorkHandoffSheet: View {
         model?.invalidate()
         importTask?.cancel()
         importTask = nil
+        shareTask?.cancel()
+        shareTask = nil
     }
 
     private func copy(_ text: String) {

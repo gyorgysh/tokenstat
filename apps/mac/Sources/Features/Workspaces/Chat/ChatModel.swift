@@ -242,6 +242,7 @@ final class ChatModel {
     /// A presented image viewer owns relay consent while it covers the chat.
     var fileRelayPresenter: UUID?
     @ObservationIgnored var fileRelayAnswer: CheckedContinuation<Bool, Never>?
+    @ObservationIgnored var fileRelayTicket: UUID?
     var fileTransferName: String?
     var fileTransferProgress: Double = 0
     var fileTransferCancelled = false
@@ -2855,6 +2856,7 @@ final class ChatModel {
         defer { fileTransferName = nil; fileTransferInFlight = false }
         var resolved: [ChatAttachment] = []
         for file in files {
+            try Task.checkCancellation()
             guard currentReference == reference, WorkCacheAccess.canSave(reference), savedCopy == nil else { throw CancellationError() }
             if ChatLocalAttachmentStore.isLocal(file) {
                 let uploaded = try await ChatLocalAttachmentStore.shared.resolveStream(file, reference: reference) { [weak self] url in
@@ -2867,6 +2869,7 @@ final class ChatModel {
                 resolved.append(uploaded)
             } else { resolved.append(file) }
         }
+        try Task.checkCancellation()
         guard currentReference == reference, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
         return resolved
     }

@@ -207,6 +207,7 @@ jobs:
           python3 scripts/check-chat-handoff-import.py
           python3 scripts/check-chat-model-preview.py
           python3 scripts/check-chat-upload-recovery.py
+          python3 scripts/check-chat-relay-cancellation.py
           python3 scripts/check-handoff-sheet-import.py
           python3 scripts/check-chat-drop-routing.py
           python3 scripts/check-chat-activity-owner.py

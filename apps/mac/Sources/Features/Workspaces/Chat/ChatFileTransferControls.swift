@@ -3,19 +3,32 @@ import SwiftUI
 
 extension ChatModel {
     func confirmFileRelay(name: String, size: UInt64?, remaining: UInt64? = nil) async -> Bool {
-        guard fileRelayAnswer == nil else { return false }
+        guard !Task.isCancelled, fileRelayAnswer == nil else { return false }
         let generation = selectionGeneration
-        let approved = await withCheckedContinuation { answer in
-            fileRelayName = name
-            fileRelaySize = size
-            fileRelayRemaining = remaining
-            fileRelayAnswer = answer
+        let ticket = UUID()
+        fileRelayTicket = ticket
+        defer { if fileRelayTicket == ticket { fileRelayTicket = nil } }
+        let approved: Bool = await withTaskCancellationHandler {
+            guard !Task.isCancelled else { return false }
+            return await withCheckedContinuation { answer in
+                fileRelayName = name
+                fileRelaySize = size
+                fileRelayRemaining = remaining
+                fileRelayAnswer = answer
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.answerFileRelay(false, request: ticket) }
         }
-        return approved && generation == selectionGeneration && savedCopy == nil
+        return approved && !Task.isCancelled && generation == selectionGeneration && savedCopy == nil
+    }
+    func answerFileRelay(_ answer: Bool, request: UUID) {
+        guard request == fileRelayTicket else { return }
+        answerFileRelay(answer)
     }
     func answerFileRelay(_ answer: Bool) {
         let continuation = fileRelayAnswer
         fileRelayAnswer = nil
+        fileRelayTicket = nil
         fileRelayName = nil
         continuation?.resume(returning: answer)
     }

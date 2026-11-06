@@ -12,6 +12,21 @@ actor UploadCounter {
         return .init(id: "host-file", name: "draft.txt", mediaType: "text/plain", size: UInt64(bytes.count))
     }
 }
+private actor PausedUpload {
+    private var pending: CheckedContinuation<Void, Never>?
+    private(set) var started = false
+    private(set) var wasCancelled = false
+    private(set) var calls = 0
+    func upload() async throws -> ChatAttachment {
+        calls += 1
+        started = true
+        await withCheckedContinuation { pending = $0 }
+        wasCancelled = Task.isCancelled
+        try Task.checkCancellation()
+        return .init(id: "shared-upload", name: "cancel.txt", mediaType: "text/plain", size: 3)
+    }
+    func finish() { pending?.resume(); pending = nil }
+}
 private final class CopyResults: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var count = 0
@@ -31,6 +46,61 @@ private final class CopyResults: @unchecked Sendable {
         let reopened = ChatLocalAttachmentStore(directory: root)
         let restored = try await reopened.read(attachment, reference: ref())
         assert(restored == bytes)
+        for stream in [true, false] {
+            for cancelled in [0, 1, 2] {
+                let original = try await reopened.stage(data: Data("abc".utf8), name: "cancel.txt", mediaType: "text/plain", reference: ref())
+                let gate = PausedUpload()
+                @Sendable func resolve() async throws -> ChatAttachment {
+                    if stream {
+                        return try await reopened.resolveStream(original, reference: ref()) { _ in try await gate.upload() }
+                    }
+                    return try await reopened.resolve(original, reference: ref()) { _ in try await gate.upload() }
+                }
+                let first = Task { try await resolve() }
+                let second = Task { try await resolve() }
+                let deadline = ContinuousClock.now + .seconds(5)
+                while try await reopened.pendingUploadWaiters(original, reference: ref()) != 2 {
+                    precondition(ContinuousClock.now < deadline, "Both upload consumers must register")
+                    await Task.yield()
+                }
+                while !(await gate.started) {
+                    precondition(ContinuousClock.now < deadline, "Shared upload must start")
+                    await Task.yield()
+                }
+                if cancelled > 0 { first.cancel() }
+                if cancelled > 1 { second.cancel() }
+                while try await reopened.pendingUploadWaiters(original, reference: ref()) != 2 - cancelled {
+                    precondition(ContinuousClock.now < deadline, "Cancelled upload consumers must leave")
+                    await Task.yield()
+                }
+                let pendingEntry = try await reopened.retained(in: ref().scope).files.first { $0.attachment.id == original.id }!
+                do {
+                    try await reopened.remove(pendingEntry, ifUnused: { true })
+                    preconditionFailure("An upload must protect its original until it actually stops")
+                } catch ChatLocalAttachmentStore.Failure.invalid {}
+                await gate.finish()
+                for (index, task) in [first, second].enumerated() {
+                    do {
+                        let uploaded = try await task.value
+                        precondition(index >= cancelled && uploaded.id == "shared-upload")
+                    } catch is CancellationError {
+                        precondition(index < cancelled)
+                    }
+                }
+                let underlyingCancelled = await gate.wasCancelled
+                let uploads = await gate.calls
+                precondition(underlyingCancelled == (cancelled == 2) && uploads == 1,
+                    "Cancel the shared upload only after its last consumer leaves")
+                let originalBytes = try await reopened.read(original, reference: ref())
+                precondition(originalBytes == Data("abc".utf8), "Cancellation preserves original files")
+                let retry = UploadCounter()
+                _ = try await reopened.resolve(original, reference: ref()) { try await retry.upload($0) }
+                let retries = await retry.count
+                precondition(retries == (cancelled == 2 ? 1 : 0), "Retain successful upload receipts and retry cancelled uploads")
+                let entry = try await reopened.retained(in: ref().scope).files.first { $0.attachment.id == original.id }!
+                try await reopened.remove(entry, ifUnused: { true })
+            }
+        }
         let pastedBytes = Data(repeating: 0x5a, count: 13 * 1024 * 1024)
         let pasted = try await store.stage(data: pastedBytes, name: "pasted.png", mediaType: "image/png", reference: ref())
         let preview = try await reopened.preview(pasted, reference: ref()) { data, file in
@@ -197,6 +267,6 @@ private final class CopyResults: @unchecked Sendable {
         try await relaunched.keep(imported, data: bytes, reference: ref())
         let importedRead = try await ChatLocalAttachmentStore(directory: root).read(imported, reference: ref())
         assert(importedRead == bytes, "Explicitly imported host files remain available offline")
-        print("Local attachments: offline relaunch, full ownership, shared upload, durable host mapping and corruption passed")
+        print("Local attachments: offline relaunch, ownership, shared upload cancellation, original retention, durable host mapping and corruption passed")
     }
 }

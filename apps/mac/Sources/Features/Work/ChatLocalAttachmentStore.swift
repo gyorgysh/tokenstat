@@ -17,7 +17,12 @@ actor ChatLocalAttachmentStore {
         var uploaded: ChatAttachment? = nil
         var external: Bool? = nil
     }
-    private var uploads: [URL: Task<ChatAttachment, Error>] = [:]
+    private struct Upload {
+        let id: UUID
+        let task: Task<ChatAttachment, Error>
+        var waiters: Set<UUID> = []
+    }
+    private var uploads: [URL: Upload] = [:]
     private var removals: Set<URL> = []
     enum Failure: LocalizedError {
         case invalid, missing, inUse, removalUnconfirmed
@@ -126,9 +131,10 @@ actor ChatLocalAttachmentStore {
     }
     func resolveStream(_ attachment: ChatAttachment, reference: WorkReference,
         upload: @escaping @Sendable (URL) async throws -> ChatAttachment) async throws -> ChatAttachment {
+        try Task.checkCancellation()
         let url = try location(attachment.id, reference: reference)
         guard !removals.contains(url) else { throw Failure.invalid }
-        if let existing = uploads[url] { return try await existing.value }
+        if uploads[url] != nil { return try await waitForUpload(url) }
         let activity = OriginalFileCoordination.use(try originalAccess.get(), file: url)
         defer { withExtendedLifetime(activity) {} }
         let file = try load(attachment, reference: reference)
@@ -142,8 +148,13 @@ actor ChatLocalAttachmentStore {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bytes.path)
             temporary = true
         }
+        let id = UUID()
         let task = Task {
-            defer { if temporary { try? FileManager.default.removeItem(at: bytes) } }
+            defer {
+                uploads[url] = nil
+                if temporary { try? FileManager.default.removeItem(at: bytes) }
+            }
+            try Task.checkCancellation()
             let uploaded = try await upload(bytes)
             try Task.checkCancellation()
             guard !Self.isLocal(uploaded) else { throw Failure.invalid }
@@ -153,9 +164,8 @@ actor ChatLocalAttachmentStore {
             try Self.synchronizeDirectory(directory)
             return uploaded
         }
-        uploads[url] = task
-        defer { uploads[url] = nil }
-        return try await task.value
+        uploads[url] = Upload(id: id, task: task)
+        return try await waitForUpload(url)
     }
     /// Keep an explicitly imported host file under the same descriptor. It
     /// remains usable offline, and sharing it again needs no second upload.
@@ -183,14 +193,18 @@ actor ChatLocalAttachmentStore {
     }
     func resolve(_ attachment: ChatAttachment, reference: WorkReference,
                  upload: @escaping @Sendable (Data) async throws -> ChatAttachment) async throws -> ChatAttachment {
+        try Task.checkCancellation()
         let url = try location(attachment.id, reference: reference)
         guard !removals.contains(url) else { throw Failure.invalid }
-        if let existing = uploads[url] { return try await existing.value }
+        if uploads[url] != nil { return try await waitForUpload(url) }
         let activity = OriginalFileCoordination.use(try originalAccess.get(), file: url)
         defer { withExtendedLifetime(activity) {} }
         let file = try load(attachment, reference: reference)
         if let uploaded = file.uploaded { return uploaded }
+        let id = UUID()
         let task = Task {
+            defer { uploads[url] = nil }
+            try Task.checkCancellation()
             let uploaded = try await upload(file.data)
             try Task.checkCancellation()
             guard !Self.isLocal(uploaded) else { throw Failure.invalid }
@@ -209,10 +223,39 @@ actor ChatLocalAttachmentStore {
             try Self.synchronizeDirectory(directory)
             return uploaded
         }
-        uploads[url] = task
-        defer { uploads[url] = nil }
-        return try await task.value
+        uploads[url] = Upload(id: id, task: task)
+        return try await waitForUpload(url)
     }
+
+    /// A dismissed caller leaves a shared upload running only while another
+    /// caller still needs it. Keep its entry until actual completion so file
+    /// removal cannot race an upload that is still stopping.
+    private func waitForUpload(_ url: URL) async throws -> ChatAttachment {
+        guard let upload = uploads[url] else { throw Failure.invalid }
+        let waiter = UUID()
+        uploads[url]?.waiters.insert(waiter)
+        return try await withTaskCancellationHandler {
+            defer { releaseUploadWaiter(url, uploadID: upload.id, waiter: waiter) }
+            try Task.checkCancellation()
+            let result = try await upload.task.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            Task { await self.releaseUploadWaiter(url, uploadID: upload.id, waiter: waiter) }
+        }
+    }
+
+    private func releaseUploadWaiter(_ url: URL, uploadID: UUID, waiter: UUID) {
+        guard uploads[url]?.id == uploadID,
+              uploads[url]?.waiters.remove(waiter) != nil else { return }
+        if let upload = uploads[url], upload.waiters.isEmpty { upload.task.cancel() }
+    }
+
+    #if TOKENSTAT_TEST
+    func pendingUploadWaiters(_ attachment: ChatAttachment, reference: WorkReference) throws -> Int {
+        uploads[try location(attachment.id, reference: reference)]?.waiters.count ?? 0
+    }
+    #endif
     struct RetainedFile: Identifiable, Sendable {
         let reference: WorkReference
         let attachment: ChatAttachment

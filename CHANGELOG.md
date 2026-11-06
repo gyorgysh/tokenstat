@@ -33,6 +33,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Mac update checks compare against the running app, and installation rejects an older version than the one already installed.
 - Fixed attachment errors when a previously inspected file had been edited.
 - Mac file cards discard pending Open actions when their content changes.
+- Closing “Continue on another device” cancels draft preparation and uploads it no longer needs. Original files remain available for retry.
 - Chat captures the final output from agents that exit quickly on Mac, including short replies and error messages.
 - Android asks for notification permission when you turn on “Notify this device”. Declining no longer brings the prompt back when you rotate or reopen the app. If Android blocks notifications, the setting explains how to allow them.
 
