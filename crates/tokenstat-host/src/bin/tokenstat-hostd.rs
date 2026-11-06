@@ -38,6 +38,10 @@ mod hook_preview;
 mod windows_log;
 
 fn main() -> ExitCode {
+    #[cfg(target_os = "macos")]
+    if let Some(code) = tokenstat_sync::quiet_keychain::serve_if_requested() {
+        return ExitCode::from(code);
+    }
     #[cfg(windows)]
     let daemon_mode = !matches!(
         std::env::args().nth(1).as_deref(),

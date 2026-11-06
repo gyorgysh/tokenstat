@@ -44,6 +44,8 @@ mod power;
 pub mod pricing;
 pub mod profile;
 pub mod push;
+#[cfg(target_os = "macos")]
+pub mod quiet_keychain;
 pub mod schema;
 pub mod snapshot;
 pub mod teams;

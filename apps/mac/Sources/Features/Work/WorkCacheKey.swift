@@ -85,14 +85,22 @@ enum WorkCacheKey {
     @discardableResult
     static func delete(for scope: String) async -> Bool {
         let status = await mutate {
-            SecItemDelete([
+            #if os(macOS)
+            return helperRequest(action: "delete", scope: scope).status
+            #else
+            return nativeDelete(scope: scope)
+            #endif
+        }
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    private static func nativeDelete(scope: String) -> OSStatus {
+        SecItemDelete([
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
                 kSecAttrAccount as String: scope,
                 kSecUseAuthenticationContext as String: silentContext(),
-            ] as CFDictionary)
-        }
-        return status == errSecSuccess || status == errSecItemNotFound
+        ] as CFDictionary)
     }
 
     /// Base64 for the wire, which takes the key as text beside the call.
@@ -113,6 +121,14 @@ enum WorkCacheKey {
     }
 
     private static func load(scope: String) -> (status: OSStatus, key: [UInt8]?) {
+        #if os(macOS)
+        return helperRequest(action: "read", scope: scope)
+        #else
+        return nativeLoad(scope: scope)
+        #endif
+    }
+
+    private static func nativeLoad(scope: String) -> (status: OSStatus, key: [UInt8]?) {
         var result: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass as String: kSecClassGenericPassword,
@@ -128,6 +144,14 @@ enum WorkCacheKey {
     }
 
     private static func store(scope: String, key: [UInt8]) -> OSStatus {
+        #if os(macOS)
+        return helperRequest(action: "create", scope: scope, key: key).status
+        #else
+        return nativeStore(scope: scope, key: key)
+        #endif
+    }
+
+    private static func nativeStore(scope: String, key: [UInt8]) -> OSStatus {
         // Readable after first unlock so a cold open in airplane mode still
         // finds its copies; this device only, so a backup never carries it.
         let status = SecItemAdd([
@@ -140,6 +164,80 @@ enum WorkCacheKey {
         ] as CFDictionary, nil)
         return status
     }
+
+    #if os(macOS)
+    private struct HelperRequest: Codable { let action, scope: String; let key: [UInt8]? }
+    private struct HelperReply: Codable { let status: OSStatus; let key: [UInt8]? }
+
+    /// Run before SwiftUI/AppKit starts. The same signed executable preserves
+    /// existing Keychain access rules, but disabling interaction affects only
+    /// this short-lived process, never the app's deliberate authentication.
+    static func helperMainIfRequested() -> Int32? {
+        guard CommandLine.arguments.dropFirst().first == "--work-cache-keychain" else { return nil }
+        guard CommandLine.arguments.count == 2,
+              SecKeychainSetUserInteractionAllowed(false) == errSecSuccess,
+              let data = boundedInput(),
+              let request = try? JSONDecoder().decode(HelperRequest.self, from: data),
+              !request.scope.isEmpty, request.scope.utf8.count <= 4096 else { return 1 }
+        let result: HelperReply
+        switch request.action {
+        case "read":
+            let value = nativeLoad(scope: request.scope)
+            result = HelperReply(status: value.status, key: value.key)
+        case "create":
+            guard let key = request.key, key.count == 32 else { return 1 }
+            result = HelperReply(status: nativeStore(scope: request.scope, key: key), key: nil)
+        case "delete":
+            result = HelperReply(status: nativeDelete(scope: request.scope), key: nil)
+        default: return 1
+        }
+        guard let encoded = try? JSONEncoder().encode(result) else { return 1 }
+        do { try FileHandle.standardOutput.write(contentsOf: encoded); return 0 }
+        catch { return 1 }
+    }
+
+    private static func boundedInput() -> Data? {
+        var data = Data()
+        do {
+            while let chunk = try FileHandle.standardInput.read(upToCount: 16_385 - data.count), !chunk.isEmpty {
+                data.append(chunk)
+                guard data.count <= 16_384 else { return nil }
+            }
+            return data
+        } catch { return nil }
+    }
+
+    private static func helperRequest(action: String, scope: String, key: [UInt8]? = nil) -> (status: OSStatus, key: [UInt8]?) {
+        guard let executable = Bundle.main.executableURL,
+              let bytes = try? JSONEncoder().encode(HelperRequest(action: action, scope: scope, key: key)),
+              bytes.count <= 16_384 else { return (errSecNotAvailable, nil) }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["--work-cache-keychain"]
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            try input.fileHandleForWriting.write(contentsOf: bytes)
+            try input.fileHandleForWriting.close()
+            // The reply is at most a 32-byte key. It cannot fill the pipe while
+            // we wait. A wedged security service must not retain this child.
+            let deadline = ProcessInfo.processInfo.systemUptime + 3
+            while process.isRunning && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.01) }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL); process.waitUntilExit(); return (errSecNotAvailable, nil) }
+            guard process.terminationStatus == 0,
+                  let data = try output.fileHandleForReading.read(upToCount: 4097), data.count <= 4096,
+                  let reply = try? JSONDecoder().decode(HelperReply.self, from: data) else { return (errSecNotAvailable, nil) }
+            return (reply.status, reply.key)
+        } catch {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL); process.waitUntilExit() }
+            return (errSecNotAvailable, nil)
+        }
+    }
+    #endif
+
 }
 
 /// A stalled security service cannot retain an unbounded number of saved pages

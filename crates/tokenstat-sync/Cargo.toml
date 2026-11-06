@@ -36,6 +36,10 @@ zeroize = "1.9"
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7.0"
+core-foundation = "0.10.1"
+
 [dev-dependencies]
 base64 = "0.23"
 tempfile.workspace = true

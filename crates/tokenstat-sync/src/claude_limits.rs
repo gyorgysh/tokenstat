@@ -109,7 +109,7 @@ pub fn fetch_with_force(force: bool) -> ProviderLimits {
         None => {
             return ProviderLimits::unavailable(
                 "claude_code",
-                "Not signed in to Claude Code on this machine, so its limits cannot be read.",
+                "Claude Code's login could not be read on this machine. Keychain access may be locked or unavailable.",
             );
         }
     };
@@ -596,40 +596,15 @@ fn write_back(stored: &Stored, fresh: &RefreshedToken) -> Result<(), String> {
     }
 }
 
-/// Replace the Keychain item, without the secret ever reaching a command line.
-///
-/// `security` takes the value on stdin when `-w` is given nothing, asking for
-/// it twice the way it would ask a person. An argument would put a live token
-/// in the process table for anything reading `ps` to pick up.
+/// Update the existing login in the helper without a password dialog.
+/// Keeping the item preserves its access rules; a removed login is not recreated.
 #[cfg(target_os = "macos")]
 fn write_keychain(service: &str, blob: &str) -> Result<(), String> {
-    use std::io::Write;
-
     let account = std::env::var("USER").map_err(|e| e.to_string())?;
-    let mut child = std::process::Command::new("security")
-        .args(["add-generic-password", "-U", "-s", service, "-a"])
-        .arg(&account)
-        .arg("-w")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        // No trailing newline: Claude Code may not trim the Keychain value.
-        stdin
-            .write_all(blob.as_bytes())
-            .map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())?;
-        // Dropped at the end of this block, closing the pipe. `security` reads
-        // the secret until EOF, so waiting with stdin still open can block
-        // forever.
-    }
-    let status = child.wait().map_err(|e| e.to_string())?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "the Keychain refused the renewed login".to_string())
+    let reply = crate::quiet_keychain::request(service, &account, Some(blob.as_bytes()));
+    (reply.status == 0).then_some(()).ok_or_else(|| {
+        "The Keychain could not save the renewed login without authorization.".to_string()
+    })
 }
 
 /// Every Claude Code Keychain blob, historical name first.
@@ -658,16 +633,10 @@ fn keychain_blobs() -> Vec<(String, String)> {
 
 #[cfg(target_os = "macos")]
 fn keychain_blob_for(service: &str, account: &str) -> Option<String> {
-    let out = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", service, "-a"])
-        .arg(account)
-        .arg("-w")
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
+    match crate::discover::keychain_item(service, account) {
+        crate::discover::KeychainItem::Found(secret) => Some(secret),
+        crate::discover::KeychainItem::Missing | crate::discover::KeychainItem::Unreadable => None,
+    }
 }
 
 /// Service names Claude Code has used on this Mac, historical one first.

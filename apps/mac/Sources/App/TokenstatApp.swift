@@ -128,7 +128,14 @@ extension Notification.Name {
 }
 
 #if !WORKBENCH_QA
-@main
+@main enum TokenstatEntry {
+    @MainActor static func main() {
+        #if os(macOS)
+        if let status = WorkCacheKey.helperMainIfRequested() { exit(status) }
+        #endif
+        TokenstatApp.main()
+    }
+}
 #endif
 struct TokenstatApp: App {
     #if os(macOS)

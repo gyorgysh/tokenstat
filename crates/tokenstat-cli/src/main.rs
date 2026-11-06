@@ -415,6 +415,10 @@ impl Window {
 }
 
 fn main() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(code) = tokenstat_sync::quiet_keychain::serve_if_requested() {
+        std::process::exit(code.into());
+    }
     let cli = Cli::parse();
     if let Some(Command::Chart {
         input,

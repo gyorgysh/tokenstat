@@ -254,7 +254,7 @@ fn stored_token() -> Result<Zeroizing<String>, &'static str> {
         _ => None,
     };
     token.filter(|token| !token.trim().is_empty()).ok_or(
-        "Muse's stored OAuth credential could not be read. Sign in again with Muse to refresh it.",
+        "Muse's stored login could not be read. Check its Keychain access or sign in with Muse again.",
     )
 }
 

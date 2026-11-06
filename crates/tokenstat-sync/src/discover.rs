@@ -267,11 +267,11 @@ fn gemini_oauth_access_token() -> Option<String> {
     Some(token.to_string())
 }
 
-/// One keychain item, as `security` answers for it.
+/// One keychain item read without presenting an authentication dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeychainItem {
     Found(String),
-    /// `security` says the item is not there (exit 44). That is an answer.
+    /// The system says the item does not exist.
     Missing,
     /// The keychain could not be asked, or refused. Not evidence either way.
     Unreadable,
@@ -279,26 +279,17 @@ pub enum KeychainItem {
 
 /// Read one generic password from the login keychain.
 ///
-/// The absolute path, because a daemon started by launchd has a short `PATH`
-/// and a hook environment may have none.
+/// Usage polling must never open an authorization dialog. Refused access is
+/// unreadable, not evidence that the provider account has signed out.
 #[cfg(target_os = "macos")]
 pub fn keychain_item(service: &str, account: &str) -> KeychainItem {
-    use std::process::{Command, Stdio};
-    let Ok(output) = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", service, "-a", account, "-w"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-    else {
-        return KeychainItem::Unreadable;
-    };
-    match output.status.code() {
-        Some(0) => match String::from_utf8(output.stdout) {
+    let reply = crate::quiet_keychain::request(service, account, None);
+    match (reply.status, reply.data) {
+        (0, Some(bytes)) => match String::from_utf8(bytes) {
             Ok(text) if !text.trim().is_empty() => KeychainItem::Found(text.trim().to_string()),
-            Ok(_) => KeychainItem::Missing,
-            Err(_) => KeychainItem::Unreadable,
+            _ => KeychainItem::Unreadable,
         },
-        Some(44) => KeychainItem::Missing,
+        (-25300, _) => KeychainItem::Missing,
         _ => KeychainItem::Unreadable,
     }
 }
