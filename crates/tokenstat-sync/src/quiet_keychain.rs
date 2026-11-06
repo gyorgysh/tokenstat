@@ -249,11 +249,13 @@ fn authorize_items(
             _ => denied.push(service),
         }
     }
-    for service in denied {
+    // One explicit action may open at most one system prompt. Old Claude
+    // profiles can leave many items behind; never walk their permission dialogs.
+    if let Some(service) = denied.first() {
         let reply = read(service, true);
         authorization_result(reply.status)?;
         if !reply.has_login {
-            continue;
+            return Err("Access was granted, but this saved item contains no provider login. No other Keychain prompts will be opened. Sign in with the provider, then refresh usage.".into());
         }
         // Allow Once only grants this short-lived child access. Verify a new
         // silent reader can use the login before claiming authorization stuck.
@@ -261,7 +263,7 @@ fn authorize_items(
         if remembered.status == 0 && remembered.has_login {
             return Ok(());
         }
-        return Err("Access was allowed for this check only. Choose Always Allow in the macOS prompt to remember access for background usage checks.".into());
+        return Err("Background access is still unavailable. If you chose Allow Once, choose Always Allow on the next attempt. You can retry later in Account → Plan limits.".into());
     }
     Err("The saved items contain no usable login. Sign in with the provider, then try again in Account → Plan limits.".into())
 }
@@ -344,6 +346,25 @@ mod tests {
             successful_reply("ai.meta.dev.credentials", Some(b"{}".to_vec()), interactive)
         });
         assert!(plugins.is_err());
+    }
+
+    #[test]
+    fn one_action_never_walks_multiple_permission_dialogs() {
+        let services = vec!["ai.meta.dev.credentials".to_string(); 10];
+        let mut prompts = 0;
+        let result = authorize_items(&services, "meta", |_, interactive| {
+            if interactive {
+                prompts += 1;
+                successful_reply("ai.meta.dev.credentials", Some(b"{}".to_vec()), true)
+            } else {
+                unavailable()
+            }
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            prompts, 1,
+            "a plugin-only item must not trigger a permission sweep"
+        );
     }
 
     #[test]
