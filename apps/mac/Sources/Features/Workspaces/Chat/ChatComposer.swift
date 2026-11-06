@@ -179,10 +179,13 @@ struct ChatComposer: View {
                     attachControl
                     ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
                 }
-                ChatComposerControls(model: model, chat: chat, locked: setupLocked)
+                ChatComposerControls(model: model, chat: chat, locked: setupLocked, compact: true, condensed: true)
                 HStack(spacing: Theme.Space.s) {
                     turnStatus
-                    ComposerLimitsBadge(backend: chat.backend, peer: model.peer)
+                    ComposerLimitsBadge(backend: chat.backend, peer: model.peer, compact: true, showUsage: {
+                        model.showingUsageStats = true
+                        model.showingCommandStats = true
+                    })
                     turnActions
                 }
             }

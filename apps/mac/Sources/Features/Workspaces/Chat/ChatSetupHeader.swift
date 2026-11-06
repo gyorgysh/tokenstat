@@ -333,10 +333,7 @@ struct ChatFastModeButton: View {
     }
 }
 
-/// One field for agent, model and effort. Plan and permission sit beside it.
-///
-/// Full setup stays in the inspector. These controls must not stretch across
-/// the well: each takes its own width, the field is the message.
+/// Agent, model and setup controls shared by phone and desktop composers.
 struct ChatComposerControls<Chrome: View>: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -558,8 +555,8 @@ struct ChatComposerControls<Chrome: View>: View {
 }
 
 extension ChatComposerControls where Chrome == EmptyView {
-    init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false) {
-        self.init(model: model, chat: chat, locked: locked, compact: compact) { EmptyView() }
+    init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false, condensed: Bool = false) {
+        self.init(model: model, chat: chat, locked: locked, compact: compact, condensed: condensed) { EmptyView() }
     }
 }
 

@@ -2093,7 +2093,7 @@ struct RootView: View {
         let available = windowContentWidth - leftChromeWidth
         return browserFitsBesideWorkspace
             ? ChromeFit.besideMax(available: available)
-            : ChromeFit.overlayMax(width: windowContentWidth)
+            : ChromeFit.overlayMax(width: available)
     }
 
     /// Floated sidebar: panel on the leading edge, dismiss region to its right.

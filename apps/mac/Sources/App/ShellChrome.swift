@@ -381,17 +381,22 @@ struct ColumnResizeHandle: View {
     var help: String = L10n.text("apple.shellchrome.drag_to_resize.31b2f1cd")
 
     @State private var start: Double?
+    @State private var hovered = false
 
     var body: some View {
         ZStack {
             if showsLine {
                 Rectangle().fill(Theme.border).frame(width: 1)
             }
+            Capsule().fill(Theme.accent.opacity(hovered || start != nil ? 0.8 : 0))
+                .frame(width: 3, height: 36)
+                .allowsHitTesting(false)
         }
         .frame(width: 7)
         .frame(maxHeight: .infinity)
         .contentShape(.rect)
         .background { ColumnResizeCursorArea() }
+        .onHover { hovered = $0 }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
@@ -408,11 +413,13 @@ struct ColumnResizeHandle: View {
         )
         // Double-click puts the column back where it started.
         .onTapGesture(count: 2) {
-            width = side == .leading ? ShellMetrics.sidebarDefault : ShellMetrics.inspectorDefault
+            let reset = side == .leading ? ShellMetrics.sidebarDefault : ShellMetrics.inspectorDefault
+            width = min(range.upperBound, max(range.lowerBound, reset))
         }
         .onDisappear {
             liveWidth = nil
             start = nil
+            hovered = false
         }
         .help(help)
         .accessibilityElement()

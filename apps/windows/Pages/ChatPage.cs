@@ -25,8 +25,8 @@ namespace Tokenstat.Pages;
 
 /// <summary>
 /// Conversations in a folder, over the same host methods the Mac uses.
-/// The list comes first. One field picks agent, model and effort. Plan and
-/// bypass sit as pills beside it. Enter sends, Shift+Enter inserts a
+/// The list comes first. One field picks agent, model and effort; Setup
+/// holds working style and permissions. Enter sends, Shift+Enter inserts a
 /// newline, Escape stops a running turn. Approvals sit in the transcript.
 /// While the agent asks before each tool, a short note rides the next step
 /// instead of waiting out the turn.
@@ -941,7 +941,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         var help = new StackPanel { Spacing = Theme.SpaceS };
         help.Children.Add(Chrome.SectionLabel(L10n.Text("windows.chatpage.how_this_chat_should_work.b5eec3c8")));
-        help.Children.Add(Muted(L10n.Text("windows.chatpage.agent_model_and_mode_also_live_on_the_comp.23ec79e1")));
+        help.Children.Add(Muted(L10n.Text("common.chat.setup.intro")));
 
         var agent = AgentPicker(backendId, running);
         if (!inspector) AutomationProperties.SetAutomationId(agent, "chat.setup.agent");
@@ -1987,13 +1987,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private UIElement CompactSetup()
     {
-        var chat = _openChat ?? new JsonObject();
         var locked = Busy();
         var row = new FlowPanel { Spacing = Theme.SpaceS };
         row.Children.Add(CompactAgentMenu(locked));
-        row.Children.Add(ModePills(Format.Text(chat, "mode", "plan"), !locked));
-        var gate = Format.Text(Backend(Format.Text(chat, "backend")), "gateTier", "full");
-        row.Children.Add(AutonomyPills(Format.Text(chat, "autonomy", "standard"), !locked, gate == "bypassOnly"));
         var setup = ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
         {
             _setupExpanded = true;
@@ -2136,29 +2132,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label);
         ToolTipService.SetToolTip(button, label);
         return button;
-    }
-
-    /// <summary>
-    /// The same segmented strip as Plan and Execute, so the two choices read
-    /// as one row. A backend with no approval gate offers only "Don't ask",
-    /// shown as a strip of one rather than a different kind of chip.
-    /// </summary>
-    private UIElement AutonomyPills(string current, bool enabled, bool bypassOnly)
-    {
-        var dontAsk = ("bypass", L10n.Text("windows.chatpage.don_t_ask.15dae980"));
-        if (bypassOnly)
-        {
-            return Chrome.Segmented([dontAsk], "bypass", _ => Task.CompletedTask);
-        }
-        return Chrome.Segmented(
-            [("standard", L10n.Text("windows.chatpage.ask_first.4a9e8cf3")), dontAsk],
-            current,
-            async value =>
-            {
-                await UpdateAsync(new JsonObject { ["autonomy"] = value });
-                PaintConversation();
-            },
-            enabled: enabled);
     }
 
     private void RebuildAttachStrip()
