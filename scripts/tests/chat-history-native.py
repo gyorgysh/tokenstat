@@ -390,7 +390,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 assert any(peer.get("peer") == fixture["hostKey"] and peer.get("route") == "relay"
                     for peer in traffic["peers"]), traffic
                 prove("The desktop reader daemon confirms an outbound relay route to the chat host")
-        if args.tall_prose or args.prose_edges or args.code_edges:
+        if args.tall_prose or args.prose_edges or args.code_edges or args.inline_edges:
             assert all(state(role)["smoothStreaming"] for role in roles)
             timings = {}
             cases = [
@@ -413,6 +413,13 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     ("wrapped code", "```text\n" + ("a " * 25 + "\n") * 2000 + "wrappedcodetail\n```", "wrappedcodetail"),
                     ("wide highlighted code", "```swift\n" + ("// " + "a " * 40 + "\n") * 2000 + "let widecodetail = true\n```", "widecodetail"),
                 ]
+            if args.inline_edges:
+                for role in roles:
+                    await native(role, "largest-text")
+                cases = [
+                    ("unbroken quoted text", "> " + "🌍" * 6000 + "\n> quotedone", "quotedone"),
+                    ("long table cell", "| A | B |\n| --- | --- |\n| " + "🌍" * 6000 + " tabledone | a |", "tabledone"),
+                ]
             for label, body, marker in cases:
                 began = time.monotonic()
                 emit({"type": "text", "data": "\n\n" + body})
@@ -431,7 +438,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 prove("Changing text size reuses correctly bounded text, including the largest accessibility size")
             for role in roles:
                 await native(role, "smooth-off", cases[-1][2])
-            prove("Long short-line replies remain visible with smooth streaming disabled")
+            prove("Both native readers keep the reply visible with smooth streaming disabled")
             assert all(not state(role)["smoothStreaming"] for role in roles)
             emit({"type": "text", "data": "\n\ntalldone"})
             emit({"type": "end", "stopReason": "end_turn"})
@@ -673,6 +680,7 @@ if __name__ == "__main__":
     parser.add_argument("--tall-prose", action="store_true", help="Verify long lists, short paragraphs and explicit line breaks")
     parser.add_argument("--prose-edges", action="store_true", help="Check tall quotes and unbroken emoji at large accessibility sizes")
     parser.add_argument("--code-edges", action="store_true", help="Check tall code fences with and without horizontal scrolling")
+    parser.add_argument("--inline-edges", action="store_true", help="Check unbroken quotes and table cells at the largest text size")
     parser.add_argument("--layout", action="store_true", help="Inspect new chat and grouped lists using the shipping phone views")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--serve", action="store_true")
