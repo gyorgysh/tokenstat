@@ -119,7 +119,7 @@ struct AccountView: View {
                     Group {
                         privacyNote
                         Text(L10n.text("common.app_version_build", AppInfo.version, AppInfo.build))
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
