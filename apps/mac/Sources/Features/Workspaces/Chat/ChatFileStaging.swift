@@ -18,11 +18,30 @@ enum ChatFileStaging {
             .appendingPathComponent("tokenstat-chat-files", isDirectory: true)
     }
 
-    /// The staged copy, made if it is not already there.
+    /// Hash and write off the UI actor, then check the caller's current
+    /// conversation and access before returning a file to open.
+    @MainActor
+    static func prepare(_ data: Data, id: String, name: String, into root: URL? = nil,
+                        canUse: @MainActor () -> Bool) async throws -> URL {
+        try Task.checkCancellation()
+        guard canUse() else { throw CancellationError() }
+        let worker = Task.detached(priority: .userInitiated) {
+            try stage(data, id: id, name: name, into: root)
+        }
+        let url = try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: { worker.cancel() }
+        try Task.checkCancellation()
+        guard canUse() else { throw CancellationError() }
+        return url
+    }
+
+    /// Write a staged copy under the file's real name.
     ///
     /// Throws rather than returning nil. A silent failure here is a card that
     /// does nothing when tapped and says nothing about why.
     static func stage(_ data: Data, id: String, name: String, into root: URL? = nil) throws -> URL {
+        try Task.checkCancellation()
         // A different file with a reused host ID must not overwrite a copy
         // already open in another application or account's window.
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -47,6 +66,7 @@ enum ChatFileStaging {
             throw CocoaError(.fileWriteInvalidFileName)
         }
         let url = URL(fileURLWithPath: filePath, isDirectory: false)
+        try Task.checkCancellation()
         // No size shortcut here: two different files can share a length, and
         // reusing the wrong bytes is a silent wrong-file. Staging is cheap
         // and repeatable (the cache prunes these copies anyway), so always
@@ -60,6 +80,7 @@ enum ChatFileStaging {
         )
         #endif
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath)
+        try Task.checkCancellation()
         return url
     }
 

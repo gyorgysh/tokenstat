@@ -39,15 +39,22 @@ def declaration(path, signature):
 
 theme_path = 'apps/mac/Sources/Design/Theme.swift'
 pieces = ['import SwiftUI\nimport AppKit\nimport Observation\nimport ImageIO\nimport UniformTypeIdentifiers\n']
+theme_source = (root / theme_path).read_text().splitlines()
+pieces += [next(line for line in theme_source if line.startswith('let ' + name + ':'))
+           for name in ['DetailChromeBarHeight', 'DetailChromeBottomSpacing']]
 pieces += [declaration(theme_path, marker) for marker in [
     'enum Theme {', 'extension Color {', 'struct ThemeRule:',
     'struct ActionLabelStyle:', 'struct SecondaryButtonStyle:', 'enum DisplayFit {',
+    'struct AccentButtonStyle:', 'private struct ChromeBarMetrics:',
+    'struct InspectorChromeBar<', 'struct InspectorTitle:', 'struct InspectorCloseButton:',
+    'extension InspectorChromeBar where Accessory == EmptyView {',
     'struct ThemedFieldStyle:', 'extension TextFieldStyle where Self == ThemedFieldStyle {', 'struct ThemedFieldBox:']]
 pieces += ['extension View {\n' + declaration(theme_path, '    func themedFieldBox(') + '\n}']
+pieces += ['extension View {\n' + declaration(theme_path, '    func chromeBarMetrics(') + '\n}']
 pieces += [declaration('apps/mac/Sources/Features/Workspaces/Chat/ChatInbox.swift', 'enum ChatThumbnail {')]
 pieces += [declaration('apps/mac/Sources/Features/Workspaces/Chat/ChatFileTransferControls.swift', 'struct ChatFileRelayConsent:')]
 pieces += [declaration('apps/mac/Sources/Features/Workspaces/Chat/ChatFileTransferControls.swift', 'private struct ChatFileRelaySheet:')]
-pieces += [declaration('apps/mac/Sources/Design/ThemedSheet.swift', 'struct SheetOutsideDismiss:')]
+pieces += [(root / 'apps/mac/Sources/Design/ThemedSheet.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Account/RelayUsage.swift').read_text()]
 pieces += ['''
 enum SyntaxKind { case keyword, string, number, constant, comment, type, function, attribute, property, markup, variable, `operator`, punctuation, unknown }
@@ -109,6 +116,7 @@ for name in ['contextOpen', 'serversOpen', 'otherServersOpen', 'promptOpen', 'hi
 pieces += [context]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageLayout.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageViewerGeometry.swift').read_text()]
+pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageViewport.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageDecode.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageGallery.swift').read_text()]
 pieces += [declaration('scripts/tests/ChatImageDecodeTests.swift', '    static func tiff(').replace('static func', 'func', 1)]

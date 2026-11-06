@@ -197,6 +197,7 @@ jobs:
           python3 scripts/check-chat-loading.py
           python3 scripts/tests/check-chat-chart-fences.py
           python3 scripts/tests/check-markdown-warmup.py
+          python3 scripts/tests/check-chat-file-opening.py
           python3 scripts/check-chat-opening.py
           python3 scripts/check-chat-empty-recovery.py
           python3 scripts/check-chat-send-context.py

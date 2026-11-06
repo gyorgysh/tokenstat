@@ -207,6 +207,15 @@ private struct ChatImageViewer: View {
     @State private var selection = 0
     @State private var zoom: CGFloat = 1
     @State private var error: String?
+    private struct FileAction: Identifiable {
+        enum Kind { case open, save }
+        let id = UUID()
+        let kind: Kind
+        let attachment: ChatAttachment
+        let reference: WorkReference
+        let generation: UInt64
+    }
+    @State private var fileAction: FileAction?
     #if os(macOS)
     @State private var enlarged = false
     @State private var viewerAvailable = CGSize(width: 1240, height: 900)
@@ -250,12 +259,17 @@ private struct ChatImageViewer: View {
         #endif
         .onAppear { model.fileRelayPresenter = request.id }
         .onDisappear {
+            fileAction = nil
             if model.fileRelayPresenter == request.id {
                 model.fileRelayPresenter = nil
                 model.answerFileRelay(false)
             }
         }
         .task(id: attachment.id) { await loadSelected() }
+        .task(id: fileAction?.id) {
+            guard let action = fileAction else { return }
+            await prepareFileAction(action)
+        }
     }
 
     private var header: some View {
@@ -321,7 +335,7 @@ private struct ChatImageViewer: View {
             HStack(spacing: 12) { openSaveButtons }
             VStack(spacing: 8) { openSaveButtons }
         }
-        .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(!resource.available).padding(12)
+        .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(!resource.available || fileAction != nil).padding(12)
     }
     private var openSaveButtons: some View {
         Group {
@@ -334,6 +348,7 @@ private struct ChatImageViewer: View {
     private func move(_ direction: Int) {
         let next = selection + direction
         guard request.attachments.indices.contains(next) else { return }
+        fileAction = nil
         selection = next; setZoom(1); error = nil
     }
     private func loadSelected() async {
@@ -349,40 +364,65 @@ private struct ChatImageViewer: View {
               attachment.id == selected.id, !resource.available else { return }
         await model.downloadResponseAttachment(selected)
     }
-    private func sourceFile() throws -> URL {
-        guard let reference = request.reference, model.currentReference == reference,
-              WorkCacheAccess.canRead(reference) else { throw CancellationError() }
+    private func canPerform(_ action: FileAction) -> Bool {
+        fileAction?.id == action.id && attachment.id == action.attachment.id && resource.available
+            && model.currentReference == action.reference && model.selectionGeneration == action.generation
+            && WorkCacheAccess.canRead(action.reference)
+    }
+
+    private func sourceFile(_ action: FileAction) async throws -> URL {
+        guard canPerform(action) else { throw CancellationError() }
         if let file = resource.file { return file }
         guard let data = resource.data else { throw CocoaError(.fileNoSuchFile) }
-        return try ChatFileStaging.stage(data, id: attachment.id, name: attachment.name)
+        return try await ChatFileStaging.prepare(data, id: action.attachment.id, name: action.attachment.name,
+                                                 canUse: { canPerform(action) })
     }
-    private func openImage() {
-        do {
-            let file = try sourceFile()
-            #if os(macOS)
-            NSWorkspace.shared.open(file)
-            #else
-            openingFile = ChatPreviewedFile(id: attachment.id, url: file, name: attachment.name)
-            #endif
-        } catch { self.error = L10n.text("common.chat.images.unavailable") }
+
+    private func beginFileAction(_ kind: FileAction.Kind) {
+        guard fileAction == nil, resource.available, let reference = request.reference,
+              model.currentReference == reference, WorkCacheAccess.canRead(reference) else { return }
+        error = nil
+        fileAction = FileAction(kind: kind, attachment: attachment, reference: reference,
+                                generation: model.selectionGeneration)
     }
-    private func saveImage() {
+    private func openImage() { beginFileAction(.open) }
+    private func saveImage() { beginFileAction(.save) }
+
+    private func prepareFileAction(_ action: FileAction) async {
+        defer { if fileAction?.id == action.id { fileAction = nil } }
         do {
-            guard let reference = request.reference else { throw CancellationError() }
-            let source = try sourceFile()
-            #if os(macOS)
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = attachment.name
-            panel.begin { result in
-                guard result == .OK, let destination = panel.url,
-                      source.standardizedFileURL != destination.standardizedFileURL,
-                      model.currentReference == reference, WorkCacheAccess.canRead(reference) else { return }
-                Task { await copyImage(source, to: destination, reference: reference) }
+            let source = try await sourceFile(action)
+            guard !Task.isCancelled, canPerform(action) else { return }
+            switch action.kind {
+            case .open:
+                #if os(macOS)
+                guard NSWorkspace.shared.open(source) else { throw CocoaError(.fileReadUnknown) }
+                #else
+                openingFile = ChatPreviewedFile(id: action.attachment.id, url: source, name: action.attachment.name)
+                #endif
+            case .save:
+                #if os(macOS)
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = action.attachment.name
+                panel.begin { result in
+                    guard result == .OK, let destination = panel.url,
+                          source.standardizedFileURL != destination.standardizedFileURL,
+                          model.currentReference == action.reference, model.selectionGeneration == action.generation,
+                          WorkCacheAccess.canRead(action.reference) else { return }
+                    Task { await copyImage(source, to: destination, reference: action.reference) }
+                }
+                #else
+                savingFile = ChatPreviewedFile(id: action.attachment.id, url: source, name: action.attachment.name)
+                #endif
             }
-            #else
-            savingFile = ChatPreviewedFile(id: attachment.id, url: source, name: attachment.name)
-            #endif
-        } catch { self.error = L10n.text("common.chat.images.save_failed") }
+        } catch is CancellationError {
+        } catch {
+            guard canPerform(action) else { return }
+            switch action.kind {
+            case .open: self.error = L10n.text("common.chat.images.unavailable")
+            case .save: self.error = L10n.text("common.chat.images.save_failed")
+            }
+        }
     }
 
     private func copyImage(_ source: URL, to destination: URL, reference: WorkReference) async {

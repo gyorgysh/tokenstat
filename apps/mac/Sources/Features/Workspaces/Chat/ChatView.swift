@@ -916,7 +916,9 @@ struct ChatView: View {
     }
 
     private func transcriptRow(_ item: ChatDisplayItem, chat: ChatConversation, spinning: String?) -> some View {
-        Group {
+        let owner = model.currentReference
+        let generation = model.selectionGeneration
+        return Group {
             if item.id == model.signInGateRowID, model.savedCopy == nil,
                let backend = model.backend(for: chat.backend) {
                 ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
@@ -940,6 +942,11 @@ struct ChatView: View {
                     attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
                     downloadAttachment: { attachment in
                         Task { await model.downloadResponseAttachment(attachment) }
+                    },
+                    canOpenAttachment: {
+                        guard let owner else { return false }
+                        return model.currentReference == owner && model.selectionGeneration == generation
+                            && WorkCacheAccess.canRead(owner)
                     },
                     faceSeed: model.faceSeed,
                     isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,

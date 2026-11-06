@@ -24,6 +24,7 @@ struct ChatEventRow: View {
     var attachmentIsLoading = false
     var attachmentError: String?
     var downloadAttachment: (ChatAttachment) -> Void = { _ in }
+    var canOpenAttachment: () -> Bool = { false }
     var faceSeed: UInt64 = 0
     /// The row still being written. Its markdown is rebuilt on every token,
     /// so selectable chains (one SelectionOverlay each) are held back until
@@ -238,7 +239,7 @@ struct ChatEventRow: View {
             ChatResponseAttachment(
                 attachment: attachment, data: attachmentData, file: attachmentFile,
                 isLoading: attachmentIsLoading, downloadError: attachmentError,
-                onDownload: { downloadAttachment(attachment) }
+                onDownload: { downloadAttachment(attachment) }, canOpen: canOpenAttachment
             )
                 .id(attachment.id)
         case let .handoff(to, brief):
@@ -393,7 +394,9 @@ private struct ChatResponseAttachment: View {
     var isLoading: Bool
     var downloadError: String?
     var onDownload: () -> Void
+    var canOpen: () -> Bool
     @State private var hovering = false
+    @State private var opening: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -432,7 +435,7 @@ private struct ChatResponseAttachment: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: Theme.Space.s)
-                    if isLoading {
+                    if isLoading || opening != nil {
                         ProgressView().controlSize(.small)
                     } else if data == nil && file == nil {
                         ActionIcon.download.label(downloadError == nil ? L10n.text("apple.chateventrow.download.d6eafe82") : L10n.text("common.retry"))
@@ -454,13 +457,32 @@ private struct ChatResponseAttachment: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .disabled(isLoading)
+        .disabled(isLoading || opening != nil)
         // Idle only. The transcript stack drops hit testing while scrolling
         // so a file card sliding under the pointer cannot start a hover
         // storm, the same gate the copy buttons use. Hover comes back 0.35s
         // after the last moved frame.
         .onHover { hovering = $0 }
         .help(data == nil && file == nil ? L10n.text("apple.chateventrow.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.chateventrow.open_0.e71b4013", "\(attachment.name)"))
+        }
+        .onChange(of: imageSource) { _, _ in opening = nil }
+        .onChange(of: attachment) { _, _ in opening = nil }
+        .onDisappear { opening = nil }
+        .task(id: opening) {
+            #if os(macOS)
+            guard let ticket = opening, let data else { return }
+            defer { if opening == ticket { opening = nil } }
+            do {
+                let url = try await ChatFileStaging.prepare(data, id: attachment.id, name: attachment.name,
+                                                           canUse: canOpen)
+                guard !Task.isCancelled, canOpen() else { return }
+                if !NSWorkspace.shared.open(url) { NSSound.beep() }
+                Task { await ChatAttachmentCache.shared.maintain() }
+            } catch is CancellationError {
+            } catch {
+                if canOpen() { NSSound.beep() }
+            }
+            #endif
         }
         .task(id: imageSource) {
             guard attachment.mediaType?.hasPrefix("image/") == true else { return }
@@ -520,17 +542,13 @@ private struct ChatResponseAttachment: View {
 
     private func open() {
         #if os(macOS)
-        if let file { NSWorkspace.shared.open(file); return }
-        #endif
-        guard let data else { return }
-        #if os(macOS)
-        do {
-            let url = try ChatFileStaging.stage(data, id: attachment.id, name: attachment.name)
-            NSWorkspace.shared.open(url)
-            Task { await ChatAttachmentCache.shared.maintain() }
-        } catch {
-            NSSound.beep()
+        guard opening == nil, canOpen() else { return }
+        if let file {
+            if !NSWorkspace.shared.open(file) { NSSound.beep() }
+            return
         }
+        guard data != nil else { return }
+        opening = UUID()
         #endif
     }
 }

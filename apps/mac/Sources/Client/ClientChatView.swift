@@ -765,6 +765,15 @@ struct ClientChatThread: View {
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @State private var previewFile: ChatPreviewedFile?
+    private struct PendingFileOpen: Identifiable {
+        let id = UUID()
+        let attachment: ChatAttachment
+        let data: Data
+        let reference: WorkReference
+        let generation: UInt64
+        let navigationGeneration: UInt64
+    }
+    @State private var pendingFileOpen: PendingFileOpen?
     /// The folder's changes, opened from a turn's card or the changes pill.
     @State private var reviewingChanges = false
     /// The folder's live git state, for the changes pill and the chip.
@@ -1376,7 +1385,11 @@ struct ClientChatThread: View {
             rememberChat(id)
             updatePresence()
         }
-        .onChange(of: model.currentReference) { _, _ in rememberChat(chatID) }
+        .onChange(of: model.currentReference) { _, _ in
+            pendingFileOpen = nil
+            previewFile = nil
+            rememberChat(chatID)
+        }
         .onAppear {
             browserLayoutGeneration = navigation.stackGeneration
             updatePresence()
@@ -1390,6 +1403,7 @@ struct ClientChatThread: View {
             updatePresence()
             if active { rememberChat(chatID) }
             if !active {
+                pendingFileOpen = nil
                 model.saveDraftNow()
                 if session == nil { closeBrowser() }
             }
@@ -1430,6 +1444,7 @@ struct ClientChatThread: View {
             Task { await model.resumeWaitingConnection() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
+            pendingFileOpen = nil
             model.clearCachedAttachmentMemory()
         }
         // Presented here rather than on the row. A row lives in a lazy stack
@@ -1439,9 +1454,14 @@ struct ClientChatThread: View {
             ClientFilePreview(file: file) { previewFile = nil }
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
         }
+        .task(id: pendingFileOpen?.id) {
+            guard let request = pendingFileOpen else { return }
+            await prepareFileOpen(request)
+        }
         .chatImageViewer(model: model)
         .chatActivityPresentation(model: model, active: isActive)
         .onDisappear {
+            pendingFileOpen = nil
             browserRequest = UUID()
             if session == nil { closeBrowser() }
             dropPresentation &+= 1
@@ -2146,13 +2166,29 @@ struct ClientChatThread: View {
     /// pruned on a budget, so the one made when the row first appeared may
     /// well be gone by the time somebody taps it.
     private func open(_ attachment: ChatAttachment, data: Data) {
+        guard isActive, let reference = model.currentReference, WorkCacheAccess.canRead(reference) else { return }
+        pendingFileOpen = PendingFileOpen(attachment: attachment, data: data, reference: reference,
+            generation: model.selectionGeneration, navigationGeneration: navigation.stackGeneration)
+    }
+
+    private func canOpen(_ request: PendingFileOpen) -> Bool {
+        isActive && pendingFileOpen?.id == request.id && model.currentReference == request.reference
+            && model.selectionGeneration == request.generation
+            && navigation.stackGeneration == request.navigationGeneration && WorkCacheAccess.canRead(request.reference)
+    }
+
+    private func prepareFileOpen(_ request: PendingFileOpen) async {
+        defer { if pendingFileOpen?.id == request.id { pendingFileOpen = nil } }
         do {
-            let url = try ChatFileStaging.stage(data, id: attachment.id, name: attachment.name)
-            previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name)
+            let url = try await ChatFileStaging.prepare(request.data, id: request.attachment.id, name: request.attachment.name,
+                                                       canUse: { canOpen(request) })
+            guard !Task.isCancelled, canOpen(request) else { return }
+            previewFile = ChatPreviewedFile(id: request.attachment.id, url: url, name: request.attachment.name)
+        } catch is CancellationError {
         } catch {
-            // Never silent. A card that does nothing when tapped is the bug
-            // this whole path is being rebuilt for.
-            showDropNotice(L10n.text("apple.clientchatview.0_could_not_be_opened_1.3ad9cd09", "\(attachment.name)", "\(error.localizedDescription)"))
+            if canOpen(request) {
+                showDropNotice(L10n.text("apple.clientchatview.0_could_not_be_opened_1.3ad9cd09", "\(request.attachment.name)", "\(error.localizedDescription)"))
+            }
         }
     }
 
