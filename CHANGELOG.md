@@ -24,7 +24,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Plain terminal logs take less processing on Mac, iPhone and iPad.
 - Remote terminals display new output with less delay.
 - Team online status uses fewer requests while the app is open and stops repeating updates while it is hidden.
-- On iPhone and iPad, images slide between pages in the viewer, with zoomed images keeping their own pan gestures.
+- On iPhone and iPad, images slide between pages in the viewer, with zoomed images keeping their own pan gestures. Zoom stays responsive after using Next or Previous.
 
 ### Fixed
 

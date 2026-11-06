@@ -51,11 +51,10 @@ struct ChatImagePager: UIViewControllerRepresentable {
         guard active, resources.indices.contains(selection) else { return }
         self.resources = resources; self.zoom = zoom
         self.reduceMotion = reduceMotion; self.onSelect = onSelect
-        let canPage = zoom.wrappedValue <= 1.001 && resources.count > 1
-        if canPage {
-            if dataSource == nil { dataSource = self }
-        } else if dataSource != nil { dataSource = nil }
-        for case let pan as UIPanGestureRecognizer in gestureRecognizers { pan.maximumNumberOfTouches = 1 }
+        // Removing the data source during a pinch interrupts UIKit's gesture.
+        // Keep the controller intact and disable only the outer page scroll.
+        if dataSource == nil { dataSource = self }
+        configurePaging()
         let changed = lastInput != selection
         lastInput = selection
         for (index, page) in pages where resources.indices.contains(index) { page.rootView = content(at: index) }
@@ -63,6 +62,17 @@ struct ChatImagePager: UIViewControllerRepresentable {
             if changed { pending = selection }
         } else if changed || displayed == nil {
             show(selection, animated: !reduceMotion && view.window != nil)
+        }
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        configurePaging()
+    }
+    private func configurePaging() {
+        let enabled = zoom.wrappedValue <= 1.001 && resources.count > 1
+        for case let scroll as UIScrollView in view.subviews {
+            if scroll.panGestureRecognizer.maximumNumberOfTouches != 1 { scroll.panGestureRecognizer.maximumNumberOfTouches = 1 }
+            if scroll.isScrollEnabled != enabled { scroll.isScrollEnabled = enabled }
         }
     }
     private func content(at index: Int) -> AnyView {
@@ -81,13 +91,19 @@ struct ChatImagePager: UIViewControllerRepresentable {
         guard active, displayed != index, let page = page(at: index) else { return }
         let previous = displayed
         let animate = animated && view.window != nil && previous.map { abs($0 - index) == 1 } == true
-        transitioning = animate
-        setViewControllers([page], direction: previous.map { index < $0 ? .reverse : .forward } ?? .forward,
-                           animated: animate) { [weak self] completed in
-            guard let self, self.active else { return }
-            self.transitioning = false
-            self.settle()
+        // UIKit's animated replacement cancels a child pinch when it finishes.
+        // Button changes crossfade an immediate replacement; swipes still use
+        // the native interactive slide. Gestures stay available during the fade.
+        let replace = {
+            self.setViewControllers([page], direction: previous.map { index < $0 ? .reverse : .forward } ?? .forward,
+                                   animated: false)
         }
+        if animate {
+            UIView.transition(with: view, duration: 0.18,
+                              options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState],
+                              animations: replace)
+        } else { replace() }
+        settle()
     }
     private func settle() {
         if let pending {
@@ -104,12 +120,12 @@ struct ChatImagePager: UIViewControllerRepresentable {
     }
     func pageViewController(_ pageViewController: UIPageViewController,
                             viewControllerBefore viewController: UIViewController) -> UIViewController? {
-        guard let page = viewController as? Page else { return nil }
+        guard zoom.wrappedValue <= 1.001, let page = viewController as? Page else { return nil }
         return self.page(at: page.index - 1)
     }
     func pageViewController(_ pageViewController: UIPageViewController,
                             viewControllerAfter viewController: UIViewController) -> UIViewController? {
-        guard let page = viewController as? Page else { return nil }
+        guard zoom.wrappedValue <= 1.001, let page = viewController as? Page else { return nil }
         return self.page(at: page.index + 1)
     }
     func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) {

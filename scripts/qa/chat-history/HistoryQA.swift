@@ -281,9 +281,15 @@ private struct Fixture: Decodable {
             throw CocoaError(.coderInvalidValue)
         }
         scale = 2; update(1)
-        guard controller.dataSource == nil else { throw CocoaError(.coderInvalidValue) }
+        guard controller.pageViewController(controller, viewControllerBefore: second) == nil,
+              controller.pageViewController(controller, viewControllerAfter: second) == nil else {
+            throw CocoaError(.coderInvalidValue)
+        }
         scale = 1; update(1)
-        guard controller.dataSource != nil else { throw CocoaError(.coderInvalidValue) }
+        guard controller.pageViewController(controller, viewControllerBefore: second) === first,
+              controller.pageViewController(controller, viewControllerAfter: second) === third else {
+            throw CocoaError(.coderInvalidValue)
+        }
         controller.pageViewController(controller, willTransitionTo: [third])
         update(0)
         controller.setViewControllers([third], direction: .forward, animated: false)

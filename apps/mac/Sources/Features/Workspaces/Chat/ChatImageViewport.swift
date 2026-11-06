@@ -178,7 +178,11 @@ final class ChatImageScrollView: UIScrollView, UIScrollViewDelegate {
             pixels = image; picture.image = UIImage(cgImage: image); fittedViewport = .zero
         }
         fitIfNeeded()
-        if abs(zoomScale - zoom) > 0.001 { zoomAt(min(4, max(1, zoom)), point: CGPoint(x: bounds.midX, y: bounds.midY)) }
+        // A SwiftUI update may echo an earlier pinch value. UIKit owns the
+        // scale and focal point until the gesture and its bounce finish.
+        if !isZooming && !isZoomBouncing && abs(zoomScale - zoom) > 0.001 {
+            zoomAt(min(4, max(1, zoom)), point: CGPoint(x: bounds.midX, y: bounds.midY))
+        }
     }
     override func layoutSubviews() { super.layoutSubviews(); fitIfNeeded(); centerImage() }
     private func fitIfNeeded() {
