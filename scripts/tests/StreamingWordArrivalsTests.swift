@@ -19,6 +19,15 @@ import Foundation
         let reopened = StreamingWordArrivals()
         precondition(reopened.update(source: "Restored", count: 1, now: 5).isEmpty)
         precondition(reopened.update(source: "Restored words in another chat", count: 5, now: 5.01, identity: "other").isEmpty)
+        let canonical = StreamingWordArrivals()
+        precondition(canonical.update(source: "é", count: 1, now: 0).isEmpty)
+        precondition(canonical.update(source: "é tail", count: 2, now: 1) == [1: 1])
+        precondition(canonical.update(source: "e\u{301} tail", count: 2, now: 1.05) == [1: 1],
+                     "Equivalent Unicode snapshots keep the original arrival time")
+        precondition(canonical.update(source: "e\u{301}", count: 1, now: 1.06).isEmpty)
+        precondition(canonical.update(source: "é tail", count: 2, now: 1.07).isEmpty,
+                     "Restoring a shorter Unicode snapshot cannot replay old words")
+        precondition(canonical.update(source: "é tail fresh", count: 3, now: 1.08) == [2: 1.08])
         var arrivals: [Int: TimeInterval] = [0: 10, 1: 11, 4: 14, 8: 18]
         let window = StreamingWordWindow(arrivals)
         precondition(window.words(in: 0..<2) == [0: 10, 1: 11])

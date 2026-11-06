@@ -18,6 +18,13 @@ final class StreamingWordArrivals {
             arrivals.removeAll()
         }
         arrivals = arrivals.filter { now - $0.value < Self.duration }
+        // Redraws of identical text can skip both prefix checks. Comparing
+        // bytes avoids an extra normalization pass for rewritten Unicode text.
+        if count == self.count, hasSameBytes(as: source) {
+            if !animate { arrivals.removeAll() }
+            self.source = source
+            return arrivals
+        }
         if let previous = self.source, previous.hasPrefix(source), source != previous {
             // A reconnect may briefly show an earlier snapshot. Keep the
             // high-water mark so restoring its text cannot replay old words.
@@ -33,6 +40,18 @@ final class StreamingWordArrivals {
         self.source = source
         self.count = appends ? max(self.count, count) : count
         return arrivals
+    }
+
+    private func hasSameBytes(as source: String) -> Bool {
+        guard let previous = self.source else { return false }
+        return source.utf8.withContiguousStorageIfAvailable { current in
+            previous.utf8.withContiguousStorageIfAvailable { old in
+                guard current.count == old.count else { return false }
+                if current.isEmpty || current.baseAddress == old.baseAddress { return true }
+                guard let lhs = current.baseAddress, let rhs = old.baseAddress else { return false }
+                return memcmp(lhs, rhs, current.count) == 0
+            } ?? false
+        } ?? false
     }
 }
 
