@@ -321,6 +321,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
         app = args.mac_app
         log = (run_root / "desktop.log").open("w"); handles.append(log)
         desktop_environment = client_environment("desktop")
+        desktop_environment["TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH"] = str(args.desktop_width)
         if reader_daemon:
             desktop_environment["TOKENSTAT_NATIVE_HISTORY_READER_SOCKET"] = reader_info["socket"]
         # Launch once through AppKit, with an explicit private environment.
@@ -330,6 +331,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
             "--stderr", str(run_root / "desktop.log")]
         for key in ["TOKENSTAT_NATIVE_HISTORY_ROLE", "TOKENSTAT_NATIVE_HISTORY_FIXTURE",
                     "TOKENSTAT_NATIVE_HISTORY_DESKTOP_LOCAL", "TOKENSTAT_NATIVE_HISTORY_RTL",
+                    "TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH",
                     "TOKENSTAT_NATIVE_HISTORY_RELAY", "TOKENSTAT_NATIVE_HISTORY_READER_SOCKET",
                     "TOKENSTAT_DATA_DIR", "TOKENSTAT_IDENTITY_DIR", "TOKENSTAT_API_BASE",
                     "HOME", "ZDOTDIR", "HISTFILE", "PATH"]:
@@ -376,6 +378,12 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 return
         else:
             await visible("network-start")
+        if args.desktop_width != 760:
+            capture = read_json(run_root / "desktop/snapshot-progress.json")
+            widths = [scroll["viewportWidth"] for scroll in capture["scrolls"]]
+            assert any(args.desktop_width - 20 <= width <= args.desktop_width + 1
+                       for width in widths), widths
+            prove(f"The native Mac capture confirms the {args.desktop_width}-point transcript viewport")
         if relay:
             status = await remote_status(fixture["socket"])
             atomic_json(run_root / "relay-route.json", status)
@@ -686,5 +694,10 @@ if __name__ == "__main__":
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--probe-only", action="store_true", help="Verify the producer and encrypted FFI setup before opening apps")
     parser.add_argument("--desktop-only", action="store_true", help="Verify the Mac view before the combined phone run")
+    parser.add_argument("--desktop-width", type=int, default=760, metavar="POINTS",
+                        help="Set the native Mac transcript width (320–1600 points)")
     parser.add_argument("--desktop-local", action="store_true", help="Use the producer's local socket on Mac, with the iPhone still encrypted")
-    asyncio.run(run(parser.parse_args()))
+    arguments = parser.parse_args()
+    if not 320 <= arguments.desktop_width <= 1600:
+        parser.error("--desktop-width must be between 320 and 1600 points")
+    asyncio.run(run(arguments))

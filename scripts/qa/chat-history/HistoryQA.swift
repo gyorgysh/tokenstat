@@ -31,9 +31,12 @@ private struct Fixture: Decodable {
     let fixture: Fixture
     let role: String
     let output: URL
+    let desktopWidth: CGFloat
 
     init() {
         let environment = ProcessInfo.processInfo.environment
+        desktopWidth = CGFloat(min(1600, max(320,
+            Int(environment["TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH"] ?? "") ?? 760)))
         fixture = try! JSONDecoder().decode(Fixture.self,
             from: Data(contentsOf: URL(fileURLWithPath: environment["TOKENSTAT_NATIVE_HISTORY_FIXTURE"]!)))
         role = environment["TOKENSTAT_NATIVE_HISTORY_ROLE"]!
@@ -115,6 +118,7 @@ private struct Fixture: Decodable {
                 result.append(["type": String(describing: type(of: scroll)),
                     "offset": scroll.contentView.bounds.minY,
                     "contentHeight": scroll.documentView?.frame.height ?? 0,
+                    "viewportWidth": scroll.contentView.bounds.width,
                     "viewportHeight": scroll.contentView.bounds.height,
                     "insetBottom": scroll.contentInsets.bottom,
                     "flipped": scroll.documentView?.isFlipped ?? false])
@@ -130,6 +134,7 @@ private struct Fixture: Decodable {
             if let scroll = view as? UIScrollView, scroll.bounds.height > 100 {
                 result.append(["type": String(describing: type(of: scroll)),
                     "offset": scroll.contentOffset.y, "contentHeight": scroll.contentSize.height,
+                    "viewportWidth": scroll.bounds.width,
                     "viewportHeight": scroll.bounds.height, "insetBottom": scroll.adjustedContentInset.bottom,
                     "tracking": scroll.isTracking, "dragging": scroll.isDragging,
                     "decelerating": scroll.isDecelerating])
@@ -309,7 +314,7 @@ private struct Fixture: Decodable {
                 #endif
             }
             #if os(macOS)
-            .frame(width: 760, height: 820)
+            .frame(width: session.desktopWidth, height: 820)
             #endif
             .background(Theme.background).tint(Theme.accent).preferredColorScheme(session.layoutScheme)
             .dynamicTypeSize(session.layoutType)
