@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with TeamStore.swift TeamChatReadState.swift TeamModels.swift WorkReference.swift JSONValue.swift.
+// Compile with TeamStore.swift TeamAppPresence.swift TeamChatReadState.swift TeamModels.swift WorkReference.swift JSONValue.swift.
 import Foundation
 
 private func check(_ value: @autoclosure () -> Bool, _ message: String) { precondition(value(), message) }
@@ -22,6 +22,9 @@ private actor Fixture {
     var paginate = false
     var publishing = false
     var failures: [String: String] = [:]
+    var presence: [Bool] = []
+    func checkPresence(_ expected: [Bool], _ message: String) { check(presence == expected, message) }
+    func checkPresenceCount(_ expected: Int, _ message: String) { check(presence.count == expected, message) }
     func api() -> TeamAPI { TeamAPI { method, params, owner in try await self.send(method, params, owner) } }
     func delay(_ key: String) { delayed.insert(key) }
     func hasWaiter(_ key: String) -> Bool { waiting[key] != nil }
@@ -33,15 +36,18 @@ private actor Fixture {
     func usePages() { paginate = true }
     func usePublishing() { publishing = true }
     func fail(_ operation: String, code: String) { failures[operation] = code }
+    func succeed(_ operation: String) { failures.removeValue(forKey: operation) }
     func send(_ method: TeamHostMethod, _ params: JSONValue, _ owner: TeamAccountOwner) async throws -> JSONValue {
         guard case let .object(fields) = params else { fatalError("Fixture parameters must be an object") }
         let operation = method == .capabilities ? "capabilities" : fields["operation"].flatString ?? method.rawValue
         let org = fields["organization"].flatString ?? ""
         let key = "\(owner.scope.identity)|\(operation)|\(org)"
         calls.append((operation, org))
+        if operation == "presence.set", case let .bool(active) = fields["active"] { presence.append(active) }
         if let code = failures[operation] { throw TeamRequestFailure(code: code, message: "Fixture authorization changed") }
         if delayed.contains(key) { return try await withCheckedThrowingContinuation { waiting[key] = $0 } }
         switch operation {
+        case "presence.set": return .object(["active": fields["active"]!, "expiresInSeconds": .int(75)])
         case "capabilities": return .object(["enabled":.bool(enabled), "actorId":.string("fixture-owner"), "ready":.bool(authorized), "version":.int(1), "authorizationRequired":.bool(!authorized), "canPublishCheckouts":.bool(publishing)])
         case "organizations.list":
             let page = fields["page"]
@@ -108,10 +114,53 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await staleSharedProjectNavigation()
         await projectCatalogRefresh()
         await memberPresence()
+        await appPresenceTraffic()
         avatars()
         try messageAuthors()
         newChatOutsideFirstCatalogPage()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
+    }
+    @MainActor static func appPresenceTraffic() async {
+        let fixture = Fixture(), account = owner("alpha")
+        let api = await fixture.api()
+        var now = ContinuousClock.now
+        let publisher = TeamAppPresence(now: { now })
+        await publisher.publish(true, owner: account, api: api)
+        await publisher.publish(true, owner: account, api: api)
+        now = now.advanced(by: .seconds(44))
+        await publisher.publish(true, owner: account, api: api)
+        await fixture.checkPresence([true], "Windows duplicated the foreground heartbeat")
+        now = now.advanced(by: .seconds(1))
+        await publisher.publish(true, owner: account, api: api)
+        await fixture.checkPresence([true, true], "Foreground lease did not renew after 45 seconds")
+        await publisher.publish(false, owner: account, api: api)
+        for _ in 0..<120 { now = now.advanced(by: .seconds(30)); await publisher.publish(false, owner: account, api: api) }
+        await fixture.checkPresence([true, true, false], "A hidden app kept sending inactive heartbeats")
+        await fixture.fail("presence.set", code: "offline")
+        await publisher.publish(true, owner: account, api: api)
+        await publisher.publish(true, owner: account, api: api)
+        now = now.advanced(by: .seconds(29))
+        await publisher.publish(true, owner: account, api: api)
+        await fixture.checkPresenceCount(4, "A failed heartbeat retried before its backoff")
+        now = now.advanced(by: .seconds(1))
+        await publisher.publish(true, owner: account, api: api)
+        now = now.advanced(by: .seconds(59))
+        await publisher.publish(true, owner: account, api: api)
+        await fixture.checkPresenceCount(5, "Repeated failure did not increase retry spacing")
+        await fixture.succeed("presence.set")
+        await publisher.publish(false, owner: account, api: api)
+        await fixture.checkPresence([true, true, false, true, true, false],
+              "Inactive transition was lost after an uncertain foreground request")
+        let key = "alpha|presence.set|"
+        await fixture.delay(key)
+        let pending = Task { await publisher.publish(true, owner: account, api: api) }
+        await waitFor(key, fixture: fixture)
+        await publisher.publish(true, owner: account, api: api)
+        await fixture.checkPresenceCount(7, "Concurrent windows duplicated an in-flight heartbeat")
+        await fixture.release(key, value: .object(["active": .bool(true)]))
+        await pending.value
+        await publisher.publish(true, owner: owner("beta"), api: api)
+        await fixture.checkPresenceCount(8, "A new account inherited another login's heartbeat")
     }
     static func newChatOutsideFirstCatalogPage() {
         let firstPage = (0..<100).map { TeamSharedChat(id: "older-\($0)", checkoutId: "checkout_fixture", revision: 1, createdAt: "2026-01-01T00:00:00Z") }

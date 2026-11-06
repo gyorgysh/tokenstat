@@ -301,11 +301,9 @@ final class TeamStore {
         repeat {
             guard self.owner == owner, phase == .ready, !Task.isCancelled else { return }
             let foreground = active()
-            do {
-                let _: JSONValue = try await api.request(.directory, ["operation": .string("presence.set"), "active": .bool(foreground)], owner: owner)
-            } catch {}
+            await TeamAppPresence.shared.publish(foreground, owner: owner, api: api)
             guard foreground || keepsWatching, !Task.isCancelled else { return }
-            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            do { try await Task.sleep(for: .seconds(15)) } catch { return }
         } while self.owner == owner
     }
 
