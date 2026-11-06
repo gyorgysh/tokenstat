@@ -63,49 +63,45 @@ struct MarkdownText: View {
 }
 
 extension MarkdownText {
-    /// Parse these bodies now, off the main thread, so that nothing has to be
-    /// parsed later while a row is being laid out.
+    /// Parse bodies and inline runs off the main thread before lazy rows need
+    /// them. Long pull-request bodies otherwise parse during scroll layout.
     ///
-    /// This is the whole fix for a scroll that hitches on a long pull request.
-    /// A conversation's rows are lazy, so a body is parsed the first time it
-    /// scrolls into view, and the parse happens inside `init` on the main
-    /// thread, in the middle of a layout pass. A Dependabot release note is
-    /// twenty kilobytes of HTML, and turning it into blocks and then into
-    /// attributed runs is tens of milliseconds of regular expressions. Doing
-    /// that on the frame the row appears is exactly the stall a reader feels.
-    ///
-    /// Everything here is a pure function of the text and the caches are
-    /// `NSCache`, which is thread safe, so the only thing that changes is when
-    /// the work happens. If a row is reached before its warm finishes it parses
-    /// itself as before and the warm finds the answer already there.
+    /// Background requests share a worker so overlapping pages and previews
+    /// reuse the cache instead of parsing the same bodies concurrently. A row
+    /// reached before its warm finishes still parses immediately; rendering
+    /// never waits for the worker.
     static func warm(_ sources: [String]) {
-        let pending = sources.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard !pending.isEmpty else { return }
+        guard !sources.isEmpty else { return }
         Task.detached(priority: .utility) {
-            for source in pending {
-                let blocks = MarkdownCache.blocks.value(for: source) {
-                    var parser = MarkdownParser(source)
-                    return parser.blocks()
+            for source in sources {
+                await MarkdownWarmup.shared.warm(source)
+            }
+        }
+    }
+}
+
+private actor MarkdownWarmup {
+    static let shared = MarkdownWarmup()
+
+    func warm(_ source: String) {
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let blocks = MarkdownCache.blocks.value(for: source) {
+            var parser = MarkdownParser(source)
+            return parser.blocks()
+        }
+        for block in blocks {
+            switch block.kind {
+            case let .heading(_, text), let .paragraph(text), let .quote(text):
+                _ = MarkdownInline.attributed(text)
+            case let .list(items):
+                for item in items { _ = MarkdownInline.attributed(item.text) }
+            case let .table(header, rows, _):
+                for cell in header { _ = MarkdownInline.attributed(cell) }
+                for row in rows {
+                    for cell in row { _ = MarkdownInline.attributed(cell) }
                 }
-                for block in blocks {
-                    switch block.kind {
-                    case let .heading(_, text):
-                        _ = MarkdownInline.attributed(text)
-                    case let .paragraph(text):
-                        _ = MarkdownInline.attributed(text)
-                    case let .quote(text):
-                        _ = MarkdownInline.attributed(text)
-                    case let .list(items):
-                        for item in items { _ = MarkdownInline.attributed(item.text) }
-                    case let .table(header, rows, _):
-                        for cell in header { _ = MarkdownInline.attributed(cell) }
-                        for row in rows {
-                            for cell in row { _ = MarkdownInline.attributed(cell) }
-                        }
-                    case .code, .rule:
-                        break
-                    }
-                }
+            case .code, .rule:
+                break
             }
         }
     }

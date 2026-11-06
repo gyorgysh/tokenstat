@@ -17,6 +17,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - The Android composer gives agent names more room on small screens and with larger text. Routing settings are in Chat setup.
 - Desktop composers keep the model picker in reach and put working style and permissions in Setup. On Mac, the usage ring opens a preview with a link to full details, and sidebar resize handles match the tool pane.
 - Chat tabs on iOS share the available width, follow the reading direction, and scroll when labels need more room. Repository and recent-chat lists use consistent row spacing and dividers.
+- Streaming replies and switching between long chats use less processing on Mac, iPhone and iPad.
 
 ### Fixed
 
