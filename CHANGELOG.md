@@ -21,6 +21,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Diff previews in iPhone and iPad chats follow the text size setting and fit the available width.
 - Chat no longer pauses to load or prepare larger attachments on Mac, iPhone and iPad.
 - Plain terminal logs take less processing on Mac, iPhone and iPad.
+- Remote terminals display new output with less delay.
 
 ### Fixed
 

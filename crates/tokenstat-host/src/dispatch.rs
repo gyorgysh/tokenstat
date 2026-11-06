@@ -4267,34 +4267,35 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
                     let _ = manager.touch_viewer(&p.id, viewer);
                 }
-                let mut chunk = match p.viewer.as_deref() {
+                let read_chunk = || match p.viewer.as_deref() {
                     Some(viewer) => manager
                         .read_for_viewer(&p.id, viewer, p.offset)
-                        .map_err(|e| e.to_string())?,
-                    None => manager.read(&p.id, p.offset).map_err(|e| e.to_string())?,
+                        .map_err(|e| e.to_string()),
+                    None => manager.read(&p.id, p.offset).map_err(|e| e.to_string()),
                 };
-                // Hold the call open until there is something to say, or the
-                // caller's patience runs out. Capped so a connection is never
-                // parked for long: this occupies one socket and one thread, and
-                // only the session somebody is looking at asks for it.
-                //
-                // Polled rather than woken by the buffer, because the buffer has
-                // no condition variable and giving it one reaches into every
-                // writer. At three milliseconds the wait costs a few hundred
-                // cheap lock-and-look passes a second on one session, and it
-                // buys back the interval a client would otherwise wait on every
-                // single keystroke.
-                if let Some(wait) = p.wait_ms.filter(|w| *w > 0) {
-                    let deadline =
-                        std::time::Instant::now() + Duration::from_millis(wait.min(1_000));
-                    while chunk.bytes.is_empty() && std::time::Instant::now() < deadline {
-                        std::thread::sleep(Duration::from_millis(3));
-                        chunk = match p.viewer.as_deref() {
-                            Some(viewer) => manager
-                                .read_for_viewer(&p.id, viewer, p.offset)
-                                .map_err(|e| e.to_string())?,
-                            None => manager.read(&p.id, p.offset).map_err(|e| e.to_string())?,
-                        };
+                let mut chunk = read_chunk()?;
+                // Wake on new bytes or output EOF instead of polling the buffer.
+                if let Some(wait) = p.wait_ms.filter(|w| *w > 0)
+                    && chunk.bytes.is_empty()
+                {
+                    let wait = Duration::from_millis(wait.min(1_000));
+                    let deadline = std::time::Instant::now() + wait;
+                    let closed = manager
+                        .wait_for_output(&p.id, chunk.next_offset.max(p.offset), false, wait)
+                        .map_err(|e| e.to_string())?;
+                    chunk = read_chunk()?;
+                    // Older clients use held empty reads to pace polling and
+                    // have no EOF field with which to stop their reader.
+                    if closed && chunk.bytes.is_empty() {
+                        manager
+                            .wait_for_output(
+                                &p.id,
+                                chunk.next_offset.max(p.offset),
+                                true,
+                                deadline.saturating_duration_since(std::time::Instant::now()),
+                            )
+                            .map_err(|e| e.to_string())?;
+                        chunk = read_chunk()?;
                     }
                 }
                 Ok(json!({
@@ -5341,6 +5342,62 @@ mod tests {
                 "{method} must not bypass the session"
             );
         }
+    }
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn closed_terminal_output_keeps_the_requested_empty_read_pacing() {
+        struct Session(String);
+        impl Drop for Session {
+            fn drop(&mut self) {
+                let _ = tokenstat_pty::manager().close(&self.0);
+            }
+        }
+        let folder = tempfile::tempdir().unwrap();
+        let (command, args) = if cfg!(windows) {
+            (
+                "cmd.exe",
+                vec!["/D".into(), "/C".into(), "exit".into(), "0".into()],
+            )
+        } else {
+            ("/usr/bin/true", Vec::new())
+        };
+        let manager = tokenstat_pty::manager();
+        let (info, _process) = manager
+            .spawn_piped_owned_checked(
+                &tokenstat_pty::Spawn {
+                    command: command.into(),
+                    args,
+                    cwd: folder.path().into(),
+                    workspace_id: None,
+                    hidden: true,
+                    rows: 24,
+                    cols: 80,
+                    no_color: true,
+                    dark: None,
+                    environment: Vec::new(),
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        let _session = Session(info.id.clone());
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while manager.output_end_offset(&info.id).unwrap().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let started = std::time::Instant::now();
+        let reply = terminal_call(
+            "pty.read",
+            &json!({"id":info.id,"offset":0,"waitMs":120}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(reply["data"], "");
+        assert_eq!(reply["nextOffset"], 0);
+        assert!(
+            started.elapsed() >= Duration::from_millis(80),
+            "Older clients use held empty reads to pace their polling after output closes"
+        );
     }
 
     /// The whole peer lifecycle over the real store, in one process.
