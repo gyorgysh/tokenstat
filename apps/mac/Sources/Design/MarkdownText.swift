@@ -797,12 +797,13 @@ private struct MessageMarkdownContent: View {
             if case let .text(_, _, end) = segment { result.end = max(result.end, end) }
         }
         let arrivals = wordArrivals.update(source: source, count: ranges.end, now: ProcessInfo.processInfo.systemUptime, animate: smoothStreaming && !reduceStreamingMotion, identity: liveSlot)
+        let activeWords = StreamingWordWindow(arrivals)
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 switch segment {
                 case let .text(chain, hasLinks, wordEnd):
                     let wordStart = ranges.starts[index]
-                    let arriving = arrivals.filter { $0.key >= wordStart && $0.key < wordEnd }
+                    let arriving = activeWords.words(in: wordStart..<wordEnd)
                     Group {
                         if selectable {
                             chain

@@ -35,3 +35,29 @@ final class StreamingWordArrivals {
         return arrivals
     }
 }
+
+/// Reuse the active word range across every text chunk in one render.
+struct StreamingWordWindow {
+    private let arrivals: [Int: TimeInterval]
+    private let first: Int
+    private let last: Int
+
+    init(_ arrivals: [Int: TimeInterval]) {
+        self.arrivals = arrivals
+        var first = Int.max
+        var last = Int.min
+        for word in arrivals.keys {
+            first = min(first, word)
+            last = max(last, word)
+        }
+        self.first = first
+        self.last = last
+    }
+
+    func words(in range: Range<Int>) -> [Int: TimeInterval] {
+        guard !arrivals.isEmpty, !range.isEmpty,
+              range.upperBound > first, range.lowerBound <= last else { return [:] }
+        if range.lowerBound <= first, range.upperBound > last { return arrivals }
+        return arrivals.filter { range.contains($0.key) }
+    }
+}

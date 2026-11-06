@@ -19,6 +19,26 @@ import Foundation
         let reopened = StreamingWordArrivals()
         precondition(reopened.update(source: "Restored", count: 1, now: 5).isEmpty)
         precondition(reopened.update(source: "Restored words in another chat", count: 5, now: 5.01, identity: "other").isEmpty)
+        var arrivals: [Int: TimeInterval] = [0: 10, 1: 11, 4: 14, 8: 18]
+        let window = StreamingWordWindow(arrivals)
+        precondition(window.words(in: 0..<2) == [0: 10, 1: 11])
+        precondition(window.words(in: 2..<2).isEmpty)
+        precondition(window.words(in: 2..<4).isEmpty)
+        precondition(window.words(in: 4..<9) == [4: 14, 8: 18])
+        precondition(window.words(in: 0..<9) == arrivals)
+        precondition(window.words(in: 9..<20).isEmpty)
+        precondition(StreamingWordWindow([:]).words(in: 0..<10).isEmpty)
+        arrivals[1] = 99
+        precondition(window.words(in: 1..<2) == [1: 11], "A rendered window keeps its own timestamp snapshot")
+        let burst = Dictionary(uniqueKeysWithValues: (4000..<10000).map { ($0, TimeInterval($0)) })
+        let longWindow = StreamingWordWindow(burst)
+        var restored: [Int: TimeInterval] = [:]
+        for start in stride(from: 0, to: 10000, by: 100) {
+            for (word, time) in longWindow.words(in: start..<start + 100) {
+                precondition(restored.updateValue(time, forKey: word) == nil, "A fade belongs to one chunk")
+            }
+        }
+        precondition(restored == burst, "Chunking preserves every word and its original arrival time")
         print("Word fade: initial history, append-only arrivals, no replay, expiry and reopened views passed")
     }
 }
