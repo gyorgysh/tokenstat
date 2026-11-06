@@ -64,12 +64,36 @@ class ChatUsagePanelTest {
         var opened = false
         compose.setContent { Theme { Fixture(onOpen = { opened = true }) } }
         compose.onNodeWithContentDescription(ring).assertIsDisplayed().performClick()
+        assertFalse("The ring opens a preview, not the full details", opened)
+        compose.onNodeWithText(L10n.text("common.chat.usage.details")).assertIsDisplayed()
+        screenshot("usage-android-preview.png")
+        compose.onNodeWithText(L10n.text("common.chat.usage.details")).performClick()
         assertTrue(opened)
         compose.onNodeWithText(L10n.text("android.chatpullssections.ask_first.4a9e8cf3")).assertDoesNotExist()
         screenshot("usage-android.png")
         compose.onNodeWithContentDescription(L10n.text("common.settings")).performClick()
         compose.onNodeWithText(L10n.text("android.chatpullssections.plan.fa8ed0bd")).assertExists()
         compose.onNodeWithText(L10n.text("common.chat.stats.cost")).performScrollTo().assertIsDisplayed()
+    }
+    @Test fun expandingGivesTheDraftFullWidthAndKeepsItsText() {
+        var draft by mutableStateOf("A draft to keep")
+        var picked = false
+        val idle = JsonObject(chat + ("running" to JsonPrimitive(false)))
+        compose.setContent { Theme {
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                ChatComposer(idle, draft, { draft = it }, "Message", false,
+                    staged = emptyList(), onPick = {}, onRemove = {}, onSend = {}, onStop = {},
+                    onChange = { _, _ -> }, backends = emptyList(), onAgent = { picked = true }, launchMode = "execute")
+            }
+        } }
+        compose.onNodeWithText(chatAgentSummary(emptyList(), idle)).assertIsDisplayed().performClick()
+        assertTrue(picked)
+        val before = compose.onNode(hasSetTextAction()).fetchSemanticsNode().boundsInRoot.width
+        compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.expand_the_message_box.c0441a94")).performClick()
+        compose.onNode(hasSetTextAction()).assertTextEquals("A draft to keep").assertIsFocused()
+        val after = compose.onNode(hasSetTextAction()).fetchSemanticsNode().boundsInRoot.width
+        assertTrue("Expanded field gains the toolbar's width", after > before + 40)
+        screenshot("composer-android-expanded.png")
     }
     @Test fun largeTextStillShowsCostAndTheQuotaControl() {
         compose.setContent { Theme { Fixture(large = true) } }

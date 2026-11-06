@@ -376,8 +376,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 events = [json.loads(line) for line in archive if line.strip()]
             deltas = [event["event"]["delta"] for event in events
                 if event.get("kind") == "agent" and event.get("event", {}).get("kind") == "text"]
-            assert "".join(deltas) == expected, "Stream batching changed or lost text"
-            assert len(deltas) < len(words) // 2, (len(deltas), len(words))
+            assert "".join(deltas) == expected, "Streaming changed or lost text"
             atomic_json(run_root / "stream-updates.json", {"inputUpdates":len(words),
                 "publishedUpdates":len(deltas), "expected":expected, "deltas":deltas})
             prove(f"Native readers ({', '.join(roles)}) display exact Unicode/Markdown and an idle tail: {len(words)} input updates become {len(deltas)} publications")
@@ -385,6 +384,7 @@ print(json.dumps({'events':len(result['result']['events'])}))
             emit({"type": "end", "stopReason": "end_turn"})
             await wait(lambda: all(state(role) and not state(role)["running"] for role in roles))
             await visible("final-no-newline")
+            assert all(not state(role)["failures"] for role in roles), {role: state(role)["failures"] for role in roles}
             prove("Turn completion publishes the final partial line to every native reader")
             atomic_json(run_root / "result.json", {"ok":True, "proofs":proofs,
                 "states":{role:state(role) for role in roles}})

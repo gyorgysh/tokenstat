@@ -13,10 +13,11 @@ struct ComposerLimitsBadge: View {
     /// Canonical source matching runs against this, so "claude" meets the
     /// "claude_code" readings.
     let backend: String
+    var peer: String?
     var compact = false
     var showUsage: (() -> Void)?
 
-    @State private var readings = PlanLimitsStore.shared
+    private var readings: PlanLimitsStore { ChatPlanLimits.store(peer: peer) }
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingDetail = false
     private var shared: [ProviderLimits] {
@@ -64,7 +65,7 @@ struct ComposerLimitsBadge: View {
                 let compactRow = ComposerLimits.compactRow(rows: headline, label: \.label, percent: \.percent)
                 if !headline.isEmpty, !compact || compactRow != nil {
                     Button {
-                        if let showUsage { showUsage() } else { showingDetail = true }
+                        showingDetail = true
                     } label: {
                         if compact, let row = compactRow {
                             ZStack {
@@ -94,17 +95,28 @@ struct ComposerLimitsBadge: View {
                     .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_limits_1.5d5c8479", "\(harnessName(provider.source))", "\(summaryText(for: compact ? compactRow.map { [$0] } ?? [] : headline))"))
                     .accessibilityValue(provider.isStale ? L10n.text("common.chat.usage.stale") : "")
                     .popover(isPresented: $showingDetail, arrowEdge: .bottom) {
-                        ComposerLimitsDetail(
-                            source: provider.source,
-                            providers: shared,
-                            refreshing: readings.isRefreshing,
-                            refresh: { Task { try? await readings.refresh(force: true) } }
-                        )
+                        VStack(alignment: .leading, spacing: 0) {
+                            ComposerLimitsDetail(
+                                source: provider.source,
+                                providers: shared,
+                                refreshing: readings.isRefreshing,
+                                refresh: { Task { try? await readings.refresh(force: true) } }
+                            )
+                            if let showUsage {
+                                Button(L10n.text("common.chat.usage.details"), .benchmarks) {
+                                    showingDetail = false
+                                    showUsage()
+                                }
+                                .buttonStyle(SecondaryButtonStyle(small: true))
+                                .padding([.horizontal, .bottom], Theme.Space.m)
+                            }
+                        }
+                        .presentationCompactAdaptation(.popover)
                     }
                 }
             }
         }
-        .task(id: scenePhase) {
+        .task(id: "\(scenePhase):\(peer ?? "local")") {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 try? await readings.refresh()

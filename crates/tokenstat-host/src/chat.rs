@@ -30,8 +30,6 @@ pub mod router;
 pub(crate) mod sharing;
 #[path = "chat_steer.rs"]
 mod steering;
-#[path = "chat_stream_batch.rs"]
-mod stream_batch;
 
 #[cfg(test)]
 const LEGACY_EVENTS_CAP: u64 = 1024 * 1024;
@@ -4728,9 +4726,7 @@ impl Store {
             None => events,
         };
         let mut burst_bytes = 0usize;
-        let mut text_batch = stream_batch::TextBatch::default();
         loop {
-            self.record_events(id, backend, text_batch.due(Instant::now()));
             let mut received_bytes = 0;
             let stop_path = self.root.join(safe_file_name(id)).join("stop-request.json");
             if let Ok(meta) = fs::symlink_metadata(&stop_path)
@@ -4779,12 +4775,8 @@ impl Store {
                     muse_sign_in_required |= backend == "muse"
                         && events.iter().any(crate::transcript::muse_sign_in_required);
                     questions.shift(collect_agent_text(&events, &mut assistant_text));
-                    self.record_events(id, backend, text_batch.push(events, Instant::now()));
-                    let images = parser.take_images();
-                    if !images.is_empty() {
-                        self.record_events(id, backend, text_batch.flush());
-                    }
-                    self.record_tool_images(id, backend, activity_revision, images);
+                    self.record_events(id, backend, events);
+                    self.record_tool_images(id, backend, activity_revision, parser.take_images());
                     if muse_sign_in_required {
                         // Muse exec waits for browser login instead of exiting.
                         // This is only its own normalized startup challenge;
@@ -4793,11 +4785,7 @@ impl Store {
                     }
                     // Mid-turn, so the card is in front of the person while
                     // an answer can still reach this turn.
-                    let found = questions.scan(&assistant_text);
-                    if !found.is_empty() {
-                        self.record_events(id, backend, text_batch.flush());
-                    }
-                    self.record_questions(id, backend, found);
+                    self.record_questions(id, backend, questions.scan(&assistant_text));
                 }
             }
             // Check budgets on every bounded chunk, including a fast backlog
@@ -4855,17 +4843,11 @@ impl Store {
             if received_bytes > 0 {
                 std::thread::sleep(STREAM_BATCH);
             }
-            match manager.wait_for_output(
-                pty,
-                offset,
-                output_closed,
-                text_batch.wait(Instant::now(), POLL),
-            ) {
+            match manager.wait_for_output(pty, offset, output_closed, POLL) {
                 Ok(closed) => output_closed = closed,
                 Err(_) => break,
             }
         }
-        self.record_events(id, backend, text_batch.flush());
         // One final read catches output written immediately before exit.
         if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset)
             && !chunk.bytes.is_empty()

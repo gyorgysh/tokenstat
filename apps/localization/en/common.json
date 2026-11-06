@@ -832,5 +832,10 @@
   "common.chat.usage.no_limits": "No limit readings for this agent.",
   "common.chat.usage.no_totals": "No usage reported for this conversation.",
   "common.chat.usage.resets": "Resets {0}",
-  "common.chat.usage.reported": "Reported {0}"
+  "common.chat.usage.reported": "Reported {0}",
+  "common.chat.usage.details": "More details",
+  "common.chat.smooth_streaming": "Smooth streaming",
+  "common.chat.smooth_streaming_help": "Fade in new words as they arrive. Reduced Motion turns this off.",
+  "common.chat.elapsed.seconds": "{0}s",
+  "common.chat.elapsed.minutes": "{0}m"
 }

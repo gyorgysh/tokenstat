@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
+import androidx.lifecycle.repeatOnLifecycle
 
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.core.readBounded
@@ -84,6 +85,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
@@ -301,6 +305,7 @@ fun ChatSection(
     // open conversation's own, and starts folded each time it opens.
     val detailStore = remember(context) { ChatDetailStore(context) }
     var detail by remember(detailStore) { mutableStateOf(detailStore.level()) }
+    var smoothStreaming by remember(detailStore) { mutableStateOf(detailStore.smoothStreaming()) }
     var detailMenu by remember { mutableStateOf(false) }
     var groupsOpen by remember(projectOwner, openId) { mutableStateOf(false) }
     var toggledGroups by remember(projectOwner, openId) { mutableStateOf(emptySet<String>()) }
@@ -397,6 +402,10 @@ fun ChatSection(
             if (ChatSteer.noteOf(old) != ChatSteer.noteOf(row)) steerVersions.changed(id)
         }
         chats = reconciled.rows
+        for (row in chats) {
+            val id = row.str("id") ?: continue
+            model.chatTurnTimes.observe(projectOwner?.conversation(id), row.bol("running"), android.os.SystemClock.elapsedRealtime())
+        }
         heldSteers = reconciled.held
         retiredSteers = reconciled.retired
     }
@@ -827,6 +836,7 @@ fun ChatSection(
             val deliveryId = live.id
             val firstAttempt = live.firstAttemptAtMs ?: return false
             if (!ownsProject()) return false
+            val turnStarted = android.os.SystemClock.elapsedRealtime()
             val sent = runCatching {
                 model.workspaceSection(
                     peer,
@@ -838,6 +848,7 @@ fun ChatSection(
                 ) as? JsonObject
             }
             if (sent.isSuccess) {
+                if (ownsProject() && !steerCurrent) projectOwner?.conversation(id)?.let { model.chatTurnTimes.begin(it, turnStarted) }
                 val revision = sent.getOrNull()?.long("sendRevision")
                 if (!writeQueue(id) { list ->
                     val kept = ChatOutboxRules.accept(list.toList(), deliveryId, revision)
@@ -1619,6 +1630,10 @@ fun ChatSection(
                                 detailMenu = false
                             }
                         }
+                        ChatAgentMenuItem(L10n.text("common.chat.smooth_streaming"), smoothStreaming) {
+                            smoothStreaming = !smoothStreaming
+                            detailStore.setSmoothStreaming(smoothStreaming)
+                        }
                         if (detail != ChatDetail.Detailed) {
                             HorizontalDivider()
                             val anyOpen = groupsOpen || toggledGroups.isNotEmpty()
@@ -1777,7 +1792,9 @@ fun ChatSection(
                                     onClick = { openId?.let { id -> scope.launch { loadEarlier(id) } } })
                             }
                         }
+                        val liveTextId = shownRows.lastOrNull()?.id
                         items(shownRows, key = { it.id }) { item ->
+                            key(projectOwner, openId) {
                             TranscriptItemRow(
                                 item = item,
                                 model = model,
@@ -1789,10 +1806,12 @@ fun ChatSection(
                                 canAnswerQuestions = !offline && HostContracts.supportsChatQuestions(protocol),
                                 onReviewChanges = if (offline) null else ({ onOpenSection("Changes") }),
                                 toolImages = imageRows.toolImages[item.id].orEmpty(),
+                                live = smoothStreaming && openChat?.bol("running") == true && item.id == liveTextId,
                                 onToggleGroup = { id ->
                                     toggledGroups = if (id in toggledGroups) toggledGroups - id else toggledGroups + id
                                 },
                             )
+                            }
                         }
                         if (chatActivity?.planReported == true && chatActivity.plan.isNotEmpty()) {
                             item(key = "activity-plan") { ChatPlanChecklist(chatActivity) }
@@ -1819,6 +1838,7 @@ fun ChatSection(
                                     waiting = waiting,
                                     step = step,
                                     speaking = speaking,
+                                    startedAt = model.chatTurnTimes.observe(openId?.let { projectOwner?.conversation(it) }, true, android.os.SystemClock.elapsedRealtime()),
                                 )
                             }
                         }
@@ -1955,7 +1975,7 @@ fun ChatSection(
             ChatComposer(
                 chat = chats.firstOrNull { it.str("id") == openId },
                 quota = {
-                    ChatQuotaBadge(rememberChatQuota(model, openChat?.str("backend").orEmpty())) {
+                    ChatQuotaBadge(rememberChatQuota(model, openChat?.str("backend").orEmpty(), peer).reading) {
                         activitySection = null; showingUsage = true; showingStats = true
                     }
                 },
@@ -3312,6 +3332,7 @@ private fun ChatWorkingIndicator(
     waiting: Boolean,
     step: String?,
     speaking: Boolean,
+    startedAt: Long? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTsColors.current
@@ -3321,7 +3342,16 @@ private fun ChatWorkingIndicator(
         speaking -> PersonaMood.Speaking
         else -> PersonaMood.Thinking
     }
-    val label = ChatSeat.seatLabel(waiting, step, speaking)
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val now by androidx.compose.runtime.produceState(android.os.SystemClock.elapsedRealtime(), startedAt, lifecycle) {
+        if (startedAt != null) lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            while (true) { value = android.os.SystemClock.elapsedRealtime(); kotlinx.coroutines.delay(1_000) }
+        }
+    }
+    val base = ChatSeat.seatLabel(waiting, step, speaking)
+    val seconds = startedAt?.let { ((now - it).coerceAtLeast(0) / 1_000) }
+    val elapsed = seconds?.let { if (it < 60) L10n.text("common.chat.elapsed.seconds", "$it") else L10n.text("common.chat.elapsed.minutes", "${it / 60}") }
+    val label = if (elapsed == null) base else "$base · $elapsed"
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -3419,6 +3449,15 @@ internal fun ChatComposer(
     // brief. The toggle sits at the top right of the bar, away from send,
     // the way the iPhone composer grows its field.
     var expanded by remember { mutableStateOf(false) }
+    val inputFocus = remember { FocusRequester() }
+    var inputFocused by remember { mutableStateOf(false) }
+    var restoreInputFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        if (restoreInputFocus) {
+            inputFocus.requestFocus()
+            restoreInputFocus = false
+        }
+    }
     var setupExpanded by remember(chat?.str("id")) { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
@@ -3436,43 +3475,31 @@ internal fun ChatComposer(
                     onClick = onQueueWhenConnected,
                 )
             }
-            // A phone uses the agent's mark; larger windows can keep the full model summary.
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val compactControls = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.3f
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (compactControls) {
-                        IconButton(onClick = onAgent, enabled = !sending,
-                            modifier = Modifier.semantics { contentDescription = chatAgentSummary(backends, chat) }) {
-                            HarnessMark(chat?.str("backend").orEmpty(), size = 22.dp)
-                        }
-                        Spacer(Modifier.weight(1f))
-                    } else {
-                        TsPickerField(
-                            summary = chatAgentSummary(backends, chat),
-                            onOpen = onAgent,
-                            enabled = !sending,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    routing()
-                    quota()
-                    IconButton(onClick = { setupExpanded = !setupExpanded }, modifier = Modifier.semantics {
-                        stateDescription = L10n.text(if (setupExpanded) "common.collapse" else "common.expand")
-                    }) {
-                        Icon(ActionIcon.Settings.vector, L10n.text("common.settings"), tint = colors.accent, modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(onClick = { expanded = !expanded }) {
-                        Icon(
-                            if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,
-                            if (expanded) L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f") else L10n.text("android.chatpullssections.expand_the_message_box.c0441a94"),
-                            tint = colors.accent,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                TsPickerField(
+                    summary = chatAgentSummary(backends, chat),
+                    onOpen = onAgent,
+                    enabled = !locked,
+                    modifier = Modifier.weight(1f),
+                )
+                routing()
+                quota()
+                IconButton(onClick = { setupExpanded = !setupExpanded }, modifier = Modifier.semantics {
+                    stateDescription = L10n.text(if (setupExpanded) "common.collapse" else "common.expand")
+                }) {
+                    Icon(ActionIcon.Settings.vector, L10n.text("common.settings"), tint = colors.accent, modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }) {
+                    Icon(
+                        if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,
+                        if (expanded) L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f") else L10n.text("android.chatpullssections.expand_the_message_box.c0441a94"),
+                        tint = colors.accent,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
             if (setupExpanded) Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -3537,6 +3564,31 @@ internal fun ChatComposer(
                     }
                 }
             }
+            val input: @Composable (Modifier) -> Unit = { inputModifier ->
+                BasicTextField(
+                    value = draft,
+                    onValueChange = onDraft,
+                    modifier = inputModifier.heightIn(min = if (expanded) 180.dp else 48.dp)
+                        .padding(horizontal = Space.xs, vertical = Space.s).then(fieldModifier)
+                        .focusRequester(inputFocus).onFocusChanged { inputFocused = it.isFocused },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
+                    cursorBrush = SolidColor(colors.accent),
+                    maxLines = if (expanded) 18 else 5,
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (draft.isEmpty()) Text(
+                                hint,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = colors.textTertiary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            innerTextField()
+                        }
+                    },
+                )
+            }
+            if (expanded) input(Modifier.fillMaxWidth())
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -3573,27 +3625,7 @@ internal fun ChatComposer(
                         }
                     }
                 }
-                BasicTextField(
-                    value = draft,
-                    onValueChange = onDraft,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)
-                        .padding(horizontal = Space.xs, vertical = Space.s).then(fieldModifier),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
-                    cursorBrush = SolidColor(colors.accent),
-                    maxLines = if (expanded) 18 else 5,
-                    decorationBox = { innerTextField ->
-                        Box {
-                            if (draft.isEmpty()) Text(
-                                hint,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = colors.textTertiary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            innerTextField()
-                        }
-                    },
-                )
+                if (expanded) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
                 if (sending) {
                     IconButton(onClick = onStop) {
                         Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)

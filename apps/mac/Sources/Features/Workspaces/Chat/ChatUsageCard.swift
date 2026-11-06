@@ -5,7 +5,8 @@ import SwiftUI
 /// lease. It never sends a prompt or starts a second inspection poller.
 struct ChatUsageCard: View {
     @Bindable var model: ChatModel
-    @State private var readings = PlanLimitsStore.shared
+    private var limitsPeer: String? { model.isSharedSource ? nil : model.peer }
+    private var readings: PlanLimitsStore { ChatPlanLimits.store(peer: limitsPeer) }
     @Environment(\.scenePhase) private var scenePhase
 
     private var provider: ProviderLimits? {
@@ -20,7 +21,7 @@ struct ChatUsageCard: View {
                          inspection: model.currentActivityRead?.inspection,
                          contextIsStale: model.currentActivityRead?.failed == true,
                          totals: model.turnUsage)
-            .task(id: scenePhase) {
+            .task(id: "\(scenePhase):\(limitsPeer ?? "local")") {
                 guard scenePhase == .active else { return }
                 while !Task.isCancelled {
                     try? await readings.refresh()

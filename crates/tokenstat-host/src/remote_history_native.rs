@@ -88,6 +88,25 @@ fn serve_fixture() {
         Some(root.join("home").into_os_string())
     );
     tokenstat_paths::configure_mobile(root.join("host-data"), root.join("host-cache")).unwrap();
+    // A fictional quota belongs only to this disposable host. It lets native
+    // composer tests see a dated reading through the real encrypted endpoint.
+    tokenstat_core::limits::cache::store(&[tokenstat_core::limits::ProviderLimits {
+        source: "grok".into(),
+        plan: Some("Native QA".into()),
+        windows: vec![tokenstat_core::limits::UsageWindow {
+            label: "5-hour".into(),
+            scope: Some("primary".into()),
+            percent: 42.0,
+            resets_at_ms: None,
+            severity: tokenstat_core::limits::LimitSeverity::Normal,
+        }],
+        observed_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64,
+        note: None,
+        stale: false,
+    }]);
     let relay: Option<Value> = if std::env::var_os("TOKENSTAT_NATIVE_HISTORY_RELAY").is_some() {
         Some(serde_json::from_slice(&std::fs::read(root.join("relay.json")).unwrap()).unwrap())
     } else {

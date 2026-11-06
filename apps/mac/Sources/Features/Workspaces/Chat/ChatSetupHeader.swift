@@ -343,6 +343,7 @@ struct ChatComposerControls<Chrome: View>: View {
     var compact = false
     /// Phone composers keep setup controls in a sheet to leave room for chat.
     var condensed = false
+    var showCompactAgent = true
     let chrome: Chrome
 
     @State private var pickingAgent = false
@@ -351,13 +352,14 @@ struct ChatComposerControls<Chrome: View>: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false,
-         condensed: Bool = false,
+         condensed: Bool = false, showCompactAgent: Bool = true,
          @ViewBuilder chrome: () -> Chrome) {
         self.model = model
         self.chat = chat
         self.locked = locked || (model.landingDraft != nil && !model.landingCanSubmit)
         self.compact = compact
         self.condensed = condensed
+        self.showCompactAgent = showCompactAgent
         self.chrome = chrome()
     }
 
@@ -430,16 +432,20 @@ struct ChatComposerControls<Chrome: View>: View {
             }
             .dynamicTypeSize(.large)
         } else if compact && condensed {
-            HStack(spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.xs) {
+                if showCompactAgent {
+                    ChatAgentField(model: model, chat: chat, locked: locked) { pickingAgent = true }
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                }
                 Button { showingAccessibleSetup = true } label: {
                     Image(systemName: "slider.horizontal.3")
-                        .frame(width: Theme.Control.heightComfortable, height: Theme.Control.heightComfortable)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(L10n.text("apple.clientchatview.chat_setup.9fa79d00"))
                 chrome
             }
-            .fixedSize(horizontal: true, vertical: false)
+            .fixedSize(horizontal: !showCompactAgent, vertical: false)
         } else if compact {
             // Keyboard and expansion actions share only the agent's row.
             // Putting them beside the whole stack subtracts their width

@@ -78,9 +78,27 @@ start = bridge.index(needle)
 end = bridge.index("\n    }\n", start) + len("\n    }")
 bridge = bridge[:start] + needle + "\n        false\n    }" + bridge[end:]
 (OUT / "Bridge.swift").write_text(bridge)
+# History QA owns disposable data and must never create keys or prompt in the
+# person's login keychain. These transient keys still exercise cache sealing.
+(OUT / "WorkCacheKey.swift").write_text("""import Foundation
+@MainActor enum WorkCacheKey {
+    private static var keys: [String: [UInt8]] = [:]
+    static func keyForSaving(for scope: String, canCreate: () -> Bool) async -> [UInt8]? {
+        guard canCreate() else { return nil }
+        if let key = keys[scope] { return key }
+        let key = (0..<32).map { _ in UInt8.random(in: .min ... .max) }
+        keys[scope] = key
+        return key
+    }
+    static func existingKeyInBackground(for scope: String) async -> [UInt8]? { keys[scope] }
+    static func delete(for scope: String) async -> Bool { keys.removeValue(forKey: scope); return true }
+    nonisolated static func encoded(_ key: [UInt8]) -> String { Data(key).base64EncodedString() }
+}
+""")
 sources = [
-    {"path": str(ROOT / "apps/mac/Sources"), "excludes": ["Bridge/Bridge.swift"]},
+    {"path": str(ROOT / "apps/mac/Sources"), "excludes": ["Bridge/Bridge.swift", "Features/Work/WorkCacheKey.swift"]},
     {"path": str(OUT / "Bridge.swift")},
+    {"path": str(OUT / "WorkCacheKey.swift")},
     {"path": str(ROOT / "scripts/qa/chat-history/HistoryQA.swift")},
     {"path": str(ROOT / "apps/localization"), "type": "folder", "buildPhase": "resources"},
     {"path": str(ROOT / "apps/mac/Resources"), "buildPhase": "resources"},

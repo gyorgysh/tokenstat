@@ -13,12 +13,13 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
-- Use `/usage` in chat to see the current agent's available limits, context usage, token counts and reported cost. On phones, tap the small usage ring in the composer to open the details. It shows the five-hour limit when available, then the weekly limit.
+- Use `/usage` in chat to see the current agent's available limits, context usage, token counts and reported cost. The phone composer's usage ring shows the five-hour limit when available, then the weekly limit.
 
 ### Improved
 
-- Replies update in larger pieces, keeping completed lines together so streamed answers are easier to follow. Long replies, tool output and busy terminal sessions reach connected devices with less delay, and long conversations take less work to read and display.
-- Phone composers leave more room for the conversation, with setup controls available in a sheet.
+- New words can fade in as replies arrive, including expanded reasoning, on supported Apple devices and Android. Smooth streaming is optional, respects Reduced Motion and adds no delivery delay. Long replies, tool output and busy terminal sessions reach connected devices with less delay, and long conversations take less work to read and display.
+- A live timer below the latest response shows how long the turn has been running. It stays visible with smooth streaming off.
+- Phone composers keep the model picker visible and give expanded drafts a full-width text field. Tap the usage ring for a quick preview, with full details one tap away.
 - Chat attachments support files up to 250 MiB. Large images can load on connected devices, and local images appear without a download-size prompt. Large pasted images on Apple devices stay available in saved drafts.
 - Before a transfer uses relay, Apple and Android clients explain the connection and show the available allowance when known. Direct transfers need no relay confirmation, and retrying a completed transfer reuses the saved bytes.
 - Image viewers keep the point under your fingers when zooming, let you pan a zoomed image, and let you swipe between images at fitted size.
@@ -27,6 +28,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- Connected chat usage views read limits from the chat host, avoiding the extra wait for account sync. Background provider lookups skip Keychain items that would require a password prompt and keep previous readings marked stale when access is unavailable.
 - Saving offline chats on Apple devices no longer waits for Keychain on the UI thread, which could freeze the conversation.
 - Long private chats no longer discard earlier messages at the old transcript size limit. Clients recover interrupted history reads and keep independent reading positions when the same chat is open on several devices.
 - On Apple devices, following a long reply reaches its end, and opening a search result reveals its message inside a folded group of steps.

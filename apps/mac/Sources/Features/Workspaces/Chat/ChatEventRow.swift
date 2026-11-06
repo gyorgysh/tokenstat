@@ -546,6 +546,7 @@ struct ChatWorkingIndicator: View {
     var mood: PersonaMood = .thinking
     /// What a running tool is doing, in words. Empty leaves the mood's own word.
     var step: String? = nil
+    var startedAt: Date? = nil
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -555,10 +556,15 @@ struct ChatWorkingIndicator: View {
             // Everything else here is short and says exactly one thing.
             if mood == .thinking {
                 PersonaPastime(seed: seed, size: 26, doing: .thought, pokeable: false)
+                    .accessibilityHidden(true)
             } else {
                 PersonaMark(seed: seed, size: 26, state: mood)
+                    .accessibilityHidden(true)
             }
-            Text(label)
+            Group {
+                if let startedAt { TurnElapsedText(since: startedAt, prefix: label) }
+                else { Text(label) }
+            }
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -569,8 +575,7 @@ struct ChatWorkingIndicator: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: TranscriptFollow.seatHeight)
         .transaction { $0.animation = nil }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
+        .accessibilityElement(children: .combine)
     }
 
     /// A running tool names the step. Every other mood uses its own word.

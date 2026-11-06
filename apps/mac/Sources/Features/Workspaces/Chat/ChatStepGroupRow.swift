@@ -15,6 +15,8 @@ struct ChatStepGroupRow: View {
     /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
     let toggle: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
 
     #if os(macOS)
     private static let titleFont = Theme.font(13, weight: .medium)
@@ -25,11 +27,11 @@ struct ChatStepGroupRow: View {
     #endif
 
     var body: some View {
-        if group.plain {
-            plainLine
-        } else {
-            standardRow
+        Group {
+            if group.plain { plainLine }
+            else { standardRow }
         }
+        .animation(smoothStreaming && !reduceMotion ? .easeOut(duration: 0.18) : nil, value: group.running)
     }
 
     /// Compact: the verb, what it acted on and the lines it changed, in one

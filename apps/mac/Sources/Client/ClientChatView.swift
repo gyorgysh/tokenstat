@@ -1836,7 +1836,8 @@ struct ClientChatThread: View {
                             ChatWorkingIndicator(
                                 seed: model.faceSeed,
                                 mood: mood,
-                                step: TranscriptFollow.liveStep(model.transcriptItems)
+                                step: TranscriptFollow.liveStep(model.transcriptItems),
+                                startedAt: model.selected.flatMap { model.turnStartedAt(for: $0.id) }
                             )
                         }
                         TranscriptBottomSentinel()

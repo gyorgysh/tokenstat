@@ -182,7 +182,7 @@ struct ChatComposer: View {
                 ChatComposerControls(model: model, chat: chat, locked: setupLocked)
                 HStack(spacing: Theme.Space.s) {
                     turnStatus
-                    ComposerLimitsBadge(backend: chat.backend)
+                    ComposerLimitsBadge(backend: chat.backend, peer: model.peer)
                     turnActions
                 }
             }

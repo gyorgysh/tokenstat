@@ -71,6 +71,7 @@ struct ChatDetailSettings: View {
     /// the open-all and fold-all action, which means nothing in Settings.
     var model: ChatModel?
     @State private var preference = ChatDetailPreference.shared
+    @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
 
     var body: some View {
         if model != nil {
@@ -140,6 +141,10 @@ struct ChatDetailSettings: View {
                 #endif
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Toggle(L10n.text("common.chat.smooth_streaming"), isOn: $smoothStreaming)
+            Text(L10n.text("common.chat.smooth_streaming_help"))
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
             if let model, preference.level != .detailed {
                 Button(
                     model.anyGroupOpen ? L10n.text("apple.chatdetail.collapse_steps") : L10n.text("apple.chatdetail.expand_steps"),
@@ -157,6 +162,7 @@ struct ChatDetailSettings: View {
 /// chat menu. The same preference as the settings card.
 struct ChatDetailMenuPicker: View {
     @State private var preference = ChatDetailPreference.shared
+    @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
 
     var body: some View {
         Picker(L10n.text("apple.chatdetail.title"), selection: $preference.level) {

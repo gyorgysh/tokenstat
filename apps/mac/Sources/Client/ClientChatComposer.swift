@@ -77,12 +77,10 @@ struct ClientChatComposer: View {
                                 checkAgain: { Task { await model.checkUnconfirmedSend() } })
             }
             if !attachments.isEmpty { strip }
-            if compactHeight && !dynamicTypeSize.isAccessibilitySize {
-                HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                    composerControls
-                    inputRow
-                }
-            } else {
+            let layout = compactHeight && !expanded && !dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(HStackLayout(alignment: .bottom, spacing: Theme.Space.s))
+                : AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.s))
+            layout {
                 composerControls
                 inputRow
             }
@@ -150,11 +148,12 @@ struct ClientChatComposer: View {
             chat: chat,
             locked: setupLocked,
             compact: true,
-            condensed: compactHeight || horizontalSizeClass == .compact
+            condensed: compactHeight || horizontalSizeClass == .compact,
+            showCompactAgent: !compactHeight || expanded
         ) {
             HStack(spacing: Theme.Space.s) {
                 if !model.isSharedSource {
-                    ComposerLimitsBadge(backend: chat.backend, compact: true, showUsage: {
+                    ComposerLimitsBadge(backend: chat.backend, peer: model.peer, compact: true, showUsage: {
                         model.showingUsageStats = true
                         model.showingCommandStats = true
                     })
@@ -177,19 +176,24 @@ struct ClientChatComposer: View {
     }
 
     private var inputRow: some View {
-        HStack(alignment: .bottom, spacing: Theme.Space.s) {
-            attachControl
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
-            ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
-                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
-            field
-            // The send button earns its 44 points only when there is
-            // something to send. A permanently greyed one is a control
-            // that has never done anything, taking the width a message
-            // could have had.
-            if canSend {
-                sendControl
-                    .transition(controlTransition)
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                if !expanded {
+                    attachControl
+                        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
+                    ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
+                        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
+                }
+                field
+                if !expanded && canSend { sendControl.transition(controlTransition) }
+            }
+            if expanded {
+                HStack(spacing: Theme.Space.s) {
+                    attachControl
+                    ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
+                    Spacer(minLength: 0)
+                    if canSend { sendControl.transition(controlTransition) }
+                }
             }
         }
     }

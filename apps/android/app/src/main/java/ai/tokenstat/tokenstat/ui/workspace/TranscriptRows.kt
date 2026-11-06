@@ -67,6 +67,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -117,12 +119,13 @@ internal fun TranscriptItemRow(
     /// Opens the folder's changes. Null where there is no folder to open.
     onReviewChanges: (() -> Unit)? = null,
     toolImages: List<ChatDisplayItem.Attachment> = emptyList(),
+    live: Boolean = false,
 ) {
     if (toolImages.isNotEmpty()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             Box(Modifier.weight(1f)) {
                 TranscriptItemRow(item, model, peer, chatId, hostLabel, defaultAgentName, expandsOutput,
-                    onToggleGroup, canAnswerQuestions, onReviewChanges)
+                    onToggleGroup, canAnswerQuestions, onReviewChanges, live = live)
             }
             ChatImageGallery(toolImages, model, peer, chatId, hostLabel, compact = true)
         }
@@ -163,6 +166,7 @@ internal fun TranscriptItemRow(
                     onToggleGroup = onToggleGroup,
                     canAnswerQuestions = canAnswerQuestions,
                     onReviewChanges = onReviewChanges,
+                    live = live,
                 )
                 }
             }
@@ -182,6 +186,7 @@ internal fun TranscriptItemRow(
         }
         is ChatDisplayItem.Assistant -> AssistantPanel(
             text = item.text,
+            live = live,
             agentName = item.backend?.let { harnessName(it) } ?: defaultAgentName,
         )
         is ChatDisplayItem.TurnSeparator -> {
@@ -207,6 +212,7 @@ internal fun TranscriptItemRow(
                 baseStyle = TextStyle(fontSize = 12.sp),
                 color = LocalTsColors.current.textSecondary,
                 presentation = MarkdownPresentation.Aside,
+                live = live,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -290,7 +296,7 @@ internal fun TranscriptItemRow(
 }
 
 @Composable
-private fun AssistantPanel(text: String, agentName: String) {
+private fun AssistantPanel(text: String, agentName: String, live: Boolean) {
     val colors = LocalTsColors.current
     val clipboard = LocalClipboard.current
     val copyScope = rememberCoroutineScope()
@@ -343,6 +349,7 @@ private fun AssistantPanel(text: String, agentName: String) {
             baseStyle = TsType.chatBody,
             color = colors.textPrimary,
             presentation = MarkdownPresentation.Chat,
+            live = live,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -933,6 +940,8 @@ private fun AttachmentRow(
     }
 }
 
+private val LocalLiveMarkdown = staticCompositionLocalOf { false }
+
 internal enum class MarkdownPresentation { Document, Chat, Aside }
 
 /// Lightweight chat markdown: fences, headers, bullets, quotes, inline
@@ -944,80 +953,84 @@ internal fun MarkdownText(
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
     presentation: MarkdownPresentation = MarkdownPresentation.Document,
+    live: Boolean = false,
 ) {
     val colors = LocalTsColors.current
     val blocks = remember(text) { parseMarkdown(text) }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        blocks.forEach { block ->
-            when (block) {
-                is MdBlock.Code -> {
-                    if (block.chart) {
-                        ChatChartView(block.code, pending = block.pending)
-                    } else Text(
-                        block.code.trimEnd(),
-                        style = TsType.mono(12),
-                        color = color,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(colors.background)
-                            .padding(Space.s),
-                    )
-                }
-                is MdBlock.Table -> MarkdownTableView(block.table, baseStyle, color)
-                is MdBlock.Header -> {
-                    val headingStyle = when (presentation) {
-                        MarkdownPresentation.Chat -> when (block.level) {
-                            1 -> baseStyle.merge(TsType.chatHeading)
-                            2 -> baseStyle.merge(TsType.chatSubheading)
-                            else -> baseStyle.copy(fontWeight = FontWeight.SemiBold)
-                        }
-                        MarkdownPresentation.Aside -> baseStyle.copy(
-                            fontWeight = if (block.level <= 2) FontWeight.Bold else FontWeight.SemiBold,
+    val animate = live && !ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion()
+    CompositionLocalProvider(LocalLiveMarkdown provides animate) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            blocks.forEach { block ->
+                when (block) {
+                    is MdBlock.Code -> {
+                        if (block.chart) {
+                            ChatChartView(block.code, pending = block.pending)
+                        } else Text(
+                            block.code.trimEnd(),
+                            style = TsType.mono(12),
+                            color = color,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(colors.background)
+                                .padding(Space.s),
                         )
-                        MarkdownPresentation.Document -> baseStyle.merge(TextStyle(
-                            fontSize = when (block.level) { 1 -> 18.sp; 2 -> 16.sp; else -> 15.sp },
-                            fontWeight = FontWeight.SemiBold,
-                        ))
                     }
-                    InlineMarkdown(
-                        block.text,
-                        headingStyle,
-                        color,
-                    )
-                }
-                is MdBlock.Bullet -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        Text("•", style = baseStyle, color = color)
-                        InlineMarkdown(block.text, baseStyle, color, Modifier.weight(1f))
+                    is MdBlock.Table -> MarkdownTableView(block.table, baseStyle, color)
+                    is MdBlock.Header -> {
+                        val headingStyle = when (presentation) {
+                            MarkdownPresentation.Chat -> when (block.level) {
+                                1 -> baseStyle.merge(TsType.chatHeading)
+                                2 -> baseStyle.merge(TsType.chatSubheading)
+                                else -> baseStyle.copy(fontWeight = FontWeight.SemiBold)
+                            }
+                            MarkdownPresentation.Aside -> baseStyle.copy(
+                                fontWeight = if (block.level <= 2) FontWeight.Bold else FontWeight.SemiBold,
+                            )
+                            MarkdownPresentation.Document -> baseStyle.merge(TextStyle(
+                                fontSize = when (block.level) { 1 -> 18.sp; 2 -> 16.sp; else -> 15.sp },
+                                fontWeight = FontWeight.SemiBold,
+                            ))
+                        }
+                        InlineMarkdown(
+                            block.text,
+                            headingStyle,
+                            color,
+                        )
                     }
-                }
-                is MdBlock.Numbered -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        Text("${block.number}.", style = baseStyle, color = color)
-                        InlineMarkdown(block.text, baseStyle, color, Modifier.weight(1f))
+                    is MdBlock.Bullet -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            Text("•", style = baseStyle, color = color)
+                            InlineMarkdown(block.text, baseStyle, color, Modifier.weight(1f))
+                        }
                     }
-                }
-                is MdBlock.Quote -> {
-                    Row(
-                        Modifier.height(IntrinsicSize.Min),
-                        horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    ) {
-                        Box(
-                            Modifier
-                                .width(3.dp)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(colors.accent),
-                        ) { }
-                        InlineMarkdown(block.text, baseStyle, colors.textSecondary, Modifier.weight(1f))
+                    is MdBlock.Numbered -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            Text("${block.number}.", style = baseStyle, color = color)
+                            InlineMarkdown(block.text, baseStyle, color, Modifier.weight(1f))
+                        }
                     }
-                }
-                is MdBlock.Rule -> {
-                    HorizontalDivider(color = colors.border)
-                }
-                is MdBlock.Paragraph -> {
-                    InlineMarkdown(block.text, baseStyle, color)
+                    is MdBlock.Quote -> {
+                        Row(
+                            Modifier.height(IntrinsicSize.Min),
+                            horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        ) {
+                            Box(
+                                Modifier
+                                    .width(3.dp)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(colors.accent),
+                            ) { }
+                            InlineMarkdown(block.text, baseStyle, colors.textSecondary, Modifier.weight(1f))
+                        }
+                    }
+                    is MdBlock.Rule -> {
+                        HorizontalDivider(color = colors.border)
+                    }
+                    is MdBlock.Paragraph -> {
+                        InlineMarkdown(block.text, baseStyle, color)
+                    }
                 }
             }
         }
@@ -1188,7 +1201,7 @@ private fun InlineMarkdown(
         }
     }
     // Links ride as LinkAnnotations, which Text opens itself.
-    Text(annotated, style = style, modifier = modifier)
+    StreamingText(annotated, style = style, modifier = modifier, live = LocalLiveMarkdown.current)
 }
 
 private fun AnnotatedString.Builder.parseInline(
@@ -1220,7 +1233,9 @@ private fun AnnotatedString.Builder.parseInline(
                     append(text.drop(i))
                     return
                 }
+                pushStringAnnotation("tokenstat.noFade", "code")
                 withStyle(codeStyle()) { append(text.substring(i + 1, end)) }
+                pop()
                 i = end + 1
             }
             text.startsWith("[", i) -> {

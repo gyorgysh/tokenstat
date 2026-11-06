@@ -72,9 +72,9 @@ internal fun chatCommands() = listOf(
 @Composable internal fun ChatStatsDialog(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null, usageOnly: Boolean = false, fallbackUsage: ChatUsageTotals? = null, onDismiss: () -> Unit) {
     val account by model.state.collectAsStateWithLifecycle()
     val snapshot = inspection ?: rememberChatInspection(model, peer, chat, account.account)
-    val quota = if (usageOnly) rememberChatQuota(model, chat.str("backend").orEmpty()) else null
+    var quotaRefresh by remember(peer) { mutableStateOf(0) }
+    val quota = if (usageOnly) rememberChatQuota(model, chat.str("backend").orEmpty(), peer, quotaRefresh) else null
     val scope = rememberCoroutineScope()
-    var refreshing by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(shape = RoundedCornerShape(20.dp), color = LocalTsColors.current.background,
             modifier = Modifier.fillMaxWidth(.94f).fillMaxHeight(.86f)) {
@@ -84,13 +84,10 @@ internal fun chatCommands() = listOf(
                     TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
                 }
                 if (usageOnly) {
-                    TextButton(enabled = !refreshing, onClick = {
-                        scope.launch {
-                            refreshing = true
-                            try { model.refreshLimits(force = true) } finally { refreshing = false }
-                        }
-                    }) { Text(L10n.text("common.refresh")) }
-                    ChatUsagePanel(quota, snapshot, fallbackUsage)
+                    TextButton(enabled = quota?.refreshing != true, onClick = { quotaRefresh += 1 }) {
+                        Text(L10n.text("common.refresh"))
+                    }
+                    ChatUsagePanel(quota?.reading, snapshot, fallbackUsage)
                 } else {
                     if (activitySection != null) {
                         ChatActivityPanel(snapshot.data, chat, activitySection, initiallyExpanded = true, loaded = snapshot.loaded)

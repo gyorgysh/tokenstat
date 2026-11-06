@@ -81,6 +81,9 @@ class ChatDetailStore(context: Context) {
         return moved
     }
 
+    fun smoothStreaming(): Boolean = prefs.getBoolean("smoothStreaming", true)
+    fun setSmoothStreaming(enabled: Boolean) { prefs.edit().putBoolean("smoothStreaming", enabled).apply() }
+
     fun setLevel(level: ChatDetail) {
         prefs.edit().putString(KEY, level.key).apply()
     }

@@ -135,6 +135,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var refreshJob: Job? = null
     private var dashboardJob: Job? = null
     private var signingOut = false
+    val chatTurnTimes = ai.tokenstat.tokenstat.ui.logic.ChatTurnTimes()
 
     private val mutableState = MutableStateFlow(ClientState())
     val state = mutableState.asStateFlow()
@@ -474,6 +475,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun signOut() = viewModelScope.launch {
         if (signingOut) return@launch
         signingOut = true
+        chatTurnTimes.clear()
         UsageWidgetStore.clear(getApplication(), block = true)
         ai.tokenstat.tokenstat.ecosystem.SystemProjects.clear(getApplication())
         try {

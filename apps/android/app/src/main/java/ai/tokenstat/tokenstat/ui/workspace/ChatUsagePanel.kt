@@ -32,19 +32,47 @@ import kotlinx.serialization.json.*
 import java.text.NumberFormat
 import java.util.Locale
 
-@Composable internal fun rememberChatQuota(model: AppViewModel, backend: String): JsonObject? {
+internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boolean)
+
+@Composable internal fun rememberChatQuota(model: AppViewModel, backend: String, peer: String = "", refresh: Int = 0): ChatQuotaState {
     val state by model.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val owner = state.account?.let(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot::owner)
-    LaunchedEffect(model, owner, lifecycle) {
+    var direct by remember(peer, owner) { mutableStateOf<JsonArray?>(null) }
+    var failed by remember(peer, owner) { mutableStateOf(false) }
+    var refreshing by remember(peer, owner, refresh) { mutableStateOf(false) }
+    LaunchedEffect(model, owner, peer, lifecycle, refresh) {
         if (owner == null) return@LaunchedEffect
+        var force = refresh > 0
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) { model.refreshLimits(); delay(30_000) }
+            while (true) {
+                refreshing = true
+                try {
+                    if (peer.isBlank()) {
+                        model.refreshLimits(force)
+                        failed = false
+                    } else {
+                        val answer = model.workspaceSection(peer, "usage.limits", buildJsonObject { put("force", force) })
+                        direct = answer as? JsonArray ?: error("Invalid usage response")
+                        failed = false
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    failed = true
+                } finally {
+                    refreshing = false
+                }
+                force = false
+                delay(30_000)
+            }
         }
     }
-    return remember(state.limits, state.limitsError, backend) {
-        chatQuotaReading(state.limits, backend, state.limitsError != null)
+    val reading = remember(direct, failed, state.limits, state.limitsError, backend, peer) {
+        chatQuotaReading(direct ?: state.limits, backend,
+            failed || (peer.isNotBlank() && direct == null) || (peer.isBlank() && state.limitsError != null))
     }
+    return ChatQuotaState(reading, refreshing)
 }
 
 @Composable internal fun ChatQuotaBadge(reading: JsonObject?, onOpen: () -> Unit) {
@@ -55,15 +83,27 @@ import java.util.Locale
     val tint = if (stale) colors.textSecondary else quotaColor(window, percent)
     val description = L10n.text("common.chat.usage.allowance", harnessName(reading.str("source").orEmpty()),
         window.str("label").orEmpty(), NumberFormat.getIntegerInstance().format(percent))
-    IconButton(onClick = onOpen, modifier = Modifier.semantics {
-        contentDescription = description
-        if (stale) stateDescription = L10n.text("common.chat.usage.stale")
-    }) {
-        Canvas(Modifier.size(20.dp)) {
-            val stroke = 3.dp.toPx()
-            drawCircle(colors.border, style = Stroke(stroke))
-            drawArc(tint, -90f, (percent.coerceIn(0.0, 100.0) * 3.6).toFloat(), false,
-                style = Stroke(stroke, cap = StrokeCap.Round))
+    var showingPreview by remember(reading.str("source")) { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { showingPreview = true }, modifier = Modifier.semantics {
+            contentDescription = description
+            if (stale) stateDescription = L10n.text("common.chat.usage.stale")
+        }) {
+            Canvas(Modifier.size(20.dp)) {
+                val stroke = 3.dp.toPx()
+                drawCircle(colors.border, style = Stroke(stroke))
+                drawArc(tint, -90f, (percent.coerceIn(0.0, 100.0) * 3.6).toFloat(), false,
+                    style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+        }
+        DropdownMenu(expanded = showingPreview, onDismissRequest = { showingPreview = false },
+            modifier = Modifier.widthIn(min = 264.dp, max = 320.dp).heightIn(max = 420.dp)) {
+            Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LimitCard(reading)
+                TextButton(onClick = { showingPreview = false; onOpen() }) {
+                    Text(L10n.text("common.chat.usage.details"))
+                }
+            }
         }
     }
 }

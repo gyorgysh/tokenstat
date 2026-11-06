@@ -538,7 +538,7 @@ private struct InlineMarkdown: View {
 /// One prose chain or one block needing its own view. File scope so the
 /// segment cache can hold finished chains across view inits.
 private enum MessageSegment {
-    case text(Text, hasLinks: Bool)
+    case text(Text, hasLinks: Bool, wordCount: Int)
     case block(MarkdownBlock)
 }
 
@@ -560,6 +560,9 @@ struct MessageMarkdown: View {
     /// inside the cadence still reaches the screen without waiting for the
     /// next token to arrive.
     @State private var refreshed: (source: String, segments: [MessageSegment])?
+    @State private var wordArrivals = StreamingWordArrivals()
+    @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
+    @Environment(\.accessibilityReduceMotion) private var reduceStreamingMotion
 
     init(
         _ markdown: String,
@@ -595,7 +598,7 @@ struct MessageMarkdown: View {
             } else {
                 var parser = MarkdownParser(markdown)
                 let parsed = parser.blocks()
-                let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+                let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style, streaming: live)
                 cache.store(segments, text: markdown, slot: slot)
                 cachedSegments = segments
                 needsRefresh = false
@@ -626,16 +629,21 @@ struct MessageMarkdown: View {
     private static func makeSegments(
         blocks: [MarkdownBlock],
         bodyFont: Font,
-        style: MarkdownStyle
+        style: MarkdownStyle, streaming: Bool = false
     ) -> [MessageSegment] {
         var out: [MessageSegment] = []
+        var wordCount = 0
+        func prose(_ value: AttributedString) -> Text {
+            streaming ? StreamingWordAttribute.text(value, next: &wordCount) : MarkdownLinks.text(value)
+        }
         var chain: Text? = nil
         var chainLength = 0
+        var chainWordCount = 0
         var chainHasLinks = false
         func gap() -> Text { Text("\n\n").font(bodyFont) }
         func flush() {
             if let current = chain {
-                out.append(.text(current, hasLinks: chainHasLinks))
+                out.append(.text(current, hasLinks: chainHasLinks, wordCount: chainWordCount))
                 chain = nil
                 chainLength = 0
                 chainHasLinks = false
@@ -652,6 +660,7 @@ struct MessageMarkdown: View {
                 chain = piece
                 chainLength = length
             }
+            chainWordCount = wordCount
             chainHasLinks = chainHasLinks || links
         }
         /// Split an oversized block on blank lines (then lines), so no
@@ -692,20 +701,20 @@ struct MessageMarkdown: View {
                     .font(bodyFont)
                     .foregroundStyle(Theme.accent)
             }
-            return row + MarkdownLinks.text(text).font(bodyFont)
+            return row + prose(text).font(bodyFont)
         }
         for block in blocks {
             switch block.kind {
             case let .heading(level, text):
                 push(
-                    MarkdownLinks.text(MarkdownInline.attributed(text))
+                    prose(MarkdownInline.attributed(text))
                         .font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
                     length: text.count, links: MarkdownInline.hasLinks(text)
                 )
             case let .paragraph(text):
                 for chunk in chunks(text) {
                     push(
-                        MarkdownLinks.text(MarkdownInline.attributed(chunk))
+                        prose(MarkdownInline.attributed(chunk))
                             .font(bodyFont),
                         length: chunk.count, links: MarkdownInline.hasLinks(chunk)
                     )
@@ -731,7 +740,7 @@ struct MessageMarkdown: View {
                         for (part, chunk) in parts.enumerated() {
                             let piece = (part == 0)
                                 ? listRow(item, text: MarkdownInline.attributed(chunk))
-                                : MarkdownLinks.text(MarkdownInline.attributed(chunk)).font(bodyFont)
+                                : prose(MarkdownInline.attributed(chunk)).font(bodyFont)
                             push(
                                 piece,
                                 length: chunk.count,
@@ -761,10 +770,21 @@ struct MessageMarkdown: View {
     }
 
     var body: some View {
+        let segments = shownSegments
+        let count = segments.reduce(0) { result, segment in
+            if case let .text(_, _, count) = segment { return max(result, count) }
+            return result
+        }
+        let arrivals = wordArrivals.update(source: source, count: count, now: ProcessInfo.processInfo.systemUptime, animate: smoothStreaming && !reduceStreamingMotion, identity: liveSlot)
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ForEach(Array(shownSegments.enumerated()), id: \.offset) { _, segment in
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 switch segment {
-                case let .text(chain, hasLinks):
+                case let .text(chain, hasLinks, wordEnd):
+                    let wordStart = segments[..<index].reduce(0) { result, item in
+                        if case let .text(_, _, end) = item { return max(result, end) }
+                        return result
+                    }
+                    let arriving = arrivals.filter { $0.key >= wordStart && $0.key < wordEnd }
                     Group {
                         if selectable {
                             chain
@@ -774,7 +794,7 @@ struct MessageMarkdown: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
-                            chain
+                            StreamingText(text: chain, live: isLive, arrivals: arriving, revision: wordEnd)
                                 .tint(Theme.accent)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -805,7 +825,7 @@ struct MessageMarkdown: View {
             guard !Task.isCancelled else { return }
             var parser = MarkdownParser(source)
             let parsed = parser.blocks()
-            let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style)
+            let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style, streaming: true)
             MarkdownCache.live.store(segments, text: source, slot: liveSlot)
             refreshed = (source, segments)
         }
