@@ -311,5 +311,5 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-preview-loader-') as work:
     work = Path(work)
     source = work / 'Check.swift'
     source.write_text(stub + progress + '\n' + loader + viewer + tests)
-    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(work/'cache'), str(source), '-o', str(work/'check')], check=True)
+    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(work/'cache'), str(source), str(root/'apps/mac/Sources/Bridge/ChatFileIO.swift'), '-o', str(work/'check')], check=True)
     subprocess.run([str(work/'check')], check=True)
