@@ -9,7 +9,7 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.13.0]
+## [1.13.0] - 2026-11-06
 
 ### Improved
 
@@ -20,7 +20,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Chat tabs on iOS share the available width, follow the reading direction, and scroll when labels need more room. Repository and recent-chat lists use consistent row spacing and dividers.
 - Streaming replies and switching between long chats use less processing on Mac, iPhone and iPad.
 - Diff previews in iPhone and iPad chats follow the text size setting and fit the available width.
-- Chat no longer pauses to load or prepare larger attachments on Mac, iPhone and iPad.
+- Chat stays responsive while preparing larger attachments on Mac, iPhone and iPad.
 - Plain terminal logs take less processing on Mac, iPhone and iPad.
 - Remote terminals display new output with less delay.
 - Team online status uses fewer requests while the app is open and stops repeating updates while it is hidden. Accounts with no teams skip foreground status requests.
@@ -37,11 +37,13 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - New chat on iOS keeps the composer visible while a computer connects.
 - Old built-in instructions are removed from starter personas even if they were saved again. Custom instructions and existing conversations keep theirs.
 - Mac update checks compare against the running app, and installation rejects an older version than the one already installed.
-- Fixed attachment errors when a previously inspected file had been edited.
+- Edited files no longer trigger a false size error when attached.
 - Mac file cards discard pending Open actions when their content changes.
 - Closing “Continue on another device” cancels draft preparation and uploads it no longer needs. Original files remain available for retry.
 - Chat captures the final output from agents that exit quickly on Mac, including short replies and error messages.
-- Remote terminals on iOS and Android keep the final output after a command exits, including when it spans several pages or the connection briefly drops. Android shows when commands finish and uses fewer status requests with updated computers. Closing an Android terminal discards late replies and connection errors from that page.
+- Codex can edit files in the current project after you approve the tool request in Ask first mode.
+- Remote terminals on iOS and Android keep final output across command exit and brief connection loss. On Mac and Linux hosts, reading continues while child processes still have output to send.
+- Connected terminals use fewer status requests with updated computers. Android shows when commands finish and discards late replies from closed terminals.
 - Android asks for notification permission when you turn on “Notify this device”. Declining no longer brings the prompt back when you rotate or reopen the app. If Android blocks notifications, the setting explains how to allow them.
 
 ## [1.12.0] - 2026-11-06
