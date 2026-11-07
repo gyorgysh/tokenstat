@@ -612,7 +612,7 @@ Check(liveGroup.Running && liveGroup.LiveVerb == "Read" && liveGroup.LiveTarget 
 var settled = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Say("a1")], ChatDetail.Minimal, running: true);
 Check(!GroupOf(settled, "g:k1")!.Running, "work before the answer is not running once its steps end");
 
-var liveThought = FoldRows([Ask("u"), Tool("t", "Read"), Think("k", "Checking the image colors"),
+var liveThought = FoldRows([Ask("u"), Tool("t", "Read"), Row("k", ChatPage.ItemKind.Thinking, text: "Checking the image colors"),
     Row("s1", ChatPage.ItemKind.Usage, cost: 0), Row("s2", ChatPage.ItemKind.Usage, cost: 0)], ChatDetail.Minimal, running: true);
 Check(GroupOf(liveThought, "g:t")!.Preview == "Checking the image colors", "mixed work keeps its live thought preview");
 Check(liveThought.Count(row => row.Kind == ChatPage.ItemKind.Usage) == 1, "free-model step counts share one turn row");
