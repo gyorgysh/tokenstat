@@ -14,6 +14,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Improved
 
 - Chats with OpenCode 2 show reply text and reasoning as it arrives. Tool activity appears when a call starts, and usage includes the final step. Older OpenCode versions keep working.
+- Compact model pickers show the selected effort beside the model, with the agent identified by its icon.
 
 ### Fixed
 

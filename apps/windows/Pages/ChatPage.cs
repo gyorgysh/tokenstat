@@ -2033,6 +2033,29 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var model = Format.Text(chat, "model");
         var effort = Format.Text(chat, "effort");
         var label = ComposerSummary(backend, backendId, model, effort);
+        var field = new Grid { MaxWidth = 280, ColumnSpacing = 6 };
+        field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        field.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var mark = AgentMark.View(backendId, 16);
+        mark.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetAccessibilityView(mark, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        field.Children.Add(mark);
+        var modelText = new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(model) ? Format.Text(backend, "label", backendId) : model,
+            TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(modelText, 1);
+        field.Children.Add(modelText);
+        if (backend?["efforts"] is JsonArray { Count: > 0 } && !string.IsNullOrWhiteSpace(effort))
+        {
+            var effortText = new TextBlock { Text = "· " + effort, TextWrapping = TextWrapping.NoWrap,
+                VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(effortText, 2);
+            field.Children.Add(effortText);
+        }
 
         var flyout = new Flyout();
         var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };
@@ -2115,11 +2138,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
         var button = new Button
         {
-            Content = new TextBlock
-            {
-                Text = label, TextTrimming = TextTrimming.CharacterEllipsis,
-                MaxWidth = 280,
-            },
+            Content = field,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Flyout = flyout,
             IsEnabled = !locked,

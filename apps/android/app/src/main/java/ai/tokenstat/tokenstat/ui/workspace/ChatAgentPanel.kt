@@ -188,6 +188,16 @@ internal fun chatAgentLabel(backends: List<JsonObject>, chat: JsonObject?): Stri
         ?: L10n.text("common.chat.select_agent")
 }
 
+/// The backend mark supplies the name; keep the selected model and effort visible.
+internal fun chatAgentCompactSummary(backends: List<JsonObject>, chat: JsonObject?): String {
+    val parts = mutableListOf(chat?.str("model")?.takeIf { it.isNotBlank() } ?: chatAgentLabel(backends, chat))
+    val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
+    if (stringList(backendOf(backends, chat?.str("backend")), "efforts").isNotEmpty() && effort != null) {
+        parts.add(effort)
+    }
+    return parts.joinToString(" · ")
+}
+
 /// Include selected model and effort; the picker also shows unset defaults.
 internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): String {
     val agent = chatAgentLabel(backends, chat)

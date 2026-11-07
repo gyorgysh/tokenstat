@@ -691,12 +691,13 @@ struct ChatAgentChoices {
         return favs + rest
     }
 
-    /// The agent, then only what somebody chose. "Codex · Default · Effort:
-    /// Default" said three times that nothing was changed; the panel this
-    /// opens shows every setting, defaults included.
+    /// The mark identifies the agent; show the model and selected effort.
     var compactSummary: String {
-        if let name = chat.model, !name.isEmpty { return name }
-        return agentLabel
+        var parts = [chat.model.flatMap { $0.isEmpty ? nil : $0 } ?? agentLabel]
+        if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
+            parts.append(effort)
+        }
+        return parts.joined(separator: " · ")
     }
 
     var summary: String {
@@ -736,6 +737,7 @@ struct ChatAgentField: View {
                     .font(Theme.callout.weight(.medium))
                     #endif
                     .lineLimit(compactLabel ? 1 : 2)
+                    .minimumScaleFactor(compactLabel ? 0.85 : 1)
                     .truncationMode(.middle)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Theme.fixed(8, weight: .semibold))
