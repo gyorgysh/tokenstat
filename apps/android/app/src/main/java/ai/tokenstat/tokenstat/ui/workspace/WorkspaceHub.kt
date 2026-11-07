@@ -366,6 +366,7 @@ fun WorkspaceHub(
     // the header from here down, so the app toolbar steps aside.
     HideTopBar()
     val presence = LocalTabBarPresence.current
+    val compactChat = section == HubSection.CHAT.key && presence.sectionHeaderHidden && compactChatKeyboard()
     Column(modifier) {
         // A screen inside the section can own the header instead, when it
         // has a truer title than the section's name.
@@ -398,7 +399,7 @@ fun WorkspaceHub(
                 )
             }
         }
-        if (wideNavigation) {
+        if (wideNavigation && !compactChat) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 // Keep the primary destinations visible and put the remainder
                 // in a menu when the detail column cannot fit the whole strip.

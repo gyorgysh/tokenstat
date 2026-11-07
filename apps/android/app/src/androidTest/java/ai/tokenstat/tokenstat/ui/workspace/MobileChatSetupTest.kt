@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -84,6 +85,60 @@ class MobileChatSetupTest {
         assertEquals("allowAlways", resolved)
         compose.onNodeWithText(always).assertDoesNotExist()
         compose.onNodeWithText("A draft").assertIsDisplayed()
+    }
+    @Test fun shortComposerKeepsTypingAndSendVisibleWithAttachmentsAndOfflineNotice() {
+        var draft by mutableStateOf("A draft")
+        var sent = false
+        val files = (1..3).map { StagedAttachment("preview-$it.png", "", "image/png", 2048) }
+        compose.setContent { Screen(width = 780) {
+            Box(Modifier.fillMaxWidth().height(112.dp)) {
+                ChatComposer(chat, draft, { draft = it }, "Message", false, staged = files, onPick = {}, onRemove = {},
+                    onSend = { sent = true }, onStop = {}, onChange = { _, _ -> }, backends = backends, onAgent = {},
+                    offline = true, compactKeyboard = true)
+            }
+        } }
+        val input = compose.onNode(hasSetTextAction())
+        input.assertIsDisplayed().performTextInput(" stays visible")
+        assertTrue(draft.contains("stays visible"))
+        compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.send.f6f4688f")).assertIsDisplayed().performClick()
+        assertTrue(sent)
+        screenshot("composer-short-with-attachments.png")
+    }
+    @Test fun longExpandedDraftKeepsSendReachableInABoundedComposer() {
+        var sent = false
+        val draft = (1..24).joinToString("\n") { "Line $it of the draft" }
+        compose.setContent { Screen(width = 780) {
+            Box(Modifier.fillMaxWidth().height(400.dp).testTag("bounded-composer")) {
+                ChatComposer(chat, draft, {}, "Message", false, staged = emptyList(), onPick = {}, onRemove = {},
+                    onSend = { sent = true }, onStop = {}, onChange = { _, _ -> }, backends = backends, onAgent = {},
+                    compactKeyboard = false)
+            }
+        } }
+        compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.expand_the_message_box.c0441a94")).performClick()
+        val send = compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.send.f6f4688f"))
+        val sendBounds = send.getUnclippedBoundsInRoot()
+        val composerBounds = compose.onNodeWithTag("bounded-composer").getUnclippedBoundsInRoot()
+        assertTrue("Send keeps its full touch target", sendBounds.height >= 44.dp)
+        assertTrue("Send stays inside the composer", sendBounds.top >= composerBounds.top && sendBounds.bottom <= composerBounds.bottom)
+        send.assertIsDisplayed().performClick()
+        assertTrue(sent)
+    }
+    @Test fun openingCompactKeyboardTransfersExpandedEditorFocus() {
+        var compact by mutableStateOf(false)
+        var draft by mutableStateOf("Keep this draft")
+        compose.setContent { Screen(width = 780) {
+            Box(Modifier.fillMaxWidth().height(if (compact) 112.dp else 400.dp)) {
+                ChatComposer(chat, draft, { draft = it }, "Message", false, staged = emptyList(), onPick = {}, onRemove = {},
+                    onSend = {}, onStop = {}, onChange = { _, _ -> }, backends = backends, onAgent = {}, compactKeyboard = compact)
+            }
+        } }
+        compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.expand_the_message_box.c0441a94")).performClick()
+        compose.runOnIdle { compact = true }
+        compose.onNode(hasSetTextAction()).assertIsDisplayed().assertIsFocused().performTextInput(" after resize")
+        assertTrue(draft.contains("after resize"))
+        compose.runOnIdle { compact = false }
+        compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.expand_the_message_box.c0441a94")).assertIsDisplayed()
+        compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f")).assertDoesNotExist()
     }
     @Test fun compoundShellRequestsOfferOnlyActionsThatCanBeHonored() {
         compose.setContent { Screen {

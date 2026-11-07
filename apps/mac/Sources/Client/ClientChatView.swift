@@ -917,6 +917,14 @@ struct ClientChatThread: View {
         .background(Theme.background)
     }
 
+    private func setControlsCollapsed(_ collapsed: Bool) {
+        guard isActive else { return }
+        chromeScroll.reset()
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+            chromeCollapsed = collapsed
+        }
+    }
+
     private func browserTab(_ focus: BrowserFocus, title: String, icon: String) -> some View {
         let selected = displayedBrowserFocus == focus || focus == .chat && companion == nil
         return Button {
@@ -937,6 +945,7 @@ struct ClientChatThread: View {
         .buttonStyle(.plain)
         .foregroundStyle(selected ? Theme.accent : Theme.controlGlyph)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .modifier(ClientChatControlsSwipe(upward: true) { setControlsCollapsed(true) })
     }
 
     private func companionTab(_ choice: Companion, title: String, icon: String) -> some View {
@@ -966,6 +975,7 @@ struct ClientChatThread: View {
         .buttonStyle(.plain)
         .foregroundStyle(companion == choice && browserFocus != .chat ? Theme.accent : Theme.controlGlyph)
         .accessibilityAddTraits(companion == choice && browserFocus != .chat ? .isSelected : [])
+        .modifier(ClientChatControlsSwipe(upward: true) { setControlsCollapsed(true) })
     }
 
     private var browserDivider: some View {
@@ -1231,13 +1241,11 @@ struct ClientChatThread: View {
                 ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
             }
         }
+        .modifier(ClientChatControlsSwipe(upward: false, enabled: isActive && chromeCollapsed,
+                                         maximumStartY: 56) { setControlsCollapsed(false) })
         .overlay(alignment: .topLeading) {
             if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
-                Button {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                        chromeCollapsed = false
-                    }
-                } label: {
+                Button { setControlsCollapsed(false) } label: {
                     Image(systemName: "rectangle.topthird.inset.filled")
                         .frame(minWidth: 44, minHeight: 44)
                 }
@@ -1331,7 +1339,8 @@ struct ClientChatThread: View {
                                 }
                             },
                             onSetup: { showingSetup = true }, onHandoff: { showingHandoff = true },
-                            onDelete: onDelete, onViewportChoice: beginViewportChoice)
+                            onDelete: onDelete, onViewportChoice: beginViewportChoice,
+                            onHideControls: { setControlsCollapsed(true) })
                             .id(chat.id)
                     }
                 }

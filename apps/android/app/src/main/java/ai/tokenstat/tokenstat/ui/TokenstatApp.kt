@@ -1013,7 +1013,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         // `TabBarChrome.contentBottomInset` so the last row rests clear of it.
         Box(
             Modifier.fillMaxSize()
-                .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
+                .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
+                .consumeWindowInsets(PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()))
+                .imePadding(),
         ) {
         if (teamOpen) {
             ai.tokenstat.tokenstat.ui.team.TeamScreen(state.account, onBack = { teamOpen = false })

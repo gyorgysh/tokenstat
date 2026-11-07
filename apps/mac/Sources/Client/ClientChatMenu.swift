@@ -14,6 +14,7 @@ struct ClientChatMenu: View {
     var onHandoff: (() -> Void)?
     var onDelete: ((ChatConversation) -> Void)?
     var onViewportChoice: (() -> Void)?
+    var onHideControls: (() -> Void)?
     @State private var rename = false
     @State private var supportsFork = false
     @State private var copying = false
@@ -68,6 +69,11 @@ struct ClientChatMenu: View {
                 }
             }
             Section {
+                if let onHideControls {
+                    Button(action: onHideControls) {
+                        Label(L10n.text("apple.clientchatview.hide_controls"), systemImage: "rectangle.topthird.inset.filled")
+                    }
+                }
                 ChatDetailMenuPicker()
                 Button(
                     model.anyGroupOpen ? L10n.text("apple.chatdetail.collapse_steps") : L10n.text("apple.chatdetail.expand_steps"),

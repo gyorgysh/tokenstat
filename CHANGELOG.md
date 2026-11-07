@@ -11,6 +11,14 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ## [1.15.0]
 
+### Improved
+
+- On iPhone and iPad, swipe up on the chat tabs to hide the controls. Swipe down from the top or tap Show controls to bring them back.
+
+### Fixed
+
+- Android keeps the message field above the keyboard, including on small phones in landscape.
+
 ## [1.14.0] - 2026-11-07
 
 ### Improved

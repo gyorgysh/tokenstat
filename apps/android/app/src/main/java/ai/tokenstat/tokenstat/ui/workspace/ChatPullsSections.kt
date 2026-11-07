@@ -122,6 +122,10 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import android.content.res.Configuration
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1396,6 +1400,7 @@ fun ChatSection(
         }
     }
 
+    val compactKeyboard = compactChatKeyboard()
     val place = folderName.ifBlank { L10n.text("android.chatpullssections.this_folder.9d6325c8") }
 
     val chatPane = modifier.then(attachmentInputs.drops).then(if (attachmentInputs.targeted)
@@ -1586,7 +1591,7 @@ fun ChatSection(
             // while this knows which conversation. Two headers with two back
             // arrows is what stacking them looked like.
             OwnSectionHeader()
-            Row(
+            if (!compactKeyboard) Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -1968,11 +1973,14 @@ fun ChatSection(
                     }
                 }
             }
-            ChatGitStrip(model, peer, workspace, openChat, protocol, projectOwner, offline, sending || runningTurn) {
-                onOpenSection("Changes")
+            if (!compactKeyboard) {
+                ChatGitStrip(model, peer, workspace, openChat, protocol, projectOwner, offline, sending || runningTurn) {
+                    onOpenSection("Changes")
+                }
+                ChatActivitySummary(chatActivityData(chatInspection.data, openChat)) { activitySection = "all"; showingUsage = false; showingStats = true }
             }
-            ChatActivitySummary(chatActivityData(chatInspection.data, openChat)) { activitySection = "all"; showingUsage = false; showingStats = true }
             ChatComposer(
+                compactKeyboard = compactKeyboard,
                 chat = chats.firstOrNull { it.str("id") == openId },
                 quota = {
                     ChatQuotaBadge(rememberChatQuota(model, openChat?.str("backend").orEmpty(), peer).reading) {
@@ -3300,14 +3308,13 @@ private fun ChatWorkingIndicator(
 internal fun chatComposerAutonomy(chat: JsonObject?, launchAutonomy: String = LaunchDefaults.AUTONOMY): String =
     if (chat == null) launchAutonomy else if (chat.str("autonomy") == "bypass") "bypass" else "standard"
 
-/// The docked composer, built like the one on iPhone: what the message will
-/// be answered by on top, then how much rope the agent has, then the field
-/// itself with the paperclip beside it.
-///
-/// The controls are above the field rather than behind a menu because they
-/// change what the next message does. Plan against Execute is the difference
-/// between being told and being acted on, and that is not a preference to go
-/// hunting for.
+@Composable
+internal fun compactChatKeyboard(): Boolean =
+    WindowInsets.ime.getBottom(LocalDensity.current) > 0 &&
+        LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+        LocalConfiguration.current.screenHeightDp < 600
+
+/// The message field, attachments and model controls docked below the conversation.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun ChatComposer(
@@ -3342,6 +3349,7 @@ internal fun ChatComposer(
     attachmentEnabled: Boolean = true,
     fieldModifier: Modifier = Modifier,
     sendModifier: Modifier = Modifier,
+    compactKeyboard: Boolean = compactChatKeyboard(),
 ) {
     val colors = LocalTsColors.current
     // The value is "standard", not "ask": the host only treats "standard"
@@ -3365,10 +3373,17 @@ internal fun ChatComposer(
     // brief. The toggle sits at the top right of the bar, away from send,
     // the way the iPhone composer grows its field.
     var expanded by remember { mutableStateOf(false) }
+    val expandedField = expanded && !compactKeyboard
     val inputFocus = remember { FocusRequester() }
     var inputFocused by remember { mutableStateOf(false) }
     var restoreInputFocus by remember { mutableStateOf(false) }
-    LaunchedEffect(expanded) {
+    LaunchedEffect(expanded, compactKeyboard) {
+        // Opening a landscape keyboard moves the editor into the short row.
+        // Transfer focus once, then leave it there when the keyboard closes.
+        if (compactKeyboard && expanded) {
+            expanded = false
+            restoreInputFocus = true
+        }
         if (restoreInputFocus) {
             inputFocus.requestFocus()
             restoreInputFocus = false
@@ -3376,140 +3391,154 @@ internal fun ChatComposer(
     }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
-    TsCard(Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            ChatCommandMenu(draft, onDraft)
-            // Nothing can be sent right now, so the offer is to keep it. The
-            // twin of the button `ClientChatComposer` shows over a saved copy.
-            if (offline) {
-                TsSecondaryButton(
-                    label = L10n.text("android.chatpullssections.send_when_connected.c2aae57a"),
-                    icon = ActionIcon.Scheduled.vector,
-                    small = true,
-                    enabled = draft.isNotBlank(),
-                    onClick = onQueueWhenConnected,
-                )
-            }
-            ChatComposerToolbar(backends, chat, locked, expanded, onAgent, onSetup,
-                onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota)
-            // Staged files sit above the field, each with its own way out, so
-            // a wrong pick is one tap to undo rather than a sent message.
-            staged.forEach { attachment ->
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val scrollExtras = compactKeyboard && constraints.hasBoundedHeight
+        TsCard(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Column(
+                    modifier = if (scrollExtras) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier,
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    ChatCommandMenu(draft, onDraft)
+                    // Nothing can be sent right now, so the offer is to keep it. The
+                    // twin of the button `ClientChatComposer` shows over a saved copy.
+                    if (offline) {
+                        TsSecondaryButton(
+                            label = L10n.text("android.chatpullssections.send_when_connected.c2aae57a"),
+                            icon = ActionIcon.Scheduled.vector,
+                            small = true,
+                            enabled = draft.isNotBlank(),
+                            onClick = onQueueWhenConnected,
+                        )
+                    }
+                    if (!compactKeyboard) ChatComposerToolbar(backends, chat, locked, expanded, onAgent, onSetup,
+                        onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota)
+                    // Staged files sit above the field, each with its own way out, so
+                    // a wrong pick is one tap to undo rather than a sent message.
+                    staged.forEach { attachment ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(cardRadiusDp))
+                                .background(colors.accentSoft)
+                                .padding(horizontal = Space.s, vertical = 6.dp),
+                        ) {
+                            Icon(ActionIcon.Attach.vector, null, tint = colors.accent, modifier = Modifier.size(15.dp))
+                            Text(
+                                attachment.name,
+                                style = TsType.caption,
+                                color = colors.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(attachmentSize(attachment.bytes), style = TsType.caption2, color = colors.textSecondary)
+                            IconButton(onClick = { onRemove(attachment) }) {
+                                Icon(
+                                    ActionIcon.Dismiss.vector,
+                                    L10n.text("android.chatpullssections.remove_0.dfbfd0da", "${attachment.name}"),
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                val input: @Composable (Modifier) -> Unit = { inputModifier ->
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = onDraft,
+                        modifier = inputModifier.heightIn(min = if (expandedField) 180.dp else 48.dp)
+                            .padding(horizontal = Space.xs, vertical = Space.s).then(fieldModifier)
+                            .focusRequester(inputFocus).onFocusChanged { inputFocused = it.isFocused },
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
+                        cursorBrush = SolidColor(colors.accent),
+                        maxLines = if (expandedField) 18 else if (compactKeyboard) 2 else 5,
+                        decorationBox = { innerTextField ->
+                            Box {
+                                if (draft.isEmpty()) Text(
+                                    hint,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = colors.textTertiary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                innerTextField()
+                            }
+                        },
+                    )
+                }
+                if (expandedField) input(Modifier.fillMaxWidth())
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(cardRadiusDp))
-                        .background(colors.accentSoft)
-                        .padding(horizontal = Space.s, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(ActionIcon.Attach.vector, null, tint = colors.accent, modifier = Modifier.size(15.dp))
-                    Text(
-                        attachment.name,
-                        style = TsType.caption,
-                        color = colors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(attachmentSize(attachment.bytes), style = TsType.caption2, color = colors.textSecondary)
-                    IconButton(onClick = { onRemove(attachment) }) {
+                    IconButton(onClick = onPick, enabled = !sending && attachmentEnabled) {
                         Icon(
-                            ActionIcon.Dismiss.vector,
-                            L10n.text("android.chatpullssections.remove_0.dfbfd0da", "${attachment.name}"),
-                            tint = colors.textSecondary,
-                            modifier = Modifier.size(18.dp),
+                            ActionIcon.Attach.vector,
+                            L10n.text("android.chatpullssections.attach_a_file.21298c62"),
+                            tint = if (sending) colors.textTertiary else colors.accent,
                         )
                     }
-                }
-            }
-            val input: @Composable (Modifier) -> Unit = { inputModifier ->
-                BasicTextField(
-                    value = draft,
-                    onValueChange = onDraft,
-                    modifier = inputModifier.heightIn(min = if (expanded) 180.dp else 48.dp)
-                        .padding(horizontal = Space.xs, vertical = Space.s).then(fieldModifier)
-                        .focusRequester(inputFocus).onFocusChanged { inputFocused = it.isFocused },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
-                    cursorBrush = SolidColor(colors.accent),
-                    maxLines = if (expanded) 18 else 5,
-                    decorationBox = { innerTextField ->
-                        Box {
-                            if (draft.isEmpty()) Text(
-                                hint,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = colors.textTertiary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            innerTextField()
+                    if (compactKeyboard) {
+                        IconButton(onClick = onSetup) {
+                            Icon(ActionIcon.Settings.vector, L10n.text("android.chatpullssections.chat_setup.9fa79d00"),
+                                tint = colors.accent)
                         }
-                    },
-                )
-            }
-            if (expanded) input(Modifier.fillMaxWidth())
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                IconButton(onClick = onPick, enabled = !sending && attachmentEnabled) {
-                    Icon(
-                        ActionIcon.Attach.vector,
-                        L10n.text("android.chatpullssections.attach_a_file.21298c62"),
-                        tint = if (sending) colors.textTertiary else colors.accent,
-                    )
-                }
-                val speedBackend = backends.firstOrNull { it.str("id") == chat?.str("backend") }
-                val fastModels = speedBackend?.get("fastModeModels") as? JsonArray
-                if (fastModels != null && !offline) {
-                    val fast = chatFastModeOn(chat)
-                    val fastAvailable = chatFastModeAvailable(chat?.str("model"), fastModels, chat?.str("backend"))
-                    val grokSpeed = chat?.str("backend") == "grok"
-                    val title = if (fast) (if (grokSpeed) L10n.text("common.chat.fast_mode_fast") else L10n.text("common.chat.fast_mode_priority")) else L10n.text("common.chat.fast_mode_default")
-                    val help = if (!fastAvailable) (if (grokSpeed) L10n.text("common.chat.fast_mode_select_grok") else L10n.text("common.chat.fast_mode_select_opus"))
-                    else title + ". " + (if (chat?.str("backend") == "claude") L10n.text("common.chat.fast_mode_claude_help") else if (grokSpeed) L10n.text("common.chat.fast_mode_grok_help") else L10n.text("common.chat.fast_mode_codex_help")) +
-                        " " + (if (speedBackend?.bol("fastModeLive") == true) L10n.text("common.chat.fast_mode_live_help") else if (grokSpeed) L10n.text("common.chat.fast_mode_grok_next_turn_help") else L10n.text("common.chat.fast_mode_next_turn_help"))
-                    TooltipBox(
-                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-                        tooltip = { PlainTooltip { Text(help) } },
-                        state = rememberTooltipState(),
-                    ) {
-                        IconButton(
-                            onClick = { onChange("fastMode", (!fast).toString()) },
-                            enabled = (!locked || (chat?.bol("running") == true && speedBackend?.bol("fastModeLive") == true)) && !fastModeSaving && fastAvailable,
-                            modifier = Modifier.background(if (fast) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp)),
+                    }
+                    val speedBackend = backends.firstOrNull { it.str("id") == chat?.str("backend") }
+                    val fastModels = speedBackend?.get("fastModeModels") as? JsonArray
+                    if (fastModels != null && !offline && !compactKeyboard) {
+                        val fast = chatFastModeOn(chat)
+                        val fastAvailable = chatFastModeAvailable(chat?.str("model"), fastModels, chat?.str("backend"))
+                        val grokSpeed = chat?.str("backend") == "grok"
+                        val title = if (fast) (if (grokSpeed) L10n.text("common.chat.fast_mode_fast") else L10n.text("common.chat.fast_mode_priority")) else L10n.text("common.chat.fast_mode_default")
+                        val help = if (!fastAvailable) (if (grokSpeed) L10n.text("common.chat.fast_mode_select_grok") else L10n.text("common.chat.fast_mode_select_opus"))
+                        else title + ". " + (if (chat?.str("backend") == "claude") L10n.text("common.chat.fast_mode_claude_help") else if (grokSpeed) L10n.text("common.chat.fast_mode_grok_help") else L10n.text("common.chat.fast_mode_codex_help")) +
+                            " " + (if (speedBackend?.bol("fastModeLive") == true) L10n.text("common.chat.fast_mode_live_help") else if (grokSpeed) L10n.text("common.chat.fast_mode_grok_next_turn_help") else L10n.text("common.chat.fast_mode_next_turn_help"))
+                        TooltipBox(
+                            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                            tooltip = { PlainTooltip { Text(help) } },
+                            state = rememberTooltipState(),
                         ) {
-                            Icon(ActionIcon.FastMode.vector, help, tint = if (fast) colors.accent else colors.textSecondary)
+                            IconButton(
+                                onClick = { onChange("fastMode", (!fast).toString()) },
+                                enabled = (!locked || (chat?.bol("running") == true && speedBackend?.bol("fastModeLive") == true)) && !fastModeSaving && fastAvailable,
+                                modifier = Modifier.background(if (fast) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp)),
+                            ) {
+                                Icon(ActionIcon.FastMode.vector, help, tint = if (fast) colors.accent else colors.textSecondary)
+                            }
                         }
                     }
-                }
-                if (expanded) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
-                if (sending) {
-                    IconButton(onClick = onStop) {
-                        Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
-                    }
-                } else {
-                    IconButton(
-                        onClick = {
-                            // The answer is the point of sending, and it
-                            // arrives under the keyboard. Twin of
-                            // `ClientChatComposer.sendTapped`, which puts the
-                            // keyboard away before it sends.
-                            keyboard?.hide()
-                            focus.clearFocus()
-                            expanded = false
-                            onSend()
-                        },
-                        enabled = canSend,
-                        modifier = sendModifier,
-                    ) {
-                        Icon(
-                            ActionIcon.Send.vector,
-                            sendLabel,
-                            tint = if (canSend) colors.accent else colors.textTertiary,
-                        )
+                    if (expandedField) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
+                    if (sending) {
+                        IconButton(onClick = onStop) {
+                            Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
+                        }
+                    } else {
+                        IconButton(
+                            onClick = {
+                                // The answer is the point of sending, and it
+                                // arrives under the keyboard. Twin of
+                                // `ClientChatComposer.sendTapped`, which puts the
+                                // keyboard away before it sends.
+                                keyboard?.hide()
+                                focus.clearFocus()
+                                expanded = false
+                                onSend()
+                            },
+                            enabled = canSend,
+                            modifier = sendModifier,
+                        ) {
+                            Icon(
+                                ActionIcon.Send.vector,
+                                sendLabel,
+                                tint = if (canSend) colors.accent else colors.textTertiary,
+                            )
+                        }
                     }
                 }
             }

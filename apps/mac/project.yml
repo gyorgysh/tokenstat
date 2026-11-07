@@ -286,8 +286,8 @@ settings:
     # 212 is spent on the 1.9.0 relay tint fix. 213 went up as 1.10.0.
     # 214 is 1.10.0 again, with the 3D model drag and access card fixes.
     # 215 is 1.11.0.
-    # 229 is the reviewed 1.15.0 test build.
-    CURRENT_PROJECT_VERSION: "230"
+    # 229 was uploaded as 1.14.0; 230 was reserved for local 1.15.0 work.
+    CURRENT_PROJECT_VERSION: "231"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
