@@ -21,10 +21,11 @@ members = '\n'.join(member(signature) for signature in [
     '    var nativeSteerAcceptsAttachments:', '    var sendsAsNote:',
     '    private var steerBackend:', '    private var steerAutonomy:',
     '    enum BusyNoteStart', '    func beginBusyNote(',
-    '    static func newChatDefaults(', '    static var newChatInitialAutonomy:', '    private struct LaunchChoice:',
+    '    static func newChatDefaults(', '    private struct LaunchChoice:',
     '    enum SignInHold', '    func holdForSignIn(',
     '    func finishBusyNote(', '    func consumeChatCommand(', '    func sendInitialDraft(',
 ])
+members += '\n' + next(line for line in source.splitlines() if line.startswith('    static let newChatInitialAutonomy ='))
 members = members.replace('UserDefaults.standard', 'FixtureDefaults.standard')
 activity = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatActivityView.swift').read_text()
 activity_section = member('enum ChatActivitySection:', activity)
@@ -195,10 +196,10 @@ tests = '''
         assert(freshSetup.mode == "execute" && freshSetup.autonomy == "bypass",
                "Fresh local setup must show Execute/Don't ask before and after a catalog answers")
         FixtureDefaults.standard.saved = Data(#"{"backend":"codex","model":"model","effort":"high","mode":"plan","autonomy":"standard"}"#.utf8)
-        assert(Model.newChatInitialAutonomy == "standard")
+        assert(Model.newChatInitialAutonomy == "bypass")
         let remembered = Model.newChatDefaults(backends: [ChatBackend(id: "codex")])!
-        assert(remembered.mode == "execute" && remembered.autonomy == "standard" && remembered.model == "model",
-               "An explicit remembered Ask first is preserved while Plan never becomes a fresh default")
+        assert(remembered.mode == "execute" && remembered.autonomy == "bypass" && remembered.model == "model",
+               "A new chat keeps the model and starts in Execute/Don't ask")
         FixtureDefaults.standard.saved = nil
         let initial = Model()
         initial.busy = false; initial.attachments = []; initial.needsAuthentication = false

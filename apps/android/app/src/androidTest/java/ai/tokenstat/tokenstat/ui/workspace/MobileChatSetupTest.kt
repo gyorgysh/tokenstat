@@ -187,8 +187,27 @@ class MobileChatSetupTest {
             for (i in 0 until node.childCount) find(node.getChild(i))?.let { return it }
             return null
         }
-        return find(InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow)
-            ?: error("Missing native accessibility text: $text")
+        // Compose can be idle before Android publishes a new popup's
+        // accessibility window. Wait for that native observation rather
+        // than reading the activity (or launcher) from the previous frame.
+        var bounds: Rect? = null
+        try {
+            compose.waitUntil(timeoutMillis = 5_000) {
+                bounds = find(InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow)
+                bounds != null
+            }
+        } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+            val labels = mutableListOf<String>()
+            fun inspect(node: AccessibilityNodeInfo?) {
+                if (node == null || labels.size >= 30) return
+                node.text?.toString()?.takeIf { it.isNotBlank() }?.let { labels.add(it.take(100)) }
+                for (i in 0 until node.childCount) inspect(node.getChild(i))
+            }
+            inspect(InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow)
+            val windows = InstrumentationRegistry.getInstrumentation().uiAutomation.windows.map { "${it.type}:${it.title}" }
+            throw AssertionError("Missing native label $text; labels=$labels; windows=$windows", error)
+        }
+        return checkNotNull(bounds) { "Missing native accessibility text: $text" }
     }
     @Test fun usagePreviewKeepsItsScreenPositionWhileReadingsRefresh() {
         var current by mutableStateOf(reading)
@@ -199,6 +218,7 @@ class MobileChatSetupTest {
         } }
         compose.onNodeWithContentDescription(L10n.text("common.chat.usage.allowance", "Codex", "5-hour", "36")).performClick()
         compose.waitForIdle()
+        compose.onNodeWithText("Codex").assertIsDisplayed()
         val initial = screenBounds("Codex")
         for (i in 0..5) {
             compose.runOnIdle { current = JsonObject(reading + ("stale" to JsonPrimitive(i % 2 == 0)) +

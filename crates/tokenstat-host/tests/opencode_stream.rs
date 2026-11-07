@@ -31,7 +31,7 @@ impl Drop for Runner {
 }
 
 const FAKE: &str = r#"#!/usr/bin/env python3
-import base64, http.server, json, os, pathlib, sys, threading, time
+import base64, http.server, json, os, pathlib, socket, socketserver, sys, threading, time
 root=pathlib.Path.cwd()
 sys.stderr=(root/('fixture-errors-'+sys.argv[1])).open('a',encoding='utf-8',buffering=1)
 def event(kind, **kw):
@@ -39,6 +39,7 @@ def event(kind, **kw):
     with (root/'events').open('a') as f: f.write(json.dumps(value,ensure_ascii=False)+'\n')
 if sys.argv[1]=='serve':
     (root/'server-pid').write_text(str(os.getpid()))
+    (root/'server-phase').write_text('starting')
     assert os.environ['TOKENSTAT_TURN_MARKER']=='owned-turn'
     if os.environ.get('TOKENSTAT_STARTUP_HANG'):
         time.sleep(60);sys.exit(1)
@@ -61,10 +62,12 @@ if sys.argv[1]=='serve':
             with (root/'events').open('a') as f:f.write(json.dumps({'type':'session.execution.interrupted','data':{'sessionID':'ses_main'}})+'\n')
             self.send_response(200);self.end_headers();self.wfile.write(b'{"interrupted":true}')
         def do_GET(self):
+            (root/'stream-phase').write_text('request')
             assert self.path=='/api/event'
             assert self.headers['Authorization']==expected
             self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
             self.wfile.write(b'data: {"type":"server.connected"}\n\n');self.wfile.flush()
+            (root/'stream-phase').write_text('connected')
             with (root/'events').open() as events:
                 while True:
                     line=events.readline()
@@ -72,8 +75,19 @@ if sys.argv[1]=='serve':
                     value=json.loads(line)
                     self.wfile.write(('data: '+line+'\n').encode());self.wfile.flush()
                     if os.environ.get('TOKENSTAT_DISCONNECT') and value['type']=='session.text.delta': return
-    server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    # HTTPServer's default bind performs reverse DNS, which can block this
+    # entirely local fixture on a CI runner. A native OpenCode server does not.
+    class LocalServer(http.server.ThreadingHTTPServer):
+        def server_bind(self):
+            socketserver.TCPServer.server_bind(self)
+            self.server_name='localhost'
+            self.server_port=self.server_address[1]
+    def unexpected_dns(*args):raise AssertionError('the loopback fixture must not resolve hostnames')
+    socket.getfqdn=unexpected_dns
+    server=LocalServer(('127.0.0.1',0),Handler)
+    (root/'server-phase').write_text('listening')
     print(json.dumps({'url':'http://127.0.0.1:'+str(server.server_port)}),flush=True)
+    (root/'server-phase').write_text('ready')
     def end_lease():
         sys.stdin.read()
         (root/'lease-closed').write_text('true')
@@ -173,18 +187,24 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
             std::thread::sleep(Duration::from_millis(10));
         }
     } else if let Err(error) = rx.recv_timeout(Duration::from_secs(10)) {
-        let diagnostics: Vec<_> = ["fixture-errors-serve", "fixture-errors-run", "events"]
-            .iter()
-            .filter_map(|name| {
-                let mut bytes = Vec::new();
-                fs::File::open(project.join(name))
-                    .ok()?
-                    .take(4096)
-                    .read_to_end(&mut bytes)
-                    .ok()?;
-                Some((*name, String::from_utf8_lossy(&bytes).into_owned()))
-            })
-            .collect();
+        let diagnostics: Vec<_> = [
+            "server-phase",
+            "stream-phase",
+            "fixture-errors-serve",
+            "fixture-errors-run",
+            "events",
+        ]
+        .iter()
+        .filter_map(|name| {
+            let mut bytes = Vec::new();
+            fs::File::open(project.join(name))
+                .ok()?
+                .take(4096)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            Some((*name, String::from_utf8_lossy(&bytes).into_owned()))
+        })
+        .collect();
         panic!(
             "native text must precede the CLI snapshot: {error:?}; child: {:?}; fixture: {diagnostics:?}",
             child.try_wait()

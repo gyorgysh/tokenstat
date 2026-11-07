@@ -18,7 +18,8 @@ methods = '\n'.join(method(s) for s in ['    private struct ChatReadOwner:', '  
 heartbeat = (root / 'apps/mac/Sources/App/WatchingHeartbeat.swift').read_text()
 assert 'scope: WorkSessionContext.shared.scope' in heartbeat
 assert 'let owner = WorkSessionContext.shared.scope' in heartbeat
-assert heartbeat.count('expectedScope: owner') == 2
+# Renewing, hiding the window and leaving the route all retain their captured owner.
+assert heartbeat.count('expectedScope: owner') == 3
 assert 'WorkSessionContext.shared.scope == owner' in heartbeat
 swift = r'''import Foundation
 @MainActor final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: WorkReference.Scope?; var generation: UInt64 = 0; var accountSession: String? = "mock-receipt" }
