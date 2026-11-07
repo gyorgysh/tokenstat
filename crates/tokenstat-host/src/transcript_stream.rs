@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 
 use crate::transcript::Event;
 
+mod opencode;
+
 #[derive(Default)]
 struct Prefix {
     bytes: usize,
@@ -49,6 +51,7 @@ pub(crate) struct Streams {
     claude_active: HashMap<String, String>,
     claude: HashMap<String, ClaudeMessage>,
     codex: HashMap<String, Prefix>,
+    opencode: opencode::Parts,
 }
 
 const MAX_MESSAGES: usize = 128;
@@ -77,6 +80,7 @@ impl Streams {
         match backend {
             "claude" => self.claude(value),
             "codex" => self.codex(value),
+            "opencode" | "opencode2" => self.opencode.observe(value),
             _ => None,
         }
     }

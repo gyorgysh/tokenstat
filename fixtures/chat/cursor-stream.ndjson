@@ -1,0 +1,12 @@
+{"type":"system","subtype":"init","session_id":"cursor-session","model":"Auto","permissionMode":"default"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"cursor-session","timestamp_ms":2}
+{"type":"thinking","subtype":"delta","text":" user wants a direct","session_id":"cursor-session","timestamp_ms":3}
+{"type":"thinking","subtype":"delta","text":" reply of \"Hello world","session_id":"cursor-session","timestamp_ms":4}
+{"type":"thinking","subtype":"delta","text":".\" without using any","session_id":"cursor-session","timestamp_ms":5}
+{"type":"thinking","subtype":"delta","text":" tools.","session_id":"cursor-session","timestamp_ms":6}
+{"type":"thinking","subtype":"completed","session_id":"cursor-session","timestamp_ms":7}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]},"session_id":"cursor-session","timestamp_ms":8}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" world"}]},"session_id":"cursor-session","timestamp_ms":9}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"."}]},"session_id":"cursor-session","timestamp_ms":10}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world."}]},"session_id":"cursor-session"}
+{"type":"result","subtype":"success","duration_ms":4008,"duration_api_ms":4008,"is_error":false,"result":"Hello world.","session_id":"cursor-session","usage":{"inputTokens":20281,"outputTokens":33,"cacheReadTokens":3968,"cacheWriteTokens":0}}

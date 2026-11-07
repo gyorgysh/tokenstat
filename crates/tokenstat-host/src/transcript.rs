@@ -2370,14 +2370,16 @@ fn events_opencode(value: &Value) -> Vec<Event> {
                 // start from the same part so the row reads Edit/Read/Bash
                 // with its path, and the end carries the red/green.
                 let start = tool_start_with_id(&id, tool_name, input.clone());
-                vec![
-                    start,
-                    Event::ToolEnd {
-                        call_id: id,
-                        ok: status == "completed",
-                        detail: opencode_tool_detail(part, &input),
-                    },
-                ]
+                let mut events = Vec::new();
+                if value["tokenstatToolStarted"] != true {
+                    events.push(start);
+                }
+                events.push(Event::ToolEnd {
+                    call_id: id,
+                    ok: status == "completed",
+                    detail: opencode_tool_detail(part, &input),
+                });
+                events
             } else {
                 vec![tool_start_with_id(&id, tool_name, input)]
             }
@@ -5162,6 +5164,60 @@ mod tests {
                 cost_usd: None
             }]
         );
+    }
+
+    #[test]
+    fn captured_grok_and_cursor_partial_streams_keep_one_exact_reply() {
+        for (backend, raw) in [
+            (
+                "grok",
+                include_str!("../../../fixtures/chat/grok-stream.ndjson"),
+            ),
+            (
+                "cursor",
+                include_str!("../../../fixtures/chat/cursor-stream.ndjson"),
+            ),
+        ] {
+            for size in [1, 11, raw.len()] {
+                let mut parser = Parser::new(backend);
+                let mut events = Vec::new();
+                for chunk in raw.as_bytes().chunks(size) {
+                    events.extend(parser.push_events(chunk));
+                }
+                events.extend(parser.finish_events());
+                let text: String = events
+                    .iter()
+                    .filter_map(|event| match event {
+                        Event::Text { delta } => Some(delta.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(text, "Hello world.", "{backend}, {size} bytes");
+                assert_eq!(
+                    events
+                        .iter()
+                        .filter(|event| matches!(event, Event::Text { .. }))
+                        .count(),
+                    3
+                );
+                assert_eq!(
+                    events
+                        .iter()
+                        .filter(|event| matches!(event, Event::Usage { .. }))
+                        .count(),
+                    1
+                );
+                if backend == "cursor" {
+                    assert_eq!(
+                        events
+                            .iter()
+                            .filter(|event| matches!(event, Event::Thinking { .. }))
+                            .count(),
+                        5
+                    );
+                }
+            }
+        }
     }
 
     #[test]

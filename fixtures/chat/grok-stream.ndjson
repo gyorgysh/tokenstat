@@ -1,0 +1,5 @@
+{"type":"text","data":"Hello"}
+{"type":"text","data":" world"}
+{"type":"text","data":"."}
+{"type":"usage","usage":{"input_tokens":27809,"output_tokens":18,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"reasoning_tokens":15}}
+{"type":"end","stopReason":"end_turn","sessionId":"grok-session","usage":{"input_tokens":27809,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":18,"reasoning_tokens":15,"total_tokens":27827},"num_turns":1,"total_cost_usd":0.055726,"total_cost_usd_ticks":557260000,"modelUsage":{"grok-4.5-build":{"inputTokens":27809,"outputTokens":18,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"modelCalls":1,"costUSD":0.055726}}}

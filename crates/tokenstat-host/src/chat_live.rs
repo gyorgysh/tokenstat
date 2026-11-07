@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 mod emitter;
 mod input;
 mod mailbox;
+mod opencode;
 mod output;
 
 const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -264,7 +265,11 @@ impl Launch {
         if argv.is_empty() {
             return Err("missing agent command".into());
         }
-        if !supported(backend) {
+        let opencode = opencode::supported(backend, argv);
+        if !supported(backend) && !opencode {
+            return Ok(None);
+        }
+        if opencode && compact {
             return Ok(None);
         }
         let directory = tempfile::Builder::new()
@@ -285,7 +290,7 @@ impl Launch {
         let helper = std::env::current_exe().map_err(|error| error.to_string())?;
         Ok(Some(Self {
             directory,
-            accepts_steer: !compact,
+            accepts_steer: !compact && !opencode,
             argv: vec![
                 helper.to_string_lossy().into_owned(),
                 "chat-live".into(),
@@ -988,6 +993,10 @@ pub fn run(path: &Path) -> Result<(), String> {
         return Err("missing agent command".into());
     }
     let directory = path.parent().ok_or("missing live control directory")?;
+    install_stop_signals();
+    if matches!(config.backend.as_str(), "opencode" | "opencode2") {
+        return opencode::run(&config.argv, directory);
+    }
     let (args, mut setup, mut initial) = match config.backend.as_str() {
         "codex" => codex_launch(&config.argv)?,
         "claude" => {
@@ -1023,13 +1032,6 @@ pub fn run(path: &Path) -> Result<(), String> {
         // The CLI's own group contains only this turn's children.
         // Stop retires that group before the wrapper.
         command.process_group(0);
-        // SAFETY: the standalone runner is single-threaded here. The handler
-        // only stores an atomic flag and does not touch allocation or I/O.
-        unsafe {
-            libc::signal(libc::SIGHUP, stopped as *const () as libc::sighandler_t);
-            libc::signal(libc::SIGTERM, stopped as *const () as libc::sighandler_t);
-            libc::signal(libc::SIGINT, stopped as *const () as libc::sighandler_t);
-        }
     }
     let mut child = command
         .stdin(Stdio::piped())
@@ -1492,6 +1494,16 @@ pub fn run(path: &Path) -> Result<(), String> {
             format!("{error}\n{detail}")
         }
     })
+}
+
+fn install_stop_signals() {
+    #[cfg(unix)]
+    // SAFETY: the handler only stores an atomic flag and performs no I/O.
+    unsafe {
+        libc::signal(libc::SIGHUP, stopped as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, stopped as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGINT, stopped as *const () as libc::sighandler_t);
+    }
 }
 
 fn codex_goal_reply(message: &Value, thread: &str, goal_notified: bool) -> Option<Value> {

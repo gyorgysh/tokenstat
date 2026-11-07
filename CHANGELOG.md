@@ -11,6 +11,10 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ## [1.14.0]
 
+### Improved
+
+- Chats with OpenCode 2 show reply text and reasoning as it arrives. Tool activity appears when a call starts, and usage includes the final step. Older OpenCode versions keep working.
+
 ## [1.13.0] - 2026-11-06
 
 ### Improved

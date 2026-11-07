@@ -161,6 +161,15 @@ fn cacheable_executable(path: &str) -> bool {
         && header != *b"#!"
 }
 
+/// A version capability must expire when the actual executable changes.
+/// Wrappers can forward to a replacement without changing their own file.
+pub(crate) fn version_probe_identity(command: &str) -> Option<(String, String, bool)> {
+    let binary = executable(command)?;
+    let cacheable = cacheable_executable(&binary.path);
+    let key = format!("{}:{}:{:?}", binary.path, binary.length, binary.modified);
+    Some((binary.path, key, cacheable))
+}
+
 fn generation_from_version(version: &str) -> Option<Generation> {
     version.split_whitespace().find_map(|word| {
         let word = word.trim_start_matches('v');
@@ -189,7 +198,7 @@ fn generation_from_help(help: &str) -> Option<Generation> {
 type Variants = HashMap<String, Vec<String>>;
 type ModelCache = HashMap<(Executable, PathBuf), (Instant, Variants)>;
 
-fn directory_header(directory: &Path) -> String {
+pub(crate) fn directory_header(directory: &Path) -> String {
     let mut value = String::from("x-opencode-directory:");
     for byte in directory.to_string_lossy().bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {

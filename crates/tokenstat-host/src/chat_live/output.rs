@@ -72,6 +72,7 @@ struct Queued {
     permit: Option<Permit>,
 }
 
+#[derive(Clone)]
 pub(super) struct Sender {
     sender: mpsc::SyncSender<Queued>,
     budget: Arc<Budget>,
