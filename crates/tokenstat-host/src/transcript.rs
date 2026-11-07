@@ -2326,6 +2326,12 @@ fn events_opencode(value: &Value) -> Vec<Event> {
                 .and_then(Value::as_str)
                 .or_else(|| value.get("text").and_then(Value::as_str)),
         ),
+        Some("reasoning") => event_thinking(
+            value
+                .pointer("/part/text")
+                .or_else(|| value.get("text"))
+                .and_then(Value::as_str),
+        ),
         Some("tool_use") => {
             let part = value.get("part").unwrap_or(value);
             let input = part
@@ -2383,13 +2389,26 @@ fn events_opencode(value: &Value) -> Vec<Event> {
                 .and_then(Value::as_str)
                 .or_else(|| value.get("error").and_then(Value::as_str)),
         ),
-        Some("step_finish") => vec![done(
-            value
-                .pointer("/part/reason")
-                .and_then(Value::as_str)
-                .unwrap_or("done"),
-            None,
-        )],
+        Some("step_finish") => {
+            let part = value.get("part").unwrap_or(value);
+            let tokens = &part["tokens"];
+            let mut events = Vec::new();
+            if tokens["input"].is_u64() || tokens["output"].is_u64() {
+                events.push(Event::Usage {
+                    input: tokens["input"].as_u64().unwrap_or(0),
+                    // Legacy CLIs include reasoning in this bucket. The
+                    // native v2 adapter normalizes its separate buckets.
+                    output: tokens["output"].as_u64().unwrap_or(0),
+                    cache_read: tokens["cache"]["read"].as_u64().unwrap_or(0),
+                    cache_write: tokens["cache"]["write"].as_u64().unwrap_or(0),
+                    cost_usd: part["cost"]
+                        .as_f64()
+                        .filter(|cost| cost.is_finite() && *cost >= 0.0),
+                });
+            }
+            events.push(done(part["reason"].as_str().unwrap_or("done"), None));
+            events
+        }
         _ => Vec::new(),
     });
     events
@@ -5067,6 +5086,82 @@ mod tests {
         let out = feed("opencode", raw);
         assert!(out.contains("Done."));
         assert!(out.contains("Bash"));
+    }
+
+    #[test]
+    fn opencode_reasoning_and_usage_keep_disjoint_token_buckets() {
+        for backend in ["opencode", "opencode2"] {
+            let mut parser = Parser::new(backend);
+            let raw = concat!(
+                "{\"type\":\"reasoning\",\"sessionID\":\"ses-test\",\"part\":{\"text\":\"Check café.\\n\"}}\n",
+                "{\"type\":\"text\",\"sessionID\":\"ses-test\",\"part\":{\"text\":\"Ready 🌍.\"}}\n",
+                "{\"type\":\"step_finish\",\"part\":{\"reason\":\"tool-calls\",\"cost\":0.0123,\"tokens\":{\"input\":11,\"output\":7,\"reasoning\":5,\"cache\":{\"read\":21,\"write\":3}}}}\n",
+                "{\"type\":\"step_finish\",\"part\":{\"reason\":\"stop\",\"cost\":0,\"tokens\":{\"input\":4,\"output\":2}}}\n",
+            );
+            let expected = parser.push_events(raw.as_bytes());
+            assert!(expected.contains(&Event::Thinking {
+                delta: "Check café.\n".into()
+            }));
+            assert!(expected.contains(&Event::Text {
+                delta: "Ready 🌍.".into()
+            }));
+            let usage: Vec<_> = expected
+                .iter()
+                .filter(|event| matches!(event, Event::Usage { .. }))
+                .collect();
+            assert_eq!(
+                usage,
+                [
+                    &Event::Usage {
+                        input: 11,
+                        output: 7,
+                        cache_read: 21,
+                        cache_write: 3,
+                        cost_usd: Some(0.0123)
+                    },
+                    &Event::Usage {
+                        input: 4,
+                        output: 2,
+                        cache_read: 0,
+                        cache_write: 0,
+                        cost_usd: Some(0.0)
+                    }
+                ]
+            );
+            for size in [1, 7, 97] {
+                let mut split = Parser::new(backend);
+                let mut events = Vec::new();
+                for bytes in raw.as_bytes().chunks(size) {
+                    events.extend(split.push_events(bytes));
+                }
+                events.extend(split.finish_events());
+                assert_eq!(events, expected, "{backend}, {size}-byte chunks");
+            }
+            assert_eq!(parser.take_inspection().unwrap().context_used, Some(4));
+        }
+    }
+
+    #[test]
+    fn opencode_missing_usage_and_cost_are_not_reported_as_free() {
+        let mut parser = Parser::new("opencode2");
+        let events = parser.push_events(concat!(
+            "{\"type\":\"step_finish\",\"part\":{\"reason\":\"stop\"}}\n",
+            "{\"type\":\"step_finish\",\"part\":{\"tokens\":{\"input\":3,\"output\":1},\"cost\":-1}}\n"
+        ).as_bytes());
+        let usage: Vec<_> = events
+            .into_iter()
+            .filter(|event| matches!(event, Event::Usage { .. }))
+            .collect();
+        assert_eq!(
+            usage,
+            [Event::Usage {
+                input: 3,
+                output: 1,
+                cache_read: 0,
+                cache_write: 0,
+                cost_usd: None
+            }]
+        );
     }
 
     #[test]

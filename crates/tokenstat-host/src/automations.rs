@@ -428,7 +428,7 @@ pub(crate) fn agent_command_in(
                 // Per-turn configuration and hook credentials must reach the
                 // server that executes this turn, even if a shared service
                 // is already running with a different version or environment.
-                args.push("--standalone".into());
+                args.extend(["--standalone", "--thinking"].map(str::to_string));
             }
             args.extend(crate::opencode_cli::model_arguments(
                 backend, generation, model, effort, directory,
