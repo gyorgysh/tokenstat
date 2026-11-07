@@ -64,7 +64,11 @@ if sys.argv[1]=='serve':
                     if os.environ.get('TOKENSTAT_DISCONNECT') and value['type']=='session.text.delta': return
     server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
     print(json.dumps({'url':'http://127.0.0.1:'+str(server.server_port)}),flush=True)
-    threading.Thread(target=lambda:(sys.stdin.read(),server.shutdown()),daemon=True).start()
+    def end_lease():
+        sys.stdin.read()
+        (root/'lease-closed').write_text('true')
+        server.shutdown()
+    threading.Thread(target=end_lease,daemon=True).start()
     server.serve_forever()
 elif sys.argv[1]=='run':
     (root/'cli-pid').write_text(str(os.getpid()))
@@ -73,7 +77,7 @@ elif sys.argv[1]=='run':
     assert sys.argv[sys.argv.index('--session')+1]=='ses_main'
     assert sys.argv[sys.argv.index('--file')+1]=='sample ü.txt'
     def emit(v):print(json.dumps(v,ensure_ascii=False),flush=True)
-    emit({'type':'step_start','sessionID':'ses_main'})
+    emit({'type':'step_start','sessionID':'ses_main','part':{'messageID':'msg_text'}})
     event('started');event('delta',delta='café ')
     if os.environ.get('TOKENSTAT_BACKPRESSURE'):
         for _ in range(40):event('delta',delta='x'*(512*1024))
@@ -192,6 +196,10 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
         }
     } else {
         assert!(status.success());
+        assert!(
+            project.join("lease-closed").exists(),
+            "the server must receive lease EOF before forced cleanup"
+        );
         let text: String = records
             .iter()
             .filter(|record| record["type"] == "tokenstat.opencode.delta")

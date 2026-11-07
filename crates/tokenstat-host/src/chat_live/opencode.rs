@@ -115,6 +115,20 @@ struct Lease {
     password: String,
 }
 
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // Match the CLI's standalone lease: EOF lets the engine persist its
+        // final session state before the process group is forcibly retired.
+        self._server.child.stdin.take();
+        let deadline = Instant::now() + super::EXIT_TIMEOUT;
+        while Instant::now() < deadline
+            && !super::agent_exited(&mut self._server.child).unwrap_or(true)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
 fn receive<T>(rx: &mpsc::Receiver<T>, stop: &mut Stop, timeout: Duration) -> Result<T, String> {
     let deadline = Instant::now() + timeout;
     loop {
@@ -233,8 +247,14 @@ impl Lease {
                     .error_for_status()
                     .map_err(|_| "OpenCode stream was refused")?;
                 read_sse(BufReader::new(response), |value, bytes| {
-                    if value["type"] == "server.connected" {
+                    let kind = value["type"].as_str().unwrap_or("");
+                    if kind == "server.connected" {
                         let _ = connected.try_send(());
+                    }
+                    // Catalog changes, tool-input fragments and other
+                    // unused updates need not wake the turn's output loop.
+                    if !Projection::observes(kind) {
+                        return true;
                     }
                     native.send(Ok(envelope("native", value)), bytes)
                 })

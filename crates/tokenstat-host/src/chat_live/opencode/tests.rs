@@ -179,6 +179,85 @@ fn another_session_cannot_write_text_or_end_the_selected_turn() {
 }
 
 #[test]
+fn resumed_session_does_not_replay_a_previous_execution_before_admission() {
+    let mut projection = Projection::default();
+    let mut parser = Parser::new("opencode2");
+    projection.native(native("started", ""));
+    projection.native(native("delta", "previous reply"));
+    projection
+        .native(json!({"type":"session.execution.succeeded","data":{"sessionID":"ses_main"}}));
+    let events = feed(
+        &mut parser,
+        projection.cli(
+            json!({"type":"step_start","sessionID":"ses_main","part":{"messageID":"msg_current"}}),
+        ),
+    );
+    assert!(
+        prose(&events, false).is_empty(),
+        "a previous execution was replayed into this turn"
+    );
+    assert!(!projection.ended, "a previous execution ended this turn");
+}
+
+#[test]
+fn a_late_previous_end_cannot_finish_before_the_current_native_message_arrives() {
+    let mut projection = Projection::default();
+    projection
+        .cli(json!({"type":"step_start","sessionID":"ses_main","part":{"messageID":"msg_text"}}));
+    let end = json!({"type":"session.execution.succeeded","data":{"sessionID":"ses_main"}});
+    projection.native(end.clone());
+    assert!(!projection.ended);
+    projection.native(native("started", ""));
+    projection.native(end);
+    assert!(projection.ended);
+}
+
+#[test]
+fn unused_argument_fragments_cannot_fill_the_pending_prose_buffer() {
+    let mut projection = Projection::default();
+    let mut parser = Parser::new("opencode2");
+    for _ in 0..PART_CAP * 2 {
+        projection.native(json!({"type":"session.tool.input.delta","data":{"sessionID":"ses_main","assistantMessageID":"msg_text","delta":"argument"}}));
+    }
+    projection.native(native("started", ""));
+    projection.native(native("delta", "early text"));
+    let events = feed(
+        &mut parser,
+        projection.cli(
+            json!({"type":"step_start","sessionID":"ses_main","part":{"messageID":"msg_text"}}),
+        ),
+    );
+    assert_eq!(
+        prose(&events, false),
+        "early text",
+        "useful prose must arrive before its CLI completion"
+    );
+}
+
+#[test]
+fn pending_overflow_falls_back_to_one_complete_cli_snapshot() {
+    let mut projection = Projection::default();
+    let mut parser = Parser::new("opencode2");
+    projection.native(native("started", ""));
+    for _ in 0..PART_CAP + 4 {
+        projection.native(native("delta", "a"));
+    }
+    let mut events = feed(
+        &mut parser,
+        projection.cli(
+            json!({"type":"step_start","sessionID":"ses_main","part":{"messageID":"msg_text"}}),
+        ),
+    );
+    events.extend(feed(&mut parser, projection.native(native("delta", "z"))));
+    let expected = format!("{}z", "a".repeat(PART_CAP + 4));
+    events.extend(feed(
+        &mut parser,
+        projection.cli(snapshot("prt_part", &expected)),
+    ));
+    assert_eq!(prose(&events, false), expected);
+}
+
+#[test]
 fn long_turns_keep_bounded_state_without_losing_or_repeating_text() {
     let mut projection = Projection::default();
     let mut parser = Parser::new("opencode2");

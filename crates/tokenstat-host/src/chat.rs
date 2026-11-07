@@ -1262,7 +1262,44 @@ impl Store {
             .get(turn_token)
             .cloned()
             .ok_or("the chat turn credential is invalid or expired")?;
+        // Serialize admission with Send, Stop and turn retirement. A hook
+        // that waited for that lock must still belong to the same live turn.
+        let _acceptance =
+            crate::chat_receipts::Operation::conversation(&self.root, &binding.conversation_id)?;
+        let binding = self
+            .turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(turn_token)
+            .cloned()
+            .ok_or("the chat turn credential is invalid or expired")?;
         self.request_approval(&binding.conversation_id, verb, preview, shell_prefix)
+    }
+
+    fn deny_pending_approvals(&self, id: &str) {
+        let denied: Vec<_> = {
+            let mut approvals = self
+                .approvals
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            approvals
+                .iter_mut()
+                .filter(|approval| approval.conversation_id == id && approval.decision.is_none())
+                .map(|approval| {
+                    approval.decision = Some("deny".into());
+                    approval.clone()
+                })
+                .collect()
+        };
+        for approval in denied {
+            let _ = self.append(
+                id,
+                &StoredEvent::Approval {
+                    approval,
+                    at_ms: now_ms(),
+                },
+            );
+        }
     }
 
     /// Record the outcome reported by a backend post-tool hook. Like an
@@ -4602,13 +4639,10 @@ impl Store {
                     return Err(error.to_string());
                 }
             }
-            // A session the manager no longer knows has no drain thread coming
-            // to reap it, so waiting for one wedges the composer until the
-            // daemon restarts. Release the guard here instead. A session that
-            // is still registered is left alone: its drain owns the ending and
-            // the cleanup, and finish_turn ignores a guard that no longer
-            // names its own session. No ending is appended: the drain wrote
-            // one on its way out, when there was a drain.
+            // A missing PTY may be orphaned, or its drainer may have closed
+            // it just before final cleanup. Only a free runner lease proves
+            // we can repair it here. Otherwise keep the running guard until
+            // that cleanup ends, so the next Send cannot race its lease.
             if tokenstat_pty::manager().info(&pty).is_err()
                 && self
                     .active
@@ -4617,19 +4651,22 @@ impl Store {
                     .get(id)
                     .is_some_and(|current| current == &pty)
             {
-                self.active
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(id);
-                // Nothing was killed: there was no session. Leaving the mark
-                // would end the next turn as stopped.
+                // The process already ended. A late Stop mark must not
+                // survive the drainer and label the next turn as stopped.
                 self.killed
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .remove(id);
-                // Best effort: the guard is already gone, so a failed write is
-                // healable through the no-session path below on a retry.
-                let _ = self.stop_running(id, branch);
+                if let Some(_idle) = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
+                {
+                    self.active
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .remove(id);
+                    // No drainer owns this orphan. A failed write remains
+                    // recoverable through the idle path on a later retry.
+                    let _ = self.stop_running(id, branch);
+                }
             }
         } else {
             if crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_none() {
@@ -4671,6 +4708,11 @@ impl Store {
             )?;
             self.stop_running(id, branch)?;
         }
+        self.turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|_, binding| binding.conversation_id != id);
+        self.deny_pending_approvals(id);
         Ok(())
     }
 
@@ -4953,6 +4995,7 @@ impl Store {
         {
             return Ok(());
         }
+        self.deny_pending_approvals(id);
         cleanup();
         let status = self.stop_running(id, branch);
         // The guard goes even when that write fails, or every later send is
@@ -10409,6 +10452,97 @@ mod tests {
         assert!(
             !store.events_path("dead-session").exists(),
             "no ending is invented for a turn whose drain already wrote one"
+        );
+    }
+
+    #[test]
+    fn stopping_a_turn_denies_its_pending_approvals_and_preserves_other_chats() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "stopped-approval");
+        conversation_for_receipts(&store, "other-approval");
+        let token = store
+            .register_turn_token("stopped-approval", "cursor")
+            .unwrap();
+        let pending = store
+            .request_turn_approval(&token, "Write", "draft.txt", None)
+            .unwrap();
+        let other = store
+            .request_approval("other-approval", "Read", "seed.txt", None)
+            .unwrap();
+        store.stop("stopped-approval").unwrap();
+        assert!(store.approvals(Some("stopped-approval")).is_empty());
+        assert_eq!(
+            store.await_approval(&pending.id, 0).decision.as_deref(),
+            Some("deny")
+        );
+        assert!(store.resolve_approval(&pending.id, "allowAlways").is_err());
+        assert!(
+            store
+                .request_turn_approval(&token, "Write", "draft.txt", None)
+                .is_err()
+        );
+        assert_eq!(store.approvals(Some("other-approval"))[0].id, other.id);
+    }
+
+    #[test]
+    fn stopping_after_pty_close_does_not_publish_idle_before_runner_cleanup() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "closing-runner");
+        store.set_running("closing-runner", true).unwrap();
+        store
+            .active
+            .lock()
+            .unwrap()
+            .insert("closing-runner".into(), "closed-pty".into());
+        let runner = crate::chat_receipts::RunnerLease::try_acquire(&store.root, "closing-runner")
+            .unwrap()
+            .unwrap();
+        store.stop("closing-runner").unwrap();
+        assert!(
+            store.get("closing-runner").unwrap().running,
+            "the cleanup still owns its runner"
+        );
+        assert!(store.active.lock().unwrap().contains_key("closing-runner"));
+        assert!(
+            !store.killed.lock().unwrap().contains("closing-runner"),
+            "a late Stop must not mark the next turn stopped"
+        );
+        store
+            .finish_turn("closing-runner", "closed-pty", Some(runner), || {}, || {})
+            .unwrap();
+        assert!(!store.get("closing-runner").unwrap().running);
+        assert!(
+            crate::chat_receipts::RunnerLease::try_acquire(&store.root, "closing-runner")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn finishing_a_turn_settles_pending_approvals_without_touching_a_new_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "finished-approval");
+        let pending = store
+            .request_approval("finished-approval", "Read", "seed.txt", None)
+            .unwrap();
+        store
+            .active
+            .lock()
+            .unwrap()
+            .insert("finished-approval".into(), "new-pty".into());
+        store
+            .finish_turn("finished-approval", "old-pty", None, || {}, || {})
+            .unwrap();
+        assert!(store.await_approval(&pending.id, 0).decision.is_none());
+        store
+            .finish_turn("finished-approval", "new-pty", None, || {}, || {})
+            .unwrap();
+        assert_eq!(
+            store.await_approval(&pending.id, 0).decision.as_deref(),
+            Some("deny")
         );
     }
 

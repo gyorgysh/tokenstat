@@ -626,6 +626,13 @@ fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
             _ => None,
         })
         .unwrap_or_else(|| format!("{flavor}-{}", std::process::id()));
+    let call_id = if flavor == "cursor" {
+        tokenstat_host::chat_gate::cursor_call_id(&call_id)
+            .unwrap_or(&call_id)
+            .to_string()
+    } else {
+        call_id
+    };
     let ok = input
         .get("success")
         .or_else(|| input.get("ok"))
@@ -1209,6 +1216,19 @@ mod tests {
         assert_eq!(call_id, "call-2");
         assert!(ok);
         assert!(detail.unwrap().contains("a.txt"));
+    }
+
+    #[test]
+    fn cursor_hook_result_matches_the_streams_multiline_call_identity() {
+        let (id, ok, _) = hook_result(
+            "cursor",
+            &json!({
+                "tool_use_id":"call-fixture-0\nfc_provider_0",
+                "hook_event_name":"postToolUse", "tool_output":"done"
+            }),
+        );
+        assert_eq!(id, "call-fixture-0");
+        assert!(ok);
     }
 
     /// A mid-turn note is extra context beside a step that already ran. It must

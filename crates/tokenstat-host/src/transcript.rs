@@ -1546,12 +1546,9 @@ fn cursor_call_id(
         .or_else(|| call.get("id"))
         .and_then(Value::as_str)
         .unwrap_or(name);
-    let first = raw.split('\n').next().unwrap_or(raw).trim();
-    if first.is_empty() {
-        name.to_string()
-    } else {
-        first.to_string()
-    }
+    crate::chat_gate::cursor_call_id(raw)
+        .unwrap_or(name)
+        .to_string()
 }
 
 /// Whether a finished call worked, and what to show under it.

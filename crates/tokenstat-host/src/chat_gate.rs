@@ -41,6 +41,15 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+/// Cursor appends a provider id on a second line. Hooks and streamed records
+/// must keep the same first-line call identity.
+pub fn cursor_call_id(raw: &str) -> Option<&str> {
+    raw.lines()
+        .next()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+}
+
 /// How long a backend is asked to wait for a person, in seconds.
 ///
 /// Measured, not guessed: a Claude Code `PreToolUse` hook with this timeout

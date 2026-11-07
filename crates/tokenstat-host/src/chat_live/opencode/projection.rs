@@ -16,7 +16,11 @@ pub(super) struct Projection {
     ordinal_order: VecDeque<(String, String)>,
     tools: HashMap<String, String>,
     started_tools: HashSet<String>,
-    pending: VecDeque<Value>,
+    messages: HashSet<String>,
+    message_order: VecDeque<String>,
+    observed_current: bool,
+    limited: bool,
+    pending: VecDeque<(Value, usize)>,
     pending_bytes: usize,
     pub(super) ended: bool,
 }
@@ -26,6 +30,38 @@ fn stream_id(message: &str, kind: &str, ordinal: u64) -> String {
 }
 
 impl Projection {
+    pub(super) fn observes(kind: &str) -> bool {
+        matches!(
+            kind,
+            "session.text.started"
+                | "session.text.delta"
+                | "session.text.ended"
+                | "session.reasoning.started"
+                | "session.reasoning.delta"
+                | "session.reasoning.ended"
+                | "session.tool.input.started"
+                | "session.tool.called"
+                | "session.step.ended"
+                | "session.execution.succeeded"
+                | "session.execution.failed"
+                | "session.execution.interrupted"
+        )
+    }
+
+    fn defer(&mut self, event: Value, bytes: usize) {
+        if self.pending.len() >= PART_CAP || self.pending_bytes.saturating_add(bytes) > 1024 * 1024
+        {
+            // A partial prefix with a missing middle cannot be appended to
+            // an exact completion. Keep the CLI recovery path for this turn.
+            self.limited = true;
+            self.pending.clear();
+            self.pending_bytes = 0;
+            return;
+        }
+        self.pending_bytes += bytes;
+        self.pending.push_back((event, bytes));
+    }
+
     fn ordinal(&mut self, message: &str, kind: &str) -> &mut u64 {
         let key = (message.to_string(), kind.to_string());
         if !self.ordinals.contains_key(&key) {
@@ -51,12 +87,32 @@ impl Projection {
         {
             self.session = Some(session.into());
         }
+        if let Some(message) = value["part"]["messageID"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 160)
+            && self.messages.insert(message.into())
+        {
+            self.message_order.push_back(message.into());
+            if self.message_order.len() > PART_CAP
+                && let Some(old) = self.message_order.pop_front()
+            {
+                self.messages.remove(&old);
+            }
+        }
         let mut out = Vec::new();
         if self.session.is_some() {
-            while let Some(event) = self.pending.pop_front() {
-                out.extend(self.native(event));
-            }
+            let pending = std::mem::take(&mut self.pending);
             self.pending_bytes = 0;
+            for (event, bytes) in pending {
+                if self
+                    .messages
+                    .contains(event["data"]["assistantMessageID"].as_str().unwrap_or(""))
+                {
+                    out.extend(self.native(event));
+                } else if !self.limited {
+                    self.defer(event, bytes);
+                }
+            }
         }
         let kind = value["type"].as_str().unwrap_or("").to_string();
         if matches!(kind.as_str(), "text" | "reasoning") {
@@ -116,23 +172,47 @@ impl Projection {
 
     pub(super) fn native(&mut self, event: Value) -> Vec<Value> {
         let data = &event["data"];
+        let kind = event["type"].as_str().unwrap_or("");
+        if !Self::observes(kind) {
+            return Vec::new();
+        }
         let Some(session) = data["sessionID"].as_str() else {
             return Vec::new();
         };
-        let Some(selected) = self.session.as_deref() else {
-            let bytes = event.to_string().len();
-            if self.pending.len() < PART_CAP
-                && self.pending_bytes.saturating_add(bytes) <= 1024 * 1024
-            {
-                self.pending_bytes += bytes;
-                self.pending.push_back(event);
-            }
-            return Vec::new();
-        };
-        if session != selected {
+        if self
+            .session
+            .as_deref()
+            .is_some_and(|selected| session != selected)
+        {
             return Vec::new();
         }
-        let kind = event["type"].as_str().unwrap_or("");
+        if matches!(
+            kind,
+            "session.execution.succeeded"
+                | "session.execution.failed"
+                | "session.execution.interrupted"
+        ) {
+            // SSE can still carry an earlier execution when resuming. Its
+            // end is meaningful only after seeing this CLI's own message.
+            self.ended |= self.observed_current;
+            return Vec::new();
+        }
+        let Some(message) = data["assistantMessageID"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 160)
+        else {
+            return Vec::new();
+        };
+        if self.limited {
+            self.observed_current |= self.session.is_some() && self.messages.contains(message);
+            return Vec::new();
+        }
+        if self.session.is_none() || !self.messages.contains(message) {
+            let bytes = event.to_string().len();
+            self.defer(event, bytes);
+            return Vec::new();
+        }
+        self.observed_current = true;
         if matches!(kind, "session.tool.input.started" | "session.tool.called") {
             let Some(id) = data["id"]
                 .as_str()
@@ -170,12 +250,6 @@ impl Projection {
                 let mut value = json!({"type":"step_finish", "sessionID":session, "part":{"messageID":data["assistantMessageID"],"reason":data["finish"],"tokens":data["tokens"],"cost":data["cost"]}});
                 normalize_step(&mut value);
                 return vec![value];
-            }
-            "session.execution.succeeded"
-            | "session.execution.failed"
-            | "session.execution.interrupted" => {
-                self.ended = true;
-                return Vec::new();
             }
             _ => return Vec::new(),
         };

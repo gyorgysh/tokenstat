@@ -15,6 +15,11 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Chats with OpenCode 2 show reply text and reasoning as it arrives. Tool activity appears when a call starts, and usage includes the final step. Older OpenCode versions keep working.
 
+### Fixed
+
+- Stopping a chat clears unanswered permission requests. The next message no longer fails with a false “already running in another instance” error.
+- Cursor tool results stay with the activity that started the call.
+
 ## [1.13.0] - 2026-11-06
 
 ### Improved
