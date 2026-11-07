@@ -51,7 +51,7 @@ class NewChatRequestTest {
     @Test fun explicitAskAndExistingConversationDefaultsRemainApprovalBased() {
         val saved = LaunchChoice("codex", null, null, "execute", "standard", null)
         val launchAutonomy = LaunchDefaults.autonomy(saved, bypassOnly = false)
-        assertEquals("standard", chatComposerAutonomy(null, launchAutonomy))
+        assertEquals("bypass", chatComposerAutonomy(null, launchAutonomy))
         val existing = Json.parseToJsonElement("""{"backend":"codex"}""").jsonObject
         assertEquals("standard", chatComposerAutonomy(existing))
         val explicit = NewChatSetup("codex", null, null, mode = "plan", autonomy = "standard")

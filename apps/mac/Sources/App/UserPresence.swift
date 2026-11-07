@@ -28,17 +28,8 @@ import UIKit
 /// window that is in front of them, is the app talking over itself, and it is
 /// how a notification switch gets turned off for good.
 ///
-/// Three things have to be true before "they can see it" is worth believing,
-/// and each of them has failed on its own:
-///
-/// 1. **The app is in front.** `NSApp.isActive` is false for a hidden app and
-///    for one behind somebody else's window, whatever route it is still on.
-/// 2. **The window is really on screen.** An active app can have its only
-///    window minimised or parked on another Space, and neither of those is
-///    visible to the person.
-/// 3. **Somebody is at the keyboard.** A Mac left in front of an open
-///    conversation overnight is not being read, and the notification is the
-///    only thing that will still be there in the morning.
+/// Mac chat windows count while visible on the current Space, including beside
+/// another app. Mobile chat surfaces count while their scene is active.
 @MainActor
 @Observable
 final class UserPresence {
@@ -112,11 +103,31 @@ final class UserPresence {
         #endif
     }
 
+    #if os(macOS)
+    private final class ReadingWindow {
+        weak var window: NSWindow?
+        let conversation: String
+        init(_ window: NSWindow?, conversation: String) { self.window = window; self.conversation = conversation }
+    }
+    @ObservationIgnored private var readingWindows: [String: ReadingWindow] = [:]
+
+    func registerReadingWindow(_ window: NSWindow?, conversation: String, watcher: String) {
+        readingWindows[watcher] = ReadingWindow(window, conversation: conversation)
+    }
+    func removeReadingWindow(watcher: String) { readingWindows.removeValue(forKey: watcher) }
+
+    static func visibleForReading(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return window.isVisible && !window.isMiniaturized && window.isOnActiveSpace
+            && window.occlusionState.contains(.visible)
+    }
+    #endif
+
     /// True when this exact conversation is the one on screen and somebody is
     /// there to read it.
     func isWatching(conversation id: String) -> Bool {
         #if os(macOS)
-        visibleConversationID == id && isAtTheKeyboard
+        readingWindows.values.contains { $0.conversation == id && Self.visibleForReading($0.window) }
         #else
         chatSurfaces.isWatching(id)
         #endif

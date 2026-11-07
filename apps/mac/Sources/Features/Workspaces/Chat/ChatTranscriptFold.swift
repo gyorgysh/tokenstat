@@ -330,6 +330,7 @@ enum ChatTranscriptFold {
         var members: [ChatDisplayItem] = []
         var usage: [ChatDisplayItem] = []
         var cost = 0.0
+        var knownCost = true
         var lastHeader: Int?
 
         func flush(trailing: Bool) {
@@ -338,6 +339,9 @@ enum ChatTranscriptFold {
             let thoughtsOnly = members.allSatisfy { if case .thinking = $0.kind { return true } else { return false } }
             var group = make(thoughtsOnly ? .thought : .work, members, running: live && trailing)
             if thoughtsOnly, case let .thinking(text) = members[0].kind { group.preview = preview(of: text) }
+            if live && trailing, case let .thinking(text) = members.last?.kind {
+                group.preview = preview(of: text)
+            }
             emit(group, members: members, into: &out, isOpen: isOpen)
             members = []
         }
@@ -347,6 +351,7 @@ enum ChatTranscriptFold {
             switch item.kind {
             case let .usage(_, _, spent):
                 cost += spent ?? 0
+                knownCost = knownCost && spent != nil && spent?.isFinite == true && (spent ?? -1) >= 0
                 usage.append(item)
             case .thinking:
                 members.append(item)
@@ -363,15 +368,25 @@ enum ChatTranscriptFold {
         flush(trailing: true)
 
         // The spend rides on the turn's last work line. A turn with no work
-        // to fold, or nothing spent because a plan covers it, keeps its usage
-        // rows, or its token counts would just vanish.
-        if let lastHeader, cost > 0, case var .group(group) = out[lastHeader].kind {
+        // to fold, or without a complete positive cost, keeps one token total.
+        if let lastHeader, knownCost, cost.isFinite, cost > 0, case var .group(group) = out[lastHeader].kind {
             group.cost = cost
             let previous = out[lastHeader]
             out[lastHeader] = ChatDisplayItem(id: previous.id, kind: .group(group), lastSequence: previous.lastSequence,
                 imageAttachments: previous.imageAttachments, imageRowIDs: previous.imageRowIDs)
-        } else {
-            out.append(contentsOf: usage)
+        } else if let first = usage.first {
+            var input: UInt64 = 0, output: UInt64 = 0
+            for row in usage {
+                if case let .usage(nextInput, nextOutput, _) = row.kind {
+                    let sumInput = input.addingReportingOverflow(nextInput)
+                    let sumOutput = output.addingReportingOverflow(nextOutput)
+                    input = sumInput.overflow ? .max : sumInput.partialValue
+                    output = sumOutput.overflow ? .max : sumOutput.partialValue
+                }
+            }
+            out.append(ChatDisplayItem(id: first.id,
+                kind: .usage(input: input, output: output, cost: knownCost && cost.isFinite ? cost : nil),
+                lastSequence: usage.last?.lastSequence))
         }
     }
 

@@ -104,7 +104,7 @@ object ChatSeat {
             return L10n.text("android.chatseat.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "${prefix}")
         }
         if (isShell(verb)) {
-            return L10n.text("android.chatseat.always_allow_answers_this_request_only_not.a067a2b7")
+            return null
         }
         val name = trimVerb(verb)
         if (name.isEmpty()) return null

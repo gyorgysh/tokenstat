@@ -504,7 +504,6 @@
   "android.chatqueuestrip.the_last_attempt_was_refused_your_message.4ef87f5b": "The last attempt was refused. Your message is still here.",
   "android.chatqueuestrip.these_wait_for_this_turn_messages_marked_s.dbd6b117": "These wait for this turn. Messages marked Send when connected keep that choice.",
   "android.chatqueuestrip.view_pending.ed59515e": "View pending",
-  "android.chatseat.always_allow_answers_this_request_only_not.a067a2b7": "Always allow answers this request only. Nothing is saved for later.",
   "android.chatseat.always_allow_remembers_0_for_this_chat_onl.394a9e6d": "Always allow remembers {0} for this chat only.",
   "android.chatseat.approval.147fb813": "Approval",
   "android.chatseat.asked_another_agent.629f8e22": "Asked another agent",

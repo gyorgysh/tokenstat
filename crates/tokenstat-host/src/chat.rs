@@ -532,7 +532,7 @@ pub struct Store {
     /// daemon restart is stale state, not evidence that somebody pressed Stop.
     killed: Mutex<HashSet<String>>,
     personas: Mutex<PersonaIndex>,
-    approvals: Mutex<Vec<Approval>>,
+    approvals: Arc<Mutex<Vec<Approval>>>,
     /// Per-turn credentials are intentionally memory-only. The 0600 file a
     /// hook reads contains the opaque value, while this map is what binds it
     /// to exactly one live conversation at the daemon boundary.
@@ -713,7 +713,7 @@ impl Store {
             desktop_apps: Mutex::new(HashMap::new()),
             killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(PersonaIndex::default()),
-            approvals: Mutex::new(Vec::new()),
+            approvals: Arc::new(Mutex::new(Vec::new())),
             turn_tokens: Mutex::new(HashMap::new()),
             steers: Mutex::new(HashMap::new()),
             suppress_follow_up: Mutex::new(HashSet::new()),
@@ -775,7 +775,7 @@ impl Store {
             desktop_apps: Mutex::new(HashMap::new()),
             killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(personas),
-            approvals: Mutex::new(Vec::new()),
+            approvals: Arc::new(Mutex::new(Vec::new())),
             turn_tokens: Mutex::new(HashMap::new()),
             steers: Mutex::new(HashMap::new()),
             suppress_follow_up: Mutex::new(HashSet::new()),
@@ -1232,8 +1232,24 @@ impl Store {
             // question its own screen is asking is the app talking over
             // itself. See `crate::presence`.
             if !already_waiting && !crate::presence::is_watched(conversation_id) {
-                tokenstat_sync::push::notify_in_background(
+                let pending = Arc::downgrade(&self.approvals);
+                let conversation = conversation_id.to_string();
+                let account = crate::account_session::current_or_capture().ok();
+                tokenstat_sync::push::notify_in_background_if(
                     tokenstat_sync::push::Reason::RunNeedsInput,
+                    move || {
+                        account
+                            .as_ref()
+                            .is_some_and(|owner| owner.ensure_current().is_ok())
+                            && !crate::presence::is_watched(&conversation)
+                            && pending.upgrade().is_some_and(|pending| {
+                                has_live_approval(
+                                    &pending.lock().unwrap_or_else(PoisonError::into_inner),
+                                    &conversation,
+                                    now_ms(),
+                                )
+                            })
+                    },
                 );
             }
             tokenstat_sync::push::activity_in_background(
@@ -2099,26 +2115,28 @@ impl Store {
             return Err("unknown approval choice".into());
         }
         self.prune_approvals();
-        let out = {
-            let mut approvals = self
+        let conversation = self
+            .approvals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|approval| approval.id == id)
+            .map(|approval| approval.conversation_id.clone())
+            .ok_or("no pending approval with that id")?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, &conversation)?;
+        self.prune_approvals();
+        let mut out = {
+            let approvals = self
                 .approvals
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             let approval = approvals
-                .iter_mut()
+                .iter()
                 .find(|approval| approval.id == id)
                 .ok_or("no pending approval with that id")?;
             if approval.decision.is_some() {
                 return Err("that approval was already answered".into());
             }
-            approval.decision = Some(
-                if choice.starts_with("allow") {
-                    "allow"
-                } else {
-                    "deny"
-                }
-                .into(),
-            );
             approval.clone()
         };
         if choice == "allowAlways" {
@@ -2138,6 +2156,27 @@ impl Store {
                 }
                 Ok(())
             })?;
+        }
+        // Publish only after the remembered rule is saved. Hooks may resume
+        // immediately when this decision becomes visible.
+        out.decision = Some(
+            if choice.starts_with("allow") {
+                "allow"
+            } else {
+                "deny"
+            }
+            .into(),
+        );
+        if let Some(approval) = self
+            .approvals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter_mut()
+            .find(|approval| approval.id == id)
+        {
+            approval.decision = out.decision.clone();
+        } else {
+            return Err("no pending approval with that id".into());
         }
         // Write the answer back to the timeline. The queue holds the live
         // decision only until the request expires, so without this a
@@ -4971,7 +5010,14 @@ impl Store {
         if let Some(reason) = chat_notification(status)
             .filter(|_| !crate::presence::is_watched(id) && self.routing_notifications_enabled(id))
         {
-            tokenstat_sync::push::notify_in_background(reason);
+            let conversation = id.to_string();
+            let account = crate::account_session::current_or_capture().ok();
+            tokenstat_sync::push::notify_in_background_if(reason, move || {
+                account
+                    .as_ref()
+                    .is_some_and(|owner| owner.ensure_current().is_ok())
+                    && !crate::presence::is_watched(&conversation)
+            });
         }
         manager.forget_reader(pty, &reader);
         let _ = manager.close(pty);
@@ -10589,6 +10635,43 @@ mod tests {
             "a retired credential must not append a result"
         );
         assert!(store.events("late-result", 0).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn always_allow_is_not_published_until_the_rule_is_durable() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "saved-approval");
+        let pending = store
+            .request_approval("saved-approval", "write", "first.txt", None)
+            .unwrap();
+        let index = store.root.join("conversations.json");
+        let saved = fs::read(&index).unwrap();
+        fs::write(&index, b"broken").unwrap();
+        assert!(store.resolve_approval(&pending.id, "allowAlways").is_err());
+        assert_eq!(
+            store.await_approval(&pending.id, 0).decision,
+            None,
+            "a failed save must not let the tool run without a remembered rule"
+        );
+        fs::write(&index, saved).unwrap();
+        store.resolve_approval(&pending.id, "allowAlways").unwrap();
+        let reloaded = Store::load_at(store.root.clone());
+        assert_eq!(
+            reloaded
+                .request_approval("saved-approval", "write", "second.txt", None)
+                .unwrap()
+                .decision
+                .as_deref(),
+            Some("allow")
+        );
+        assert_eq!(
+            reloaded
+                .request_approval("saved-approval", "Read", "second.txt", None)
+                .unwrap()
+                .decision,
+            None
+        );
     }
 
     #[test]

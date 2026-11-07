@@ -323,104 +323,85 @@ struct ChatView: View {
                     .padding(.bottom, Theme.Space.s)
                     .frame(maxWidth: .infinity)
                 }
-                // A blocked turn takes the composer's place rather than
-                // sitting beside it. There is nothing useful to type while an
-                // agent is parked, and removing the field is the plainest way
-                // to say what the conversation is actually waiting for.
-                if model.approvals.isEmpty {
-                    if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
-                        ChatSteerNoteBanner(note: note) { model.clearSteer() }
-                            .frame(maxWidth: ReadingRoom.laneWidth)
-                            .padding(.horizontal, Theme.Space.l)
-                            .padding(.bottom, Theme.Space.s)
-                            .frame(maxWidth: .infinity)
-                    }
-                    // Pending writing stays available offline for copying or cancellation.
-                    // Sending and receipt checks require a live, verified owner.
-                    if !model.pendingQueue.isEmpty {
-                        let queueOwner = model.currentReference
-                        let queueCanSteer = model.busy && model.selected?.nativeSteer == true
-                        let queueCanSteerAttachments = model.selected?.nativeSteerAttachments == true
-                        ChatQueueStrip(
-                            items: model.pendingQueue,
-                            owner: queueOwner,
-                            paused: model.queuePaused,
-                            offline: model.savedCopy != nil || model.isSharedSource,
-                            privateOnly: model.isSharedSource,
-                            canSteer: queueCanSteer,
-                            canSteerAttachments: queueCanSteerAttachments,
-                            onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
-                            onRemove: { model.removeQueued($0, owner: queueOwner) },
-                            onSendNow: { item in
-                                showNewest()
-                                follow.jump()
-                                followPulse += 1
-                                let steerOnly = queueCanSteer && ChatCommandRules.canSteer(item.text,
-                                    attachments: !item.attachments.isEmpty, acceptsAttachments: queueCanSteerAttachments)
-                                Task { await model.sendNow(item, owner: queueOwner, steerOnly: steerOnly) }
-                            },
-                            onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
-                        )
+                if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+                    ChatSteerNoteBanner(note: note) { model.clearSteer() }
                         .frame(maxWidth: ReadingRoom.laneWidth)
                         .padding(.horizontal, Theme.Space.l)
                         .padding(.bottom, Theme.Space.s)
                         .frame(maxWidth: .infinity)
-                    }
-                    if let backend = model.backend(for: chat.backend), !model.isSharedSource, model.savedCopy == nil, model.signInGateRowID == nil {
-                        ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
-                                           recoveryFailureID: model.signInFailureID)
-                            .frame(maxWidth: ReadingRoom.laneWidth)
-                            .padding(.horizontal, Theme.Space.l)
-                            .padding(.bottom, Theme.Space.s)
-                            .frame(maxWidth: .infinity)
-                    }
-                    if model.savedCopy == nil {
-                        changesRow
-                    }
-                    ChatActivityStrip(model: model)
-                        .frame(maxWidth: ReadingRoom.laneWidth)
-                        .padding(.horizontal, Theme.Space.l)
-                        .padding(.bottom, Theme.Space.s)
-                        .frame(maxWidth: .infinity)
-                    ChatComposer(
-                        model: model,
-                        chat: chat,
-                        draft: $model.draft,
-                        selection: $draftSelection,
-                        attachments: model.attachments,
-                        previews: model.attachmentPreviews,
-                        running: model.busy,
-                        sendsAsNote: model.sendsAsNote,
-                        placeholder: model.isSharedSource ? L10n.text("common.teams.private_draft_placeholder") : model.sendsAsNote
-                            ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_placeholder") : L10n.text("apple.chatview.add_a_note_for_the_next_step.4778177a"))
-                            : (model.busy
-                                ? L10n.text("apple.chatview.send_after_this_turn.012fc8c3")
-                                : L10n.text("apple.chatview.ask_about_0.35c322e7", "\(workspaceName ?? L10n.text("apple.chatview.this_folder.9d6325c8"))")),
-                        onSend: { submit(from: chat) },
-                        onSendNow: { submit(from: chat, sendNow: true) },
-                        onStop: { Task { await model.stop() } },
-                        onAttach: { item, owner in await model.attach(item, to: owner) },
-                        onRemove: { model.removeAttachment($0) },
-                        acceptsDrops: acceptsDrops,
-                        onDropProviders: { providers in
-                            receive(providers)
+                }
+                // Pending writing stays available offline for copying or cancellation.
+                // Sending and receipt checks require a live, verified owner.
+                if !model.pendingQueue.isEmpty {
+                    let queueOwner = model.currentReference
+                    let queueCanSteer = model.busy && model.selected?.nativeSteer == true
+                    let queueCanSteerAttachments = model.selected?.nativeSteerAttachments == true
+                    ChatQueueStrip(
+                        items: model.pendingQueue,
+                        owner: queueOwner,
+                        paused: model.queuePaused,
+                        offline: model.savedCopy != nil || model.isSharedSource,
+                        privateOnly: model.isSharedSource,
+                        canSteer: queueCanSteer,
+                        canSteerAttachments: queueCanSteerAttachments,
+                        onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
+                        onRemove: { model.removeQueued($0, owner: queueOwner) },
+                        onSendNow: { item in
+                            showNewest()
+                            follow.jump()
+                            followPulse += 1
+                            let steerOnly = queueCanSteer && ChatCommandRules.canSteer(item.text,
+                                attachments: !item.attachments.isEmpty, acceptsAttachments: queueCanSteerAttachments)
+                            Task { await model.sendNow(item, owner: queueOwner, steerOnly: steerOnly) }
                         },
-                        onDropTargeted: { composerDropTargeted = $0 }
-                    )
-                } else {
-                    ChatApprovalBar(
-                        approvals: model.approvals,
-                        resolve: { approval, choice in
-                            let owner = model.currentReference
-                            Task { await model.resolve(approval, choice: choice, owner: owner) }
-                        },
-                        showInTranscript: { approval in
-                            scrollTarget = "approval-\(approval.id)"
-                        }
+                        onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
                     )
                     .frame(maxWidth: ReadingRoom.laneWidth)
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.bottom, Theme.Space.s)
                     .frame(maxWidth: .infinity)
                 }
+                if let backend = model.backend(for: chat.backend), !model.isSharedSource, model.savedCopy == nil, model.signInGateRowID == nil {
+                    ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
+                                       recoveryFailureID: model.signInFailureID)
+                        .frame(maxWidth: ReadingRoom.laneWidth)
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.bottom, Theme.Space.s)
+                        .frame(maxWidth: .infinity)
+                }
+                if model.savedCopy == nil {
+                    changesRow
+                }
+                ChatActivityStrip(model: model)
+                    .frame(maxWidth: ReadingRoom.laneWidth)
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.bottom, Theme.Space.s)
+                    .frame(maxWidth: .infinity)
+                ChatComposer(
+                    model: model,
+                    chat: chat,
+                    draft: $model.draft,
+                    selection: $draftSelection,
+                    attachments: model.attachments,
+                    previews: model.attachmentPreviews,
+                    running: model.busy,
+                    sendsAsNote: model.sendsAsNote,
+                    placeholder: model.isSharedSource ? L10n.text("common.teams.private_draft_placeholder") : model.sendsAsNote
+                        ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_placeholder") : L10n.text("apple.chatview.add_a_note_for_the_next_step.4778177a"))
+                        : (model.busy
+                            ? L10n.text("apple.chatview.send_after_this_turn.012fc8c3")
+                            : L10n.text("apple.chatview.ask_about_0.35c322e7", "\(workspaceName ?? L10n.text("apple.chatview.this_folder.9d6325c8"))")),
+                    onSend: { submit(from: chat) },
+                    onSendNow: { submit(from: chat, sendNow: true) },
+                    onStop: { Task { await model.stop() } },
+                    onAttach: { item, owner in await model.attach(item, to: owner) },
+                    onRemove: { model.removeAttachment($0) },
+                    acceptsDrops: acceptsDrops,
+                    onDropProviders: { providers in
+                        receive(providers)
+                    },
+                    onDropTargeted: { composerDropTargeted = $0 }
+                )
             } else if model.isReady(for: workspaceID), model.chats.isEmpty {
                 empty
             } else {
@@ -741,7 +722,7 @@ struct ChatView: View {
                 window.note(metrics)
             }
             .transcriptFollowBar {
-                if model.approvals.isEmpty && (follow.showJump || model.busy) {
+                if follow.showJump || model.busy {
                     TranscriptFollowPill(
                         showJump: follow.showJump,
                         busy: model.busy,
@@ -777,8 +758,9 @@ struct ChatView: View {
                     Task { await model.drainQueue() }
                 }
             }
-            .onChange(of: model.approvals.isEmpty) { _, empty in
-                follow.suppressed = !empty
+            .onChange(of: model.approvals.map(\.id)) { _, ids in
+                follow.suppressed = !ids.isEmpty
+                if follow.pinned, let id = ids.first { scrollTarget = "approval-\(id)" }
             }
             // A scroll that has come to rest is a reader who has stopped
             // somewhere. Wait a beat for the rows to say where they are:
@@ -844,6 +826,7 @@ struct ChatView: View {
                 lastSilentPinAt = .distantPast
                 #endif
                 follow.suppressed = !model.approvals.isEmpty
+                if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
                 window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
                 pinToLatest(proxy, animated: false)
@@ -1132,8 +1115,7 @@ struct ChatView: View {
         let state = follow
         let model = model
         state.repin = { [weak state] in
-            guard let state, state.active, state.pinned, !state.sliceHidesNewest,
-                  model.approvals.isEmpty else { return false }
+            guard let state, state.active, state.pinned, !state.sliceHidesNewest, model.approvals.isEmpty else { return false }
             state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
             return true

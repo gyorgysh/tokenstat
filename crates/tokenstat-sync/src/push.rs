@@ -101,6 +101,13 @@ pub struct Sent {
 /// Zero devices is the ordinary answer on an account that has never opened the
 /// app on a phone, and is not a failure.
 pub fn notify(reason: Reason) -> Result<Sent, ProfileError> {
+    notify_when(reason, &|| true)
+}
+
+fn notify_when(reason: Reason, permitted: &dyn Fn() -> bool) -> Result<Sent, ProfileError> {
+    if !permitted() {
+        return Ok(Sent::default());
+    }
     let host = resolve_api_host(None)?;
     let Some(token) = keychain::load_token(&host)? else {
         // Signed out. A machine nobody has linked has nowhere to send.
@@ -108,6 +115,12 @@ pub fn notify(reason: Reason) -> Result<Sent, ProfileError> {
     };
     let machine = crate::config::ensure_machine_id()?;
     let body = serde_json::json!({ "reason": reason.wire(), "machine": machine });
+    if !permitted() {
+        return Ok(Sent {
+            signed_in: true,
+            ..Sent::default()
+        });
+    }
     let text = post(&host, &token, "/api/v1/push/notify", &body)?;
     let answer = serde_json::from_str::<serde_json::Value>(&text).ok();
     Ok(Sent {
@@ -657,26 +670,50 @@ fn capped_text(response: reqwest::blocking::Response, max: usize) -> Result<Stri
 /// runs ending together cannot grow a thread per notification. A full queue
 /// means posts are slower than runs are ending, and the excess is dropped:
 /// a notification is never worth blocking the run that triggered it.
+struct Notification {
+    reason: Reason,
+    permitted: Box<dyn Fn() -> bool + Send>,
+}
+
+impl From<Reason> for Notification {
+    fn from(reason: Reason) -> Self {
+        Self {
+            reason,
+            permitted: Box::new(|| true),
+        }
+    }
+}
+
 pub fn notify_in_background(reason: Reason) {
-    static QUEUE: std::sync::OnceLock<std::sync::mpsc::SyncSender<Reason>> =
+    notify_in_background_if(reason, || true);
+}
+
+/// Recheck observation and ownership when queued delivery actually runs.
+pub fn notify_in_background_if(reason: Reason, permitted: impl Fn() -> bool + Send + 'static) {
+    static QUEUE: std::sync::OnceLock<std::sync::mpsc::SyncSender<Notification>> =
         std::sync::OnceLock::new();
     let sender = QUEUE.get_or_init(|| {
-        notification_worker(|reason| {
-            let _ = notify(reason);
+        notification_worker(|reason, permitted| {
+            let _ = notify_when(reason, permitted);
         })
     });
-    let _ = sender.try_send(reason);
+    let _ = sender.try_send(Notification {
+        reason,
+        permitted: Box::new(permitted),
+    });
 }
 
 fn notification_worker(
-    send: impl Fn(Reason) + Send + 'static,
-) -> std::sync::mpsc::SyncSender<Reason> {
-    let (tx, rx) = std::sync::mpsc::sync_channel::<Reason>(8);
+    send: impl Fn(Reason, &dyn Fn() -> bool) + Send + 'static,
+) -> std::sync::mpsc::SyncSender<Notification> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Notification>(8);
     let _ = std::thread::Builder::new()
         .name("tokenstat-push-notify".to_string())
         .spawn(move || {
             for queued in rx {
-                send(queued);
+                if (queued.permitted)() {
+                    send(queued.reason, &queued.permitted);
+                }
             }
         });
     tx
@@ -819,12 +856,59 @@ mod tests {
         // promptly even while the worker is stuck on a slow server.
         // Exercise the real bounded worker without contacting a signed-in
         // account or sending notifications from a test process.
-        let sender = notification_worker(|_| {});
+        let sender = notification_worker(|_, _| {});
         let start = std::time::Instant::now();
         for _ in 0..64 {
-            let _ = sender.try_send(Reason::Test);
+            let _ = sender.try_send(Reason::Test.into());
         }
         assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn queued_attention_is_dropped_if_the_chat_is_opened_before_delivery() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        };
+        let (entered, waiting) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let (sent, delivered) = mpsc::channel();
+        let sender = notification_worker(move |reason, _| {
+            if reason == Reason::Test {
+                entered.send(()).unwrap();
+                released.recv().unwrap();
+            } else {
+                sent.send(reason).unwrap();
+            }
+        });
+        sender.send(Reason::Test.into()).unwrap();
+        waiting
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let missed = Arc::new(AtomicBool::new(true));
+        let guard = Arc::clone(&missed);
+        sender
+            .send(Notification {
+                reason: Reason::RunNeedsInput,
+                permitted: Box::new(move || guard.load(Ordering::SeqCst)),
+            })
+            .unwrap();
+        sender.send(Reason::ChatFinished.into()).unwrap();
+        missed.store(false, Ordering::SeqCst);
+        release.send(()).unwrap();
+        assert_eq!(
+            delivered
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap(),
+            Reason::ChatFinished
+        );
+        drop(sender);
+        assert!(
+            delivered
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .is_err()
+        );
     }
 
     #[test]

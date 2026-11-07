@@ -2370,9 +2370,11 @@ internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
             Text(preview, style = TsType.mono(12), color = colors.textPrimary, maxLines = 5)
         }
         if (pending) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 TsAccentButton(label = L10n.text("android.chatpullssections.allow.e213c161"), small = true, onClick = { onResolve("allow") })
-                TsSecondaryButton(label = L10n.text("android.chatpullssections.always_allow.977618bd"), small = true, onClick = { onResolve("allowAlways") })
+                if (!ChatSeat.isShell(verb) || !approval.str("shellPrefix").isNullOrBlank()) {
+                    TsSecondaryButton(label = L10n.text("android.chatpullssections.always_allow.977618bd"), small = true, onClick = { onResolve("allowAlways") })
+                }
                 TsSecondaryButton(label = L10n.text("android.chatpullssections.deny.05a2d733"), small = true, onClick = { onResolve("deny") })
             }
             if (note != null) {

@@ -121,16 +121,11 @@ final class ChatModel {
         return .init(backend: chosen.id,
                      model: chosen.models.contains(saved?.model ?? "") ? saved?.model : nil,
                      effort: chosen.efforts.contains(saved?.effort ?? "") ? saved?.effort : nil,
-                     autonomy: chosen.gateTier == "bypassOnly" ? "bypass" : (saved?.autonomy ?? "bypass"))
+                     autonomy: "bypass")
     }
 
-    /// The disabled composer is visible before a host catalog answers. Use
-    /// the same local permission preference as the eventual fresh choice, so
-    /// loading does not flash Ask first before switching to Don't ask.
-    static var newChatInitialAutonomy: String {
-        UserDefaults.standard.data(forKey: launchChoiceKey)
-            .flatMap { try? JSONDecoder().decode(LaunchChoice.self, from: $0) }?.autonomy ?? "bypass"
-    }
+    /// New chats start in Don't ask; a draft can explicitly choose Ask first.
+    static let newChatInitialAutonomy = "bypass"
     var chats: [ChatConversation] = [] {
         didSet { noteRunningChats() }
     }
@@ -2050,7 +2045,7 @@ final class ChatModel {
                 mode: requestedChoice?.mode ?? "execute",
                 autonomy: chosen?.gateTier == "bypassOnly"
                     ? "bypass"
-                    : (requestedChoice?.autonomy ?? saved?.autonomy ?? "standard"),
+                    : (requestedChoice?.autonomy ?? "bypass"),
                 model: model,
                 effort: effort,
                 personaID: rememberedPersonaID(saved),

@@ -1360,6 +1360,7 @@ private fun stepGroupSummary(group: ChatStepGroup): String? = when (group.style)
     ChatStepGroup.Style.Work -> buildList {
         add(if (group.steps == 1) L10n.text("android.chatdetail.steps.one", "1") else L10n.text("android.chatdetail.steps.other", "${group.steps}"))
         if (group.files > 0) add(if (group.files == 1) L10n.text("android.chatdetail.files_edited.one", "1") else L10n.text("android.chatdetail.files_edited.other", "${group.files}"))
+        if (group.running && !group.open) group.preview?.let { add(it) }
     }.joinToString(" · ")
     ChatStepGroup.Style.Explored -> buildList {
         if (group.reads > 0) add(if (group.reads == 1) L10n.text("android.chatdetail.files.one", "1") else L10n.text("android.chatdetail.files.other", "${group.reads}"))

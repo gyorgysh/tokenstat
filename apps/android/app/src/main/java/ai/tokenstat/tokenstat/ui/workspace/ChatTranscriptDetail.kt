@@ -306,7 +306,7 @@ private fun foldMinimalTurn(
     out: MutableList<ChatDisplayItem>,
 ) {
     val members = ArrayList<ChatDisplayItem>()
-    val usage = ArrayList<ChatDisplayItem>()
+    val usage = ArrayList<ChatDisplayItem.Usage>()
     var cost = 0.0
     var lastHeader = -1
 
@@ -320,6 +320,9 @@ private fun foldMinimalTurn(
         )
         if (thoughtsOnly) {
             group = group.copy(preview = thoughtPreview((members.first() as ChatDisplayItem.Thinking).text))
+        }
+        if (live && trailing && members.lastOrNull() is ChatDisplayItem.Thinking) {
+            group = group.copy(preview = thoughtPreview((members.last() as ChatDisplayItem.Thinking).text))
         }
         emitGroup(group, members.toList(), out, isOpen)
         members.clear()
@@ -344,13 +347,18 @@ private fun foldMinimalTurn(
     flush(trailing = true)
 
     // The spend rides on the turn's last work line. A turn with no work to
-    // fold, or nothing spent because a plan covers it, keeps its usage rows,
-    // or its token counts would just vanish.
+    // fold, or without a complete positive cost, keeps one token total.
     val header = out.getOrNull(lastHeader) as? ChatDisplayItem.Group
-    if (lastHeader >= 0 && header != null && cost > 0) {
+    val knownCost = cost.isFinite() && usage.all { row -> row.costUsd?.let { it.isFinite() && it >= 0 } == true }
+    if (lastHeader >= 0 && header != null && knownCost && cost > 0) {
         out[lastHeader] = header.copy(group = header.group.copy(cost = cost))
-    } else {
-        out.addAll(usage)
+    } else if (usage.isNotEmpty()) {
+        fun sum(values: List<Long>): Long = values.fold(0L) { total, value ->
+            val next = value.coerceAtLeast(0)
+            if (Long.MAX_VALUE - total < next) Long.MAX_VALUE else total + next
+        }
+        out.add(ChatDisplayItem.Usage(usage.first().id, sum(usage.map { it.input }), sum(usage.map { it.output }),
+            cost.takeIf { knownCost }))
     }
 }
 

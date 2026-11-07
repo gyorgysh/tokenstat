@@ -359,6 +359,8 @@ internal static class ChatDetailFold
             var thoughtsOnly = members.All(item => item.Kind == ChatPage.ItemKind.Thinking);
             var group = Make(thoughtsOnly ? ChatStepGroupStyle.Thought : ChatStepGroupStyle.Work, members, live && trailing);
             if (thoughtsOnly) group = group with { Preview = Preview(members[0].Text) };
+            if (live && trailing && members[^1].Kind == ChatPage.ItemKind.Thinking)
+                group = group with { Preview = Preview(members[^1].Text) };
             Emit(group, [.. members], output, isOpen);
             members.Clear();
         }
@@ -387,17 +389,20 @@ internal static class ChatDetailFold
         Flush(true);
 
         // The spend rides on the turn's last work line. A turn with no work to
-        // fold, or nothing spent because a plan covers it, keeps its usage
-        // rows, or its token counts would just vanish.
-        if (lastHeader >= 0 && cost > 0 && output[lastHeader].Group is { } group)
+        // fold, or without a complete positive cost, keeps one token total.
+        var knownCost = double.IsFinite(cost) && usage.All(item => !item.CostUnknown && double.IsFinite(item.Cost) && item.Cost >= 0);
+        if (lastHeader >= 0 && knownCost && cost > 0 && output[lastHeader].Group is { } group)
         {
             var header = output[lastHeader];
             header.Group = group with { Cost = cost };
             output[lastHeader] = header;
         }
-        else
+        else if (usage.Count > 0)
         {
-            output.AddRange(usage);
+            static long Sum(IEnumerable<long> values) => values.Aggregate(0L, (total, value) =>
+                long.MaxValue - total < Math.Max(0, value) ? long.MaxValue : total + Math.Max(0, value));
+            output.Add(new ChatPage.DisplayItem { Id = usage[0].Id, Kind = ChatPage.ItemKind.Usage,
+                Input = Sum(usage.Select(item => item.Input)), Output = Sum(usage.Select(item => item.Output)), Cost = knownCost ? cost : 0, CostUnknown = !knownCost });
         }
     }
 

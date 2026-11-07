@@ -48,10 +48,9 @@ object LaunchDefaults {
     @Suppress("UNUSED_PARAMETER")
     fun mode(saved: LaunchChoice?): String = MODE
 
-    /// Fresh chats start on Bypass. A saved Ask first choice still wins for
-    /// agents with approvals; bypass-only agents cannot use that preference.
-    fun autonomy(saved: LaunchChoice?, bypassOnly: Boolean): String =
-        if (bypassOnly) "bypass" else saved?.autonomy?.ifBlank { null } ?: AUTONOMY
+    /// Permission choices belong to their chat. A new draft starts in Don't ask.
+    @Suppress("UNUSED_PARAMETER")
+    fun autonomy(saved: LaunchChoice?, bypassOnly: Boolean): String = AUTONOMY
 
     /// The agent a new chat opens on: the one last used if it is still
     /// installed, then Codex, then whatever else there is. `sh` is a shell

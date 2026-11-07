@@ -45,6 +45,23 @@ class ChatTranscriptDetailTest {
     ) = foldTranscript(rows, detail, running, isOpen)
 
     @Test
+    fun minimalKeepsLiveThoughtAndOneAccurateUsageTotal() {
+        val rows = listOf(user("u"), tool("t", "Read"), think("k", "Checking the image colors"),
+            ChatDisplayItem.Usage("s1", 3, 4, 0.0), ChatDisplayItem.Usage("s2", 5, 6, 0.0))
+        val live = fold(rows, ChatDetail.Minimal, running = true)
+        assertEquals("Checking the image colors", group(live, "g:t")?.preview)
+        val total = live.filterIsInstance<ChatDisplayItem.Usage>().single()
+        assertEquals("s1", total.id)
+        assertEquals(8L, total.input)
+        assertEquals(10L, total.output)
+        assertEquals(0.0, total.costUsd!!, 0.0)
+        assertNull(group(fold(rows, ChatDetail.Minimal), "g:t")?.preview)
+        val partial = fold(rows + ChatDisplayItem.Usage("unknown", 1, 2, null) + usage("paid", 0.1), ChatDetail.Minimal)
+        assertNull(partial.filterIsInstance<ChatDisplayItem.Usage>().single().costUsd)
+        assertEquals(10L, partial.filterIsInstance<ChatDisplayItem.Usage>().single().input)
+    }
+
+    @Test
     fun largeEditsRetainTheirTotalsAcrossEveryDetailLevel() {
         val count = 4_294_967_295L
         val rows = listOf(user("u1"), edit("e1", "a.kt", count, count), edit("e2", "a.kt", count, count), say("a1"))

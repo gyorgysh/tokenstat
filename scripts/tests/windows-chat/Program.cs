@@ -534,10 +534,10 @@ void Note(string? verb, string? prefix, string? expected, string message)
 }
 Note("Bash", "cargo test", "Always allow remembers cargo test for this chat only.", "a command prefix is what is saved");
 Note("Read", "  cargo test  ", "Always allow remembers cargo test for this chat only.", "a prefix is trimmed, then kept");
-Note("Bash", null, "Always allow answers this request only. Nothing is saved for later.", "a command with no prefix is not saved");
-Note("Bash", "  ", "Always allow answers this request only. Nothing is saved for later.", "a blank prefix is no prefix");
-Note("run_terminal_command", null, "Always allow answers this request only. Nothing is saved for later.", "a compound command name is still a command");
-Note("sh", null, "Always allow answers this request only. Nothing is saved for later.", "a short shell name is a command");
+Note("Bash", null, null, "a command with no prefix is not saved");
+Note("Bash", "  ", null, "a blank prefix is no prefix");
+Note("run_terminal_command", null, null, "a compound command name is still a command");
+Note("sh", null, null, "a short shell name is a command");
 Note("Read", null, "Always allow remembers Read for this chat only.", "a plain tool is remembered by its name");
 Note(" ApplyPatch ", null, "Always allow remembers ApplyPatch for this chat only.", "an unknown tool keeps the trimmed name");
 Note("execute_turn", null, "Always allow remembers execute_turn for this chat only.", "execute inside a longer word is not a command");
@@ -611,6 +611,15 @@ var liveGroup = GroupOf(live, "g:k1")!;
 Check(liveGroup.Running && liveGroup.LiveVerb == "Read" && liveGroup.LiveTarget == "t-t1", "a live work line names its step");
 var settled = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Say("a1")], ChatDetail.Minimal, running: true);
 Check(!GroupOf(settled, "g:k1")!.Running, "work before the answer is not running once its steps end");
+
+var liveThought = FoldRows([Ask("u"), Tool("t", "Read"), Think("k", "Checking the image colors"),
+    Row("s1", ChatPage.ItemKind.Usage, cost: 0), Row("s2", ChatPage.ItemKind.Usage, cost: 0)], ChatDetail.Minimal, running: true);
+Check(GroupOf(liveThought, "g:t")!.Preview == "Checking the image colors", "mixed work keeps its live thought preview");
+Check(liveThought.Count(row => row.Kind == ChatPage.ItemKind.Usage) == 1, "free-model step counts share one turn row");
+var unknownSpend = Row("unknown", ChatPage.ItemKind.Usage);
+unknownSpend.CostUnknown = true;
+var partialSpend = FoldRows([Ask("u"), Tool("t", "Read"), Row("paid", ChatPage.ItemKind.Usage, cost: 0.1), unknownSpend], ChatDetail.Minimal);
+Check(partialSpend.Single(row => row.Kind == ChatPage.ItemKind.Usage).CostUnknown, "partial spend cannot become a complete cost");
 
 var standard = FoldRows(
     [Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Grep"), Tool("t3", "WebFetch"), Tool("t4", "Bash"), EditRow("e1", "a"), Say("a1")],

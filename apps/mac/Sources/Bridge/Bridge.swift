@@ -1249,7 +1249,7 @@ extension Bridge {
         backend: String,
         title: String = L10n.text("apple.bridge.new_chat.db18382a"),
         mode: String = "execute",
-        autonomy: String = "standard",
+        autonomy: String = "bypass",
         model: String? = nil,
         effort: String? = nil,
         budgetSeconds: UInt64? = nil,

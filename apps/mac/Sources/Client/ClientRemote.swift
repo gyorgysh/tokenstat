@@ -527,7 +527,7 @@ enum ClientRemote {
         workspaceID: String,
         backend: String = "claude",
         mode: String = "execute",
-        autonomy: String = "standard",
+        autonomy: String = "bypass",
         personaID: String? = nil
     ) async throws -> ChatConversation {
         try await Bridge.createChat(

@@ -12,6 +12,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 mod projection;
+mod steering;
 use projection::Projection;
 
 const RECORD_CAP: usize = 16 * 1024 * 1024;
@@ -253,7 +254,7 @@ impl Lease {
                     }
                     // Catalog changes, tool-input fragments and other
                     // unused updates need not wake the turn's output loop.
-                    if !Projection::observes(kind) {
+                    if !Projection::observes(kind) && kind != "session.inbox.delivered" {
                         return true;
                     }
                     native.send(Ok(envelope("native", value)), bytes)
@@ -356,6 +357,7 @@ pub(super) fn run(argv: &[String], directory: &Path) -> Result<(), String> {
         let _ = tx.send(Ok(json!({"cliEof":true})), 0);
     });
     let mut projection = Projection::default();
+    let mut steering: Option<steering::Steering> = None;
     let mut output = Emitter::new(|| std::io::stdout().lock(), directory);
     let mut cli_eof = false;
     let mut native_eof = false;
@@ -366,6 +368,9 @@ pub(super) fn run(argv: &[String], directory: &Path) -> Result<(), String> {
         loop {
             if stop.requested() && stopped_at.is_none() {
                 stopped_at = Some(Instant::now());
+                if let Some(steering) = &steering {
+                    steering.close();
+                }
             }
             if stopped_at.is_some()
                 && !interrupted
@@ -381,15 +386,33 @@ pub(super) fn run(argv: &[String], directory: &Path) -> Result<(), String> {
                 Ok(Ok(mut value)) => {
                     let projected = if value["nativeEof"] == true {
                         native_eof = true;
+                        if let Some(steering) = &steering {
+                            steering.close();
+                        }
                         Vec::new()
                     } else if value["cliEof"] == true {
                         cli_eof = true;
                         Vec::new()
                     } else if let Some(native) = value.get_mut("native") {
+                        if let (Some(steering), Some(session)) = (&steering, &projection.session) {
+                            steering.delivered(native, session);
+                        }
                         projection.native(native.take())
                     } else {
                         projection.cli(value["cli"].take())
                     };
+                    if steering.is_none()
+                        && stopped_at.is_none()
+                        && !projection.ended
+                        && let Some(session) = &projection.session
+                    {
+                        steering = Some(steering::Steering::start(&lease, session, directory)?);
+                    }
+                    if projection.ended
+                        && let Some(steering) = &steering
+                    {
+                        steering.close();
+                    }
                     for value in projected {
                         output.emit(&value)?;
                     }
@@ -405,6 +428,9 @@ pub(super) fn run(argv: &[String], directory: &Path) -> Result<(), String> {
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
             if super::agent_exited(&mut cli.child).map_err(|error| error.to_string())? {
+                if let Some(steering) = &steering {
+                    steering.close();
+                }
                 let at = *exited.get_or_insert_with(Instant::now);
                 if cli_eof
                     && (projection.ended || native_eof || at.elapsed() >= Duration::from_secs(1))
@@ -422,6 +448,11 @@ pub(super) fn run(argv: &[String], directory: &Path) -> Result<(), String> {
         }
         cli.finish()
     })();
+    if result.is_err()
+        && let Some(steering) = &steering
+    {
+        steering.close();
+    }
     if result.is_err()
         && !cli.reaped
         && let Some(session) = &projection.session

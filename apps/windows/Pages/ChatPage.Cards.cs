@@ -774,6 +774,7 @@ internal sealed partial class ChatPage
             case ChatStepGroupStyle.Work:
                 parts.Add(group.Steps == 1 ? L10n.Text("windows.chatdetail.steps.one", "1") : L10n.Text("windows.chatdetail.steps.other", $"{group.Steps}"));
                 if (group.Files > 0) parts.Add(group.Files == 1 ? L10n.Text("windows.chatdetail.files_edited.one", "1") : L10n.Text("windows.chatdetail.files_edited.other", $"{group.Files}"));
+                if (group.Running && !group.Open && !string.IsNullOrEmpty(group.Preview)) parts.Add(group.Preview);
                 return string.Join(" · ", parts);
             case ChatStepGroupStyle.Explored:
                 if (group.Reads > 0) parts.Add(group.Reads == 1 ? L10n.Text("windows.chatdetail.files.one", "1") : L10n.Text("windows.chatdetail.files.other", $"{group.Reads}"));

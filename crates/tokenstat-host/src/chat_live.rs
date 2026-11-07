@@ -290,7 +290,7 @@ impl Launch {
         let helper = std::env::current_exe().map_err(|error| error.to_string())?;
         Ok(Some(Self {
             directory,
-            accepts_steer: !compact && !opencode,
+            accepts_steer: !compact,
             argv: vec![
                 helper.to_string_lossy().into_owned(),
                 "chat-live".into(),

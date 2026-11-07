@@ -59,6 +59,39 @@ class MobileChatSetupTest {
         assertEquals(1, layouts.single().lineCount)
         assertFalse("The compact label must fit", layouts.single().isLineEllipsized(0))
     }
+    @Test fun pendingPermissionStaysInlineWithAUsableComposer() {
+        var request by mutableStateOf(json("""{"id":"approval","verb":"write","preview":"/tmp/owned/preview.py"}"""))
+        var resolved = ""
+        compose.setContent { Screen(large = true) {
+            Column(Modifier.fillMaxSize().padding(12.dp)) {
+                ApprovalCard(request) { choice ->
+                    resolved = choice
+                    request = JsonObject(request + ("decision" to JsonPrimitive("allow")))
+                }
+                Spacer(Modifier.weight(1f))
+                ChatComposer(chat, "A draft", {}, "Message", false, staged = emptyList(), onPick = {}, onRemove = {},
+                    onSend = {}, onStop = {}, onChange = { _, _ -> }, backends = backends, onAgent = {}, onSetup = {})
+            }
+        } }
+        val allow = L10n.text("android.chatpullssections.allow.e213c161")
+        val always = L10n.text("android.chatpullssections.always_allow.977618bd")
+        val deny = L10n.text("android.chatpullssections.deny.05a2d733")
+        compose.onNodeWithText("A draft").assertIsDisplayed()
+        for (label in listOf(allow, always, deny)) compose.onNodeWithText(label).assertIsDisplayed()
+        screenshot("permission-inline-large-text.png")
+        compose.onNodeWithText(always).performClick()
+        assertEquals("allowAlways", resolved)
+        compose.onNodeWithText(always).assertDoesNotExist()
+        compose.onNodeWithText("A draft").assertIsDisplayed()
+    }
+    @Test fun compoundShellRequestsOfferOnlyActionsThatCanBeHonored() {
+        compose.setContent { Screen {
+            ApprovalCard(json("""{"id":"shell","verb":"bash","preview":"cd /tmp/owned && python preview.py"}""")) {}
+        } }
+        compose.onNodeWithText(L10n.text("android.chatpullssections.allow.e213c161")).assertIsDisplayed()
+        compose.onNodeWithText(L10n.text("android.chatpullssections.deny.05a2d733")).assertIsDisplayed()
+        compose.onNodeWithText(L10n.text("android.chatpullssections.always_allow.977618bd")).assertDoesNotExist()
+    }
     @Test fun narrowComposerKeepsModelAndSetupReachable() {
         var setup = false
         var current by mutableStateOf(chat)

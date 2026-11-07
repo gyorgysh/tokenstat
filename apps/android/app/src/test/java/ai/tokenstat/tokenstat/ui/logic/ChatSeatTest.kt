@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.logic
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /// The live seat uses the same sentences on every client.
@@ -214,20 +215,16 @@ class ChatSeatTest {
             "Always allow remembers cargo test for this chat only.",
             ChatSeat.allowAlwaysNote("Read", "  cargo test  "),
         )
-        assertEquals(
-            "Always allow answers this request only. Nothing is saved for later.",
+        assertNull(
             ChatSeat.allowAlwaysNote("Bash", null),
         )
-        assertEquals(
-            "Always allow answers this request only. Nothing is saved for later.",
+        assertNull(
             ChatSeat.allowAlwaysNote("Bash", "  "),
         )
-        assertEquals(
-            "Always allow answers this request only. Nothing is saved for later.",
+        assertNull(
             ChatSeat.allowAlwaysNote("run_terminal_command", null),
         )
-        assertEquals(
-            "Always allow answers this request only. Nothing is saved for later.",
+        assertNull(
             ChatSeat.allowAlwaysNote("sh", null),
         )
         assertEquals(

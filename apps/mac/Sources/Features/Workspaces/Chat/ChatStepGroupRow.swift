@@ -228,6 +228,7 @@ struct ChatStepGroupRow: View {
         case .work:
             var parts = [group.steps == 1 ? L10n.text("apple.chatdetail.steps.one", "1") : L10n.text("apple.chatdetail.steps.other", "\(group.steps)")]
             if group.files > 0 { parts.append(group.files == 1 ? L10n.text("apple.chatdetail.files_edited.one", "1") : L10n.text("apple.chatdetail.files_edited.other", "\(group.files)")) }
+            if group.running, !group.open, let preview = group.preview { parts.append(preview) }
             return parts.joined(separator: " · ")
         case .explored:
             var parts: [String] = []

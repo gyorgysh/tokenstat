@@ -1655,121 +1655,105 @@ struct ClientChatThread: View {
         "\(chatID)-\(scenePhase == .active)-\(isActive)"
     }
 
-    /// Same rule as the Mac: a blocked turn takes the composer's place. On a
-    /// phone this matters more, not less, because the card scrolls out of a
-    /// short viewport in one streamed paragraph.
     @ViewBuilder
     private func bar(_ chat: ChatConversation) -> some View {
-        if model.approvals.isEmpty {
-            VStack(spacing: Theme.Space.s) {
-                if let notice = model.sharingRecoveryNotice {
-                    TeamNotice(message: notice).padding(.horizontal, Theme.Space.m)
-                }
-                if model.isSharedSource {
-                    ChatSharingNotice(model: model)
-                        .padding(.horizontal, Theme.Space.s)
-                }
-                // A saved copy explains itself above the composer: what the
-                // rows are, when they were kept, and the way back to live.
-                if let copy = model.savedCopy {
-                    ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy,
-                        canCheck: model.currentReference?.scope == WorkSessionContext.shared.scope) {
-                        Task { await checkSavedCopyUpdates() }
-                    }
-                    .padding(.horizontal, Theme.Space.s)
-                }
-                // Pending writing stays available offline for copying or cancellation.
-                // Sending and receipt checks require a live, verified owner.
-                if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
-                    ChatSteerNoteBanner(note: note) { model.clearSteer() }
-                        .padding(.horizontal, Theme.Space.s)
-                }
-                if !model.pendingQueue.isEmpty {
-                    let queueOwner = model.currentReference
-                    let queueCanSteer = model.busy && model.selected?.nativeSteer == true
-                    let queueCanSteerAttachments = model.selected?.nativeSteerAttachments == true
-                    ChatQueueStrip(
-                        items: model.pendingQueue,
-                        owner: queueOwner,
-                        paused: model.queuePaused,
-                        offline: model.savedCopy != nil || model.isSharedSource,
-                            privateOnly: model.isSharedSource,
-                        canSteer: queueCanSteer,
-                        canSteerAttachments: queueCanSteerAttachments,
-                        onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
-                        onRemove: { model.removeQueued($0, owner: queueOwner) },
-                        onSendNow: { item in
-                            showNewest()
-                            resumeLatest()
-                            followPulse += 1
-                            let steerOnly = queueCanSteer && ChatCommandRules.canSteer(item.text,
-                                attachments: !item.attachments.isEmpty, acceptsAttachments: queueCanSteerAttachments)
-                            Task { await model.sendNow(item, owner: queueOwner, steerOnly: steerOnly) }
-                        },
-                        onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
-                    )
-                    .padding(.horizontal, Theme.Space.s)
-                }
-                if let backend = model.backend(for: chat.backend), !model.isSharedSource, model.savedCopy == nil, model.signInGateRowID == nil {
-                    ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
-                                       recoveryFailureID: model.signInFailureID)
-                        .padding(.horizontal, Theme.Space.s)
-                }
-                if model.savedCopy == nil, folder != nil {
-                    changesRow
-                }
-                ChatActivityStrip(model: model)
-                    .padding(.horizontal, Theme.Space.s)
-                    .padding(.bottom, Theme.Space.s)
-                ClientChatComposer(
-                    model: model,
-                    chat: chat,
-                    draft: $model.draft,
-                    attachments: model.attachments,
-                    previews: model.attachmentPreviews,
-                    running: model.busy,
-                    sendsAsNote: model.sendsAsNote,
-                    placeholder: model.isSharedSource ? L10n.text("common.teams.private_draft_placeholder") : model.sendsAsNote
-                        ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_placeholder") : L10n.text("apple.clientchatview.add_a_note_for_the_next_step.4778177a"))
-                        : (model.busy
-                            ? L10n.text("apple.clientchatview.send_after_this_turn.012fc8c3")
-                            : L10n.text("apple.clientchatview.ask_about_0.35c322e7", "\(folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName)")),
-                    onSend: { submit(from: chat) },
-                    onSendNow: { submit(from: chat, sendNow: true) },
-                    onStop: { Task { await model.stop() } },
-                    onKeyboardDidHide: {
-                        guard follow.pinned else { return }
-                        followPulse += 1
-                    },
-                    onAttach: { item, owner in await model.attach(item, to: owner) },
-                    onRemove: { model.removeAttachment($0) },
-                    onOpenSetup: { if model.savedCopy == nil { showingSetup = true } },
-                    onImportURLs: { urls, owner in
-                        let drops = ChatInbox.drops(from: urls)
-                        Task { await receive(drops, owner: owner) }
-                    },
-                    onDropURLs: { urls in
-                        receive(ChatInbox.drops(from: urls))
-                    },
-                    onDropText: { items in
-                        receive(items.map(ChatInboxDrop.text))
-                    },
-                    onDropData: { items in
-                        receive(items.compactMap(ChatInbox.imageDrop(from:)))
-                    },
-                    onDropTargeted: { composerDropTargeted = $0 }
-                )
+        VStack(spacing: Theme.Space.s) {
+            if let notice = model.sharingRecoveryNotice {
+                TeamNotice(message: notice).padding(.horizontal, Theme.Space.m)
             }
-        } else {
-            ChatApprovalBar(
-                approvals: model.approvals,
-                resolve: { approval, choice in
-                    let owner = model.currentReference
-                    Task { await model.resolve(approval, choice: choice, owner: owner) }
-                },
-                showInTranscript: { approval in
-                    scrollTarget = "approval-\(approval.id)"
+            if model.isSharedSource {
+                ChatSharingNotice(model: model)
+                    .padding(.horizontal, Theme.Space.s)
+            }
+            // A saved copy explains itself above the composer: what the
+            // rows are, when they were kept, and the way back to live.
+            if let copy = model.savedCopy {
+                ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy,
+                    canCheck: model.currentReference?.scope == WorkSessionContext.shared.scope) {
+                    Task { await checkSavedCopyUpdates() }
                 }
+                .padding(.horizontal, Theme.Space.s)
+            }
+            // Pending writing stays available offline for copying or cancellation.
+            // Sending and receipt checks require a live, verified owner.
+            if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+                ChatSteerNoteBanner(note: note) { model.clearSteer() }
+                    .padding(.horizontal, Theme.Space.s)
+            }
+            if !model.pendingQueue.isEmpty {
+                let queueOwner = model.currentReference
+                let queueCanSteer = model.busy && model.selected?.nativeSteer == true
+                let queueCanSteerAttachments = model.selected?.nativeSteerAttachments == true
+                ChatQueueStrip(
+                    items: model.pendingQueue,
+                    owner: queueOwner,
+                    paused: model.queuePaused,
+                    offline: model.savedCopy != nil || model.isSharedSource,
+                        privateOnly: model.isSharedSource,
+                    canSteer: queueCanSteer,
+                    canSteerAttachments: queueCanSteerAttachments,
+                    onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
+                    onRemove: { model.removeQueued($0, owner: queueOwner) },
+                    onSendNow: { item in
+                        showNewest()
+                        resumeLatest()
+                        followPulse += 1
+                        let steerOnly = queueCanSteer && ChatCommandRules.canSteer(item.text,
+                            attachments: !item.attachments.isEmpty, acceptsAttachments: queueCanSteerAttachments)
+                        Task { await model.sendNow(item, owner: queueOwner, steerOnly: steerOnly) }
+                    },
+                    onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
+                )
+                .padding(.horizontal, Theme.Space.s)
+            }
+            if let backend = model.backend(for: chat.backend), !model.isSharedSource, model.savedCopy == nil, model.signInGateRowID == nil {
+                ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
+                                   recoveryFailureID: model.signInFailureID)
+                    .padding(.horizontal, Theme.Space.s)
+            }
+            if model.savedCopy == nil, folder != nil {
+                changesRow
+            }
+            ChatActivityStrip(model: model)
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.bottom, Theme.Space.s)
+            ClientChatComposer(
+                model: model,
+                chat: chat,
+                draft: $model.draft,
+                attachments: model.attachments,
+                previews: model.attachmentPreviews,
+                running: model.busy,
+                sendsAsNote: model.sendsAsNote,
+                placeholder: model.isSharedSource ? L10n.text("common.teams.private_draft_placeholder") : model.sendsAsNote
+                    ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_placeholder") : L10n.text("apple.clientchatview.add_a_note_for_the_next_step.4778177a"))
+                    : (model.busy
+                        ? L10n.text("apple.clientchatview.send_after_this_turn.012fc8c3")
+                        : L10n.text("apple.clientchatview.ask_about_0.35c322e7", "\(folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName)")),
+                onSend: { submit(from: chat) },
+                onSendNow: { submit(from: chat, sendNow: true) },
+                onStop: { Task { await model.stop() } },
+                onKeyboardDidHide: {
+                    guard follow.pinned else { return }
+                    followPulse += 1
+                },
+                onAttach: { item, owner in await model.attach(item, to: owner) },
+                onRemove: { model.removeAttachment($0) },
+                onOpenSetup: { if model.savedCopy == nil { showingSetup = true } },
+                onImportURLs: { urls, owner in
+                    let drops = ChatInbox.drops(from: urls)
+                    Task { await receive(drops, owner: owner) }
+                },
+                onDropURLs: { urls in
+                    receive(ChatInbox.drops(from: urls))
+                },
+                onDropText: { items in
+                    receive(items.map(ChatInboxDrop.text))
+                },
+                onDropData: { items in
+                    receive(items.compactMap(ChatInbox.imageDrop(from:)))
+                },
+                onDropTargeted: { composerDropTargeted = $0 }
             )
         }
     }
@@ -1961,7 +1945,7 @@ struct ClientChatThread: View {
                 readerMoved = true
             })
             .transcriptFollowBar {
-                if model.approvals.isEmpty && (follow.showJump || model.busy) {
+                if follow.showJump || model.busy {
                     TranscriptFollowPill(
                         showJump: follow.showJump,
                         busy: model.busy,
@@ -2005,8 +1989,9 @@ struct ClientChatThread: View {
                     Task { await model.drainQueue() }
                 }
             }
-            .onChange(of: model.approvals.isEmpty) { _, empty in
-                follow.suppressed = !empty
+            .onChange(of: model.approvals.map(\.id)) { _, ids in
+                follow.suppressed = !ids.isEmpty
+                if follow.pinned, let id = ids.first { scrollTarget = "approval-\(id)" }
             }
             // A scroll that has come to rest is a reader who has stopped
             // somewhere. Wait a beat for the rows to say where they are:
@@ -2047,6 +2032,7 @@ struct ClientChatThread: View {
             .onAppear {
                 follow.active = isActive
                 follow.suppressed = !model.approvals.isEmpty
+                if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
                 window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
                 scrollAccess.refreshAttachment(retryVisibility: true)
@@ -2424,8 +2410,7 @@ struct ClientChatThread: View {
         state.repin = { [weak state, weak access] in
             guard let state, state.active, let access, access.isEligible,
                   model.viewportContinuity.owns(generation: model.selectionGeneration, owner: owner),
-                  state.pinned, !state.sliceHidesNewest,
-                  model.approvals.isEmpty else { return false }
+                  state.pinned, !state.sliceHidesNewest, model.approvals.isEmpty else { return false }
             state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
             return true

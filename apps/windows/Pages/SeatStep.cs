@@ -145,7 +145,7 @@ internal static class SeatStep
         }
         if (IsShell(verb))
         {
-            return L10n.Text("windows.seatstep.always_allow_answers_this_request_only_not.a067a2b7");
+            return null;
         }
         var name = TrimVerb(verb);
         if (name.Length == 0) return null;

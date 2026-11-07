@@ -50,6 +50,7 @@ internal sealed partial class ChatPage
         public long Input;
         public long Output;
         public double Cost;
+        public bool CostUnknown;
         public long StartedAt;
         public long EndedAt;
         /// <summary>

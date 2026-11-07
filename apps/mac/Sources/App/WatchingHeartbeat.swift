@@ -6,6 +6,9 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Tell the host, while this screen is up, that somebody is reading this
 /// conversation.
@@ -21,9 +24,9 @@ import SwiftUI
 /// recover by itself instead of leaving an account permanently quiet. See
 /// `crate::presence` on the host for the other half.
 ///
-/// Renewing stops the moment `UserPresence` says nobody is there, so a Mac left
-/// on an open conversation goes back to notifying about a minute later, without
-/// anybody closing anything.
+/// On Mac, a visible chat keeps its claim even while another app has focus or
+/// the person is reading without typing. Hidden windows and other destinations
+/// release it; the host lease also handles crashes and lost connections.
 struct WatchingHeartbeat: ViewModifier {
     /// The conversation on screen, or nil when there is none.
     var conversationID: String?
@@ -33,6 +36,25 @@ struct WatchingHeartbeat: ViewModifier {
     var isActive: Bool = true
 
     @Environment(\.scenePhase) private var scenePhase
+    #if os(macOS)
+    @State private var windowReference = WatchingWindowReference()
+    private var window: NSWindow? { windowReference.window }
+    #endif
+
+    private var enabled: Bool {
+        #if os(macOS)
+        isActive
+        #else
+        isActive && scenePhase == .active
+        #endif
+    }
+    private var windowID: Int? {
+        #if os(macOS)
+        window?.windowNumber
+        #else
+        nil
+        #endif
+    }
 
     private struct Identity: Hashable {
         let conversation: String?
@@ -40,6 +62,7 @@ struct WatchingHeartbeat: ViewModifier {
         let scope: WorkReference.Scope?
         let generation: UInt64
         let active: Bool
+        let window: Int?
     }
 
     /// Comfortably inside the host's 30 second lease, so one slow or dropped
@@ -48,17 +71,26 @@ struct WatchingHeartbeat: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            #if os(macOS)
+            .background(WatchingWindowBridge(reference: $windowReference).frame(width: 0, height: 0))
+            #endif
             .task(id: Identity(conversation: conversationID, peer: peer,
                                scope: WorkSessionContext.shared.scope,
                                generation: WorkSessionContext.shared.generation,
-                               active: isActive && scenePhase == .active)) {
-                guard scenePhase == .active, isActive, let id = conversationID, !id.isEmpty,
+                               active: enabled, window: windowID)) {
+                guard enabled, let id = conversationID, !id.isEmpty,
                       let owner = WorkSessionContext.shared.scope else { return }
                 // A late release from the previous scene phase must never
                 // remove the foreground task's newly renewed lease.
                 let ownerGeneration = WorkSessionContext.shared.generation
                 let watcherID = UUID().uuidString
+                #if os(macOS)
+                UserPresence.shared.registerReadingWindow(window, conversation: id, watcher: watcherID)
+                #endif
                 defer {
+                    #if os(macOS)
+                    UserPresence.shared.removeReadingWindow(watcher: watcherID)
+                    #endif
                     // Leaving the screen. The lease would expire anyway, and
                     // saying so makes the next half minute behave correctly.
                     // Detached: the view may already be gone when this runs.
@@ -75,9 +107,17 @@ struct WatchingHeartbeat: ViewModifier {
                 }
                 while !Task.isCancelled, WorkSessionContext.shared.scope == owner,
                       WorkSessionContext.shared.generation == ownerGeneration {
-                    if UserPresence.shared.isAtTheKeyboard {
+                    #if os(macOS)
+                    let watching = UserPresence.visibleForReading(window)
+                    #else
+                    let watching = UserPresence.shared.isAtTheKeyboard
+                    #endif
+                    if watching {
                         await Bridge.watching(conversationID: id, watcherID: watcherID, peer: peer,
                                               expectedScope: owner, expectedGeneration: ownerGeneration)
+                    } else {
+                        await Bridge.stoppedWatching(conversationID: id, watcherID: watcherID, peer: peer,
+                                                     expectedScope: owner, expectedGeneration: ownerGeneration)
                     }
                     try? await Task.sleep(for: Self.beat)
                 }
@@ -93,3 +133,25 @@ extension View {
         )
     }
 }
+
+#if os(macOS)
+@MainActor
+private final class WatchingWindowReference {
+    weak var window: NSWindow?
+    init(_ window: NSWindow? = nil) { self.window = window }
+}
+
+private struct WatchingWindowBridge: NSViewRepresentable {
+    @Binding var reference: WatchingWindowReference
+    func makeNSView(context: Context) -> WindowReportingView {
+        let view = WindowReportingView()
+        view.onWindowChange = { next in Task { @MainActor in reference = WatchingWindowReference(next) } }
+        return view
+    }
+    func updateNSView(_ view: WindowReportingView, context: Context) {
+        guard view.window !== reference.window else { return }
+        let next = view.window
+        Task { @MainActor in reference = WatchingWindowReference(next) }
+    }
+}
+#endif

@@ -14,13 +14,19 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Improved
 
 - Chats with OpenCode 2 show reply text and reasoning as it arrives. Tool activity appears when a call starts, and usage includes the final step. Older OpenCode versions keep working.
+- You can send updated instructions during an OpenCode 2 turn when the installed engine supports steering.
 - Compact model pickers show the selected effort beside the model, with the agent identified by its icon.
+- Minimal chat view shows a short preview of current reasoning and combines step-by-step token counts into one total for the turn.
+- Images inspected by OpenCode tools appear as thumbnails beside the activity, including on connected devices.
 
 ### Fixed
 
+- Permission requests stay in the conversation on Mac, iPhone and iPad, with the composer still available. Approval buttons wrap when space is tight.
+- Always allow saves its rule before the tool resumes. Commands that cannot be remembered no longer offer that choice.
+- New chats consistently start in Don't ask, including after an Ask first conversation. Existing chats keep their permissions.
+- A visible Mac chat keeps mobile attention notifications quiet even while another app has focus. Queued alerts are checked again before delivery.
 - Stopping a chat clears unanswered permission requests. The next message no longer fails with a false “already running in another instance” error.
-- Cursor tool results stay with the activity that started the call.
-- Late tool results from a finished turn no longer appear after the next message.
+- Tool results stay with their original turn and activity, including Cursor calls and results that arrive late.
 
 ## [1.13.0] - 2026-11-06
 

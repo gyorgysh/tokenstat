@@ -45,11 +45,11 @@ class LaunchChoiceTest {
     }
 
     @Test
-    fun `the last autonomy is what the next chat opens in`() {
+    fun `new chats do not inherit an old chats approval mode`() {
         assertEquals("bypass", LaunchDefaults.autonomy(null, bypassOnly = false))
         assertEquals("bypass", LaunchDefaults.AUTONOMY)
         assertEquals("bypass", LaunchDefaults.autonomy(choice(autonomy = "bypass"), false))
-        assertEquals("standard", LaunchDefaults.autonomy(choice(autonomy = "standard"), false))
+        assertEquals("bypass", LaunchDefaults.autonomy(choice(autonomy = "standard"), false))
     }
 
     /// An agent with no approval protocol of its own runs on Bypass or not at

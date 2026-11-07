@@ -115,6 +115,24 @@ impl Collector {
                 }
             }
         } else {
+            if matches!(backend, "opencode" | "opencode2") {
+                let part = &value["part"];
+                if part["tool"] == "read"
+                    && let Some(call) = part["id"].as_str()
+                    && let Some(path) = part
+                        .pointer("/state/input/path")
+                        .or_else(|| part.pointer("/state/input/filePath"))
+                        .or_else(|| part.pointer("/input/filePath"))
+                        .and_then(Value::as_str)
+                    && self.reads.len() < IMAGE_COUNT
+                    && image_extension(Path::new(path))
+                    && path.len() <= 8192
+                    && !call.is_empty()
+                    && call.len() <= 512
+                {
+                    self.reads.insert(call.into(), path.into());
+                }
+            }
             // Other adapters already normalize their correlated tool end.
             // Only one end may own the structured content in a record.
             let mut ends = events.iter().filter_map(|event| match event {
@@ -234,6 +252,14 @@ impl Collector {
                 self.inline(call, url);
             }
         }
+        if value["type"] == "file"
+            && value["mime"]
+                .as_str()
+                .is_some_and(|mime| mime.starts_with("image/"))
+            && let Some(uri) = value["uri"].as_str()
+        {
+            self.inline(call, uri);
+        }
         // Embedded resource bytes are evidence. A remote MCP file:// URI
         // names its own host's filesystem, never this host's local files.
         if let Some(resource) = value.get("resource")
@@ -244,7 +270,9 @@ impl Collector {
         {
             self.inline(call, blob);
         }
-        for key in ["content", "result", "output", "response", "event", "state"] {
+        for key in [
+            "content", "result", "output", "response", "event", "state", "metadata",
+        ] {
             if let Some(child) = value.get(key) {
                 self.content(call, child, depth + 1);
             }
@@ -302,6 +330,63 @@ pub(crate) fn media_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn opencode_read_keeps_the_image_returned_by_the_tool_once() {
+        let bytes = b"\x89PNG\r\n\x1a\nfixture";
+        let record = json!({"type":"tool_use","part":{
+        "id":"read-image","tool":"read","state":{
+            "status":"completed","input":{"path":"/removed/preview.png"},
+            "metadata":{"content":[{"type":"file","mime":"image/png",
+                "uri":format!("data:image/png;base64,{}", crate::base64::encode(bytes))}]}
+        }}});
+        let events = [Event::ToolEnd {
+            call_id: "read-image".into(),
+            ok: true,
+            detail: None,
+        }];
+        let mut collector = Collector::default();
+        collector.observe("opencode2", &record, &events);
+        let images = collector.take();
+        assert_eq!(images.len(), 1);
+        assert!(matches!(&images[0].source, Source::Bytes(data) if data == bytes));
+        collector.observe("opencode2", &record, &events);
+        assert!(
+            collector.take().is_empty(),
+            "replay must not fall back to the local path"
+        );
+    }
+
+    #[test]
+    fn opencode_image_paths_require_a_successful_correlated_read() {
+        for backend in ["opencode", "opencode2"] {
+            let mut collector = Collector::default();
+            for (call, ok) in [("denied", false), ("read", true)] {
+                let record = json!({"type":"tool_use","part":{"id":call,"tool":"read",
+                "state":{"input":{"filePath":"preview.png"},"metadata":{
+                    "content":[{"type":"file","mime":"image/png","uri":"https://example.com/image.png"}]}
+                }}});
+                collector.observe(
+                    backend,
+                    &record,
+                    &[Event::ToolEnd {
+                        call_id: call.into(),
+                        ok,
+                        detail: None,
+                    }],
+                );
+            }
+            let images = collector.take();
+            assert_eq!(images.len(), 1);
+            assert_eq!(images[0].call_id, "read");
+            assert!(
+                matches!(&images[0].source,Source::File(path) if path == Path::new("preview.png"))
+            );
+            collector.observe(backend, &json!({"part":{"id":"shell","tool":"bash","state":{"input":{"path":"secret.png"}}}}),
+                &[Event::ToolEnd {call_id:"shell".into(),ok:true,detail:None}]);
+            assert!(collector.take().is_empty());
+        }
+    }
     #[test]
     fn only_correlated_image_content_is_captured_and_duplicates_are_bounded() {
         let data = crate::base64::encode(b"\x89PNG\r\n\x1a\nfixture");

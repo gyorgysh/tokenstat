@@ -69,6 +69,7 @@ struct ChatTranscriptFoldTests {
         minimalKeepsUsageWhenThereIsNoWork()
         minimalKeepsEveryReplyVisible()
         minimalLiveTurn()
+        minimalKeepsALiveThoughtPreviewAndOneUsageTotal()
         minimalActivitySurvivesBetweenCalls()
         minimalActivityKeepsRunningCallsVisible()
         minimalActivityIsBoundedAndDoesNotHideFailures()
@@ -161,6 +162,24 @@ struct ChatTranscriptFoldTests {
 
         let settled = fold([user("u1"), think("k1"), tool("t1", "Read"), say("a1")], .minimal, running: true)
         require(group(settled, "g:k1")?.running == false, "work before the answer is not running once its steps end")
+    }
+
+    static func minimalKeepsALiveThoughtPreviewAndOneUsageTotal() {
+        let rows = [user("u"), tool("t", "Read"), think("k", "Checking the image colors"), usage("s1", 0), usage("s2", 0)]
+        let live = fold(rows, .minimal, running: true)
+        require(group(live, "g:t")?.preview == "Checking the image colors", "mixed work keeps a small live thought preview")
+        let totals = live.filter { if case .usage = $0.kind { return true }; return false }
+        require(totals.count == 1 && totals.first?.id == "s1", "free-model step usage is one stable turn row")
+        if case let .usage(input, output, cost) = totals[0].kind {
+            require(input == 2 && output == 2 && cost == 0, "aggregation preserves token totals and known zero cost")
+        }
+        require(group(fold(rows, .minimal), "g:t")?.preview == nil, "finished work does not keep a live peek")
+        let partial = fold(rows + [ChatDisplayItem(id: "unknown", kind: .usage(input: 3, output: 4, cost: nil)), usage("paid", 0.1)], .minimal)
+        let counts = partial.filter { if case .usage = $0.kind { return true }; return false }
+        require(counts.count == 1, "incomplete costs retain a single count row")
+        if case let .usage(input, output, cost) = counts[0].kind {
+            require(input == 6 && output == 7 && cost == nil, "an unknown step cannot turn into a complete cost")
+        }
     }
 
     static func minimalActivitySurvivesBetweenCalls() {

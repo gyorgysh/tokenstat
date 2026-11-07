@@ -45,6 +45,15 @@ if sys.argv[1]=='serve':
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self,*args):pass
         def do_POST(self):
+            if self.path=='/api/session/ses_main/prompt':
+                assert self.headers['Authorization']==expected
+                body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                assert body['text']=='café steer 🌍' and body['delivery']=='steer' and body['resume'] is False
+                assert body['files']==[]
+                (root/'steered.json').write_text(json.dumps(body))
+                with (root/'events').open('a') as f:f.write(json.dumps({'type':'session.inbox.delivered','data':{'sessionID':'ses_main','inboxID':body['id']}})+'\n')
+                ack={'data':{'id':body['id'],'sessionID':'ses_main','type':'user','delivery':'steer','payload':{'text':body['text']}}}
+                self.send_response(200);self.end_headers();self.wfile.write(json.dumps(ack).encode());return
             assert self.path=='/api/session/ses_main/interrupt'
             assert self.headers['Authorization']==expected
             (root/'interrupted').write_text('true')
@@ -93,7 +102,7 @@ elif sys.argv[1]=='run':
     emit({'type':'step_finish','sessionID':'ses_main','part':{'messageID':'msg_text','reason':'stop','tokens':step['tokens'],'cost':step['cost']}})
 "#;
 
-fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool) {
+fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool, steer: bool) {
     let root = tempfile::tempdir().unwrap();
     let project = root.path().join("project ü");
     fs::create_dir(&project).unwrap();
@@ -162,6 +171,32 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
     } else {
         rx.recv_timeout(Duration::from_secs(10))
             .expect("native text must arrive before releasing the CLI snapshot");
+    }
+    if steer {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !root.path().join("ready.json").exists() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let id = "0123456789abcdef0123456789abcdef";
+        let expires = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            + 10000;
+        fs::write(
+            root.path().join(format!("request-{id}.json")),
+            json!({"id":id,"steer":"café steer 🌍","images":[],"expires":expires}).to_string(),
+        )
+        .unwrap();
+        let response = root.path().join(format!("response-{id}.json"));
+        while !response.exists() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let response: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
+        assert_eq!(response["ok"], true);
+        assert!(project.join("steered.json").is_file());
     }
     let stopping = Instant::now();
     if backpressure {
@@ -238,25 +273,35 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
 
 #[test]
 fn native_deltas_precede_completion_and_usage_is_not_doubled() {
-    run_case(false, false, false, false);
+    run_case(false, false, false, false, false);
 }
 
 #[test]
 fn a_disconnected_observer_keeps_the_cli_completion_without_resending() {
-    run_case(true, false, false, false);
+    run_case(true, false, false, false, false);
 }
 
 #[test]
 fn stop_retires_the_owned_cli_and_server() {
-    run_case(false, true, false, false);
+    run_case(false, true, false, false, false);
 }
 
 #[test]
 fn stop_during_server_startup_is_bounded() {
-    run_case(false, false, true, false);
+    run_case(false, false, true, false, false);
 }
 
 #[test]
 fn stop_interrupts_native_execution_when_stdout_is_not_consumed() {
-    run_case(false, true, false, true);
+    run_case(false, true, false, true, false);
+}
+
+#[test]
+fn steering_is_acknowledged_by_the_same_native_session_without_restarting_the_cli() {
+    run_case(false, false, false, false, true);
+}
+
+#[test]
+fn stopping_after_steering_retires_the_control_worker_and_owned_processes() {
+    run_case(false, true, false, false, true);
 }

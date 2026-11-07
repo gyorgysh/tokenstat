@@ -113,7 +113,7 @@ enum SeatStep {
             return L10n.text("apple.seatstep.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "\(prefix)")
         }
         if isShell(verb: verb) {
-            return L10n.text("apple.seatstep.always_allow_answers_this_request_only_not.a067a2b7")
+            return nil
         }
         let name = trimVerb(verb)
         if name.isEmpty { return nil }

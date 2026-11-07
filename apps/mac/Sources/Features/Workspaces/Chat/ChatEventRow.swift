@@ -763,21 +763,20 @@ struct ChatApprovalCard: View {
     }
 }
 
-/// Allow, Always allow, Deny. One row, one meaning each, shared by the card in
-/// the transcript and the bar pinned above the composer so the two can never
-/// offer different answers to the same question.
+/// One action row for the inline request. Offer Always allow only when a rule can be saved.
 struct ChatApprovalActions: View {
     let approval: ChatApproval
     let resolve: (ChatApproval, String) -> Void
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
+        FlowLayout(spacing: Theme.Space.s, rowSpacing: Theme.Space.s) {
             Button(L10n.text("apple.chateventrow.allow.e213c161"), .allow) { resolve(approval, "allow") }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .keyboardShortcut(.return, modifiers: [.command])
-            Button(L10n.text("apple.chateventrow.always_allow.977618bd"), .allow) { resolve(approval, "allowAlways") }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-            Spacer(minLength: 0)
+            if !SeatStep.isShell(verb: approval.verb) || approval.shellPrefix?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                Button(L10n.text("apple.chateventrow.always_allow.977618bd"), .allow) { resolve(approval, "allowAlways") }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
             Button(L10n.text("apple.chateventrow.deny.05a2d733"), .deny, role: .destructive) { resolve(approval, "deny") }
                 .buttonStyle(DestructiveButtonStyle(small: true))
         }

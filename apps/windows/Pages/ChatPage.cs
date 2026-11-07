@@ -714,11 +714,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 // of work, and carried over it left every later chat planning
                 // at somebody who had asked for something to be done.
                 ["mode"] = setup?.Mode ?? "execute",
-                // Don't ask unless the last chat was set to ask first. The
-                // remembered choice still wins once somebody has made one.
+                // New chats start in Don't ask. An explicit choice in this
+                // draft still wins; existing chats keep their permissions.
                 ["autonomy"] = Format.Text(chosen, "gateTier") == "bypassOnly"
                     ? "bypass"
-                    : setup?.Autonomy ?? saved?.Autonomy ?? "bypass",
+                    : setup?.Autonomy ?? "bypass",
             };
             // The rest of the last setup travels when this agent still
             // offers it. A model or effort it no longer lists is dropped.
@@ -1274,7 +1274,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Approval => $"{item.Id}|{item.Pending}|{item.Approval?.ToJsonString()}",
         ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}|{_modelPreviews.Contains(ImageOwner() + "/" + item.Id)}",
         ItemKind.Gallery => $"{item.Id}|{string.Join(";", item.Images?.Select(image => image.Id + ":" + image.Name + ":" + image.Size) ?? [])}",
-        ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
+        ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}|{item.CostUnknown}",
         ItemKind.Failed => $"{item.Id}|{item.Text}",
         ItemKind.Changes => $"{item.Id}|{string.Join(",", item.Changes?.Select(file => $"{file.Path}:{file.Added}:{file.Removed}") ?? Enumerable.Empty<string>())}|{_expandedCards.GetValueOrDefault(item.Id)}",
         _ => item.Id,
@@ -1660,7 +1660,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var id = Format.Text(approval, "id");
             var reply = ApprovalReply(id);
             actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.allow.e213c161"), ActionIcon.Allow, async (_, _) => await reply("allow")));
-            actions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.always_allow.977618bd"), ActionIcon.Allow, async (_, _) => await reply("allowAlways")));
+            if (!SeatStep.IsShell(verb) || !string.IsNullOrWhiteSpace(Format.Text(approval, "shellPrefix")))
+                actions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.always_allow.977618bd"), ActionIcon.Allow, async (_, _) => await reply("allowAlways")));
             actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.deny.05a2d733"), ActionIcon.Deny, async (_, _) => await reply("deny")));
             body.Children.Add(actions);
             var note = SeatStep.AllowAlwaysNote(verb, Format.Text(approval, "shellPrefix"));
@@ -1748,7 +1749,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             L10n.Text("windows.chatpage.0_n0_in_1_n0_out.bcfb97ef"),
             item.Input,
             item.Output);
-        if (item.Cost > 0)
+        if (!item.CostUnknown && item.Cost > 0)
         {
             text += "  ·  " + item.Cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"));
         }
@@ -3004,6 +3005,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         Input = Format.Long(ev, "input"),
                         Output = Format.Long(ev, "output"),
                         Cost = Format.Number(ev, "costUsd"),
+                        CostUnknown = ev?["costUsd"] is null,
                     });
                     break;
                 case "attachment":

@@ -43,7 +43,7 @@ internal sealed class NewChatPage : Page
     private string? _draftRepository => _drafts.Repository;
     private long _draftGeneration => _drafts.Revision;
     private long _lifetime;
-    private string _mode = "execute", _autonomy = ChatLaunchChoice.Load()?.Autonomy ?? "bypass";
+    private string _mode = "execute", _autonomy = "bypass";
     private bool _fastMode;
     private bool _restoringDraft;
     private readonly Button _attach;
@@ -264,7 +264,7 @@ internal sealed class NewChatPage : Page
         _catalogRepository = null;
         _restoringDraft = true;
         _draft.Text = restored.Text; _files.Clear(); _files.AddRange(restored.Files); _preferredSetup = restored.Setup;
-        _mode = restored.Setup?.Mode ?? "execute"; _autonomy = restored.Setup?.Autonomy ?? ChatLaunchChoice.Load()?.Autonomy ?? "bypass";
+        _mode = restored.Setup?.Mode ?? "execute"; _autonomy = restored.Setup?.Autonomy ?? "bypass";
         _fastMode = restored.Setup?.FastMode ?? false;
         _restoringDraft = false; RenderFiles();
     }
