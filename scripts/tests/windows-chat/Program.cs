@@ -532,15 +532,15 @@ void Note(string? verb, string? prefix, string? expected, string message)
     var got = SeatStep.AllowAlwaysNote(verb, prefix);
     if (got != expected) throw new Exception(message + ": " + (got ?? "<none>"));
 }
-Note("Bash", "cargo test", "Always allow remembers cargo test for this chat only.", "a command prefix is what is saved");
-Note("Read", "  cargo test  ", "Always allow remembers cargo test for this chat only.", "a prefix is trimmed, then kept");
+Note("Bash", "cargo test", "Always allow approves commands starting with cargo test in this chat. Other commands still ask.", "a command prefix is what is saved");
+Note("Read", "  cargo test  ", "Always allow approves commands starting with cargo test in this chat. Other commands still ask.", "a prefix is trimmed, then kept");
 Note("Bash", null, null, "a command with no prefix is not saved");
 Note("Bash", "  ", null, "a blank prefix is no prefix");
 Note("run_terminal_command", null, null, "a compound command name is still a command");
 Note("sh", null, null, "a short shell name is a command");
-Note("Read", null, "Always allow remembers Read for this chat only.", "a plain tool is remembered by its name");
-Note(" ApplyPatch ", null, "Always allow remembers ApplyPatch for this chat only.", "an unknown tool keeps the trimmed name");
-Note("execute_turn", null, "Always allow remembers execute_turn for this chat only.", "execute inside a longer word is not a command");
+Note("Read", null, "Always allow lets this chat use Read on any file or target. Other tools still ask.", "a plain tool is remembered by its name");
+Note(" ApplyPatch ", null, "Always allow lets this chat use ApplyPatch on any file or target. Other tools still ask.", "an unknown tool keeps the trimmed name");
+Note("execute_turn", null, "Always allow lets this chat use execute_turn on any file or target. Other tools still ask.", "execute inside a longer word is not a command");
 Note(null, null, null, "nothing to remember says nothing");
 Check(!SeatStep.IsShell("push"), "push is not a command");
 Check(SeatStep.IsShell("Run-Task"), "run as its own word is a command");

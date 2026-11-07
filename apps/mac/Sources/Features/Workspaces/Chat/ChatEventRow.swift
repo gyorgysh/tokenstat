@@ -770,7 +770,7 @@ struct ChatApprovalActions: View {
 
     var body: some View {
         FlowLayout(spacing: Theme.Space.s, rowSpacing: Theme.Space.s) {
-            Button(L10n.text("apple.chateventrow.allow.e213c161"), .allow) { resolve(approval, "allow") }
+            Button(L10n.text("common.chat.approval.allow_once"), .allow) { resolve(approval, "allow") }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .keyboardShortcut(.return, modifiers: [.command])
             if !SeatStep.isShell(verb: approval.verb) || approval.shellPrefix?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {

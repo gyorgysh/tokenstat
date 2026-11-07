@@ -4063,7 +4063,12 @@ private fun WorkspacesScreen(
                     initialChatId = pendingChatId,
                     openConversationOnAppear = pendingOpenConversation,
                     newChatRequest = newChatRequest,
-                    onNewChatHandled = { token -> if (newChatRequest?.id == token) newChatRequest = null },
+                    onNewChatHandled = { token ->
+                        newChatRequest?.takeIf { it.id == token }?.let { completed ->
+                            model.finishNewChatSetup(completed)
+                            newChatRequest = null
+                        }
+                    },
                     onNewChat = {
                         selectNewChatRepository(boundFolder.string("id"))
                         initialSection = "Chat"

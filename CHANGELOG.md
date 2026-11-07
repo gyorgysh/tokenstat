@@ -9,7 +9,7 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.14.0]
+## [1.14.0] - 2026-11-07
 
 ### Improved
 
@@ -21,9 +21,9 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
-- Permission requests stay in the conversation on Mac, iPhone and iPad, with the composer still available. Approval buttons wrap when space is tight.
+- Permission requests stay in the conversation on Mac, iPhone and iPad, with the composer still available. Allow once approves one request; Always allow explains which tool or command is remembered for the chat. Buttons wrap when space is tight.
 - Always allow saves its rule before the tool resumes. Commands that cannot be remembered no longer offer that choice.
-- New chats consistently start in Don't ask, including after an Ask first conversation. Existing chats keep their permissions.
+- New chats consistently start in Don't ask, including after an Ask first conversation. Unsent drafts and existing chats keep their permissions.
 - A visible Mac chat keeps mobile attention notifications quiet even while another app has focus. Queued alerts are checked again before delivery.
 - Stopping a chat clears unanswered permission requests. The next message no longer fails with a false “already running in another instance” error.
 - Tool results stay with their original turn and activity, including Cursor calls and results that arrive late.

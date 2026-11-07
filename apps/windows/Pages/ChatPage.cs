@@ -1656,10 +1656,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         });
         if (pending && !SharedSource)
         {
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+            var actions = new FlowPanel { Spacing = Theme.SpaceS };
             var id = Format.Text(approval, "id");
             var reply = ApprovalReply(id);
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.allow.e213c161"), ActionIcon.Allow, async (_, _) => await reply("allow")));
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chat.approval.allow_once"), ActionIcon.Allow, async (_, _) => await reply("allow")));
             if (!SeatStep.IsShell(verb) || !string.IsNullOrWhiteSpace(Format.Text(approval, "shellPrefix")))
                 actions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.always_allow.977618bd"), ActionIcon.Allow, async (_, _) => await reply("allowAlways")));
             actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.deny.05a2d733"), ActionIcon.Deny, async (_, _) => await reply("deny")));

@@ -80,7 +80,9 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         draft.text = "Bob's draft"
         let bobRetry = draft.begin(available: ["other"])!
         draft.transferred(bobRetry)
-        precondition(draft.text.isEmpty && draft.attachments.isEmpty && draft.repositoryID == "other" && draft.agent == codex)
+        var nextChoice = codex; nextChoice.autonomy = "bypass"
+        precondition(draft.text.isEmpty && draft.attachments.isEmpty && draft.repositoryID == "other" && draft.agent == nextChoice)
+        precondition(bobRetry.agent.autonomy == codex.autonomy, "The submitted chat keeps its explicit permission choice")
         let empty = draft.begin(available: ["other"])!
         precondition(empty.text.isEmpty && empty.attachments.isEmpty, "Explicit Open chat allows an ordinary empty composer without a model turn")
         draft.failed(empty, message: nil)
@@ -131,6 +133,16 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
                      "An old preload completion cannot dismiss a newer presentation")
         preparing.finishPresentation(later)
         precondition(!preparing.isSubmitting && preparing.preparationStartedAt == nil)
+        let permissions = ChatStartDraft(defaults: defaults)
+        permissions.activate(scope: alice, session: 4, repositoryID: "permission-default")
+        permissions.agent = .init(backend: "codex", model: "selected", effort: "low", autonomy: "standard")
+        let guarded = permissions.begin(available: ["permission-default"])!
+        permissions.transferred(guarded)
+        precondition(guarded.agent.autonomy == "standard", "The accepted chat keeps Ask first")
+        precondition(permissions.agent?.autonomy == "bypass" && permissions.agent?.model == "selected",
+                     "The next empty draft keeps its model and returns to Don't ask")
+        permissions.repositoryID = "other"; permissions.repositoryID = "permission-default"
+        precondition(permissions.agent?.autonomy == "bypass", "Returning to the empty draft cannot restore the prior chat's permissions")
         repositoryDefaults(defaults)
         print("New chat landing: local attachment ownership, repository/account restoration, one-time unbound carry, stale picker/drop guards, immutable setup, failure retention and explicit empty Open chat passed")
     }

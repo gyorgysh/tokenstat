@@ -85,6 +85,7 @@ internal fun adoptUnboundNewChatDraft(drafts: ChatComposerSessions<StagedAttachm
 class NewChatRequest(val peer: String, val workspace: String, val accountScope: String,
     val source: ChatComposerSessions.Capture<StagedAttachment>, val id: String = UUID.randomUUID().toString(), val setup: NewChatSetup? = null) {
     private val claimed = AtomicBoolean(false)
+    var sourceTransferred = false; private set
     val shouldSend get() = source.snapshot.text.isNotBlank() || source.snapshot.attachments.isNotEmpty()
     fun claim(currentAccount: String?, currentPeer: String, currentWorkspace: String) =
         currentAccount == accountScope && source.owner == newChatDraftOwner(accountScope, peer, workspace) &&
@@ -92,9 +93,14 @@ class NewChatRequest(val peer: String, val workspace: String, val accountScope: 
     fun installInto(drafts: ChatComposerSessions<StagedAttachment>, target: String): Boolean {
         if (!claimed.get() || drafts.hasWriting(target) || !drafts.update(target, source.snapshot)) return false
         drafts.clearIfUnchanged(source.owner, source)
+        sourceTransferred = true
         return true
     }
 }
+
+/** An accepted chat keeps its explicit choice; its next empty draft starts with Don't ask. */
+internal fun nextNewChatSetup(current: NewChatSetup?, submitted: NewChatSetup?, transferred: Boolean, hasWriting: Boolean): NewChatSetup? =
+    if (transferred && !hasWriting && current == submitted) current?.copy(autonomy = LaunchDefaults.AUTONOMY) else current
 
 private fun JsonObject.newChatText(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
 private fun newChatCopy(key: String): String { val resource = "common.new_chat.$key"; return L10n.text(resource) }

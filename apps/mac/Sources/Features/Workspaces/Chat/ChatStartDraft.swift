@@ -125,6 +125,9 @@ final class ChatStartDraft {
     func transferred(_ submission: Submission, preparingPresentation: Bool = false) {
         guard accepts(submission, scope: owner?.scope, session: owner?.session ?? 0) else { return }
         let started = preparationStartedAt
+        // The submitted setup belongs to that chat. The next empty draft
+        // keeps its model but starts with the normal permission default.
+        agent?.autonomy = "bypass"
         if let owner { writings[Key(scope: owner.scope, repository: repositoryID)] = Writing(agent: agent, localID: localID) }
         text = ""; attachments = []; previews = [:]
         retire()

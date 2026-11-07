@@ -73,11 +73,12 @@ class MobileChatSetupTest {
                     onSend = {}, onStop = {}, onChange = { _, _ -> }, backends = backends, onAgent = {}, onSetup = {})
             }
         } }
-        val allow = L10n.text("android.chatpullssections.allow.e213c161")
+        val allow = L10n.text("common.chat.approval.allow_once")
         val always = L10n.text("android.chatpullssections.always_allow.977618bd")
         val deny = L10n.text("android.chatpullssections.deny.05a2d733")
         compose.onNodeWithText("A draft").assertIsDisplayed()
         for (label in listOf(allow, always, deny)) compose.onNodeWithText(label).assertIsDisplayed()
+        compose.onNodeWithText(L10n.text("common.chat.approval.tool_scope", "write")).assertIsDisplayed()
         screenshot("permission-inline-large-text.png")
         compose.onNodeWithText(always).performClick()
         assertEquals("allowAlways", resolved)
@@ -88,7 +89,7 @@ class MobileChatSetupTest {
         compose.setContent { Screen {
             ApprovalCard(json("""{"id":"shell","verb":"bash","preview":"cd /tmp/owned && python preview.py"}""")) {}
         } }
-        compose.onNodeWithText(L10n.text("android.chatpullssections.allow.e213c161")).assertIsDisplayed()
+        compose.onNodeWithText(L10n.text("common.chat.approval.allow_once")).assertIsDisplayed()
         compose.onNodeWithText(L10n.text("android.chatpullssections.deny.05a2d733")).assertIsDisplayed()
         compose.onNodeWithText(L10n.text("android.chatpullssections.always_allow.977618bd")).assertDoesNotExist()
     }

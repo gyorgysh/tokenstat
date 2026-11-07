@@ -853,5 +853,8 @@
   "common.chat.setup.bypass_help": "Allow supported actions without asking each time. Only use this for work you trust the agent to carry out.",
   "common.chat.setup.bypass_only_help": "This agent does not support approval requests. It runs without asking.",
   "common.chat.setup.details": "Conversation details",
-  "common.chat.setup.read_only": "This conversation is read-only on this device."
+  "common.chat.setup.read_only": "This conversation is read-only on this device.",
+  "common.chat.approval.allow_once": "Allow once",
+  "common.chat.approval.tool_scope": "Always allow lets this chat use {0} on any file or target. Other tools still ask.",
+  "common.chat.approval.command_scope": "Always allow approves commands starting with {0} in this chat. Other commands still ask."
 }

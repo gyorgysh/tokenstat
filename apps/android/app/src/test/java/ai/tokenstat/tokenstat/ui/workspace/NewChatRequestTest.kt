@@ -15,6 +15,16 @@ class NewChatRequestTest {
     private val owner = newChatDraftOwner("account", "host", "repository")!!
     private val file = StagedAttachment("image.png", "", "image/png", 20, "/local/unsent-image")
 
+    @Test fun successfulTransferResetsOnlyTheNextEmptyDraftPermission() {
+        val explicit = NewChatSetup("codex", "model", "low", autonomy = "standard")
+        assertEquals("bypass", nextNewChatSetup(explicit, explicit, true, false)?.autonomy)
+        assertEquals("standard", explicit.autonomy)
+        assertEquals(explicit, nextNewChatSetup(explicit, explicit, false, false))
+        assertEquals(explicit, nextNewChatSetup(explicit, explicit, true, true))
+        val newerChoice = explicit.copy(effort = "high")
+        assertEquals(newerChoice, nextNewChatSetup(newerChoice, explicit, true, false))
+    }
+
     @Test fun emptyExplicitOpenCanClaimCreationWithoutSendingAModelPrompt() {
         val drafts = drafts()
         for (text in listOf("", " \n ")) {

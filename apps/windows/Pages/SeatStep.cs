@@ -141,7 +141,7 @@ internal static class SeatStep
         var prefix = TrimVerb(shellPrefix);
         if (prefix.Length > 0)
         {
-            return L10n.Text("windows.seatstep.always_allow_remembers_0_for_this_chat_onl.394a9e6d", $"{prefix}");
+            return L10n.Text("common.chat.approval.command_scope", $"{prefix}");
         }
         if (IsShell(verb))
         {
@@ -149,7 +149,7 @@ internal static class SeatStep
         }
         var name = TrimVerb(verb);
         if (name.Length == 0) return null;
-        return L10n.Text("windows.seatstep.always_allow_remembers_0_for_this_chat_onl.394a9e6d", $"{name}");
+        return L10n.Text("common.chat.approval.tool_scope", $"{name}");
     }
 
     /// <summary>

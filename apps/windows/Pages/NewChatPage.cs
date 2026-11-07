@@ -363,6 +363,7 @@ internal sealed class NewChatPage : Page
         var text = _draft.Text; var ticket = ++_request; _sending = true; _notice.Text = ""; RefreshActions();
         var setup = CurrentSetup()!; var files = _files.ToArray(); RememberDraft();
         var revision = _draftGeneration;
+        var transferred = false;
         bool Owns() => _account == AppServices.AccountGeneration && _request == ticket && _draftGeneration == revision
             && (_draftRepository == repository.Id || _draftRepository is null)
             && (_repository.SelectedItem as NewChatRepository)?.Id == repository.Id
@@ -370,10 +371,15 @@ internal sealed class NewChatPage : Page
         _handoff = true;
         try { await _send(repository, text, setup, files, Owns, () => {
             if (Owns() && _draft.Text == text && _files.SequenceEqual(files)) {
-                _draft.Text = ""; _files.Clear(); RenderFiles(); RememberDraft();
+                _draft.Text = ""; _files.Clear(); transferred = true; RenderFiles(); RememberDraft();
             }
         }); }
         catch (Exception error) { if (Owns()) _notice.Text = error.Message; }
-        finally { _handoff = false; _sending = false; RefreshActions(); if (IsLoaded) RefreshRepositories(); }
+        finally {
+            if (transferred && _account == AppServices.AccountGeneration && _request == ticket && _draft.Text.Length == 0 && _files.Count == 0 && CurrentSetup() == setup) {
+                _autonomy = "bypass"; RememberDraft(); RefreshWorkingStyle();
+            }
+            _handoff = false; _sending = false; RefreshActions(); if (IsLoaded) RefreshRepositories();
+        }
     }
 }

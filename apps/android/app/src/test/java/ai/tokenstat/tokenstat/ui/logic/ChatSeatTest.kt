@@ -208,11 +208,11 @@ class ChatSeatTest {
         assertEquals("Approval", ChatSeat.approvalWord("  ", false))
         assertEquals("ApplyPatch", ChatSeat.approvalWord(" ApplyPatch ", true))
         assertEquals(
-            "Always allow remembers cargo test for this chat only.",
+            "Always allow approves commands starting with cargo test in this chat. Other commands still ask.",
             ChatSeat.allowAlwaysNote("Bash", "cargo test"),
         )
         assertEquals(
-            "Always allow remembers cargo test for this chat only.",
+            "Always allow approves commands starting with cargo test in this chat. Other commands still ask.",
             ChatSeat.allowAlwaysNote("Read", "  cargo test  "),
         )
         assertNull(
@@ -228,15 +228,15 @@ class ChatSeatTest {
             ChatSeat.allowAlwaysNote("sh", null),
         )
         assertEquals(
-            "Always allow remembers Read for this chat only.",
+            "Always allow lets this chat use Read on any file or target. Other tools still ask.",
             ChatSeat.allowAlwaysNote("Read", null),
         )
         assertEquals(
-            "Always allow remembers ApplyPatch for this chat only.",
+            "Always allow lets this chat use ApplyPatch on any file or target. Other tools still ask.",
             ChatSeat.allowAlwaysNote(" ApplyPatch ", null),
         )
         assertEquals(
-            "Always allow remembers execute_turn for this chat only.",
+            "Always allow lets this chat use execute_turn on any file or target. Other tools still ask.",
             ChatSeat.allowAlwaysNote("execute_turn", null),
         )
         assertEquals(null, ChatSeat.allowAlwaysNote(null, null))

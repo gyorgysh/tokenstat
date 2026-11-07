@@ -101,14 +101,14 @@ object ChatSeat {
     fun allowAlwaysNote(verb: String?, shellPrefix: String?): String? {
         val prefix = trimVerb(shellPrefix)
         if (prefix.isNotEmpty()) {
-            return L10n.text("android.chatseat.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "${prefix}")
+            return L10n.text("common.chat.approval.command_scope", "${prefix}")
         }
         if (isShell(verb)) {
             return null
         }
         val name = trimVerb(verb)
         if (name.isEmpty()) return null
-        return L10n.text("android.chatseat.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "${name}")
+        return L10n.text("common.chat.approval.tool_scope", "${name}")
     }
 
     /// Same rule as the host: a shell tool is never remembered by its name.

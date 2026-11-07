@@ -30,7 +30,13 @@ assert '!Task.isCancelled' in member('    private func noteSteerAvailability(')
 for path in ['apps/mac/Sources/Features/Workspaces/Chat/ChatView.swift', 'apps/mac/Sources/Client/ClientChatView.swift']:
     view = (root / path).read_text()
     assert '.transcriptFollowBar {' in view
-    assert 'model.approvals.isEmpty && (follow.showJump || model.busy)' in view
+    # The composer and follow control remain available while the only
+    # approval card lives in the transcript. Automatic repinning pauses so
+    # a request cannot move out from under the person answering it.
+    assert 'if follow.showJump || model.busy' in view
+    assert 'ChatApprovalBar(' not in view
+    assert 'follow.suppressed = !ids.isEmpty' in view
+    assert 'scrollTarget = "approval-\\(id)"' in view
     assert 'await model.watchPolls()' in view and 'ChatPollWatchIdentity(owner: model.pollingIdentity' in view
 swift = r'''import Foundation
 @MainActor final class Context { static let shared = Context(); var scope = "A" }

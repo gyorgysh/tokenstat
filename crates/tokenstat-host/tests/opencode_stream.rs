@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -33,6 +33,7 @@ impl Drop for Runner {
 const FAKE: &str = r#"#!/usr/bin/env python3
 import base64, http.server, json, os, pathlib, sys, threading, time
 root=pathlib.Path.cwd()
+sys.stderr=(root/('fixture-errors-'+sys.argv[1])).open('a',encoding='utf-8',buffering=1)
 def event(kind, **kw):
     value={'id':'evt_part','type':'session.text.'+kind,'data':{'sessionID':'ses_main','assistantMessageID':'msg_text','ordinal':0,**kw}}
     with (root/'events').open('a') as f: f.write(json.dumps(value,ensure_ascii=False)+'\n')
@@ -117,6 +118,9 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
         .args(["chat-live", config.to_str().unwrap()])
         .current_dir(&project)
         .env("TOKENSTAT_TURN_MARKER", "owned-turn")
+        // The fixture is a UTF-8 protocol peer, even on CI's C locale.
+        // Python's locale-dependent stdout otherwise fails on café/ü.
+        .env("PYTHONUTF8", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -168,9 +172,23 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(10));
         }
-    } else {
-        rx.recv_timeout(Duration::from_secs(10))
-            .expect("native text must arrive before releasing the CLI snapshot");
+    } else if let Err(error) = rx.recv_timeout(Duration::from_secs(10)) {
+        let diagnostics: Vec<_> = ["fixture-errors-serve", "fixture-errors-run", "events"]
+            .iter()
+            .filter_map(|name| {
+                let mut bytes = Vec::new();
+                fs::File::open(project.join(name))
+                    .ok()?
+                    .take(4096)
+                    .read_to_end(&mut bytes)
+                    .ok()?;
+                Some((*name, String::from_utf8_lossy(&bytes).into_owned()))
+            })
+            .collect();
+        panic!(
+            "native text must precede the CLI snapshot: {error:?}; child: {:?}; fixture: {diagnostics:?}",
+            child.try_wait()
+        );
     }
     if steer {
         let deadline = Instant::now() + Duration::from_secs(5);

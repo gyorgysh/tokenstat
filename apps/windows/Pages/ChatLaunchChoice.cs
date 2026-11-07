@@ -12,8 +12,8 @@ namespace Tokenstat.Pages;
 /// <summary>
 /// The setup the last conversation ended up with, so a new chat starts where
 /// the person left off. Mirrors the Mac launch choice: the agent, model,
-/// effort, autonomy and persona travel, the mode does not. A new chat always
-/// starts in Execute, because Plan is a choice for one piece of work.
+/// effort and persona travel. A new chat starts in Execute and Don't ask;
+/// a draft can explicitly choose its own working style and permissions.
 ///
 /// A plain file, not LocalSettings: this app is unpackaged, and
 /// ApplicationData.Current throws there.

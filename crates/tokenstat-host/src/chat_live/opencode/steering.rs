@@ -236,11 +236,20 @@ mod tests {
     }
     #[test]
     fn invalid_or_expired_requests_do_not_reach_the_server() {
-        let request = json!({"id":"abc","expires":super::super::super::now_ms()+10000,"steer":"update","images":["/tmp/café picture.png"]});
+        let path = if cfg!(windows) {
+            "C:/tmp/café picture.png"
+        } else {
+            "/tmp/café picture.png"
+        };
+        let request = json!({"id":"abc","expires":super::super::super::now_ms()+10000,"steer":"update","images":[path]});
         let valid = prompt("abc", &request).unwrap();
         assert_eq!(
             valid["files"][0]["uri"],
-            "file:///tmp/caf%C3%A9%20picture.png"
+            if cfg!(windows) {
+                "file:///C:/tmp/caf%C3%A9%20picture.png"
+            } else {
+                "file:///tmp/caf%C3%A9%20picture.png"
+            }
         );
         assert!(prompt("other", &request).is_err());
         let mut expired = request.clone();

@@ -150,6 +150,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (owner != null && setup != null) mutableNewChatSetups.value = mutableNewChatSetups.value + (owner to setup)
     }
 
+    fun finishNewChatSetup(request: ai.tokenstat.tokenstat.ui.workspace.NewChatRequest) {
+        val owner = request.source.owner ?: return
+        val current = mutableNewChatSetups.value[owner]
+        val next = ai.tokenstat.tokenstat.ui.workspace.nextNewChatSetup(current, request.setup,
+            request.sourceTransferred, chatComposers.hasWriting(owner))
+        if (next != null && next != current) mutableNewChatSetups.value = mutableNewChatSetups.value + (owner to next)
+    }
+
     /// The live SSH shells, in one place. Held here so navigating between
     /// tabs cannot orphan a shell: a refresh reconciles against what the host
     /// is holding and never drops a live connection. See `SshConnectionState`.
