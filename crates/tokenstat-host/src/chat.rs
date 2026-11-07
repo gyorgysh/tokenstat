@@ -1312,6 +1312,19 @@ impl Store {
         ok: bool,
         detail: Option<String>,
     ) -> Result<(), String> {
+        let id = self
+            .turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(turn_token)
+            .map(|binding| binding.conversation_id.clone())
+            .ok_or("the chat turn credential is invalid or expired")?;
+        if call_id.trim().is_empty() {
+            return Err("chat.toolResult needs callId".into());
+        }
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, &id)?;
+        // A result that waited behind Send or Stop may belong to a turn
+        // already retired. Never write it into the following turn.
         let binding = self
             .turn_tokens
             .lock()
@@ -1319,9 +1332,6 @@ impl Store {
             .get(turn_token)
             .cloned()
             .ok_or("the chat turn credential is invalid or expired")?;
-        if call_id.trim().is_empty() {
-            return Err("chat.toolResult needs callId".into());
-        }
         self.append(
             &binding.conversation_id,
             &StoredEvent::Agent {
@@ -10544,6 +10554,41 @@ mod tests {
             store.await_approval(&pending.id, 0).decision.as_deref(),
             Some("deny")
         );
+    }
+
+    #[test]
+    fn a_retired_turn_cannot_append_a_tool_result_across_send_or_stop() {
+        use std::sync::mpsc;
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "late-result");
+        let token = store.register_turn_token("late-result", "cursor").unwrap();
+        let acceptance =
+            crate::chat_receipts::Operation::conversation(&store.root, "late-result").unwrap();
+        let (entered, started) = mpsc::channel();
+        let (completed, result) = mpsc::channel();
+        let worker_store = store.clone();
+        let worker_token = token.clone();
+        let worker = std::thread::spawn(move || {
+            entered.send(()).unwrap();
+            completed
+                .send(worker_store.record_turn_result(&worker_token, "old-call", true, None))
+                .unwrap();
+        });
+        started.recv_timeout(Duration::from_secs(3)).unwrap();
+        let early = result.recv_timeout(Duration::from_millis(200));
+        store.revoke_turn_token(&token);
+        drop(acceptance);
+        let waited = early.is_err();
+        let outcome =
+            early.unwrap_or_else(|_| result.recv_timeout(Duration::from_secs(3)).unwrap());
+        worker.join().unwrap();
+        assert!(waited, "tool results must wait for Send or Stop to settle");
+        assert!(
+            outcome.is_err(),
+            "a retired credential must not append a result"
+        );
+        assert!(store.events("late-result", 0).unwrap().0.is_empty());
     }
 
     #[test]

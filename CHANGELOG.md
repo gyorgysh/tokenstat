@@ -19,6 +19,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Stopping a chat clears unanswered permission requests. The next message no longer fails with a false “already running in another instance” error.
 - Cursor tool results stay with the activity that started the call.
+- Late tool results from a finished turn no longer appear after the next message.
 
 ## [1.13.0] - 2026-11-06
 
