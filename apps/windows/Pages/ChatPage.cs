@@ -279,6 +279,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     {
                         await OpenAsync(_openId);
                     }
+                    TraceComposition("reload completed");
                 }),
             Buttons.ToolbarIcon(
                 ActionIcon.Create,

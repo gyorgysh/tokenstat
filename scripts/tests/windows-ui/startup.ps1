@@ -277,7 +277,38 @@ try {
     if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {
         throw 'Reattaching the production chat page lost the selected conversation draft'
     }
-    Open-Place 'Reload chats'
+    function Get-CompletedChatReloads {
+        return @(Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match "pid=$($process.Id) Chat layout: reload completed;" }).Count
+    }
+    $completedReloads = Get-CompletedChatReloads
+    $reloadFailure = $null
+    try { Open-Place 'Reload chats' }
+    catch {
+        $failure = $_.Exception.GetBaseException()
+        # WinUI can retire the invoked toolbar peer after delivering its Click.
+        # Never replay the action or accept an arbitrary invocation exception.
+        $stalePeer = $failure -is [System.Windows.Automation.ElementNotAvailableException] -or
+            ($failure -is [System.Runtime.InteropServices.COMException] -and
+                $failure.HResult -in @(-2147220991, -2147467259, -2147418113))
+        if (!$stalePeer) {
+            Write-Host ('Reload invocation failed: {0}; HRESULT=0x{1:x8}' -f $failure.GetType().FullName, $failure.HResult)
+            throw
+        }
+        $reloadFailure = $_
+    }
+    $reloadCompleted = $false
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        $process.Refresh()
+        if ($process.HasExited) { throw 'GUI exited while reloading the conversation' }
+        if ((Get-CompletedChatReloads) -gt $completedReloads) { $reloadCompleted = $true; break }
+        Start-Sleep -Milliseconds 250
+    }
+    if (!$reloadCompleted) {
+        if ($reloadFailure) { throw $reloadFailure }
+        throw 'The production reload callback did not finish'
+    }
+    if ($reloadFailure) { Write-Host 'Reload completed after the toolbar automation peer was retired; verifying the retained editor' }
     $draft = Wait-ForControl 'chat.composer'
     if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {
         throw 'Reopening the chat composer lost the draft'
