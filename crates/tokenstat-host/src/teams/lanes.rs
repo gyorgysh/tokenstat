@@ -1278,13 +1278,28 @@ mod tests {
             assert!(started.elapsed() < std::time::Duration::from_secs(15));
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         for index in 0..10 {
-            update_settings_at(
-                &root,
-                format!("{checkout}-{index}"),
-                settings("main", None, &[]),
-            )
-            .unwrap();
+            loop {
+                match update_settings_at(
+                    &root,
+                    format!("{checkout}-{index}"),
+                    settings("main", None, &[]),
+                ) {
+                    Ok(_) => break,
+                    // A bounded save can report contention during the other
+                    // process's burst. Test that accepted writes are preserved,
+                    // without requiring ten durable saves to finish in 2s.
+                    Err(error)
+                        if error.code == "team_lanes_busy"
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        fs::write(root.join(format!("{checkout}.busy")), []).unwrap();
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("Settings update {checkout}-{index} failed: {error:?}"),
+                }
+            }
         }
     }
 
@@ -1328,6 +1343,18 @@ mod tests {
         )
         .unwrap();
         fs::write(root.path().join("settings.start"), []).unwrap();
+        // Exercise the documented retry response deterministically, rather
+        // than depending on runner load to make one child's burst contend.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let both_busy = || {
+            ["first", "second"]
+                .iter()
+                .all(|checkout| root.path().join(format!("{checkout}.busy")).exists())
+        };
+        while !both_busy() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let both_retried = both_busy();
         drop(lease);
         // Always release the parent lock and reap children before assertions.
         let outputs = children.map(|child| child.wait_with_output().unwrap());
@@ -1340,6 +1367,10 @@ mod tests {
             );
         }
         assert!(both_ready);
+        assert!(
+            both_retried,
+            "Both processes must retry the held settings lease"
+        );
         let file = load_at(root.path()).unwrap();
         assert_eq!(file.checkouts.len(), 21);
         assert!(file.checkouts.contains_key("existing"));
