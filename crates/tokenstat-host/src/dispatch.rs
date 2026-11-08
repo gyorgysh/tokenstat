@@ -5442,20 +5442,19 @@ mod tests {
             }
         }
         let folder = tempfile::tempdir().unwrap();
-        std::fs::write(
-            folder.path().join("child.py"),
-            "import time\nfrom pathlib import Path\nwhile not Path('release').exists(): time.sleep(0.01)\nprint('late output', flush=True)\n",
-        )
-        .unwrap();
         let manager = tokenstat_pty::manager();
         let (info, _process) = manager
             .spawn_piped_owned_checked(
                 &tokenstat_pty::Spawn {
-                    command: "/usr/bin/python3".into(),
+                    // The launcher exits while its descendant retains stdout.
+                    // Use the native shell so cold Python/Xcode startup cannot
+                    // consume the process-exit deadline on a busy macOS runner.
+                    command: "/bin/sh".into(),
                     args: vec![
                         "-c".into(),
-                        "import subprocess, sys; subprocess.Popen([sys.executable, 'child.py'])"
-                            .into(),
+                        "(while [ ! -e release ]; do [ -d \"$1\" ] || exit 0; /bin/sleep 0.01; done; printf 'late output\\n') &".into(),
+                        "terminal-output-fixture".into(),
+                        folder.path().to_string_lossy().into_owned(),
                     ],
                     cwd: folder.path().into(),
                     workspace_id: None,
@@ -5472,7 +5471,10 @@ mod tests {
         let _session = Session(info.id.clone());
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while manager.info(&info.id).unwrap().exit_code.is_none() {
-            assert!(std::time::Instant::now() < deadline);
+            assert!(
+                std::time::Instant::now() < deadline,
+                "The shell launcher did not exit while its descendant retained output"
+            );
             std::thread::sleep(Duration::from_millis(5));
         }
         let read = |offset| {
