@@ -13,7 +13,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Improved
 
-- On iPhone and iPad, swipe up on the chat tabs to hide the controls. Swipe down from the top or tap Show controls to bring them back.
+- On iPhone and iPad, chat controls stay visible while you scroll or follow live replies. Tap Hide controls in the top bar or swipe up on the chat tabs for more reading space; swipe down from the top or tap the labeled Show controls button to bring them back. Jumping to the latest reply keeps your choice. Pin to Home is in the chat menu.
+- Swipe from the leading edge to go back from a chat even when its controls are hidden.
 
 ### Fixed
 

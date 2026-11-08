@@ -143,7 +143,10 @@ struct PinToggleButton: View {
     var reference: WorkReference?
     var label: String
     var folderName: String
+    var isMenuItem = false
+    var onRefused: (() -> Void)? = nil
 
+    @Environment(AccountModel.self) private var account
     @State private var store = PinnedWorkStore.shared
     @State private var refused = false
 
@@ -154,28 +157,40 @@ struct PinToggleButton: View {
 
     var body: some View {
         if let reference {
-            Button {
-                Task {
-                    if pinned {
-                        await PinnedWorkActions.unpin(reference)
-                        refused = false
-                    } else if await PinnedWorkActions.pin(reference, label: label, folderName: folderName) {
-                        refused = false
-                    } else {
-                        refused = true
-                    }
+            if isMenuItem {
+                Button(pinned ? L10n.text("apple.chatview.unpin_from_home.df00f5de") : L10n.text("apple.chatview.pin_to_home.db029e6f"),
+                       pinned ? ActionIcon.pinned : .pin) { toggle(reference) }
+            } else {
+                Button { toggle(reference) } label: {
+                    (pinned ? ActionIcon.pinned : ActionIcon.pin).label(pinned ? L10n.text("apple.clientpinnedworksection.pinned.f20c8794") : L10n.text("apple.clientpinnedworksection.pin.ff1cee74"))
+                        .labelStyle(.iconOnly)
+                        .font(ClientType.body)
+                        .foregroundStyle(pinned ? Theme.accent : refused ? Theme.danger : .secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
-            } label: {
-                (pinned ? ActionIcon.pinned : ActionIcon.pin).label(pinned ? L10n.text("apple.clientpinnedworksection.pinned.f20c8794") : L10n.text("apple.clientpinnedworksection.pin.ff1cee74"))
-                    .labelStyle(.iconOnly)
-                    .font(ClientType.body)
-                    .foregroundStyle(pinned ? Theme.accent : refused ? Theme.danger : .secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
+                .buttonStyle(.plain)
+                .accessibilityLabel(pinned ? L10n.text("apple.clientpinnedworksection.unpin_0.450ccf9f", "\(label)") : L10n.text("apple.clientpinnedworksection.pin_0.67fd141b", "\(label)"))
+                .accessibilityHint(refused ? L10n.text("apple.clientpinnedworksection.the_shelf_holds_eight_pins.5cd37254") : L10n.text("apple.clientpinnedworksection.keep_this_on_home.ee17cc72"))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(pinned ? L10n.text("apple.clientpinnedworksection.unpin_0.450ccf9f", "\(label)") : L10n.text("apple.clientpinnedworksection.pin_0.67fd141b", "\(label)"))
-            .accessibilityHint(refused ? L10n.text("apple.clientpinnedworksection.the_shelf_holds_eight_pins.5cd37254") : L10n.text("apple.clientpinnedworksection.keep_this_on_home.ee17cc72"))
+        }
+    }
+
+    private func toggle(_ reference: WorkReference) {
+        Task {
+            guard reference.scope == account.account?.pinnedWorkScope else { return }
+            if store.isPinned(reference) {
+                await PinnedWorkActions.unpin(reference)
+                guard reference.scope == account.account?.pinnedWorkScope else { return }
+                refused = false
+            } else if await PinnedWorkActions.pin(reference, label: label, folderName: folderName) {
+                guard reference.scope == account.account?.pinnedWorkScope else { return }
+                refused = false
+            } else {
+                guard reference.scope == account.account?.pinnedWorkScope else { return }
+                refused = true
+                onRefused?()
+            }
         }
     }
 }

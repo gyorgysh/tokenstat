@@ -727,6 +727,8 @@ struct ClientChatThread: View {
     /// same reason.
     var isActive = true
     var onBack: (() -> Void)?
+    /// A root reader presented as a cover closes through its owner.
+    var onSwipeBack: (() -> Void)?
     var onShowChats: (() -> Void)? = nil
     var availableWorkbenchWidth: CGFloat? = nil
     var availableWorkbenchHeight: CGFloat? = nil
@@ -818,7 +820,6 @@ struct ClientChatThread: View {
     @State private var localBrowserFocus: BrowserFocus = .split
     @State private var localChatPaneFraction: CGFloat = 0.5
     @State private var localChromeCollapsed = false
-    @State private var chromeScroll = ClientChatChromeScroll()
     @State private var chatResize = ClientChatResizeState()
     @State private var localCompanion: Companion?
     @State private var browserLayoutGeneration: UInt64?
@@ -919,7 +920,8 @@ struct ClientChatThread: View {
 
     private func setControlsCollapsed(_ collapsed: Bool) {
         guard isActive else { return }
-        chromeScroll.reset()
+        // Reading and live-follow move the transcript in both directions.
+        // Keep this explicit choice until the reader shows the controls again.
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
             chromeCollapsed = collapsed
         }
@@ -1243,13 +1245,18 @@ struct ClientChatThread: View {
         }
         .modifier(ClientChatControlsSwipe(upward: false, enabled: isActive && chromeCollapsed,
                                          maximumStartY: 56) { setControlsCollapsed(false) })
+        .modifier(ClientChatBackSwipe(enabled: isActive && chromeCollapsed,
+                                     action: onBack ?? onSwipeBack))
         .overlay(alignment: .topLeading) {
             if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
                 Button { setControlsCollapsed(false) } label: {
-                    Image(systemName: "rectangle.topthird.inset.filled")
-                        .frame(minWidth: 44, minHeight: 44)
+                    Label(L10n.text("apple.clientchatview.show_controls"), systemImage: "rectangle.topthird.inset.filled")
+                        .font(ClientType.caption.weight(.semibold))
+                        .padding(.horizontal, Theme.Space.s)
+                        .frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
                 .clientFloatingBar(cornerRadius: 14)
                 .accessibilityLabel(L10n.text("apple.clientchatview.show_controls"))
                 .padding(.leading, Theme.Space.s)
@@ -1270,18 +1277,6 @@ struct ClientChatThread: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(isActive && chromeCollapsed ? .hidden : .visible, for: .navigationBar)
         .toolbar {
-            if isActive && !chromeCollapsed && browserFocus == .browser {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                            chromeCollapsed = true
-                        }
-                    } label: {
-                        Image(systemName: "rectangle.topthird.inset.filled")
-                    }
-                    .accessibilityLabel(L10n.text("apple.clientchatview.hide_controls"))
-                }
-            }
             if isActive, let onBack {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: onBack) { ActionIcon.back.label(L10n.text("common.chats")) }
@@ -1308,9 +1303,19 @@ struct ClientChatThread: View {
                     .accessibilityLabel(L10n.text("apple.clientfoldersplit.browse_port.d3b57f13"))
                 }
             }
-            if isActive, let chat, pinReference != nil || model.savedCopy == nil {
+            if isActive, let chat {
                 ToolbarItem(placement: .topBarTrailing) {
-                    PinToggleButton(reference: pinReference, label: chat.title, folderName: folderName)
+                    Button { setControlsCollapsed(true) } label: {
+                        Label(L10n.text("apple.clientchatview.hide_controls"), systemImage: "rectangle.topthird.inset.filled")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityLabel(L10n.text("apple.clientchatview.hide_controls"))
+                    .accessibilityShowsLargeContentViewer()
+                    .contextMenu {
+                        Button { setControlsCollapsed(true) } label: {
+                            Label(L10n.text("apple.clientchatview.hide_controls"), systemImage: "rectangle.topthird.inset.filled")
+                        }
+                    }
                 }
                 if toolsIdentity != nil && onShowChats == nil {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -1330,7 +1335,8 @@ struct ClientChatThread: View {
                 if model.savedCopy == nil, let tools = toolsIdentity {
                     ToolbarItem(placement: .topBarTrailing) {
                         ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
-                            workspaceID: tools.workspaceID, hostName: hostName, onFork: onFork,
+                            workspaceID: tools.workspaceID, hostName: hostName,
+                            pinReference: pinReference, folderName: folderName, onFork: onFork,
                             onTools: onShowChats == nil ? nil : {
                                 if ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass) {
                                     showingToolsPane.toggle()
@@ -1339,9 +1345,21 @@ struct ClientChatThread: View {
                                 }
                             },
                             onSetup: { showingSetup = true }, onHandoff: { showingHandoff = true },
-                            onDelete: onDelete, onViewportChoice: beginViewportChoice,
-                            onHideControls: { setControlsCollapsed(true) })
+                            onDelete: onDelete, onViewportChoice: beginViewportChoice)
                             .id(chat.id)
+                    }
+                } else if pinReference != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            PinToggleButton(reference: pinReference, label: chat.title, folderName: folderName,
+                                            isMenuItem: true, onRefused: {
+                                model.error = L10n.text("apple.chatview.home_holds_eight_pins_unpin_one_to_make_ro.7d0eb1cf")
+                            })
+                        } label: {
+                            Label(L10n.text("apple.clientchatmenu.chat_actions.8ba35bb8"), systemImage: "ellipsis")
+                                .labelStyle(.iconOnly)
+                        }
+                        .menuIndicator(.hidden)
                     }
                 }
             }
@@ -1406,7 +1424,6 @@ struct ClientChatThread: View {
         // `isWatching()` is always false on iOS and on-device banners are
         // never suppressed (host push suppression still works via heartbeat).
         .onChange(of: chatID, initial: true) { old, id in
-            chromeScroll.reset()
             if old != id { chromeCollapsed = false }
             rememberChat(id)
             updatePresence()
@@ -1919,13 +1936,6 @@ struct ClientChatThread: View {
             ))
             .chatScrollMetrics { metrics in
                 guard isActive, follow.active else { return }
-                if let collapse = chromeScroll.update(offset: metrics.distanceFromTop,
-                                                      touching: scrollAccess.readerIsTouching,
-                                                      collapsed: chromeCollapsed) {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                        chromeCollapsed = collapse
-                    }
-                }
                 if scrollAccess.readerIsMoving {
                     if readingFrames.captureReady || !readerMoved {
                         readingFrames.cancelCapture()
@@ -1960,12 +1970,6 @@ struct ClientChatThread: View {
                         busy: model.busy,
                         paused: follow.paused,
                         resume: {
-                            if chromeCollapsed {
-                                chromeScroll.reset()
-                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                                    chromeCollapsed = false
-                                }
-                            }
                             showNewest()
                             resumeLatest()
                             Task { await returnToLatest(proxy) }
@@ -3612,46 +3616,6 @@ private struct ClientTranscriptScrollReporter: UIViewRepresentable {
         private func report() {
             access?.refreshAttachment(from: self)
         }
-    }
-}
-
-/// One chrome transition per user gesture. Programmatic transcript placement
-/// and the viewport's height change after collapsing do not trigger a bounce.
-@MainActor
-private final class ClientChatChromeScroll {
-    private var start: CGFloat?
-    private var lastSettledOffset: CGFloat?
-    private var changed = false
-
-    func reset() {
-        start = nil
-        lastSettledOffset = nil
-        changed = false
-    }
-
-    func update(offset: CGFloat, touching: Bool, collapsed: Bool) -> Bool? {
-        guard touching else {
-            start = nil
-            lastSettledOffset = offset
-            changed = false
-            return nil
-        }
-        if start == nil {
-            // A short touch can deliver its entire movement in the first
-            // geometry update. Compare it with the last idle frame.
-            start = lastSettledOffset ?? offset
-        }
-        guard let start else { return nil }
-        guard !changed else { return nil }
-        if !collapsed && offset > 80 && offset - start > 36 {
-            changed = true
-            return true
-        }
-        if collapsed && (offset < 20 || start - offset > 28) {
-            changed = true
-            return false
-        }
-        return nil
     }
 }
 

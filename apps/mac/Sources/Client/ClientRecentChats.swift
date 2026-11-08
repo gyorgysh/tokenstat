@@ -533,6 +533,12 @@ private struct ClientRecentChatContent: View {
                         layout: publicationLayout, currentLayout: navigation.stackGeneration,
                         rootCover: rootChatReference, currentCover: navigation.presentedChat?.reference,
                         scope: WorkSessionContext.shared.scope),
+                    onSwipeBack: rootChatReference != nil ? {
+                        guard visible, publicationLayout == navigation.stackGeneration,
+                              WorkDestinationResolver.sameConversation(rootChatReference, navigation.presentedChat?.reference)
+                        else { return }
+                        navigation.presentedChat = nil
+                    } : nil,
                     onShowChats: model.savedCopy == nil ? {
                         if canShowChatSidebar {
                             withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
