@@ -5827,5 +5827,8 @@
   "apple.usage.keychain.notice.detail": "To update {0} usage, allow access to its saved login. macOS may ask for permission.",
   "apple.usage.keychain.notice.later": "Later",
   "apple.usage.keychain.notice.settings_hint": "You can allow access later in Account → Plan limits.",
-  "apple.usage.keychain.notice.allowed": "Keychain access was allowed. You can manage usage in Account → Plan limits."
+  "apple.usage.keychain.notice.allowed": "Keychain access was allowed. You can manage usage in Account → Plan limits.",
+  "apple.usage.claude_live.title": "Live Claude limits",
+  "apple.usage.claude_live.detail": "Claude Code passes its limits to tokenstat after every reply, through its status line. Turning this off removes it again.",
+  "apple.usage.claude_live.detail_chained": "Claude Code passes its limits to tokenstat after every reply. Your own status line keeps working, and turning this off puts it back as it was."
 }

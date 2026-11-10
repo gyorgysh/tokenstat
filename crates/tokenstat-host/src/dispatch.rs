@@ -1283,6 +1283,8 @@ fn owner_only_method(method: &str) -> bool {
                 | "local.provider.set"
                 | "config.limitsSync"
                 | "usage.authorizeKeychain"
+                | "usage.claudeLiveFeed"
+                | "usage.setClaudeLiveFeed"
                 | "push.register"
                 | "push.unregister"
                 | "push.test"
@@ -4067,6 +4069,37 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 }
                 parse::<Params>(params).map(|p| usage_limits(p.force.unwrap_or(true)))
             }
+            // The Claude live feed: whether Claude Code's status line hands
+            // its limits to tokenstat. Turning it on edits Claude Code's own
+            // settings, so it only happens from an explicit local action and
+            // is undone exactly when turned off.
+            "usage.claudeLiveFeed" => {
+                #[cfg(feature = "local-host")]
+                {
+                    Ok(crate::claude_usage::status_line::state())
+                }
+                #[cfg(not(feature = "local-host"))]
+                {
+                    Err("The Claude live feed belongs to the host.".into())
+                }
+            }
+            "usage.setClaudeLiveFeed" => {
+                #[derive(Default, Deserialize)]
+                struct Params {
+                    enabled: bool,
+                }
+                parse::<Params>(params).and_then(|p| {
+                    #[cfg(feature = "local-host")]
+                    {
+                        crate::claude_usage::status_line::set(p.enabled)
+                    }
+                    #[cfg(not(feature = "local-host"))]
+                    {
+                        let _ = p.enabled;
+                        Err("The Claude live feed belongs to the host.".into())
+                    }
+                })
+            }
             "usage.authorizeKeychain" => {
                 #[derive(Default, Deserialize)]
                 struct Params {
@@ -4655,7 +4688,7 @@ fn fetch_usage_limits(_force: bool) -> Value {
         let skipped = |id: &str| skip.iter().any(|s| s == id);
         let providers = std::thread::scope(|scope| {
             let claude = (!skipped("claude_code"))
-                .then(|| scope.spawn(|| tokenstat_sync::claude_limits::fetch_with_force(_force)));
+                .then(|| scope.spawn(|| crate::claude_usage::read(_force)));
             let cursor = (!skipped("cursor")).then(|| scope.spawn(tokenstat_sync::cursor::limits));
             let grok = (!skipped("grok")).then(|| scope.spawn(tokenstat_sync::grok_limits::fetch));
             let muse = (!skipped("muse")).then(|| scope.spawn(tokenstat_sync::muse_limits::fetch));
@@ -6603,6 +6636,7 @@ mod tests {
                 ("pricing.seed", r#"{"path":"/etc/hosts"}"#),
                 ("config.limitsSync", r#"{"enabled":true}"#),
                 ("usage.authorizeKeychain", r#"{"source":"claude_code"}"#),
+                ("usage.setClaudeLiveFeed", r#"{"enabled":true}"#),
                 ("local.provider.set", r#"{"id":"ollama","port":12345}"#),
                 ("push.register", r#"{"token":"x","platform":"ios"}"#),
                 ("push.unregister", r#"{"token":"x"}"#),

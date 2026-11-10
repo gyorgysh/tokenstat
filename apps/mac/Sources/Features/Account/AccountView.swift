@@ -53,6 +53,8 @@ struct AccountView: View {
     @State private var forgeError: String?
     @State private var forgeLoginError: String?
     @State private var forgeBusy = false
+    @State private var claudeLiveFeed: ClaudeLiveFeedState?
+    @State private var claudeLiveFeedError: String?
     @State private var forgeConnecting = false
     @State private var confirmingForgeSignOut = false
     #endif
@@ -523,6 +525,7 @@ struct AccountView: View {
                         set: { on in Task { await model.setLimitsSync(on) } }
                     )
                 )
+                claudeLiveFeedRow
                 if model.limitsProviders.isEmpty {
                     Text(model.isLoadingLimits
                          ? L10n.text("apple.accountview.looking_for_vendor_readings.09bcadbb")
@@ -546,6 +549,43 @@ struct AccountView: View {
             while !Task.isCancelled {
                 await model.loadLimitsIfNeeded()
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
+    }
+
+    /// Claude Code hands its limits to the host after every reply once this is
+    /// on. Off by default, because turning it on edits Claude Code's settings.
+    private var claudeLiveFeedRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            toggleRow(
+                L10n.text("apple.usage.claude_live.title"),
+                detail: claudeLiveFeed?.chained == true
+                    ? L10n.text("apple.usage.claude_live.detail_chained")
+                    : L10n.text("apple.usage.claude_live.detail"),
+                isOn: Binding(
+                    get: { claudeLiveFeed?.enabled ?? false },
+                    set: { on in setClaudeLiveFeed(on) }
+                )
+            )
+            .disabled(claudeLiveFeed == nil)
+            if let claudeLiveFeedError {
+                Text(claudeLiveFeedError)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .task { claudeLiveFeed = try? await Bridge.claudeLiveFeed() }
+    }
+
+    private func setClaudeLiveFeed(_ on: Bool) {
+        claudeLiveFeedError = nil
+        Task {
+            do {
+                claudeLiveFeed = try await Bridge.setClaudeLiveFeed(enabled: on)
+                try? await PlanLimitsStore.shared.refresh(force: true)
+            } catch {
+                claudeLiveFeedError = error.localizedDescription
             }
         }
     }

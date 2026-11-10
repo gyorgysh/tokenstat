@@ -1922,6 +1922,17 @@ extension Bridge {
     }
 
     #if os(macOS)
+    /// Whether Claude Code's status line hands its limits to this Mac's host.
+    static func claudeLiveFeed() async throws -> ClaudeLiveFeedState {
+        try await background("usage.claudeLiveFeed", as: ClaudeLiveFeedState.self)
+    }
+
+    /// Turns the live feed on or off. This edits Claude Code's own settings,
+    /// so it is only ever called from the switch a person flipped.
+    static func setClaudeLiveFeed(enabled: Bool) async throws -> ClaudeLiveFeedState {
+        try await background("usage.setClaudeLiveFeed", ["enabled": enabled], as: ClaudeLiveFeedState.self)
+    }
+
     static func authorizeUsageKeychain(source: String) async throws {
         _ = try await background("usage.authorizeKeychain", ["source": source],
                                  patience: Patience.long, as: Bool.self)

@@ -167,6 +167,14 @@ fn fetch_stored(
             .expires_at
             .is_some_and(|ms| ms <= now_ms().saturating_add(60_000))
         {
+            if stored.unread_sibling {
+                return ProviderLimits::unavailable(
+                    "claude_code",
+                    "The readable Claude Code login has expired, and a newer one is in a \
+                     Keychain item tokenstat cannot read without asking. It was not renewed, \
+                     so the current login stays untouched.",
+                );
+            }
             match refresh(&client, stored, token) {
                 Ok(fresh) => fresh,
                 Err(note) => return ProviderLimits::unavailable("claude_code", note),
@@ -394,6 +402,10 @@ enum Store {
 struct Stored {
     raw: String,
     store: Store,
+    /// Another Claude Code item exists that could not be read without
+    /// asking. When this login has expired, that item may well hold the
+    /// current one, and renewing this one would spend an old token.
+    unread_sibling: bool,
 }
 
 impl Stored {
@@ -414,20 +426,16 @@ impl Stored {
 fn stored_credentials() -> Option<Stored> {
     #[cfg(target_os = "macos")]
     {
-        let mut plugin_only = None;
-        for (service, raw) in keychain_blobs() {
-            let stored = Stored {
-                raw,
-                store: Store::Keychain { service },
-            };
-            if stored.token().is_some() {
-                return Some(stored);
-            }
-            if plugin_only.is_none() {
-                plugin_only = Some(stored);
-            }
+        let Picked {
+            best,
+            plugin_only,
+            unread,
+        } = pick_login(keychain_items());
+        if let Some(mut stored) = best {
+            stored.unread_sibling = unread;
+            return Some(stored);
         }
-        if let Some(stored) = plugin_only {
+        if let Some(mut stored) = plugin_only {
             // So the caller can say "no login" rather than "not signed in".
             // The file fallback still runs: an older Claude Code put the
             // login there when the Keychain only held plugins.
@@ -438,11 +446,13 @@ fn stored_credentials() -> Option<Stored> {
                 let file = Stored {
                     raw,
                     store: Store::File(path),
+                    unread_sibling: unread,
                 };
                 if file.token().is_some() {
                     return Some(file);
                 }
             }
+            stored.unread_sibling = unread;
             return Some(stored);
         }
     }
@@ -451,7 +461,56 @@ fn stored_credentials() -> Option<Stored> {
     Some(Stored {
         raw,
         store: Store::File(path),
+        unread_sibling: false,
     })
+}
+
+/// What the Keychain walk found.
+#[cfg(any(target_os = "macos", test))]
+struct Picked {
+    best: Option<Stored>,
+    plugin_only: Option<Stored>,
+    unread: bool,
+}
+
+/// The login among every Claude Code item, plus whether some item could not
+/// be read. Claude Code has moved its login between these items more than
+/// once, so the one that runs out last is the one it wrote most recently.
+#[cfg(any(target_os = "macos", test))]
+fn pick_login(items: Vec<(String, crate::discover::KeychainItem)>) -> Picked {
+    let mut picked = Picked {
+        best: None,
+        plugin_only: None,
+        unread: false,
+    };
+    let mut best_expiry = i64::MIN;
+    for (service, item) in items {
+        let raw = match item {
+            crate::discover::KeychainItem::Found(raw) => raw,
+            crate::discover::KeychainItem::Unreadable => {
+                picked.unread = true;
+                continue;
+            }
+            crate::discover::KeychainItem::Missing => continue,
+        };
+        let stored = Stored {
+            raw,
+            store: Store::Keychain { service },
+            unread_sibling: false,
+        };
+        match stored.token() {
+            Some(token) => {
+                let expires = token.expires_at.unwrap_or(i64::MAX);
+                if picked.best.is_none() || expires > best_expiry {
+                    best_expiry = expires;
+                    picked.best = Some(stored);
+                }
+            }
+            None if picked.plugin_only.is_none() => picked.plugin_only = Some(stored),
+            None => {}
+        }
+    }
+    picked
 }
 
 fn credentials_file_path() -> Option<std::path::PathBuf> {
@@ -572,8 +631,10 @@ fn write_back(stored: &Stored, fresh: &RefreshedToken) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         Store::Keychain { service } => {
             let account = std::env::var("USER").map_err(|e| e.to_string())?;
-            keychain_blob_for(service, &account)
-                .ok_or("The Claude Code login changed while renewing it.")?
+            match crate::discover::keychain_item(service, &account) {
+                crate::discover::KeychainItem::Found(raw) => raw,
+                _ => return Err("The Claude Code login changed while renewing it.".into()),
+            }
         }
         Store::File(path) => std::fs::read_to_string(path).map_err(|e| e.to_string())?,
     };
@@ -607,36 +668,28 @@ fn write_keychain(service: &str, blob: &str) -> Result<(), String> {
     })
 }
 
-/// Every Claude Code Keychain blob, historical name first.
+/// Every Claude Code Keychain item, historical name first, including the
+/// ones that could not be read, so the caller knows they exist.
 ///
 /// No stub for the others: the only caller is behind the same condition, and a
 /// version of this that always answers "nothing" is a function the compiler is
 /// right to complain about.
 #[cfg(target_os = "macos")]
-fn keychain_blobs() -> Vec<(String, String)> {
+fn keychain_items() -> Vec<(String, crate::discover::KeychainItem)> {
     let account = match std::env::var("USER") {
         Ok(a) if !a.is_empty() => a,
         _ => return Vec::new(),
     };
     let mut seen = std::collections::HashSet::new();
-    let mut blobs = Vec::new();
+    let mut items = Vec::new();
     for service in keychain_services() {
         if !seen.insert(service.clone()) {
             continue;
         }
-        if let Some(raw) = keychain_blob_for(&service, &account) {
-            blobs.push((service, raw));
-        }
+        let item = crate::discover::keychain_item(&service, &account);
+        items.push((service, item));
     }
-    blobs
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_blob_for(service: &str, account: &str) -> Option<String> {
-    match crate::discover::keychain_item(service, account) {
-        crate::discover::KeychainItem::Found(secret) => Some(secret),
-        crate::discover::KeychainItem::Missing | crate::discover::KeychainItem::Unreadable => None,
-    }
+    items
 }
 
 /// Service names Claude Code has used on this Mac, historical one first.
@@ -922,6 +975,34 @@ mod tests {
         assert!(out.note.is_some());
     }
     #[test]
+    fn the_newest_login_wins_and_an_unreadable_item_is_remembered() {
+        use crate::discover::KeychainItem::{Found, Missing, Unreadable};
+        let login =
+            |at: i64| format!(r#"{{"claudeAiOauth":{{"accessToken":"t{at}","expiresAt":{at}}}}}"#);
+        let picked = pick_login(vec![
+            ("Claude Code-credentials".into(), Unreadable),
+            (
+                "Claude Code-credentials-a".into(),
+                Found(r#"{"mcpOAuth":{}}"#.into()),
+            ),
+            ("Claude Code-credentials-b".into(), Found(login(100))),
+            ("Claude Code-credentials-c".into(), Found(login(300))),
+            ("Claude Code-credentials-d".into(), Found(login(200))),
+            ("Claude Code-credentials-e".into(), Missing),
+        ]);
+        let best = picked.best.unwrap();
+        assert_eq!(best.token().unwrap().access_token, "t300");
+        assert!(
+            picked.unread,
+            "an unreadable item must not be mistaken for none"
+        );
+        assert!(picked.plugin_only.is_some());
+
+        let picked = pick_login(vec![("Claude Code-credentials".into(), Found(login(5)))]);
+        assert!(!picked.unread);
+    }
+
+    #[test]
     fn renewal_preserves_new_plugin_data_and_never_restores_another_login() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("credentials.json");
@@ -929,6 +1010,7 @@ mod tests {
         let stored = Stored {
             raw: raw.into(),
             store: Store::File(path.clone()),
+            unread_sibling: false,
         };
         let fresh = RefreshedToken {
             access_token: "fresh".into(),

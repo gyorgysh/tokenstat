@@ -29,6 +29,7 @@ pub mod backup;
 pub mod budget;
 pub mod catalog;
 pub mod chart;
+pub mod claude_feed;
 pub mod engine;
 pub mod error;
 pub mod host_rpc;

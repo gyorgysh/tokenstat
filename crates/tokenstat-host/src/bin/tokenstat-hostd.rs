@@ -42,11 +42,17 @@ fn main() -> ExitCode {
     if let Some(code) = tokenstat_sync::quiet_keychain::serve_if_requested() {
         return ExitCode::from(code);
     }
+    // Claude Code runs this as its status line once the live feed is on. It
+    // reads one payload and exits, before anything a daemon would start.
+    if std::env::args().nth(1).as_deref() == Some("statusline") {
+        return ExitCode::from(tokenstat_host::claude_usage::run_status_line());
+    }
     #[cfg(windows)]
     let daemon_mode = !matches!(
         std::env::args().nth(1).as_deref(),
         Some(
             "hook"
+                | "statusline"
                 | "team-hook"
                 | "chat-live"
                 | "team-run-anchor"

@@ -85,6 +85,8 @@ pub mod chat_receipts;
 pub(crate) mod chat_sessions;
 #[cfg(feature = "local-host")]
 pub mod chat_turn;
+#[cfg(feature = "local-host")]
+pub mod claude_usage;
 pub mod cloud_import;
 pub mod dispatch;
 pub mod dto;

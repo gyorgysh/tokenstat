@@ -4594,3 +4594,11 @@ extension SSHProviderReference {
         }
     }
 }
+
+/// The Claude live feed, as the host reads it from Claude Code's settings.
+struct ClaudeLiveFeedState: Decodable, Equatable {
+    var enabled: Bool
+    /// The person had a status line of their own, which still runs.
+    var chained: Bool
+    var lastReadingAtMs: Int64?
+}
