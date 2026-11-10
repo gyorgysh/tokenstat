@@ -120,14 +120,17 @@ struct ChatTranscriptFoldTests {
         ]
         for detail in ChatDetail.allCases {
             let out = fold(rows, detail)
-            for must in ["u1", "p1", "t3", "e1", "h1", "f1", "x1"] {
+            for must in ["u1", "p1", "h1", "f1", "x1"] {
                 require(out.contains { $0.id == must }, "\(detail) shows \(must)")
                 require(ChatTranscriptFold.owner(of: must, in: out) == nil, "\(detail) never folds \(must)")
             }
         }
         let out = fold(rows, .minimal)
-        require(ids(out) == ["u1", "g:t1", "p1", "g:t2", "t3", "e1", "h1", "f1", "x1"],
+        require(ids(out) == ["u1", "g:t1", "p1", "g:t2", "h1", "f1", "x1"],
                 "an approval splits the work where it happened: \(ids(out))")
+        let work = group(out, "g:t2")!
+        require(work.memberIDs == ["t2", "t3", "e1"], "failed steps fold with the work around them")
+        require(work.failures == 2, "the work line counts its failures")
     }
 
     static func minimalKeepsUsageWhenThereIsNoWork() {
@@ -218,14 +221,15 @@ struct ChatTranscriptFoldTests {
     static func minimalActivityIsBoundedAndDoesNotHideFailures() {
         let long = tool("long", "CustomTool", target: String(repeating: "x", count: 10_000) + "\nsecond line")
         let rows = [user("u1"), long, tool("bad", "Write", failed: true), edit("e1", "a.swift"), tool("blank", "")]
+        let alone = group(fold([user("u1"), long], .minimal, running: true), "g:long")!
+        require(alone.recentActivity.first?.verb == "CustomTool", "an unknown tool keeps its real name")
+        require(alone.recentActivity.first?.target.count == 160, "long commands cannot produce a document-sized preview")
         let out = fold(rows, .minimal, running: true)
         let first = group(out, "g:long")!
-        require(first.recentActivity.first?.verb == "CustomTool", "an unknown tool keeps its real name")
-        require(first.recentActivity.first?.target.count == 160, "long commands cannot produce a document-sized preview")
-        require(out.contains { $0.id == "bad" }, "a failed call keeps its visible error row")
-        let last = group(out, "g:e1")!
-        require(last.activityPreview.map(\.id) == ["e1", "blank"], "a failure divides the work history")
-        require(last.activityPreview.last?.verb == "", "unnamed calls retain the generic work fallback")
+        require(ChatTranscriptFold.owner(of: "bad", in: out) == "g:long", "a failed call folds with the work")
+        require(first.failures == 1, "and the work line counts it")
+        require(first.recentActivity.first { $0.id == "bad" }?.failed == true, "its activity is marked failed")
+        require(first.recentActivity.last?.verb == "", "unnamed calls retain the generic work fallback")
         let multiline = group(fold([tool("line", "Shell", target: "  swift test  \nmore code")], .minimal, running: true), "g:line")!
         require(multiline.activityPreview.first?.target == "swift test", "only the first command line is shown")
         let blank = group(fold([tool("line", "Shell", target: "\nmore code")], .minimal, running: true), "g:line")!
@@ -327,7 +331,7 @@ struct ChatTranscriptFoldTests {
                     edit("e1", "src/a.swift", added: 6, removed: 2), tool("t4", "Read", target: "/w/sync.js"), say("a1"),
                     tool("t5", "Bash", failed: true)]
         let out = fold(rows, .compact)
-        require(ids(out) == ["u1", "g:k1", "g:t1", "g:t3", "g:e1", "g:t4", "a1", "t5", "changes:e1"],
+        require(ids(out) == ["u1", "g:k1", "g:t1", "g:t3", "g:e1", "g:t4", "a1", "g:t5", "changes:e1"],
                 "Compact is a line per step: \(ids(out))")
         for id in ["g:k1", "g:t1", "g:t3", "g:e1", "g:t4"] {
             require(group(out, id)?.plain == true, "\(id) is drawn as a plain line")
@@ -341,7 +345,9 @@ struct ChatTranscriptFoldTests {
         require(edited.added == 6 && edited.removed == 2, "and the lines it changed")
         let lone = group(out, "g:t4")!
         require(lone.style == .explored && lone.subject == "/w/sync.js", "a lone read folds too, naming its file")
-        require(ChatTranscriptFold.owner(of: "t5", in: out) == nil, "a failed step is never folded")
+        let failedLine = group(out, "g:t5")!
+        require(failedLine.style == .step && failedLine.failures == 1 && failedLine.plain,
+                "a failed step is a marked line, not a card")
     }
 
     static func compactKeepsRunningStepsAndOpensToTheRow() {

@@ -17,6 +17,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Swipe from the leading edge to go back from a chat even when its controls are hidden.
 - The Mac sidebar can list chats instead of repositories: grouped under Today, Yesterday, the past week's dates and Older, 30 at a time with Show more, each named with its folder. A switch in the section heading picks the view, a filter opens from the same heading, and repositories can be sorted by hand, name or recent activity.
 - Sidebar rows and buttons on the Mac are larger and easier to hit with a pointer or a touch screen.
+- A failed step no longer takes a red card in Minimal and Compact chat detail. It folds like any other step and the line shows Failed, or how many failed. Step lines also highlight on hover on the Mac.
 
 ### Fixed
 

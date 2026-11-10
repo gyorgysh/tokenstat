@@ -33,6 +33,7 @@ struct ChatStepGroup: Equatable, Sendable {
         let verb: String
         let target: String
         let running: Bool
+        var failed = false
     }
 
     enum Style: Equatable, Sendable {
@@ -62,6 +63,9 @@ struct ChatStepGroup: Equatable, Sendable {
     var reads = 0
     var searches = 0
     var pages = 0
+    /// Steps that failed. A failure folds like any other step, since agents
+    /// retry all the time, and the line says how many so none goes unseen.
+    var failures = 0
     /// Still being added to: the conversation is running and nothing has
     /// come after this group yet.
     var running = false
@@ -287,10 +291,11 @@ enum ChatTranscriptFold {
                     group.plain = true
                     emit(group, members: [item], into: &out, isOpen: isOpen)
                 }
-            case let .tool(state) where !state.failed:
+            // A failed step is a line too, marked on the line itself.
+            case let .tool(state):
                 flushRun(trailing: false)
                 line(.step, [item], running: state.running)
-            case let .edit(state) where !state.failed:
+            case let .edit(state):
                 flushRun(trailing: false)
                 line(.step, [item], running: state.running)
             default:
@@ -353,14 +358,12 @@ enum ChatTranscriptFold {
                 cost += spent ?? 0
                 knownCost = knownCost && spent != nil && spent?.isFinite == true && (spent ?? -1) >= 0
                 usage.append(item)
-            case .thinking:
-                members.append(item)
-            case let .tool(state) where !state.failed:
-                members.append(item)
-            case let .edit(state) where !state.failed:
+            case .thinking, .tool, .edit:
+                // A failed step folds with the rest. The work line counts
+                // it, so it is marked without taking a card of its own.
                 members.append(item)
             default:
-                // Replies, questions, failures and handoffs stay in order.
+                // Replies, questions, turn failures and handoffs stay in order.
                 flush(trailing: false)
                 out.append(item)
             }
@@ -422,14 +425,14 @@ enum ChatTranscriptFold {
         var paths = Set<String>()
         var anyRunning = false
 
-        func activity(_ member: ChatDisplayItem, verb: String, target: String, running: Bool) {
+        func activity(_ member: ChatDisplayItem, verb: String, target: String, running: Bool, failed: Bool) {
             guard style == .work else { return }
             let line = String(target.prefix(160))
                 .split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
                 .first.map(String.init) ?? ""
             group.recentActivity.append(.init(
                 id: member.id, verb: verb,
-                target: line.trimmingCharacters(in: .whitespaces), running: running
+                target: line.trimmingCharacters(in: .whitespaces), running: running, failed: failed
             ))
             if group.recentActivity.count > 3 {
                 // A long-running call may precede several quick completions.
@@ -448,7 +451,8 @@ enum ChatTranscriptFold {
             switch member.kind {
             case let .tool(state):
                 group.steps += 1
-                activity(member, verb: state.verb, target: state.target, running: state.running)
+                activity(member, verb: state.verb, target: state.target, running: state.running, failed: state.failed)
+                if state.failed { group.failures += 1 }
                 if readVerbs.contains(state.verb) { group.reads += 1 }
                 if searchVerbs.contains(state.verb) { group.searches += 1 }
                 if pageVerbs.contains(state.verb) { group.pages += 1 }
@@ -460,7 +464,8 @@ enum ChatTranscriptFold {
                 }
             case let .edit(state):
                 group.steps += 1
-                activity(member, verb: "Edit", target: state.path, running: state.running)
+                activity(member, verb: "Edit", target: state.path, running: state.running, failed: state.failed)
+                if state.failed { group.failures += 1 }
                 paths.insert(state.path)
                 group.added += UInt64(state.added)
                 group.removed += UInt64(state.removed)

@@ -366,6 +366,7 @@
   "windows.chatdetail.searches.other": "{0} searches",
   "windows.chatdetail.show_steps": "Shows the steps.",
   "windows.chatdetail.standard": "Standard",
+  "windows.chatdetail.failed_count": "{0} failed",
   "windows.chatdetail.steps.one": "{0} step",
   "windows.chatdetail.steps.other": "{0} steps",
   "windows.chatdetail.thought": "Thought",

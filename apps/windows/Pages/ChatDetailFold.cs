@@ -73,6 +73,11 @@ internal sealed record ChatStepGroup
     public int Reads { get; init; }
     public int Searches { get; init; }
     public int Pages { get; init; }
+    /// <summary>
+    /// Steps that failed. A failure folds like any other step, since agents
+    /// retry all the time, and the line says how many so none goes unseen.
+    /// </summary>
+    public int Failures { get; init; }
     public bool Running { get; init; }
     public string? LiveVerb { get; init; }
     public string? LiveTarget { get; init; }
@@ -223,7 +228,8 @@ internal static class ChatDetailFold
                     Emit(group, [item], output, isOpen);
                 }
             }
-            else if ((item.Kind == ChatPage.ItemKind.Tool || item.Kind == ChatPage.ItemKind.Edit) && !item.Failed)
+            // A failed step is a line too, marked on the line itself.
+            else if (item.Kind == ChatPage.ItemKind.Tool || item.Kind == ChatPage.ItemKind.Edit)
             {
                 FlushRun(false);
                 Line(ChatStepGroupStyle.Step, [item], item.Running);
@@ -375,12 +381,14 @@ internal static class ChatDetailFold
                     usage.Add(item);
                     break;
                 case ChatPage.ItemKind.Thinking:
-                case ChatPage.ItemKind.Tool when !item.Failed:
-                case ChatPage.ItemKind.Edit when !item.Failed:
+                case ChatPage.ItemKind.Tool:
+                case ChatPage.ItemKind.Edit:
+                    // A failed step folds with the rest. The work line counts
+                    // it, so it is marked without taking a card of its own.
                     members.Add(item);
                     break;
                 default:
-                    // Replies, questions, failures and handoffs stay in order.
+                    // Replies, questions, turn failures and handoffs stay in order.
                     Flush(false);
                     output.Add(item);
                     break;
@@ -436,7 +444,7 @@ internal static class ChatDetailFold
 
     private static ChatStepGroup Make(ChatStepGroupStyle style, List<ChatPage.DisplayItem> members, bool running)
     {
-        int steps = 0, reads = 0, searches = 0, pages = 0;
+        int steps = 0, reads = 0, searches = 0, pages = 0, failures = 0;
         long added = 0, removed = 0;
         var paths = new HashSet<string>();
         var anyRunning = false;
@@ -445,6 +453,7 @@ internal static class ChatDetailFold
 
         foreach (var member in members)
         {
+            if ((member.Kind == ChatPage.ItemKind.Tool || member.Kind == ChatPage.ItemKind.Edit) && member.Failed) failures++;
             if (member.Kind == ChatPage.ItemKind.Tool)
             {
                 steps++;
@@ -490,6 +499,7 @@ internal static class ChatDetailFold
             Reads = reads,
             Searches = searches,
             Pages = pages,
+            Failures = failures,
             // A step still running is running whatever came after it.
             Running = anyRunning || running,
             LiveVerb = liveVerb,

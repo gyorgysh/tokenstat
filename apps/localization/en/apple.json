@@ -629,6 +629,7 @@
   "apple.chatdetail.exploring": "Exploring",
   "apple.chatdetail.explored": "Explored",
   "apple.chatdetail.thought": "Thought",
+  "apple.chatdetail.failed_count": "{0} failed",
   "apple.chatdetail.steps.one": "{0} step",
   "apple.chatdetail.steps.other": "{0} steps",
   "apple.chatdetail.files_edited.one": "{0} file edited",

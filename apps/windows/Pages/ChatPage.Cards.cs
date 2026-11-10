@@ -490,7 +490,7 @@ internal sealed partial class ChatPage
 
     /// <summary>What a group row shows, so it is rebuilt only when that changes.</summary>
     private static string StepGroupKey(ChatStepGroup? group) => group is null ? ""
-        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Plain}|{group.Verb}|{group.Subject}";
+        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Failures}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Plain}|{group.Verb}|{group.Subject}";
 
     /// <summary>
     /// Compact: the verb, what it acted on and the lines it changed, in one
@@ -539,6 +539,7 @@ internal sealed partial class ChatPage
         };
         row.Children.Add(detail);
         if (group.Added + group.Removed > 0) row.Children.Add(DiffStat(group.Added, group.Removed, plain: true));
+        if (FailureMark(group, 13, mono: false) is { } plainFailure) row.Children.Add(plainFailure);
         var button = new Button
         {
             Content = row,
@@ -710,6 +711,12 @@ internal sealed partial class ChatPage
             Grid.SetColumn(stat, 4);
             row.Children.Add(stat);
         }
+        if (FailureMark(group, 11, mono: true) is { } failure)
+        {
+            // Shares the diff stat's column: a step that failed changed nothing.
+            Grid.SetColumn(failure, 4);
+            row.Children.Add(failure);
+        }
         if (group.Cost is > 0 and var cost)
         {
             var spend = new TextBlock
@@ -753,6 +760,24 @@ internal sealed partial class ChatPage
         Padding = new Thickness(Theme.SpaceS, 0, 0, 0),
         Child = view,
     };
+
+    /// <summary>A quiet red count of failed steps. A lone step just says Failed.</summary>
+    private static TextBlock? FailureMark(ChatStepGroup group, double size, bool mono)
+    {
+        if (group.Failures == 0 || group.Running) return null;
+        var text = new TextBlock
+        {
+            Text = group.MemberIds.Count == 1
+                ? L10n.Text("common.failed")
+                : L10n.Text("windows.chatdetail.failed_count", group.Failures.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            FontSize = size,
+            Foreground = Theme.Brush(static () => Theme.Danger),
+            Opacity = 0.85,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        if (mono) text.FontFamily = Fonts.Mono;
+        return text;
+    }
 
     private static string StepGroupTitle(ChatStepGroup group) => group.Style switch
     {
