@@ -30,12 +30,17 @@ struct PickerChoice<Value: Hashable>: Identifiable {
     var label: String
     var detail: String?
     var section: String
+    /// Overrides the list's typeface for this row. A product name such as an
+    /// agent reads as a name, not as an identifier, beside model ids that do.
+    var monospaced: Bool?
 
-    init(value: Value, label: String, detail: String? = nil, section: String = "") {
+    init(value: Value, label: String, detail: String? = nil, section: String = "",
+         monospaced: Bool? = nil) {
         self.value = value
         self.label = label
         self.detail = detail
         self.section = section
+        self.monospaced = monospaced
     }
 
     var id: Value { value }
@@ -98,7 +103,7 @@ extension View {
                     : .rect(.bounds),
                 arrowEdge: .bottom) {
             content()
-                .frame(width: 320, height: 420)
+                .frame(width: 320, height: 460)
                 .background(Theme.panel)
         }
         #else
@@ -132,12 +137,15 @@ struct PickerSearchField: View {
     var prompt: String
     @Binding var query: String
     var onSubmit: () -> Void = {}
+    /// Lets a stepped panel put the caret back in the field when it moves to
+    /// the next step, so the next thing typed searches that step.
+    var focus: FocusState<Bool>.Binding?
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.tertiary)
-            TextField(prompt, text: $query)
+            focusable(TextField(prompt, text: $query))
                 .textFieldStyle(.plain)
                 .onSubmit(onSubmit)
                 #if !os(macOS)
@@ -153,23 +161,32 @@ struct PickerSearchField: View {
             }
         }
         .padding(.horizontal, Theme.Space.s)
-        #if os(macOS)
-        .frame(minHeight: 34)
-        #else
-        .frame(minHeight: 44)
-        #endif
+        .frame(minHeight: Theme.Control.heightComfortable)
         .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.Space.s))
         .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
     }
+
+    @ViewBuilder
+    private func focusable(_ field: TextField<Text>) -> some View {
+        if let focus {
+            field.focused(focus)
+        } else {
+            field
+        }
+    }
 }
 
-/// One selectable row: the mark, the label, and whatever the caller hangs off
-/// the end of it.
+/// One selectable row: the mark, an optional icon, the label, and whatever
+/// the caller hangs off the end of it.
+///
+/// At least 44 points tall on every platform. A Mac can have a touch screen,
+/// and a finger needs the same target there that it needs on the phone.
 struct PickerOptionRow<Trailing: View>: View {
     var label: String
     var detail: String?
     var isSelected: Bool
     var monospaced: Bool = true
+    var leading: AnyView?
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
@@ -177,6 +194,9 @@ struct PickerOptionRow<Trailing: View>: View {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                 .font(Theme.font(11, weight: .semibold))
                 .foregroundStyle(isSelected ? Theme.accent : Color.secondary.opacity(0.35))
+            if let leading {
+                leading.accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     #if os(macOS)
@@ -203,7 +223,9 @@ struct PickerOptionRow<Trailing: View>: View {
         }
         .padding(.horizontal, Theme.Space.s)
         .padding(.vertical, 6)
-        #if !os(macOS)
+        #if os(macOS)
+        .frame(minHeight: Theme.Control.heightComfortable)
+        #else
         .frame(minHeight: 48)
         #endif
         .contentShape(.rect)
@@ -297,16 +319,34 @@ struct PickerOptionList<Value: Hashable>: View {
     /// uses these so the model and effort lists are visible before anybody
     /// scrolls past the agents. Two or more turn them on.
     var sectionTabs: [String] = []
+    /// Walk the tabs in order: picking a row moves on to the next tab, and
+    /// picking in the last one calls `finish`. Search covers only the current
+    /// step, because a step is one question. The tabs stay clickable, so any
+    /// earlier answer is one click away.
+    var stepped = false
+    /// The search prompt for one step, "Search models" rather than a prompt
+    /// that names all three.
+    var stepPrompt: ((String) -> String)?
+    var finish: (() -> Void)?
+    var stepPick: ((Value) async -> [String]?)?
     var selectionSummary: String?
     var pick: (Value) -> Void
     /// Trailing accessory per row, for the model picker's favourite star.
     var accessory: ((Value) -> AnyView)?
+    /// Leading icon per row, for an agent's brand mark. Nil for a row with
+    /// none, so model and effort rows keep their alignment.
+    var icon: ((Value) -> AnyView?)?
 
     @State private var query = ""
     @State private var refreshing = false
     /// The tab somebody chose. Empty means the first one.
     @State private var selectedSection = ""
     @State private var hoveredSection: String?
+    /// Which way the list slides on a step change: forward from the trailing
+    /// edge, back from the leading one.
+    @State private var movingForward = true
+    @State private var choosing = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -325,14 +365,18 @@ struct PickerOptionList<Value: Hashable>: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel(L10n.text("apple.searchablepicker.current_selection_0.a744cd0f", "\(selectionSummary)"))
                 }
+                if tabbed {
+                    sectionFilter
+                }
                 HStack(spacing: Theme.Space.s) {
-                    PickerSearchField(prompt: prompt, query: $query, onSubmit: submit)
+                    if stepped, let previous = previousStep {
+                        backButton(to: previous)
+                    }
+                    PickerSearchField(prompt: currentPrompt, query: $query, onSubmit: submit,
+                                      focus: $searchFocused)
                     if refresh != nil {
                         refreshButton
                     }
-                }
-                if tabbed {
-                    sectionFilter
                 }
             }
             .padding(Theme.Space.s)
@@ -347,6 +391,18 @@ struct PickerOptionList<Value: Hashable>: View {
 
             ThemeRule()
 
+            listBody
+                .id(activeSection)
+                .transition(stepTransition)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+        }
+        .onAppear { focusSearch() }
+    }
+
+    @ViewBuilder
+    private var listBody: some View {
+        Group {
             if filtered.isEmpty {
                 VStack(spacing: Theme.Space.xs) {
                     Text(query.isEmpty ? emptyMessage : L10n.text("apple.searchablepicker.nothing_matches.965b516d"))
@@ -380,8 +436,88 @@ struct PickerOptionList<Value: Hashable>: View {
                     }
                     .padding(Theme.Space.s)
                 }
-                .id(activeSection)
                 .scrollDismissesKeyboard(.interactively)
+            }
+        }
+    }
+
+    private var stepTransition: AnyTransition {
+        guard stepped else { return .identity }
+        return .asymmetric(
+            insertion: .move(edge: movingForward ? .trailing : .leading).combined(with: .opacity),
+            removal: .opacity
+        )
+    }
+
+    private var currentPrompt: String {
+        guard stepped, !activeSection.isEmpty, let stepPrompt else { return prompt }
+        return stepPrompt(activeSection)
+    }
+
+    private var previousStep: String? {
+        guard let index = sectionTabs.firstIndex(of: activeSection), index > 0 else { return nil }
+        return sectionTabs[index - 1]
+    }
+
+    /// One step back, beside the search field where the eye already is.
+    /// Command-[ does the same on a keyboard, as it does in every Mac app
+    /// with a back button.
+    private func backButton(to section: String) -> some View {
+        Button { show(section) } label: {
+            Image(systemName: ActionIcon.back.symbol)
+                .font(Theme.font(12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: Theme.Control.heightComfortable, height: Theme.Control.heightComfortable)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("[", modifiers: .command)
+        .help(L10n.text("common.back"))
+        .accessibilityLabel(L10n.text("common.back"))
+        .accessibilityValue(section)
+    }
+
+    /// Moves to a tab, sliding the list the way the steps run.
+    private func show(_ section: String) {
+        let from = sectionTabs.firstIndex(of: activeSection) ?? 0
+        let to = sectionTabs.firstIndex(of: section) ?? 0
+        movingForward = to >= from
+        withAnimation(.snappy(duration: 0.22)) {
+            selectedSection = section
+            query = ""
+        }
+        focusSearch()
+    }
+
+    /// The caret follows the step on a Mac. On the phone it would raise the
+    /// keyboard over a list of four efforts, so there the field waits for a tap.
+    private func focusSearch() {
+        #if os(macOS)
+        guard stepped else { return }
+        searchFocused = true
+        #endif
+    }
+
+    /// Picking answers the current step and asks the next one. Picking the
+    /// row that is already marked counts too: it is how somebody says "that
+    /// one is fine" and moves on.
+    private func choose(_ choice: PickerChoice<Value>) {
+        guard !choosing else { return }
+        guard stepped, let stepPick else {
+            pick(choice.value)
+            return
+        }
+        choosing = true
+        Task { @MainActor in
+            defer { choosing = false }
+            guard let tabs = await stepPick(choice.value),
+                  let index = tabs.firstIndex(of: choice.section) else { return }
+            if index + 1 < tabs.count {
+                show(tabs[index + 1])
+            } else {
+                finish?()
             }
         }
     }
@@ -389,15 +525,18 @@ struct PickerOptionList<Value: Hashable>: View {
     private func row(_ choice: PickerChoice<Value>) -> some View {
         let selected = isSelected(choice.value)
         return HStack(spacing: 0) {
-            Button { pick(choice.value) } label: {
+            Button { choose(choice) } label: {
                 PickerOptionRow(
                     label: choice.label,
                     detail: choice.detail,
                     isSelected: selected,
-                    monospaced: monospaced
+                    monospaced: choice.monospaced ?? monospaced,
+                    leading: icon?(choice.value),
+                    trailing: { EmptyView() }
                 )
             }
             .buttonStyle(PickerRowButtonStyle(isSelected: selected))
+            .disabled(choosing)
             .accessibilityAddTraits(selected ? .isSelected : [])
             if let accessory { accessory(choice.value) }
         }
@@ -415,10 +554,8 @@ struct PickerOptionList<Value: Hashable>: View {
         .buttonStyle(.plain)
         .foregroundStyle(Theme.accent)
         .environment(\.compactActions, true)
-        #if !os(macOS)
-        .frame(minWidth: 44, minHeight: 44)
+        .frame(minWidth: Theme.Control.heightComfortable, minHeight: Theme.Control.heightComfortable)
         .contentShape(.rect)
-        #endif
         .disabled(refreshing)
         .opacity(refreshing ? 0.4 : 1)
         .help(L10n.text("apple.searchablepicker.ask_this_computer_to_read_the_agent_s_mode.a3d03fd8"))
@@ -433,8 +570,15 @@ struct PickerOptionList<Value: Hashable>: View {
     /// are visible at a glance. Typing searches every tab at once, and no tab
     /// is marked while it does, because the list is no longer one of them.
     private var sectionFilter: some View {
-        HStack(spacing: 3) {
-            ForEach(sectionTabs, id: \.self) { section in
+        HStack(spacing: stepped ? 0 : 3) {
+            ForEach(Array(sectionTabs.enumerated()), id: \.element) { index, section in
+                if stepped, index > 0 {
+                    Image(systemName: "chevron.compact.right")
+                        .font(Theme.font(11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 10)
+                        .accessibilityHidden(true)
+                }
                 sectionTab(section)
             }
         }
@@ -451,15 +595,25 @@ struct PickerOptionList<Value: Hashable>: View {
     private func sectionTab(_ section: String) -> some View {
         let selected = activeSection == section
         let value = sectionValue?(section) ?? ""
+        let step = (sectionTabs.firstIndex(of: section) ?? 0) + 1
+        let answered = stepped && step - 1 < (sectionTabs.firstIndex(of: activeSection) ?? 0)
         return Button {
-            selectedSection = section
-            query = ""
+            if stepped { show(section) } else {
+                selectedSection = section
+                query = ""
+            }
         } label: {
             VStack(alignment: .leading, spacing: 1) {
-                Text(section.uppercased())
-                    .font(Theme.caption2.weight(.semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(selected ? Theme.accent : .secondary)
+                HStack(spacing: 4) {
+                    if stepped {
+                        stepBadge(step, answered: answered, current: selected)
+                    }
+                    Text(section.uppercased())
+                        .font(Theme.caption2.weight(.semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(selected ? Theme.accent : .secondary)
+                        .lineLimit(1)
+                }
                 Text(value)
                     .font(Theme.callout.weight(selected ? .semibold : .regular))
                     .foregroundStyle(selected ? .primary : .secondary)
@@ -469,9 +623,7 @@ struct PickerOptionList<Value: Hashable>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, 5)
-            #if !os(macOS)
-            .frame(minHeight: 44)
-            #endif
+            .frame(minHeight: Theme.Control.heightComfortable)
             .background(
                 selected ? Theme.accentSoft
                     : (hoveredSection == section ? Theme.rowHighlight : .clear),
@@ -494,12 +646,31 @@ struct PickerOptionList<Value: Hashable>: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    /// The step's number, or a check once it has been answered on the way
+    /// through, so the strip reads as progress rather than as three filters.
+    private func stepBadge(_ step: Int, answered: Bool, current: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(current || answered ? Theme.accent : Color.secondary.opacity(0.18))
+            if answered {
+                Image(systemName: "checkmark")
+                    .font(Theme.fixed(7, weight: .bold))
+            } else {
+                Text("\(step)")
+                    .font(Theme.fixed(8, weight: .bold))
+            }
+        }
+        .foregroundStyle(current || answered ? Color.white : Color.secondary)
+        .frame(width: 13, height: 13)
+        .accessibilityHidden(true)
+    }
+
     private var tabbed: Bool { sectionTabs.count > 1 }
 
     /// The section the list shows, or empty for all of them: when there are no
     /// tabs, and while a search is running across every tab.
     private var activeSection: String {
-        guard tabbed, query.isEmpty else { return "" }
+        guard tabbed, stepped || query.isEmpty else { return "" }
         return sectionTabs.contains(selectedSection) ? selectedSection : sectionTabs[0]
     }
 
@@ -531,12 +702,20 @@ struct PickerOptionList<Value: Hashable>: View {
     /// select the Agent.
     private func submit() {
         guard !filtered.isEmpty else { return }
+        // Return on an empty field keeps the marked row and moves on, so a
+        // keyboard can walk all three steps without changing anything.
+        if stepped, query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if let current = filtered.first(where: { isSelected($0.value) }) ?? filtered.first {
+                choose(current)
+            }
+            return
+        }
         if let exact = filtered.first(where: { $0.matches(query) && $0.label.lowercased() == query.lowercased().trimmingCharacters(in: .whitespaces) }) {
-            pick(exact.value)
+            choose(exact)
             return
         }
         if !activeSection.isEmpty, let first = filtered.first {
-            pick(first.value)
+            choose(first)
             return
         }
         // No section filter: prefer a non-Agent section for Enter, since the
@@ -545,10 +724,10 @@ struct PickerOptionList<Value: Hashable>: View {
         if sectionsInOrder.count > 1,
            let nonAgent = sectionsInOrder.first(where: { !$0.0.lowercased().contains("agent") }),
            let first = nonAgent.1.first {
-            pick(first.value)
+            choose(first)
             return
         }
         guard let first = filtered.first else { return }
-        pick(first.value)
+        choose(first)
     }
 }

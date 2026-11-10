@@ -159,6 +159,14 @@ internal fun chatAgentSectionValue(
     else -> null
 }
 
+/// The search prompt for one step of the panel.
+internal fun chatAgentSearchPrompt(section: String): String = when (section) {
+    SECTION_AGENT -> L10n.text("android.chatagentpanel.search_agents.212fd04a")
+    SECTION_MODEL -> L10n.text("android.chatagentpanel.search_models.10421935")
+    SECTION_EFFORT -> L10n.text("android.chatagentpanel.search_efforts.f7909b52")
+    else -> L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da")
+}
+
 /// Three marks in one list, one per section, each reading the conversation's
 /// own setting.
 internal fun chatAgentIsSelected(choice: ChatAgentChoice, chat: JsonObject?): Boolean = when (choice) {
@@ -230,7 +238,7 @@ fun ChatAgentSheet(
     /// list to say which agent is answering and whether it has an effort.
     backends: List<JsonObject>,
     onBackends: (List<JsonObject>) -> Unit,
-    onChanged: () -> Unit,
+    onChanged: suspend (JsonObject) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = LocalTsColors.current
@@ -260,29 +268,29 @@ fun ChatAgentSheet(
     val current = backends.firstOrNull { it.str("id") == chat?.str("backend") }
     val choices = remember(backends, chat, pinned) { chatAgentChoices(backends, chat, pinned) }
 
-    fun pick(choice: ChatAgentChoice) {
-        if (updating || locked) return
-        if (choice is ChatAgentChoice.Agent && backendNotInstalled(backendOf(backends, choice.id))) return
+    suspend fun pick(choice: ChatAgentChoice): List<String>? {
+        if (updating || locked) return null
+        if (choice is ChatAgentChoice.Agent && backendNotInstalled(backendOf(backends, choice.id))) return null
         val (field, value) = chatAgentField(choice)
+        if (chatAgentIsSelected(choice, chat)) return chatAgentSections(choices)
         updating = true
-        scope.launch {
-            runCatching {
-                model.workspaceSection(peer, "chat.update", buildJsonObject {
-                    put("id", chatId)
-                    put(field, value)
-                    // An agent with no way to ask runs on Bypass or not at
-                    // all, so picking it sets both in one write rather than
-                    // leaving the conversation claiming it will ask.
-                    if (choice is ChatAgentChoice.Agent && chatAgentForcesBypass(backends, choice.id)) {
-                        put("autonomy", "bypass")
-                    }
-                })
-            }.onSuccess {
-                refreshError = null
-                onChanged()
-            }.onFailure {
-                refreshError = TunnelCopy.display(it.message ?: L10n.text("android.chatagentpanel.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatagentpanel.that_computer.2b209061") })
-            }
+        try {
+            val updated = model.workspaceSection(peer, "chat.update", buildJsonObject {
+                put("id", chatId)
+                put(field, value)
+                if (choice is ChatAgentChoice.Agent && chatAgentForcesBypass(backends, choice.id)) {
+                    put("autonomy", "bypass")
+                }
+            }) as? JsonObject ?: return null
+            refreshError = null
+            onChanged(updated)
+            return chatAgentSections(chatAgentChoices(backends, updated))
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            refreshError = TunnelCopy.display(error.message ?: L10n.text("android.chatagentpanel.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatagentpanel.that_computer.2b209061") })
+            return null
+        } finally {
             updating = false
         }
     }
@@ -378,9 +386,13 @@ fun ChatAgentSheet(
                     },
                     sectionValue = { chatAgentSectionValue(it, backends, chat) },
                     sectionTabs = chatAgentSections(choices),
+                    stepped = true,
+                    stepPrompt = ::chatAgentSearchPrompt,
+                    onFinish = onDismiss,
                     selectionSummary = chatAgentSummary(backends, chat),
                     enabled = !updating && !locked,
-                    pick = ::pick,
+                    pick = {},
+                    onStepPick = ::pick,
                     accessory = { value ->
                         // The favourite star, on model rows only.
                         val id = (value as? ChatAgentChoice.Model)?.id

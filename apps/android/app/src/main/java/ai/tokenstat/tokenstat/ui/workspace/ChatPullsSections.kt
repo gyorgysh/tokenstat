@@ -2221,7 +2221,14 @@ fun ChatSection(
                 locked = sending,
                 backends = backends,
                 onBackends = { backends = it },
-                onChanged = { scope.launch { loadChats() } },
+                onChanged = { updated ->
+                    if (ownsProject()) {
+                        chats = chats.map { row ->
+                            if (row.str("id") == id) ChatSteer.withNote(updated, ChatSteer.noteOf(row)) else row
+                        }
+                        loadChats()
+                    }
+                },
                 onDismiss = { showingAgent = false },
             )
         }

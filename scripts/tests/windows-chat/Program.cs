@@ -7,6 +7,7 @@ static void Check(bool answer, string message) { if (!answer) throw new Exceptio
 ChatUsageTests.Run();
 TeamTranscriptTests.Run();
 ChartViewportTests.Run();
+ChatAgentStepsTests.Run();
 TeamPageTests.Run();
 await TeamCommentTests.RunAsync();
 await TeamAskTests.RunAsync();
