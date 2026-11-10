@@ -99,6 +99,7 @@
   "common.sidebar.no_matching_chats": "No chats match this filter.",
   "common.sidebar.sort_section": "Sort",
   "common.sidebar.older": "Older",
+  "common.sidebar.no_chats_yet": "No chats yet",
   "common.yesterday": "Yesterday",
   "common.chat.fast_mode_fast": "Fast · Fast mode",
   "common.chat.fast_mode_select_grok": "Select a Grok model with an available fast variant. Refresh the model list to check availability.",

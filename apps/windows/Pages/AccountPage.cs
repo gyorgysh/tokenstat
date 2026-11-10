@@ -664,6 +664,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             }
             await LoadAsync();
         }));
+        body.Children.Add(await ClaudeLiveFeedAsync());
         var providers = state["providers"] as JsonArray;
         if (providers is null || providers.Count == 0)
         {
@@ -687,6 +688,49 @@ internal sealed class AccountPage : Page, IToolbarItems
             L10n.Text("windows.accountpage.plan_limits.925788cd"),
             body,
             L10n.Text("windows.accountpage.how_much_of_each_tool_s_subscription_is_le.72953050"));
+    }
+
+    /// <summary>
+    /// Claude Code hands its limits to the host after every reply once this is
+    /// on. Off by default, because turning it on edits Claude Code's settings.
+    /// </summary>
+    private async Task<UIElement> ClaudeLiveFeedAsync()
+    {
+        var panel = new StackPanel { Spacing = 4 };
+        JsonNode? feed;
+        try
+        {
+            feed = await AppServices.Host.CallAsync("usage.claudeLiveFeed", new JsonObject());
+        }
+        catch
+        {
+            // A host without the feed simply has no switch to show.
+            return panel;
+        }
+        panel.Children.Add(Chrome.SettingSwitch(L10n.Text("windows.accountpage.claude_live.title"), Format.Flag(feed, "enabled"), async on =>
+        {
+            try
+            {
+                await AppServices.Host.CallAsync("usage.setClaudeLiveFeed", new JsonObject { ["enabled"] = on });
+            }
+            catch (Exception ex)
+            {
+                _content.Children.Insert(0, Chrome.Banner(
+                    FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
+                return;
+            }
+            await LoadAsync();
+        }));
+        panel.Children.Add(new TextBlock
+        {
+            Text = Format.Flag(feed, "chained")
+                ? L10n.Text("windows.accountpage.claude_live.detail_chained")
+                : L10n.Text("windows.accountpage.claude_live.detail"),
+            Opacity = 0.7,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        return panel;
     }
 
     private UIElement PlanLimitRow(JsonNode provider, string source, bool shared)

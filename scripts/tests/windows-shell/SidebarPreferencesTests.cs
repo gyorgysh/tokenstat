@@ -24,6 +24,15 @@ internal static class SidebarPreferencesTests
         Check(reopened.ExpandedIDs("history:").SetEquals(["local"]), "Expanded history was not restored");
         Check(!reopened.IsExpanded("row:ssh:Hosts", true) && !reopened.IsExpanded("section:projects", true), "Collapsed sections were not restored");
         Check(reopened.SectionOrder.SequenceEqual(["servers", "projects"]), "Section order did not survive reopening");
+        Check(reopened.ProjectsDisplay == SidebarProjectsDisplay.ByRepository && reopened.ProjectsSort == SidebarProjectsSort.Manual,
+            "Missing view and sort did not default to repositories in manual order");
+        reopened.ProjectsDisplay = SidebarProjectsDisplay.ByChat;
+        reopened.ProjectsSort = SidebarProjectsSort.Recent;
+        var chosen = new SidebarPreferences(path);
+        Check(chosen.ProjectsDisplay == SidebarProjectsDisplay.ByChat && chosen.ProjectsSort == SidebarProjectsSort.Recent,
+            "View and sort did not survive reopening");
+        Check(JsonNode.Parse(File.ReadAllText(path))!["projectsDisplay"]!.GetValue<string>() == "byChat",
+            "View is not stored with the Mac's raw value");
 
         File.WriteAllText(path, """
             {"futureSetting":{"version":8},"expanded":{"future:row":{"mode":"automatic"},"row:number":1,"row:string":"open"},

@@ -201,9 +201,12 @@ internal static class SidebarLive
 
     /// <summary>
     /// One recent conversation row: title, backend and age. Tapping opens the
-    /// conversation in its folder chat, like the Mac sidebar row.
+    /// conversation in its folder chat, like the Mac sidebar row. A
+    /// <paramref name="caption"/> replaces the age: the chat list names the
+    /// folder there, because its day heading already says when.
     /// </summary>
-    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null, JsonNode? folder = null)
+    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null, JsonNode? folder = null,
+        string? caption = null)
     {
         folderName ??= L10n.Text("windows.sidebarlive.project.98595978");
         var id = Format.Text(chat, "id");
@@ -252,8 +255,9 @@ internal static class SidebarLive
         panel.Children.Add(label);
         var age = new TextBlock
         {
-            Text = ms is null ? "" : RelativeShort(ms.Value),
+            Text = caption ?? (ms is null ? "" : RelativeShort(ms.Value)),
             FontSize = 10, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = caption is null ? double.PositiveInfinity : 110, TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
         if (chat["pull"] is JsonObject pull) trailing.Children.Add(WorkspaceBranchPull.Badge(pull));
@@ -267,7 +271,7 @@ internal static class SidebarLive
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };
-        if (row.Content is FrameworkElement view) view.Tag = (title, detail, backend);
+        if (row.Content is FrameworkElement view) view.Tag = (title, detail + caption, backend);
         ChatPreviewCache.Attach(row, folderId, id);
         AutomationProperties.SetAutomationId(row, "sidebar.chat." + id);
         AutomationProperties.SetName(row, title + ". " + detail);

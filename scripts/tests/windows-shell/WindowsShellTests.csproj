@@ -9,6 +9,7 @@
     <Compile Include="../../../apps/windows/Navigation/BoundedHostSweep.cs" Link="BoundedHostSweep.cs" />
     <Compile Include="../../../apps/windows/Navigation/HostAutoConnectPreferences.cs" Link="HostAutoConnectPreferences.cs" />
     <Compile Include="../../../apps/windows/Navigation/SidebarPreferences.cs" Link="SidebarPreferences.cs" />
+    <Compile Include="../../../apps/windows/Navigation/SidebarProjectsLayout.cs" Link="SidebarProjectsLayout.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalPaneSelection.cs" Link="TerminalPaneSelection.cs" />
     <Compile Include="../../../apps/windows/Pages/WorkspaceSshTabs.cs" Link="WorkspaceSshTabs.cs" />
     <Compile Include="../../../apps/windows/Pages/SshDisplayName.cs" Link="SshDisplayName.cs" />
