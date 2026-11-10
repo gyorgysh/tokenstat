@@ -2699,14 +2699,26 @@ struct RootView: View {
                     .task(id: workspaces.folders.map(\.id)) {
                         await warmAllProjectChatLists()
                     }
+                    // Here, not inside the list: an empty result unmounts the
+                    // list, and a change made then must still reset the page.
+                    .onChange(of: projectsFilter) { _, _ in
+                        chatListLimit = SidebarProjectsLayout.chatPageSize
+                    }
             } else {
                 ForEach(visibleProjectFolders) { folder in
                     projectRow(folder)
                 }
+                // The filter and the recent sort read every folder's chats.
+                // Closing the filter needs no read, and a folder already
+                // read is not asked again just because the filter opened.
                 .task(id: workspaces.folders.map(\.id) + [projectsSort.rawValue, showingProjectsFilter ? "filter" : ""]) {
                     #if os(macOS)
-                    if showingProjectsFilter || projectsSort == .recent {
+                    if projectsSort == .recent {
                         await warmAllProjectChatLists()
+                    } else if showingProjectsFilter {
+                        await warmAllProjectChatLists(onlyUnread: true)
+                    } else {
+                        chat.retainSidebarWorkspaceLists([])
                     }
                     #endif
                 }
@@ -2836,9 +2848,6 @@ struct RootView: View {
                     }
                     .padding(.top, Theme.Space.xs)
                 }
-            }
-            .onChange(of: projectsFilter) { _, _ in
-                chatListLimit = SidebarProjectsLayout.chatPageSize
             }
         }
     }
@@ -3218,13 +3227,11 @@ struct RootView: View {
     }
 
     private func setProjectsDisplay(_ display: SidebarProjectsDisplay) {
+        // The chat list's own task reads every folder as it appears. Keep
+        // Manual stored while chat mode is up: that view cannot drag folders,
+        // so it reads as Recent without overwriting the preference.
         projectsDisplay = display
         SidebarPreferences.shared.projectsDisplay = display
-        // Keep Manual stored while chat mode is up: that view cannot drag
-        // folders, so it reads as Recent without overwriting the preference.
-        if display == .byChat {
-            Task { await warmAllProjectChatLists() }
-        }
     }
 
     private func setProjectsSort(_ sort: SidebarProjectsSort) {
@@ -3232,10 +3239,12 @@ struct RootView: View {
         SidebarPreferences.shared.projectsSort = sort
     }
 
-    private func warmAllProjectChatLists() async {
+    private func warmAllProjectChatLists(onlyUnread: Bool = false) async {
         chat.retainSidebarWorkspaceLists(workspaces.folders.map(\.id))
         await BridgeLaunch.wait()
         for folder in workspaces.folders {
+            guard !Task.isCancelled else { return }
+            if onlyUnread && chat.hasSidebarList(for: folder.id) { continue }
             await chat.warmWorkspacePreviews(folder.id, includeMessages: false)
         }
     }
