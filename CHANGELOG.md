@@ -9,10 +9,12 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.15.0]
+## [1.15.0] - 2026-11-11
 
 ### Improved
 
+- The chat agent picker guides you through choosing an agent, model and effort. You can search each list or go back to change a choice.
+- On Windows, the new chat page puts the repository, message and agent settings together. Choose a folder on this computer or a connected one, and write a message or attach files before opening the chat.
 - On iPhone and iPad, chat controls stay visible while you scroll or follow live replies. Tap Hide controls in the top bar or swipe up on the chat tabs for more reading space. Swipe down from the top or tap the labeled Show controls button to bring them back. Jumping to the latest reply keeps your choice. Pin to Home is in the chat menu.
 - Swipe from the leading edge to go back from a chat even when its controls are hidden.
 - The sidebar on Mac and Windows can list chats instead of repositories, grouped under Today, Yesterday, the past week's dates and Older, 30 at a time with Show more. Each chat shows its folder. A switch in the section heading picks the view, a filter opens from the same heading, and repositories can be sorted by hand, name or recent activity. In the chat list, the + button starts a new chat in any repository or adds a repository.

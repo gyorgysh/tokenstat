@@ -2880,10 +2880,10 @@ public sealed partial class MainWindow : Window
 
     private IReadOnlyList<NewChatRepository> NewChatRepositories() => _localFolders
         .Where(folder => Format.Text(folder, "id").Length > 0)
-        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path")))
+        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path"), IsLocal: true))
         .Concat(RemoteWorkspaces.CachedFolders()
             .Where(folder => RemoteWorkspaces.IsConnected(folder.PeerKey))
-            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path))).ToArray();
+            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path, IsLocal: false))).ToArray();
 
     private void OpenNewChat(string? repository = null)
     {

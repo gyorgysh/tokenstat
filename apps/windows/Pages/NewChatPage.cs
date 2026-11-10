@@ -16,7 +16,7 @@ using WinRT.Interop;
 
 namespace Tokenstat.Pages;
 
-internal sealed record NewChatRepository(string Id, string Name, string Machine, string Path)
+internal sealed record NewChatRepository(string Id, string Name, string Machine, string Path, bool IsLocal)
 {
     public override string ToString() => Name + " · " + Machine;
 }
@@ -295,14 +295,13 @@ internal sealed class NewChatPage : Page
             if (!fresh.Select(item => item.Id).SequenceEqual(_list.Select(item => item.Id))) RefreshRepositories();
         }
         // This computer first, then each remote computer under its name.
-        var local = L10n.Text("windows.mainwindow_xaml.this_pc.638a348b");
-        foreach (var machine in _list.Select(item => item.Machine).Distinct().OrderBy(name => name == local ? 0 : 1))
+        foreach (var group in _list.GroupBy(item => (item.IsLocal, item.Machine)).OrderBy(group => group.Key.IsLocal ? 0 : 1))
         {
-            menu.Items.Add(new MenuFlyoutItem { Text = machine, IsEnabled = false, FontSize = 11 });
-            foreach (var repository in _list.Where(item => item.Machine == machine))
+            menu.Items.Add(new MenuFlyoutItem { Text = group.Key.Machine, IsEnabled = false, FontSize = 11 });
+            foreach (var repository in group)
             {
                 var item = new MenuFlyoutItem { Text = repository.Name,
-                    Icon = new FontIcon { Glyph = repository.Id == _selected?.Id ? "" : machine == local ? "" : "" } };
+                    Icon = new FontIcon { Glyph = repository.Id == _selected?.Id ? "" : repository.IsLocal ? "" : "" } };
                 ToolTipService.SetToolTip(item, repository.Path);
                 var target = repository;
                 item.Click += async (_, _) => await SelectRepositoryAsync(target);
@@ -329,7 +328,7 @@ internal sealed class NewChatPage : Page
     private void RenderRepository()
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        var local = _selected is null || _selected.Machine == L10n.Text("windows.mainwindow_xaml.this_pc.638a348b");
+        var local = _selected is null || _selected.IsLocal;
         row.Children.Add(new FontIcon { Glyph = local ? "" : "", FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
             Foreground = _selected is null ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph) });
         row.Children.Add(new TextBlock { Text = _selected?.Name ?? Copy("choose_repository"), FontSize = 12, FontWeight = FontWeights.Medium,
