@@ -4096,8 +4096,9 @@ impl Store {
         if let Some(note) = crate::chat_question::native_tool_note(&chat.backend) {
             composed.append_standing(note);
         }
-        // How to keep a plan the chat can show. Nothing for a backend whose own
-        // plan tool already reaches it.
+        // How to keep a plan the chat can show: the plan block, or a pointer
+        // to the agent's own todo tool. Nothing for a backend that already
+        // keeps one unprompted.
         if let Some(plan) = crate::chat_plan::rule(&chat.backend) {
             composed.append_standing(&plan);
         }

@@ -834,7 +834,13 @@ impl Activity {
         let payload = &value["payload"];
         let event = &payload["event"];
         if value["payload_type"] == "todo.snapshot.updated" {
-            self.plan(&payload["items"], "text", "agent");
+            // Muse 1.4 moved the list under `facts`. Earlier builds put it
+            // straight on the payload.
+            let items = payload
+                .pointer("/facts/items")
+                .filter(|items| items.is_array())
+                .unwrap_or(&payload["items"]);
+            self.plan(items, "text", "agent");
         } else if value["payload_type"] == "runtime.session"
             && event["kind"] == "todo_snapshot_updated"
         {
@@ -1520,6 +1526,19 @@ mod tests {
         let snapshot = parser.take_inspection().unwrap();
         assert_eq!(snapshot.activity.plan[0].text, "Inspect 🦀");
         assert_eq!(snapshot.activity.plan[0].status, "inProgress");
+    }
+
+    #[test]
+    fn muse_todo_snapshot_reads_its_facts() {
+        let mut muse = Activity::default();
+        muse.observe(
+            "muse",
+            &json!({"payload_type":"todo.snapshot.updated","payload":{"kind":"todo_snapshot_updated","facts":{"revision":2,"source_tool":"write_todos","items":[{"text":"Create a.txt","status":"completed"},{"text":"Create b.txt","status":"in_progress"}]}}}),
+        );
+        assert_eq!(muse.plan.len(), 2);
+        assert_eq!(muse.plan[0].status, "completed");
+        assert_eq!(muse.plan[1].text, "Create b.txt");
+        assert_eq!(muse.plan[1].status, "inProgress");
     }
 
     #[test]

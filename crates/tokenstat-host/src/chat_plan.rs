@@ -12,6 +12,10 @@
 //! time.
 //! The host reads the latest complete block into the conversation's activity
 //! and the clients hide the block from the reply.
+//!
+//! OpenCode and Muse do have a todo tool the host reads, but nothing told the
+//! model to use it, and a smaller model often did the work with no plan at
+//! all. They get one sentence pointing at their own tool instead of the block.
 
 use serde_json::{Value, json};
 
@@ -81,8 +85,8 @@ fn parse(body: &str) -> Option<Value> {
     Some(Value::Array(steps))
 }
 
-/// How this backend should keep a visible plan, or nothing when its own plan
-/// tool already reaches the chat without help.
+/// How this backend should keep a visible plan: the fenced block, a pointer
+/// to its own todo tool, or nothing when it keeps one without being asked.
 pub fn rule(backend: &str) -> Option<String> {
     match backend {
         "codex" | "claude" => Some(format!(
@@ -97,8 +101,20 @@ pub fn rule(backend: &str) -> Option<String> {
              through the block: do not also write the plan or \"step N done\" notes \
              as prose. Skip this for quick answers, and do not mention this format."
         )),
+        "opencode" => Some(native_rule("todowrite")),
+        "muse" => Some(native_rule("write_todos")),
         _ => None,
     }
+}
+
+fn native_rule(tool: &str) -> String {
+    format!(
+        "For work with three or more steps, keep a visible plan with your `{tool}` \
+         tool: write the list before you start the work, then update it each time \
+         a step starts or finishes, with one step in progress. The app shows that \
+         list in its plan panel, so do not also write the plan or \"step N done\" \
+         notes as prose. Skip this for quick answers."
+    )
 }
 
 #[cfg(test)]
@@ -162,6 +178,13 @@ mod tests {
     fn only_backends_without_a_reaching_plan_tool_get_a_rule() {
         assert!(rule("codex").is_some_and(|text| text.contains(FENCE)));
         assert!(rule("claude").is_some_and(|text| text.contains(FENCE)));
+        assert!(
+            rule("opencode")
+                .is_some_and(|text| text.contains("todowrite") && !text.contains(FENCE))
+        );
+        assert!(
+            rule("muse").is_some_and(|text| text.contains("write_todos") && !text.contains(FENCE))
+        );
         assert!(rule("cursor").is_none());
     }
 }
