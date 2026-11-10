@@ -75,6 +75,24 @@ private func key(_ owner: String = "account-a", _ peer: String? = "computer-a", 
         do { _ = try await canceledEntry.value; preconditionFailure() } catch is CancellationError {}
         precondition(wire.reads == 13, "A caller canceled before entry dispatched a read")
         let typed: Int = try await flights.run(request) { 42 }; precondition(typed == 42)
+        var cancelledFinished = false
+        let timedCancellation = Task {
+            defer { cancelledFinished = true }
+            return try await flights.run(request) { try await wire.read() }
+        }
+        await until { wire.reads == 14 }
+        timedCancellation.cancel()
+        let unrelated = Task {
+            try await flights.run(key("account-a", "computer-a", "timing-unrelated")) { try await wire.read() }
+        }
+        await until { wire.reads == 15 }
+        wire.answer(14, .success("unrelated")); _ = try await unrelated.value
+        for _ in 0..<100 { await Task.yield() }
+        precondition(!cancelledFinished, "Another producer completed a cancelled waiter")
+        await flights.invalidate(owner: request.owner, peer: request.peer)
+        wire.answer(13, .failure(Failure.temporary))
+        do { _ = try await timedCancellation.value; preconditionFailure() } catch is CancellationError {}
+        precondition(wire.reads == 15, "Cancellation retried an invalidated result")
         precondition(!ChatReadFlights.reads.contains("chat.send") && !ChatReadFlights.reads.contains("chat.receipt"))
         precondition(ChatReadFlights.mutations.contains("chat.compact") && ChatReadFlights.mutations.contains("chat.steerSend"))
         precondition(ChatReadFlights.mutations.contains("chat.send") && ChatReadFlights.mutations.contains("chat.remove"))

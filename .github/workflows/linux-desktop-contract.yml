@@ -1,0 +1,290 @@
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+name: linux desktop contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/linux/**'
+      - 'apps/mac/Sources/App/**'
+      - 'apps/mac/Sources/Design/**'
+      - 'apps/mac/Sources/Features/Account/ChatDetailSettings.swift'
+      - 'apps/mac/Sources/Features/Home/**'
+      - 'apps/mac/Sources/Client/ClientDeviceName.swift'
+      - 'apps/mac/Sources/Client/ClientRemoteFeatureGate.swift'
+      - 'apps/mac/Sources/Features/Machines/MachinesModel.swift'
+      - 'apps/mac/Sources/Features/Work/**'
+      - 'apps/mac/Sources/Features/Insights/**'
+      - 'apps/mac/Sources/Bridge/Models.swift'
+      - 'apps/mac/Sources/Bridge/Bridge.swift'
+      - 'apps/mac/Sources/Bridge/ChatReadFlights.swift'
+      - 'apps/mac/Sources/Bridge/ChatEvents.swift'
+      - 'apps/mac/Sources/Bridge/ChatRoutingModels.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatRecentMessages.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatSendContext.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatPaging.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatPolling.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatCostMeter.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatListMutations.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatSteerOverlay.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatTranscriptFold.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatCoalescer.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatTranscriptProjector.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatDisplayItem.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatQuestion.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/MuseToolPresentation.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageGrouping.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatAuthenticationFailure.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatHistoryWindow.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatTurnTiming.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift'
+      - 'apps/mac/Sources/Features/Workspaces/WorkspaceDirectoryPresentation.swift'
+      - 'apps/mac/Sources/Features/Workspaces/GitPullView.swift'
+      - 'apps/mac/Sources/Bridge/GitPullModels.swift'
+      - 'apps/mac/Sources/Features/Workspaces/WorkspaceInspector.swift'
+      - 'apps/mac/Sources/Features/Workspaces/WorkspacesModel.swift'
+      - 'apps/mac/Resources/Fonts/**'
+      - 'apps/mac/Resources/Brands.xcassets/**'
+      - 'apps/mac/Resources/FeatureMarks.xcassets/**'
+      - 'apps/localization/**'
+      - 'crates/tokenstat-core/**'
+      - 'crates/tokenstat-host/**'
+      - 'crates/tokenstat-paths/**'
+      - 'Cargo.*'
+      - 'rust-toolchain.toml'
+      - 'scripts/tests/linux-swiftui-contract.py'
+      - 'scripts/tests/linux-swiftui-getting-started.py'
+      - 'scripts/tests/linux-swiftui-scan.py'
+      - 'scripts/tests/linux-swiftui-fetch.py'
+      - 'scripts/tests/linux-swiftui-account-insights.py'
+      - 'scripts/tests/linux-swiftui-insight-axis.py'
+      - 'scripts/tests/linux-swiftui-insights-date.py'
+      - 'scripts/tests/linux-swiftui-chats.py'
+      - 'scripts/tests/linux-swiftui-drafts.py'
+      - 'scripts/tests/linux-swiftui-chat-mutations.py'
+      - 'scripts/tests/linux-swiftui-fork.py'
+      - 'scripts/tests/linux-swiftui-reader.py'
+      - 'scripts/tests/linux-swiftui-transcript.py'
+      - 'scripts/tests/linux-swiftui-publication.py'
+      - 'scripts/tests/linux-swiftui-polling.py'
+      - 'scripts/tests/ChatPollingTests.swift'
+      - 'scripts/tests/ChatReadFlightsTests.swift'
+      - 'scripts/tests/linux-swiftui-chat-alerts.py'
+      - 'scripts/tests/linux-swiftui-confirmations.py'
+      - 'scripts/tests/linux-swiftui-render.py'
+      - 'scripts/prepare-linux-fonts.*'
+      - 'scripts/linux-fonttools-requirements.txt'
+      - 'scripts/check-dep-licences.sh'
+      - 'scripts/licence_rules.py'
+      - '.github/workflows/linux-desktop-contract.yml'
+  pull_request:
+    paths:
+      - 'apps/linux/**'
+      - 'apps/mac/Sources/App/**'
+      - 'apps/mac/Sources/Design/**'
+      - 'apps/mac/Sources/Features/Account/ChatDetailSettings.swift'
+      - 'apps/mac/Sources/Features/Home/**'
+      - 'apps/mac/Sources/Client/ClientDeviceName.swift'
+      - 'apps/mac/Sources/Client/ClientRemoteFeatureGate.swift'
+      - 'apps/mac/Sources/Features/Machines/MachinesModel.swift'
+      - 'apps/mac/Sources/Features/Work/**'
+      - 'apps/mac/Sources/Features/Insights/**'
+      - 'apps/mac/Sources/Bridge/Models.swift'
+      - 'apps/mac/Sources/Bridge/Bridge.swift'
+      - 'apps/mac/Sources/Bridge/ChatReadFlights.swift'
+      - 'apps/mac/Sources/Bridge/ChatEvents.swift'
+      - 'apps/mac/Sources/Bridge/ChatRoutingModels.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatRecentMessages.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatSendContext.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatPaging.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatPolling.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatCostMeter.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatListMutations.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatSteerOverlay.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatTranscriptFold.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatCoalescer.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatTranscriptProjector.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatDisplayItem.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatQuestion.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/MuseToolPresentation.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageGrouping.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatAuthenticationFailure.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatHistoryWindow.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatTurnTiming.swift'
+      - 'apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift'
+      - 'apps/mac/Sources/Features/Workspaces/WorkspaceDirectoryPresentation.swift'
+      - 'apps/mac/Sources/Features/Workspaces/GitPullView.swift'
+      - 'apps/mac/Sources/Bridge/GitPullModels.swift'
+      - 'apps/mac/Sources/Features/Workspaces/WorkspaceInspector.swift'
+      - 'apps/mac/Sources/Features/Workspaces/WorkspacesModel.swift'
+      - 'apps/mac/Resources/Fonts/**'
+      - 'apps/mac/Resources/Brands.xcassets/**'
+      - 'apps/mac/Resources/FeatureMarks.xcassets/**'
+      - 'apps/localization/**'
+      - 'crates/tokenstat-core/**'
+      - 'crates/tokenstat-host/**'
+      - 'crates/tokenstat-paths/**'
+      - 'Cargo.*'
+      - 'rust-toolchain.toml'
+      - 'scripts/tests/linux-swiftui-contract.py'
+      - 'scripts/tests/linux-swiftui-getting-started.py'
+      - 'scripts/tests/linux-swiftui-scan.py'
+      - 'scripts/tests/linux-swiftui-fetch.py'
+      - 'scripts/tests/linux-swiftui-account-insights.py'
+      - 'scripts/tests/linux-swiftui-insight-axis.py'
+      - 'scripts/tests/linux-swiftui-insights-date.py'
+      - 'scripts/tests/linux-swiftui-chats.py'
+      - 'scripts/tests/linux-swiftui-drafts.py'
+      - 'scripts/tests/linux-swiftui-chat-mutations.py'
+      - 'scripts/tests/linux-swiftui-fork.py'
+      - 'scripts/tests/linux-swiftui-reader.py'
+      - 'scripts/tests/linux-swiftui-transcript.py'
+      - 'scripts/tests/linux-swiftui-publication.py'
+      - 'scripts/tests/linux-swiftui-polling.py'
+      - 'scripts/tests/ChatPollingTests.swift'
+      - 'scripts/tests/ChatReadFlightsTests.swift'
+      - 'scripts/tests/linux-swiftui-chat-alerts.py'
+      - 'scripts/tests/linux-swiftui-confirmations.py'
+      - 'scripts/tests/linux-swiftui-render.py'
+      - 'scripts/prepare-linux-fonts.*'
+      - 'scripts/linux-fonttools-requirements.txt'
+      - 'scripts/check-dep-licences.sh'
+      - 'scripts/licence_rules.py'
+      - '.github/workflows/linux-desktop-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-desktop-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
+
+jobs:
+  contracts:
+    name: desktop contracts ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Format
+        run: cargo fmt --manifest-path apps/linux/Cargo.toml -- --check
+      - name: Desktop state and transport checks without a GPU
+        run: |
+          cargo clippy --manifest-path apps/linux/Cargo.toml --no-default-features --all-targets --locked -- -D warnings
+          cargo test --manifest-path apps/linux/Cargo.toml --no-default-features --lib --locked
+      - name: Dependency licences for the standalone client
+        run: bash scripts/check-dep-licences.sh --manifest-path apps/linux/Cargo.toml --locked
+      - name: Compare with compiled SwiftUI source and state behavior
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-contract.py
+      - name: Compare original first-scan card states
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-getting-started.py
+      - name: Compare original suspended scan lifecycle
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-scan.py
+      - name: Compare original suspended remote fetch lifecycle
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-fetch.py
+      - name: Compare original account Insights ownership
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-account-insights.py
+      - name: Compare original Insights day positions
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-insight-axis.py
+      - name: Compare local Insights calendar queries with SwiftUI
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-insights-date.py
+      - name: Compare original draft stores and independent process locks
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-drafts.py
+      - name: Compare original fork tasks and route effects
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-fork.py
+      - name: Compare original reader wire, warm rows and page windows
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-reader.py
+      - name: Compare complete original transcript projection and folds
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-transcript.py
+      - name: Compile the GPUI adapter on macOS
+        if: runner.os == 'macOS'
+        run: |
+          bash scripts/prepare-linux-fonts.sh
+          cargo check --manifest-path apps/linux/Cargo.toml --all-targets --locked
+          cargo test --manifest-path apps/linux/Cargo.toml --lib --locked
+      - name: Compare original read flights and actual GPUI typed transport
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-chat-mutations.py --compare-gpui
+      - name: Compare original retained poll tasks and actual GPUI timers
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-polling.py --compare-gpui
+      - name: Compare suspended transcript publication and actual GPUI executor
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-publication.py --compare-gpui
+      - name: Compare native font metrics and render SwiftUI references
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-render.py --compare-gpui-fonts
+      - name: Measure original native confirmation roles and content layout
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-confirmations.py --compare-gpui
+      - name: Measure original fork alerts and compare real GPUI content layout
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-chat-alerts.py --compare-gpui
+      - name: Render original project conversation children
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-chats.py
+      - name: Save SwiftUI reference evidence
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: swiftui-desktop-references
+          path: |
+            target/linux-day-visuals/*.png
+            target/linux-day-visuals/manifest.json
+            target/linux-day-visuals/environment.json
+            target/linux-day-visuals/fixture.json
+            target/linux-day-visuals/gpui-fonts.json
+            target/linux-day-visuals/swift-fonts.json
+            target/linux-day-visuals/font-comparison.json
+            target/linux-confirmation-reference/*.png
+            target/linux-confirmation-reference/native.json
+            target/linux-confirmation-reference/gpui.json
+            target/linux-confirmation-reference/manifest.json
+            target/linux-confirmation-reference/layout-comparison.json
+            target/linux-chat-references/*.png
+            target/linux-chat-references/manifest.json
+            target/linux-chat-references/environment.json
+            target/linux-chat-references/fixture.json
+            target/linux-draft-reference/rust.json
+            target/linux-draft-reference/swift.json
+            target/linux-draft-reference/manifest.json
+            target/linux-chat-mutation-reference/rust.json
+            target/linux-chat-mutation-reference/swift.json
+            target/linux-chat-mutation-reference/manifest.json
+            target/linux-fork-reference/*.json
+            target/linux-reader-reference/*.json
+            target/linux-transcript-reference/*.json
+            target/linux-publication-reference/*.json
+            target/linux-polling-reference/*.json
+            target/linux-polling-reference/*.txt
+            target/linux-chat-alert-reference/*.png
+            target/linux-chat-alert-reference/*.json
+          if-no-files-found: error
+      # Linux GUI, compositor and package acceptance are separate release gates.

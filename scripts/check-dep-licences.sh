@@ -31,17 +31,19 @@ cd "$ROOT"
 # `cargo metadata` fails the pipeline would otherwise surface as a decode error
 # and exit 1, which reads exactly like a licence violation and sends whoever is
 # debugging it in precisely the wrong direction.
-if ! metadata="$(cargo metadata --format-version 1 --all-features)"; then
+if ! metadata="$(cargo metadata --format-version 1 --all-features "$@")"; then
     echo "error: cargo metadata failed, so no licence conclusion can be drawn" >&2
     exit 2
 fi
 
 report="$(printf '%s' "$metadata" | python3 -c '
 import json, sys
+from pathlib import Path
 sys.path.insert(0, "scripts")
 from licence_rules import clean_license
 
 meta = json.load(sys.stdin)
+repo = Path.cwd().resolve()
 packages = {p["id"]: p for p in meta["packages"]}
 nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
 
@@ -63,7 +65,17 @@ problems = []
 for pid in sorted(linked):
     p = packages[pid]
     # pueev owns these.
-    if pid in meta["workspace_members"]:
+    # Standalone native clients also consume our path crates. Their licence
+    # belongs to this repository, even when they are not workspace members.
+    manifest = Path(p["manifest_path"]).resolve()
+    licence_file = Path(p.get("license_file") or "")
+    if not licence_file.is_absolute():
+        licence_file = manifest.parent / licence_file
+    owned_path_crate = (p.get("source") is None
+        and manifest.is_relative_to(repo)
+        and p.get("license_file")
+        and licence_file.resolve() == repo / "LICENSE")
+    if pid in meta["workspace_members"] or owned_path_crate:
         continue
     lic = p.get("license") or ""
     if not lic:

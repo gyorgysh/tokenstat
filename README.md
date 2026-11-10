@@ -385,6 +385,12 @@ The Mac app is generated from `apps/mac/project.yml`. The Windows app is
 `apps/windows/`. The Android app is `apps/android/`. Each tree has its own
 README for the extra tooling that build needs.
 
+The [Linux desktop feasibility client](apps/linux/README.md) uses GPUI over the
+same Rust host. It has its own Cargo workspace while native Linux graphics,
+accessibility and packaging are evaluated. Its partial SwiftUI shell can be
+inspected with `--shell-fixture`; complete visual and feature parity is still
+required. It is not a stable Linux download.
+
 Use `scripts/build-mac-quick.sh --build-only` for an isolated Mac compile in
 `target/xcode-build-only`. It leaves the running app and host in place. Add
 `--rust` to refresh the FFI framework as part of the build.

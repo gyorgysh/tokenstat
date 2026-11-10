@@ -111,6 +111,7 @@ pub fn open_file_count() -> Option<usize> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::os::unix::process::CommandExt;
 
     #[test]
     fn the_open_count_is_plausible() {
@@ -130,5 +131,71 @@ mod tests {
         let (soft, hard) = open_file_limit().expect("unix reports a limit");
         assert!(soft > 256 || soft == hard, "soft limit stayed at {soft}");
         assert!(soft <= hard, "soft {soft} must not exceed hard {hard}");
+    }
+
+    // Each case execs a fresh process: changing a hard limit in the shared
+    // test runner cannot be undone, and raise_open_file_limit is guarded by Once.
+    #[test]
+    fn isolated_limits_respect_the_inherited_ceiling_and_never_lower_soft() {
+        let (_, available_hard) = open_file_limit().expect("unix reports a limit");
+        let mut ran = 0;
+        for (soft, hard, expected) in [
+            (96, 128, 128),
+            (128, 512, 512),
+            (128, 2_048, 2_048),
+            (1_400, 2_048, 2_048),
+            (128, 16_000, 10_240),
+            (12_000, 16_000, 12_000),
+        ] {
+            if hard > available_hard {
+                continue;
+            }
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "open_files::tests::isolated_limit_child",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("TOKENSTAT_TEST_SOFT", soft.to_string())
+                .env("TOKENSTAT_TEST_HARD", hard.to_string())
+                .env("TOKENSTAT_TEST_EXPECTED", expected.to_string());
+            // SAFETY: only setrlimit is called between fork and exec, using a
+            // stack value. The lowered hard limit applies only to the child.
+            unsafe {
+                command.pre_exec(move || {
+                    let limit = libc::rlimit {
+                        rlim_cur: soft as libc::rlim_t,
+                        rlim_max: hard as libc::rlim_t,
+                    };
+                    if libc::setrlimit(libc::RLIMIT_NOFILE, &limit) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+            let output = command.output().expect("start isolated limit test");
+            assert!(
+                output.status.success(),
+                "limit {soft}:{hard} failed: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            ran += 1;
+        }
+        assert!(ran > 0, "no child limit was supported by this test process");
+    }
+
+    #[test]
+    #[ignore = "run only in an isolated child with explicit descriptor limits"]
+    fn isolated_limit_child() {
+        let number = |key| std::env::var(key).unwrap().parse::<u64>().unwrap();
+        let soft = number("TOKENSTAT_TEST_SOFT");
+        let hard = number("TOKENSTAT_TEST_HARD");
+        let expected = number("TOKENSTAT_TEST_EXPECTED");
+        assert_eq!(open_file_limit(), Some((soft, hard)));
+        raise_open_file_limit();
+        assert_eq!(open_file_limit(), Some((expected, hard)));
     }
 }

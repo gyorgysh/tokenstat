@@ -13,6 +13,41 @@ import Foundation
 }
 @main struct Check {
     @MainActor static func main() async {
+        let opening = ChatOpeningRead<String>(), pages = Wire()
+        var openingResults: [Task<Bool, Never>] = []
+        for _ in 0..<30 {
+            openingResults.append(Task {
+                await opening.run(owner: "A") { await pages.read(); return !Task.isCancelled }
+            })
+        }
+        await until { pages.calls == 1 }
+        for _ in 0..<100 { await Task.yield() }
+        openingResults[0].cancel()
+        pages.finish(0)
+        for task in openingResults {
+            let result = await task.value
+            precondition(result, "One opening waiter cancelled its producer")
+        }
+        let oldOpening = Task {
+            await opening.run(owner: "A") { await pages.read(); return !Task.isCancelled }
+        }
+        await until { pages.calls == 2 }
+        let nextOpening = Task {
+            await opening.run(owner: "B") { await pages.read(); return !Task.isCancelled }
+        }
+        await until { pages.calls == 3 }
+        pages.finish(1)
+        let oldResult = await oldOpening.value
+        precondition(!oldResult)
+        let joinedOpening = Task {
+            await opening.run(owner: "B") { preconditionFailure("Old opening teardown erased successor") }
+        }
+        for _ in 0..<100 { await Task.yield() }
+        precondition(pages.calls == 3)
+        pages.finish(2)
+        let nextResult = await nextOpening.value, joinedResult = await joinedOpening.value
+        precondition(nextResult && joinedResult)
+
         let lane = ChatPollLane<String>(), wire = Wire()
         var published = 0
         let operation: @MainActor @Sendable (@escaping @MainActor @Sendable () -> Bool) async -> Void = { permits in
@@ -36,6 +71,19 @@ import Foundation
         precondition(wire.calls == 4 && published == 1, "Old owner cleared/published into successor")
         lane.cancel(owner: "A"); wire.finish(3); await next.value
         precondition(published == 2)
+
+        var heldLane: ChatPollLane<String>? = ChatPollLane<String>()
+        let heldWire = Wire()
+        var heldPublications = 0
+        let heldTask = heldLane!.start(owner: "held") { permits in
+            await heldWire.read()
+            if permits() { heldPublications += 1 }
+        }!
+        await until { heldWire.calls == 1 }
+        heldLane = nil
+        heldWire.finish(0)
+        await heldTask.value
+        precondition(heldPublications == 1, "A running lane lost its retained self")
         let canceled = lane.start(owner: "B", operation: operation)!
         await until { wire.calls == 5 }; lane.cancel(); wire.finish(4); await canceled.value
         precondition(published == 2)
@@ -66,6 +114,20 @@ import Foundation
         replacement.cancel(); await replacement.value; await until { stops == 4 }
         cycles.finish(2); cycles.finish(3)
 
+        var heldWatcher: ChatPollWatcher<String>? = ChatPollWatcher<String>()
+        let heldCycles = Wire()
+        var heldStops = 0
+        let heldWatch = Task { [reader = heldWatcher!] in
+            await reader.watch(owner: "held", cycle: { await heldCycles.read() },
+                               interval: { .seconds(100) }, stop: { heldStops += 1 })
+        }
+        await until { heldCycles.calls == 1 }
+        heldWatcher = nil
+        precondition(heldStops == 0)
+        heldWatch.cancel(); await heldWatch.value
+        await until { heldStops == 1 }
+        heldCycles.finish(0)
+
         var cadence = ChatPollCadence()
         precondition(cadence.interval(busy: false, attachments: false, now: 0) == .seconds(2))
         precondition(cadence.interval(busy: true, attachments: false, now: 0) == .milliseconds(120))
@@ -90,6 +152,9 @@ import Foundation
         precondition(cadence.claimApprovals(now: 0, force: false))
         precondition(!cadence.claimApprovals(now: 0.99, force: false))
         precondition(cadence.claimApprovals(now: 0.99, force: true))
+        precondition(!cadence.claimStatus(now: .nan, force: false))
+        precondition(!cadence.claimApprovals(now: .nan, force: false))
         print("Polling: bounded refresh/share, exact owner/leases, cancellation, adaptive cadence")
+        print("Opening: 30 shared callers, waiter cancellation, cooperative producer cancellation and successor isolation")
     }
 }

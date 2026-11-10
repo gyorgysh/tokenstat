@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
+[package]
+name = "tokenstat-linux"
+version = "1.15.0"
+edition = "2024"
+rust-version = "1.99"
+license-file = "../../LICENSE"
+publish = false
+description = "Linux desktop feasibility client over the shared tokenstat host"
+
+# Keep the feasibility build independent of the shipping clients until Linux
+# graphics, input and accessibility acceptance is complete.
+[workspace]
+resolver = "3"
+
+[features]
+default = ["gui"]
+gui = ["dep:gpui"]
+
+[dependencies]
+tokenstat-core = { path = "../../crates/tokenstat-core" }
+tokenstat-paths = { path = "../../crates/tokenstat-paths" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+libc = "0.2"
+idna = "=1.1.0"
+unicode-properties = { version = "=0.1.5", default-features = false, features = ["general-category"] }
+unicode-segmentation = "=1.13.3"
+unicode-normalization = "=0.1.26"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+gpui = { version = "=0.2.2", optional = true, default-features = false, features = ["font-kit", "wayland", "x11"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[example]]
+name = "font-contract"
+required-features = ["gui"]
+
+[[example]]
+name = "component-preview"
+required-features = ["gui"]
+
+[[example]]
+name = "confirmation-contract"
+required-features = ["gui"]
+
+[[example]]
+name = "fork-alert-contract"
+required-features = ["gui"]
+
+[[example]]
+name = "projector-executor"
+required-features = ["gui"]
+
+[[example]]
+name = "chat-transport-executor"
+required-features = ["gui"]
+
+[[example]]
+name = "polling-executor"
+required-features = ["gui"]
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+

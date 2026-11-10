@@ -180,7 +180,35 @@ fn detect_internal_battery() -> bool {
     crate::win32::has_system_battery()
 }
 
-#[cfg(not(any(all(target_os = "macos", not(test)), all(windows, not(test)))))]
+#[cfg(all(target_os = "linux", not(test)))]
+fn detect_internal_battery() -> bool {
+    linux_internal_battery_at(Path::new("/sys/class/power_supply"))
+}
+
+/// External peripheral batteries must not turn a desktop into a laptop.
+#[cfg(any(target_os = "linux", test))]
+fn linux_internal_battery_at(root: &Path) -> bool {
+    let Ok(supplies) = fs::read_dir(root) else {
+        return false;
+    };
+    supplies.flatten().any(|entry| {
+        let path = entry.path();
+        if !fs::read_to_string(path.join("type")).is_ok_and(|kind| kind.trim() == "Battery") {
+            return false;
+        }
+        match fs::read_to_string(path.join("scope")) {
+            Ok(scope) => scope.trim() == "System",
+            // Older drivers omit scope. Their Battery supply is a system one.
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        }
+    })
+}
+
+#[cfg(not(any(
+    all(target_os = "macos", not(test)),
+    all(windows, not(test)),
+    all(target_os = "linux", not(test))
+)))]
 fn detect_internal_battery() -> bool {
     false
 }
@@ -744,6 +772,29 @@ mod tests {
     fn battery_macs_default_off() {
         assert!(!default_always_on(true));
         assert!(default_always_on(false));
+    }
+
+    #[test]
+    fn linux_laptops_are_distinguished_from_peripheral_batteries() {
+        let root = tempfile::tempdir().unwrap();
+        let supply = |name: &str, kind: &str, scope: Option<&str>| {
+            let path = root.path().join(name);
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("type"), kind).unwrap();
+            if let Some(scope) = scope {
+                fs::write(path.join("scope"), scope).unwrap();
+            }
+        };
+        assert!(!linux_internal_battery_at(root.path()));
+        supply("AC", "Mains\n", None);
+        supply("mouse", "Battery\n", Some("Device\n"));
+        supply("UPS", "UPS\n", Some("System\n"));
+        assert!(!linux_internal_battery_at(root.path()));
+        supply("BAT0", "Battery\n", Some("System\n"));
+        assert!(linux_internal_battery_at(root.path()));
+        fs::remove_file(root.path().join("BAT0/scope")).unwrap();
+        assert!(linux_internal_battery_at(root.path()));
+        assert!(!linux_internal_battery_at(&root.path().join("absent")));
     }
 
     #[test]
