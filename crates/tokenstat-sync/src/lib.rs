@@ -33,6 +33,7 @@ pub mod claude_limits;
 pub mod config;
 pub mod creds;
 pub mod cursor;
+mod cursor_app_auth;
 pub mod discover;
 pub mod forge;
 pub mod grok_limits;

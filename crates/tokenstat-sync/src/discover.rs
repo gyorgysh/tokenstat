@@ -158,8 +158,8 @@ fn cursor_app_state_token() -> Option<String> {
             |row| row.get(0),
         )
         .ok()?;
-    let token = value.trim().trim_matches('"').to_string();
-    (!token.is_empty()).then_some(token)
+    let stored = value.trim().trim_matches('"').to_string();
+    crate::cursor_app_auth::decode_stored_access_token(&stored)
 }
 
 fn cursor_state_db() -> Option<std::path::PathBuf> {
@@ -326,6 +326,42 @@ mod tests {
     fn reads_the_expiry_of_a_jwt() {
         assert_eq!(jwt_expiry(&jwt(1_790_136_811)), Some(1_790_136_811));
         assert_eq!(jwt_expiry("not-a-jwt"), None);
+    }
+
+    #[test]
+    fn encrypted_cursor_app_token_decodes_to_jwt() {
+        let Some(path) = cursor_state_db() else {
+            return;
+        };
+        if !path.is_file() {
+            return;
+        }
+        let Some(token) = cursor_app_state_token() else {
+            return;
+        };
+        assert!(
+            token.matches('.').count() == 2,
+            "Cursor app token should decode to a JWT"
+        );
+    }
+
+    #[test]
+    fn cursor_limits_are_fresh_when_app_is_signed_in() {
+        let Some(path) = cursor_state_db() else {
+            return;
+        };
+        if !path.is_file() || cursor_app_state_token().is_none() {
+            return;
+        }
+        let limits = crate::cursor::limits();
+        if !limits.has_reading() {
+            eprintln!(
+                "skip: {}",
+                limits.note.unwrap_or_else(|| "no reading".into())
+            );
+            return;
+        }
+        assert!(!limits.stale);
     }
 
     #[test]

@@ -28,6 +28,11 @@ flate2 = { workspace = true }
 tar = { workspace = true }
 zip = { workspace = true }
 sha2 = { workspace = true }
+sha1 = "0.10"
+pbkdf2 = { version = "0.12", features = ["hmac"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["block-padding"] }
+base64 = "0.23"
 getrandom = { workspace = true }
 atomicwrites = "0.4.4"
 tempfile.workspace = true
@@ -41,5 +46,4 @@ security-framework = "3.7.0"
 core-foundation = "0.10.1"
 
 [dev-dependencies]
-base64 = "0.23"
 tempfile.workspace = true
