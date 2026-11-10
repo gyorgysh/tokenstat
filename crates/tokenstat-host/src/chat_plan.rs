@@ -145,6 +145,20 @@ mod tests {
     }
 
     #[test]
+    fn scanner_survives_buffer_trimming_before_final_plan() {
+        let mut scanner = Scanner::default();
+        let prefix = "a".repeat(1000);
+        assert!(scanner.scan(&prefix).is_none());
+        scanner.shift(900);
+        let text = format!(
+            "{}\n{}",
+            &prefix[900..],
+            block(r#"{"steps":[{"step":"Finish","status":"completed"}]}"#)
+        );
+        assert_eq!(scanner.finish(&text).unwrap()[0]["text"], "Finish");
+    }
+
+    #[test]
     fn only_backends_without_a_reaching_plan_tool_get_a_rule() {
         assert!(rule("codex").is_some_and(|text| text.contains(FENCE)));
         assert!(rule("claude").is_some_and(|text| text.contains(FENCE)));

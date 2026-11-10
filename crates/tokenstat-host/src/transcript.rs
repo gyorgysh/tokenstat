@@ -242,9 +242,9 @@ impl Parser {
     /// Record a plan the agent wrote in its reply, so the next inspection
     /// carries it like a plan from a tool.
     pub(crate) fn report_plan(&mut self, steps: &serde_json::Value) {
-        let before = self.inspection.activity.plan.clone();
+        let before = self.inspection.activity.clone();
         self.inspection.activity.reported_plan(steps);
-        self.inspection_dirty |= self.inspection.activity.plan != before;
+        self.inspection_dirty |= self.inspection.activity != before;
     }
 
     pub(crate) fn inherit_goal(&mut self, snapshot: &crate::chat_inspection::Snapshot) {

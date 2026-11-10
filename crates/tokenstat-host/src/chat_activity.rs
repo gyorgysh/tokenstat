@@ -1521,4 +1521,15 @@ mod tests {
         assert_eq!(snapshot.activity.plan[0].text, "Inspect 🦀");
         assert_eq!(snapshot.activity.plan[0].status, "inProgress");
     }
+
+    #[test]
+    fn empty_reported_plan_publishes_its_metadata() {
+        let mut parser = crate::transcript::Parser::new("codex");
+        parser.report_plan(&json!([]));
+        let snapshot = parser
+            .take_inspection()
+            .expect("empty plan is still a report");
+        assert!(snapshot.activity.plan_reported);
+        assert_eq!(snapshot.activity.plan_source.as_deref(), Some("agent"));
+    }
 }

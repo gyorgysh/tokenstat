@@ -4970,7 +4970,9 @@ impl Store {
             let events = measured(parser.push_events(&chunk.bytes));
             muse_sign_in_required |=
                 backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
-            questions.shift(collect_agent_text(&events, &mut assistant_text));
+            let removed = collect_agent_text(&events, &mut assistant_text);
+            questions.shift(removed);
+            plans.shift(removed);
             self.record_events(id, backend, events);
             self.record_tool_images(id, backend, activity_revision, parser.take_images());
         }
