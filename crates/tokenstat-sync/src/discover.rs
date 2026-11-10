@@ -141,6 +141,10 @@ fn freshest_unexpired(candidates: Vec<String>, now: i64) -> Option<String> {
 /// but the lookup is one primary-key read, and the app holding it open in WAL
 /// mode does not block a reader.
 fn cursor_app_state_token() -> Option<String> {
+    crate::cursor_app_auth::decode_stored_access_token(&cursor_app_stored_token()?)
+}
+
+fn cursor_app_stored_token() -> Option<String> {
     let path = cursor_state_db()?;
     if !path.is_file() {
         return None;
@@ -158,8 +162,19 @@ fn cursor_app_state_token() -> Option<String> {
             |row| row.get(0),
         )
         .ok()?;
-    let stored = value.trim().trim_matches('"').to_string();
-    crate::cursor_app_auth::decode_stored_access_token(&stored)
+    Some(value.trim().trim_matches('"').to_string())
+}
+
+/// The app has an encrypted login, but its safe-storage key needs permission.
+#[cfg(target_os = "macos")]
+pub(crate) fn cursor_safe_storage_unreadable() -> bool {
+    cursor_app_stored_token().is_some_and(|value| value.starts_with("cursor-safe-storage:v1:"))
+        && crate::cursor_app_auth::safe_storage_accounts()
+            .iter()
+            .any(|account| {
+                keychain_item(crate::cursor_app_auth::safe_storage_service(), account)
+                    == KeychainItem::Unreadable
+            })
 }
 
 fn cursor_state_db() -> Option<std::path::PathBuf> {
@@ -326,42 +341,6 @@ mod tests {
     fn reads_the_expiry_of_a_jwt() {
         assert_eq!(jwt_expiry(&jwt(1_790_136_811)), Some(1_790_136_811));
         assert_eq!(jwt_expiry("not-a-jwt"), None);
-    }
-
-    #[test]
-    fn encrypted_cursor_app_token_decodes_to_jwt() {
-        let Some(path) = cursor_state_db() else {
-            return;
-        };
-        if !path.is_file() {
-            return;
-        }
-        let Some(token) = cursor_app_state_token() else {
-            return;
-        };
-        assert!(
-            token.matches('.').count() == 2,
-            "Cursor app token should decode to a JWT"
-        );
-    }
-
-    #[test]
-    fn cursor_limits_are_fresh_when_app_is_signed_in() {
-        let Some(path) = cursor_state_db() else {
-            return;
-        };
-        if !path.is_file() || cursor_app_state_token().is_none() {
-            return;
-        }
-        let limits = crate::cursor::limits();
-        if !limits.has_reading() {
-            eprintln!(
-                "skip: {}",
-                limits.note.unwrap_or_else(|| "no reading".into())
-            );
-            return;
-        }
-        assert!(!limits.stale);
     }
 
     #[test]

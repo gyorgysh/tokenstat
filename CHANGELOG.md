@@ -25,6 +25,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Chats running in another repository no longer keep showing Working in the Mac sidebar after they finish.
 - Android keeps the message field above the keyboard, including on small phones in landscape.
 - Menus on the Mac no longer close by themselves, and selecting text no longer drops the selection, while an agent or a build is writing files in one of your repositories.
+- When Cursor's saved sign-in is locked in Keychain, Account and Home now offer to allow access so its plan limits can be read, instead of saying no session was found.
 
 ## [1.14.0] - 2026-11-07
 

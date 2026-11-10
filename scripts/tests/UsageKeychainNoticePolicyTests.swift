@@ -13,6 +13,9 @@ import Foundation
         precondition(!reopened.dismissed.contains("codex"))
         let partial = UsageKeychainNoticePolicy(saved: "claude_code")
         precondition(partial.offer(affected: ["claude_code", "muse"]) == "muse")
+        precondition(partial.offer(affected: ["cursor"]) == "cursor")
+        policy.dismiss(affected: ["cursor"])
+        precondition(UsageKeychainNoticePolicy(saved: policy.saved).offer(affected: ["cursor"]) == nil)
         precondition(partial.offer(affected: []) == nil)
         print("Keychain notice: provider scope, persisted dismissal and later providers passed")
     }

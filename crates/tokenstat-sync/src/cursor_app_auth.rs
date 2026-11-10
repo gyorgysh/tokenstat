@@ -7,8 +7,6 @@
 //! treated the ciphertext as a session cookie and Cursor rejected every limits
 //! request, leaving the panel on a stale cache.
 
-use std::process::Command;
-
 #[cfg(target_os = "macos")]
 use aes::cipher::KeyIvInit;
 #[cfg(target_os = "macos")]
@@ -61,7 +59,9 @@ fn decode_encrypted_macos(stored: &str) -> Option<String> {
         let Ok(plain) = decrypt_v10(&encrypted[3..], &key) else {
             continue;
         };
-        let token = String::from_utf8(plain).ok()?;
+        let Ok(token) = String::from_utf8(plain) else {
+            continue;
+        };
         let token = token.trim();
         if !token.is_empty() {
             return Some(token.to_string());
@@ -94,22 +94,8 @@ pub(crate) fn safe_storage_service() -> &'static str {
 fn safe_storage_password(account: &str) -> Option<String> {
     match crate::discover::keychain_item(SAFE_STORAGE_SERVICE, account) {
         crate::discover::KeychainItem::Found(secret) => Some(secret),
-        _ => security_generic_password(SAFE_STORAGE_SERVICE, account),
+        _ => None,
     }
-}
-
-#[cfg(target_os = "macos")]
-fn security_generic_password(service: &str, account: &str) -> Option<String> {
-    let output = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", service, "-a", account, "-w"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8(output.stdout).ok()?;
-    let trimmed = text.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 #[cfg(target_os = "macos")]
