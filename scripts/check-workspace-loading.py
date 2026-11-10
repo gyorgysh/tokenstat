@@ -16,8 +16,8 @@ while depth:
     end += 1
 method = source[start:end]
 swift = r'''import Foundation
-struct WorkspaceFolder { let id: String; var name = "Fixture"; var exists = true }
-struct WorkspaceSummary { let id: String }
+struct WorkspaceFolder: Equatable { let id: String; var name = "Fixture"; var exists = true }
+struct WorkspaceSummary: Equatable { let id: String }
 struct EcosystemProject { let id: String; let name: String; let host: String }
 @MainActor final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: String? = "A" }
 @MainActor enum EcosystemPublisher {
