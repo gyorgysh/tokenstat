@@ -2654,20 +2654,18 @@ struct RootView: View {
             #endif
             projectsSectionMenu()
             #if os(macOS)
-            Button {
-                workspaces.requestAdd()
-            } label: {
-                Image(systemName: "plus")
-                    .font(Theme.font(12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    // The glyph is small, the target is not. The frame and
-                    // the shape are what make it easy to hit, by pointer or touch.
-                    .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
-                    .contentShape(.rect)
+            if projectsDisplay == .byChat && !workspaces.folders.isEmpty {
+                projectsAddMenu()
+            } else {
+                // A folder with a plus, not a bare plus: in the folder view
+                // this only ever adds a repository.
+                SidebarHeaderIconButton(
+                    systemImage: "folder.badge.plus",
+                    help: L10n.text("apple.rootview.add_a_project_folder.1fb6a975")
+                ) {
+                    workspaces.requestAdd()
+                }
             }
-            .buttonStyle(.plain)
-            .help(L10n.text("apple.rootview.add_a_project_folder.1fb6a975"))
-            .accessibilityLabel(L10n.text("apple.rootview.add_a_project_folder.1fb6a975"))
             #endif
         }
 
@@ -3177,6 +3175,31 @@ struct RootView: View {
                     Button(L10n.text("common.sidebar.move_servers_above_projects"), .move) { moveSidebarSection("servers", before: "projects") }
                 } else {
                     Button(L10n.text("common.sidebar.move_projects_above_servers"), .move) { moveSidebarSection("projects", before: "servers") }
+                }
+            }
+        }
+    }
+
+    /// The chat view's add button. A list of chats is where a new chat is
+    /// most often wanted, so it leads, with a repository to start it in.
+    /// Adding a repository (a folder here or a clone on another machine)
+    /// stays one choice away.
+    private func projectsAddMenu() -> some View {
+        ToolbarMenuButton(
+            systemImage: "plus",
+            help: L10n.text("common.sidebar.add_menu"),
+            diameter: Theme.Control.sidebarIcon,
+            glyphSize: 12
+        ) {
+            Button(L10n.text("apple.rootview.new_chat.db18382a"), .create) { startNewChat() }
+            Menu(L10n.text("common.sidebar.new_chat_in")) {
+                ForEach(workspaces.folders) { folder in
+                    Button(folder.name, .reveal) { startNewChat(in: folder) }
+                }
+            }
+            Section {
+                Button(L10n.text("apple.rootview.add_a_project_folder.1fb6a975"), .reveal) {
+                    workspaces.requestAdd()
                 }
             }
         }

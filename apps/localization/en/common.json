@@ -89,6 +89,8 @@
   "common.sidebar.expand_projects": "Expand Repositories",
   "common.sidebar.filter_repositories": "Filter repositories and chats",
   "common.sidebar.filter_chats": "Filter chats",
+  "common.sidebar.add_menu": "New chat or repository",
+  "common.sidebar.new_chat_in": "New chat in",
   "common.sidebar.view_by_repository": "By repository",
   "common.sidebar.view_by_chat": "By chat",
   "common.sidebar.sort_manual": "Manual",
