@@ -652,7 +652,7 @@ internal sealed partial class ChatPage
         if (group.Plain) return PlainStepLine(id, group);
         var tint = group.Running ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
-        for (var column = 0; column < 6; column++)
+        for (var column = 0; column < 7; column++)
         {
             row.ColumnDefinitions.Add(new ColumnDefinition
             {
@@ -713,8 +713,7 @@ internal sealed partial class ChatPage
         }
         if (FailureMark(group, 11, mono: true) is { } failure)
         {
-            // Shares the diff stat's column: a step that failed changed nothing.
-            Grid.SetColumn(failure, 4);
+            Grid.SetColumn(failure, 5);
             row.Children.Add(failure);
         }
         if (group.Cost is > 0 and var cost)
@@ -727,7 +726,7 @@ internal sealed partial class ChatPage
                 Foreground = Theme.AccentBrush,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(spend, 5);
+            Grid.SetColumn(spend, 6);
             row.Children.Add(spend);
         }
 
