@@ -2315,7 +2315,7 @@ public sealed partial class MainWindow : Window
         if (SidebarPreferences.Shared.ProjectsDisplay == SidebarProjectsDisplay.ByChat)
         {
             RebuildChatListCore();
-            RestoreSelection(selectedTag);
+            KeepSelectedRow(selectedTag);
             return;
         }
         QueueRecentReorder();
@@ -2469,7 +2469,8 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void RestoreSelection(string? selectedTag)
+    /// <summary>Puts the selection back on a row a rebuild replaced, without navigating.</summary>
+    private void KeepSelectedRow(string? selectedTag)
     {
         if (selectedTag is not null
             && ((_nav.SelectedItem as NavigationViewItem)?.Tag as string) != selectedTag
