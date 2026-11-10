@@ -150,7 +150,7 @@ internal sealed class InspectorHost : Grid
         Children.Add(_rule);
         _resizeHandle = new ResizeHandle
         {
-            Width = 6, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Width = 6, Background = Theme.ClearBrush,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_resizeHandle, L10n.Text("windows.inspectorhost.resize_details_panel.e84be123"));

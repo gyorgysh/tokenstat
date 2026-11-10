@@ -81,7 +81,7 @@ internal static class Buttons
             Padding = new Thickness(0),
             CornerRadius = new CornerRadius(8),
             BorderThickness = new Thickness(0),
-            Background = isAccent ? Theme.AccentSoftBrush : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = isAccent ? Theme.AccentSoftBrush : Theme.ClearBrush,
             Foreground = isAccent ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
@@ -102,7 +102,7 @@ internal static class Buttons
         };
         button.PointerExited += (_, _) =>
         {
-            button.Background = isAccent ? Theme.AccentSoftBrush : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            button.Background = isAccent ? Theme.AccentSoftBrush : Theme.ClearBrush;
             if (!isAccent)
             {
                 button.Foreground = Theme.Brush(static () => Theme.ControlGlyph);

@@ -760,7 +760,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 Content = content,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
+                Background = Theme.ClearBrush,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0, Theme.SpaceS, 0, Theme.SpaceS),
             };

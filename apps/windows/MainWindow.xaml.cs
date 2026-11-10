@@ -69,6 +69,9 @@ public sealed partial class MainWindow : Window
     {
         Content = L10n.Text("common.projects"),
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        // The default header style disables the item, which greys out and
+        // blocks the view switch, filter, menu and add buttons it now holds.
+        IsEnabled = true,
     };
     /// <summary>Filter over repository and chat names in the Repositories section.</summary>
     private string _projectsFilter = "";
@@ -209,7 +212,7 @@ public sealed partial class MainWindow : Window
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
         SidebarChrome.SetAdaptiveThreshold(_nav, ShellWidths.Shared.Sidebar + ShellWidths.ContentMinimum);
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
-        _nav.Background = new SolidColorBrush(Colors.Transparent);
+        _nav.Background = Theme.ClearBrush;
         _nav.Resources["NavigationViewDefaultPaneBackground"] = _chromeSidebar;
         _nav.Resources["NavigationViewExpandedPaneBackground"] = _chromeSidebar;
         _nav.Resources["NavigationViewContentBackground"] = _chromeBackground;
@@ -294,7 +297,7 @@ public sealed partial class MainWindow : Window
         InitializeDesktopActions();
         _paneResize.Width = 6;
         _paneResize.HorizontalAlignment = HorizontalAlignment.Left;
-        _paneResize.Background = new SolidColorBrush(Colors.Transparent);
+        _paneResize.Background = Theme.ClearBrush;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_paneResize, L10n.Text("windows.mainwindow_xaml.resize_projects_panel.4be39519"));
         _paneResize.DragDelta += (_, drag) =>
         {
@@ -631,6 +634,8 @@ public sealed partial class MainWindow : Window
             {
                 RebuildFolderItems();
                 ResolveDesktopActions();
+                // New Chat may have opened before the folders arrived.
+                if (_newChatPage?.IsLoaded == true) _newChatPage.RefreshRepositories();
             });
             _ = RemoteWorkspaces.SweepAsync();
         }
@@ -690,23 +695,17 @@ public sealed partial class MainWindow : Window
             }
             _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"])));
         }
+        // Another computer's folders sit beside this one's, as on the Mac:
+        // one level, named "Computer / folder", not nested under a computer
+        // row that pushes every folder and chat a step further in.
         foreach (var peer in byChat ? Enumerable.Empty<IGrouping<string, RemoteFolder>>() : RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey))
         {
-            var label = peer.First().MachineLabel;
             var stale = RemoteWorkspaces.IsStale(peer.Key);
-            var machine = new NavigationViewItem
-            {
-                Content = stale ? label + " · Offline" : label,
-                Tag = "machine:" + peer.Key,
-                Icon = new SymbolIcon { Symbol = Symbol.Globe },
-                SelectsOnInvoked = false,
-                IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:machine:" + peer.Key, true),
-            };
-            TrackSidebarExpansion(machine);
-            ToolTipService.SetToolTip(machine, stale ? label + " · Offline; showing saved folders" : label);
             foreach (var folder in SidebarProjectsLayout.OrderFolders(peer, sort, folder => folder.Name, folder => FolderActivity(folder.Id)))
-                machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git));
-            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, machine));
+            {
+                var machine = folder.MachineLabel + (stale ? " · Offline" : "");
+                _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git, machine)));
+            }
         }
         if (_localFolders.Count == 0 && RemoteWorkspaces.CachedFolders().Count == 0)
         {
@@ -770,11 +769,11 @@ public sealed partial class MainWindow : Window
         SidebarProjectsLayout.FolderMatches(_projectsFilter, name, machine,
             _liveChats.Where(chat => chat is not null && Format.Text(chat, "workspaceId") == folderId).Select(chat => chat!));
 
-    private NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null)
+    private NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null, string? machine = null)
     {
         var parent = new NavigationViewItem
         {
-            Content = FolderLabel(name, git),
+            Content = FolderLabel(name, git, machine),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = "ws:" + id + ":Launcher",
             IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ws:" + id + ":Launcher", true),
@@ -860,13 +859,16 @@ public sealed partial class MainWindow : Window
         more.Padding = new Thickness(0);
         if (!remote)
         {
-            var share = Buttons.ToolbarIcon(ActionIcon.Connect, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), (_, _) => OpenTeamFolder(id, name, path));
+            // The Mac draws a plain link here. Windows' Connect is the Wifi
+            // glyph for joining devices, so borrow Pair's link instead.
+            var share = Buttons.ToolbarIcon(ActionIcon.Pair, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), (_, _) => OpenTeamFolder(id, name, path));
             share.Width = share.Height = 22;
-            if (shared) SidebarChrome.RevealActions(parent, compose, more); else SidebarChrome.RevealActions(parent, share, compose, more);
+            // Hover-only like the Mac, shared or not: it takes the counts' seat.
+            SidebarChrome.RevealActions(parent, share, compose, more);
             parent.Content = SidebarChrome.ProjectContent(parent, label, remote, shared, share, compose, more);
         }
         else { SidebarChrome.RevealActions(parent, compose, more); parent.Content = SidebarChrome.ProjectContent(parent, label, remote, compose, more); }
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, shared ? name + " · " + L10n.Text("common.teams.checkout_shared") : name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, (machine is null ? "" : machine + " / ") + (shared ? name + " · " + L10n.Text("common.teams.checkout_shared") : name));
         return parent;
     }
 
@@ -1156,7 +1158,9 @@ public sealed partial class MainWindow : Window
                         if (tag.StartsWith("ws:", StringComparison.Ordinal) && tag.EndsWith(":Launcher", StringComparison.Ordinal))
                         {
                             var id = tag["ws:".Length..^":Launcher".Length];
-                            shown = FolderPassesFilter(id, Format.Text(_localFolders.FirstOrDefault(f => Format.Text(f, "id") == id), "name", id), local);
+                            shown = RemoteWorkspaces.CachedFolder(id) is { } remoteFolder
+                                ? FolderPassesFilter(id, remoteFolder.Name, remoteFolder.MachineLabel)
+                                : FolderPassesFilter(id, Format.Text(_localFolders.FirstOrDefault(f => Format.Text(f, "id") == id), "name", id), local);
                         }
                         else if (tag.StartsWith("machine:", StringComparison.Ordinal))
                         {
@@ -1186,22 +1190,49 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private static UIElement FolderLabel(string name, JsonNode? git)
+    private static UIElement FolderLabel(string name, JsonNode? git, string? machine = null)
     {
         var label = new Grid { ColumnSpacing = 6 };
         label.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         label.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        label.Children.Add(new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (machine is null)
+        {
+            label.Children.Add(new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+        }
+        else
+        {
+            // "Computer / folder". The computer gives way first, so a long
+            // computer name never hides which folder this is.
+            var names = new Grid();
+            names.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            names.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            names.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            names.Children.Add(new TextBlock { Text = machine, FontSize = 13, Opacity = 0.6, MaxWidth = 90,
+                TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
+            var slash = new TextBlock { Text = " / ", FontSize = 13, Opacity = 0.6 };
+            Grid.SetColumn(slash, 1);
+            names.Children.Add(slash);
+            var folderName = new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
+            Grid.SetColumn(folderName, 2);
+            names.Children.Add(folderName);
+            label.Children.Add(names);
+        }
+        // Always present, even empty: it holds the right-hand seat the row's
+        // hover actions take over, so the name keeps its width either way.
+        // The counts sit flush right inside it, like the Mac's trailing frame.
+        var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         if (git is not null && Format.Flag(git, "isRepo"))
         {
-            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             var added = Format.Long(git, "added");
             var removed = Format.Long(git, "removed");
             if (added > 0) line.Children.Add(new TextBlock { Text = "+" + added, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffAdded) });
             if (removed > 0) line.Children.Add(new TextBlock { Text = "−" + removed, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffRemoved) });
-            Grid.SetColumn(line, 1);
-            label.Children.Add(line);
         }
+        var seat = new Grid { Name = SidebarChrome.CountsName, VerticalAlignment = VerticalAlignment.Center };
+        seat.Children.Add(line);
+        Grid.SetColumn(seat, 1);
+        label.Children.Add(seat);
         return label;
     }
 
@@ -1268,7 +1299,7 @@ public sealed partial class MainWindow : Window
         // the terminal and the screen own a black one, and a local value wins.
         if (page.ReadLocalValue(Control.BackgroundProperty) == DependencyProperty.UnsetValue)
         {
-            page.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            page.Background = Theme.ClearBrush;
         }
         if (_toolbarSource is not null)
         {
@@ -2678,7 +2709,7 @@ public sealed partial class MainWindow : Window
             Width = expanded ? double.NaN : 44, Height = 44, Padding = new Thickness(expanded ? 0 : 4),
             HorizontalAlignment = expanded ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
             MinWidth = 0, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0),
+            Background = Theme.ClearBrush, BorderThickness = new Thickness(0),
         };
         if (avatar is not null) ProfileHoverRing.Attach(avatar, footer);
         var label = AppServices.Update.IsReady || AppServices.Update.IsAvailable ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : L10n.Text("windows.mainwindow_xaml.account_0.d8cd9318", $"{name}");
@@ -2726,7 +2757,7 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(settings, 1);
         bar.Children.Add(settings);
         return new Border { Child = bar, Padding = new Thickness(0), Margin = new Thickness(6),
-            Background = new SolidColorBrush(Colors.Transparent) };
+            Background = Theme.ClearBrush };
     }
 
     private void TrySize()

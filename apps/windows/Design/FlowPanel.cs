@@ -10,6 +10,8 @@ internal sealed class FlowPanel : Panel
 {
     public double Spacing { get; set; } = Theme.SpaceS;
     public double MinimumItemWidth { get; set; }
+    /// <summary>Centre each line, like the Mac's FlowRow, instead of starting it at the left.</summary>
+    public bool CentersLines { get; set; }
 
     private double ItemWidth(double width)
     {
@@ -38,9 +40,11 @@ internal sealed class FlowPanel : Panel
         var row = new List<(UIElement Child, double X, double Width)>();
         void FinishRow()
         {
+            var shift = CentersLines && row.Count > 0
+                ? Math.Max(0, (width - (row[^1].X + row[^1].Width)) / 2) : 0;
             if (arrange)
                 foreach (var cell in row)
-                    cell.Child.Arrange(new Rect(cell.X, y, cell.Width,
+                    cell.Child.Arrange(new Rect(cell.X + shift, y, cell.Width,
                         MinimumItemWidth > 0 ? rowHeight : cell.Child.DesiredSize.Height));
             row.Clear();
         }

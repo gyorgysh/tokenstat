@@ -95,7 +95,7 @@ internal static class WorkspaceBypass
         {
             Content = row,
             Foreground = on ? Theme.Brush(static () => Theme.Warning) : Theme.Brush(static () => Theme.ControlGlyph),
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(8, 0, 8, 0),

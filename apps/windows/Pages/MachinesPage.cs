@@ -1729,7 +1729,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             Child = row,
             Padding = new Thickness(Theme.SpaceS),
             CornerRadius = new CornerRadius(8),
-            Background = selected ? Theme.AccentSoftBrush : Theme.Brush(Microsoft.UI.Colors.Transparent),
+            Background = selected ? Theme.AccentSoftBrush : Theme.ClearBrush,
             BorderBrush = selected ? Theme.AccentBrush : Theme.BorderBrush,
             BorderThickness = new Thickness(1),
         };

@@ -823,7 +823,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         };
         var button = new Button
         {
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch,

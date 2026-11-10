@@ -319,7 +319,7 @@ internal sealed class HeatmapView : StackPanel
         {
             Width = contentWidth,
             Height = contentHeight,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(0),
         };

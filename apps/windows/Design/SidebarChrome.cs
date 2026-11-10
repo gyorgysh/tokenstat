@@ -150,7 +150,7 @@ internal static class SidebarChrome
         {
             Content = chevron, Width = 16, Height = 24, MinWidth = 0, MinHeight = 0,
             Padding = new Thickness(0), BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
         };
         AutomationProperties.SetName(expand, L10n.Text("windows.mainwindow_xaml.expand_collapse"));
         // Content can move to a reused native container. Resolve its current
@@ -169,14 +169,31 @@ internal static class SidebarChrome
         grid.Children.Add(folder);
         Grid.SetColumn((FrameworkElement)label, 2);
         grid.Children.Add(label);
-        foreach (var action in actions)
-        {
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            Grid.SetColumn(action, grid.ColumnDefinitions.Count - 1);
-            grid.Children.Add(action);
-        }
+        // As on the Mac: the change counts sit against the right edge, and the
+        // hover actions take that same seat rather than columns of their own,
+        // which left the counts stranded mid-row. The counts slot is held at
+        // the actions' width so the name never moves when they appear.
+        const double spacing = 4;
+        var seat = new StackPanel { Orientation = Orientation.Horizontal, Spacing = spacing,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var action in actions) { action.VerticalAlignment = VerticalAlignment.Center; seat.Children.Add(action); }
+        Grid.SetColumn(seat, 2);
+        grid.Children.Add(seat);
+        if (Counts(label) is FrameworkElement counts)
+            counts.MinWidth = actions.Sum(action => double.IsNaN(action.Width) ? 22 : action.Width) + spacing * Math.Max(0, actions.Length - 1);
         return grid;
     }
+
+    /// <summary>The change counts a folder label reserves at its right edge, if it has any.</summary>
+    private static FrameworkElement? Counts(object? root)
+    {
+        if (root is FrameworkElement { Name: CountsName } found) return found;
+        if (root is Panel panel)
+            foreach (var child in panel.Children)
+                if (Counts(child) is { } match) return match;
+        return null;
+    }
+    internal const string CountsName = "SidebarChangeCounts";
 
     // CompactPaneLength is zero because the shell owns its rail. That also
     // makes the native icon seat zero-width. Project icons and the leading
@@ -220,7 +237,7 @@ internal static class SidebarChrome
         {
             Content = text, FontSize = 11, Opacity = 0.7, MinWidth = 0, MinHeight = 0,
             Padding = new Thickness(0, 4, 0, 4), BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             HorizontalAlignment = HorizontalAlignment.Left,
         };
         var more = Link(label);
@@ -251,7 +268,15 @@ internal static class SidebarChrome
             var binding = new ActionBinding();
             void Paint()
             {
-                foreach (var action in binding.Actions) action.Opacity = binding.Pointer || binding.Focused || action.FocusState != FocusState.Unfocused ? 1 : 0;
+                var shown = false;
+                foreach (var action in binding.Actions)
+                {
+                    action.Opacity = binding.Pointer || binding.Focused || action.FocusState != FocusState.Unfocused ? 1 : 0;
+                    action.IsHitTestVisible = action.Opacity > 0;
+                    shown |= action.Opacity > 0;
+                }
+                // The counts give their seat to the actions while they show.
+                if (Counts((owner as ContentControl)?.Content) is { } counts) counts.Opacity = shown ? 0 : 1;
             }
             void RefreshFocus()
             {
@@ -269,7 +294,11 @@ internal static class SidebarChrome
             return binding;
         });
         state.Actions = actions;
-        foreach (var action in state.Actions) action.Opacity = state.Pointer || state.Focused || action.FocusState != FocusState.Unfocused ? 1 : 0;
+        foreach (var action in state.Actions)
+        {
+            action.Opacity = state.Pointer || state.Focused || action.FocusState != FocusState.Unfocused ? 1 : 0;
+            action.IsHitTestVisible = action.Opacity > 0;
+        }
     }
 
     public static Button RailButton(IconElement icon, string label, RoutedEventHandler click)
@@ -294,7 +323,7 @@ internal static class SidebarChrome
     public static void Select(Button button, bool selected)
     {
         button.Background = selected ? Theme.Brush(static () => Theme.RowSelected)
-            : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            : Theme.ClearBrush;
         button.Foreground = selected ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
         button.Resources["ButtonBackgroundPointerOver"] = Theme.Brush(static () => Theme.RowHighlight);
         button.Resources["ButtonBackgroundPressed"] = Theme.Brush(static () => Theme.RowSelected);
@@ -328,7 +357,7 @@ internal static class SidebarChrome
             Content = content, Height = 32, MinHeight = 0, MinWidth = 0,
             Padding = new Thickness(10, 0, 10, 0), Margin = new Thickness(4, 0, 4, 0),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(8),
         };
         button.Click += click;

@@ -618,7 +618,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         };
         var button = new Button
         {
-            Background = new SolidColorBrush(Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -922,7 +922,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             Padding = new Thickness(0, 0, 12, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
             Foreground = Theme.AccentBrush,
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button,

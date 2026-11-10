@@ -255,7 +255,7 @@ internal static class SidebarLive
         panel.Children.Add(label);
         var age = new TextBlock
         {
-            Text = caption ?? (ms is null ? "" : RelativeShort(ms.Value)),
+            Text = caption ?? (ms is null ? "" : CompactAge(ms.Value)),
             FontSize = 10, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center,
             MaxWidth = caption is null ? double.PositiveInfinity : 110, TextTrimming = TextTrimming.CharacterEllipsis,
         };
@@ -399,7 +399,7 @@ internal static class SidebarLive
         var open = new Button
         {
             Content = row,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0, 1, 0, 0),
             BorderBrush = Theme.BorderBrush,
             Padding = new Thickness(12, 8, 12, 8),
@@ -597,6 +597,27 @@ internal static class SidebarLive
             return L10n.Text("windows.sidebarlive.days_ago", (int)age.TotalDays);
         }
         return moment.LocalDateTime.ToString("d", CultureInfo.CurrentCulture);
+    }
+
+    /// <summary>
+    /// The chat row's age, the Mac's CompactAge: "now", "5m", "3h", "4d",
+    /// "6w", "1y". Never a full date, so the title keeps the row's width.
+    /// </summary>
+    public static string CompactAge(long ms)
+    {
+        DateTimeOffset moment;
+        try { moment = DateTimeOffset.FromUnixTimeMilliseconds(ms); }
+        catch { return ""; }
+        var seconds = (DateTimeOffset.Now - moment).TotalSeconds;
+        return seconds switch
+        {
+            < 60 => L10n.Text("windows.sidebarlive.now"),
+            < 3600 => L10n.Text("windows.sidebarlive.age_minutes", (int)(seconds / 60)),
+            < 86_400 => L10n.Text("windows.sidebarlive.age_hours", (int)(seconds / 3600)),
+            < 86_400 * 14 => L10n.Text("windows.sidebarlive.age_days", (int)(seconds / 86_400)),
+            < 86_400 * 365 => L10n.Text("windows.sidebarlive.age_weeks", (int)(seconds / (86_400 * 7))),
+            _ => L10n.Text("windows.sidebarlive.age_years", (int)(seconds / (86_400 * 365))),
+        };
     }
 
     /// <summary>Display name for a harness, the same spelling the Mac uses.</summary>

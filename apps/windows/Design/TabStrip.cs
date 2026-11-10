@@ -41,7 +41,7 @@ internal static class TabStrip
             Height = Height,
             Background = showsChrome
                 ? Theme.TabStripBrush
-                : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                : Theme.ClearBrush,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Top,
         };
@@ -156,8 +156,8 @@ internal static class TabStrip
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
         };
-        tab.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        tab.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        tab.Resources["ButtonBorderBrushPointerOver"] = Theme.ClearBrush;
+        tab.Resources["ButtonBorderBrushPressed"] = Theme.ClearBrush;
         void Paint(bool now)
         {
             if (mark is not null)
@@ -170,13 +170,13 @@ internal static class TabStrip
             text.Foreground = now ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
             marker.Background = now
                 ? Theme.AccentBrush
-                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                : Theme.ClearBrush;
             // The native hover and pressed fills are grey, which on a dark strip
             // is the same colour as everything around it. Pin them to the resting
             // fills so the selected tab stays the only accent on the row.
             Brush resting = now
                 ? Theme.AccentSoftBrush
-                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                : Theme.ClearBrush;
             tab.Background = resting;
             tab.Resources["ButtonBackgroundPointerOver"] = resting;
             tab.Resources["ButtonBackgroundPressed"] = resting;

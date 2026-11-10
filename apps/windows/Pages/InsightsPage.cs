@@ -1372,7 +1372,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 BorderThickness = new Thickness(0),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                Background = Theme.ClearBrush,
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(4),
                 Margin = new Thickness(-4),
@@ -1381,7 +1381,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             hit.Click += (_, _) => SelectAndOpen(tab, captured);
             hit.PointerEntered += (_, _) => hit.Background = Theme.Brush(static () => Theme.RowHighlight);
             hit.PointerExited += (_, _) => hit.Background =
-                new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                Theme.ClearBrush;
             stack.Children.Add(hit);
         }
         var more = ActionIconGlyph.Button(
@@ -1549,7 +1549,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Padding = new Thickness(0),
                 Background = key == _selectedKey
                     ? Theme.Brush(static () => Theme.RowSelected)
-                    : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                    : Theme.ClearBrush,
             };
             var captured = key;
             hit.Click += (_, _) =>
@@ -1562,7 +1562,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             {
                 hit.PointerEntered += (_, _) => hit.Background = Theme.Brush(static () => Theme.RowHighlight);
                 hit.PointerExited += (_, _) => hit.Background =
-                    new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                    Theme.ClearBrush;
             }
             stack.Children.Add(hit);
             var shareBar = new Grid { Height = 1 };

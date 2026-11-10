@@ -95,7 +95,7 @@ internal static class ServerLauncher
         var button = new Button
         {
             Content = Verb(title, icon),
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(4, 2, 4, 2),
             MinHeight = 0,

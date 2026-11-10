@@ -130,8 +130,8 @@ internal static class SegmentedCapsule
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
         };
-        segment.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        segment.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        segment.Resources["ButtonBorderBrushPointerOver"] = Theme.ClearBrush;
+        segment.Resources["ButtonBorderBrushPressed"] = Theme.ClearBrush;
         void Paint(bool now)
         {
             if (mark is not null)
@@ -141,7 +141,7 @@ internal static class SegmentedCapsule
             text.Foreground = now ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
             Brush resting = now
                 ? Theme.AccentSoftBrush
-                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                : Theme.ClearBrush;
             segment.Background = resting;
             // Hover in the row grey, pressed settling back to the resting fill.
             // The native grey hover would be a second grey beside the row one.

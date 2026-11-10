@@ -61,11 +61,14 @@ internal sealed class SidebarHoverPresenter
     public static Button DetailsButton()
     {
         var button = new Button { Name = "SidebarDetails", Width = 28, Height = 28, MinWidth = 0, MinHeight = 0,
-            Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Theme.ClearBrush,
             Content = new FontIcon { Glyph = "\uE946", FontSize = 14, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") } };
         var label = L10n.Text("windows.sidebarhovercard.details");
+        // No tooltip: its popup takes the pointer from the row, the row drops
+        // its hover, the tooltip closes and the pointer re-enters, so the row
+        // blinks for as long as the mouse rests here. The card it opens is the
+        // explanation, and the accessible name still says what it does.
         AutomationProperties.SetName(button, label); AutomationProperties.SetAutomationId(button, "sidebar.details");
-        ToolTipService.SetToolTip(button, label);
         button.Click += (_, _) => {
             // NavigationRows can move fresh content into a retained container.
             // Resolve its current row instead of capturing the discarded one.

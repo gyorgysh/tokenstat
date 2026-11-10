@@ -54,9 +54,9 @@ internal sealed partial class TeamsPage
         var detail = new TextBlock { Text = L10n.Text("common.teams.ask_runs_on", computer), FontSize = 12, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         ToolTipService.SetToolTip(detail, L10n.Text("common.teams.ask_detail", computer));
         var question = new TextBox { Text = model.Text, PlaceholderText = L10n.Text("common.teams.ask_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
-            BorderThickness = new Thickness(0), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), MinHeight = 40, MaxHeight = 180 };
-        question.Resources["TextControlBackgroundFocused"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        question.Resources["TextControlBackgroundPointerOver"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            BorderThickness = new Thickness(0), Background = Theme.ClearBrush, MinHeight = 40, MaxHeight = 180 };
+        question.Resources["TextControlBackgroundFocused"] = Theme.ClearBrush;
+        question.Resources["TextControlBackgroundPointerOver"] = Theme.ClearBrush;
         question.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
         Button? ask = null;
         ask = Buttons.Primary(L10n.Text("common.teams.ask"), ActionIcon.Run, async (_, _) => {
