@@ -324,6 +324,11 @@ impl Activity {
         self.plan_reported = true;
     }
 
+    /// A plan the agent wrote in its reply (`chat_plan`), as `[{text, status}]`.
+    pub(crate) fn reported_plan(&mut self, steps: &Value) {
+        self.plan(steps, "text", "agent");
+    }
+
     fn agent(&mut self, mut agent: Agent) {
         self.agents_reported = true;
         if let Some(previous) = self.agents.iter_mut().find(|old| old.id == agent.id) {

@@ -21,6 +21,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- Codex and Claude Code chats show their plan in the Plan panel again, updated as they work, instead of writing it as chat messages. Codex now asks its questions as question cards rather than through a prompt the app could not show.
 - Chats running in another repository no longer keep showing Working in the Mac sidebar after they finish.
 - Android keeps the message field above the keyboard, including on small phones in landscape.
 
