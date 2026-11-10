@@ -466,7 +466,8 @@ fn stored_credentials() -> Option<Stored> {
 }
 
 /// What the Keychain walk found.
-#[cfg(any(target_os = "macos", test))]
+// macOS only: a Keychain walk, and `Store::Keychain` exists only there.
+#[cfg(target_os = "macos")]
 struct Picked {
     best: Option<Stored>,
     plugin_only: Option<Stored>,
@@ -476,7 +477,7 @@ struct Picked {
 /// The login among every Claude Code item, plus whether some item could not
 /// be read. Claude Code has moved its login between these items more than
 /// once, so the one that runs out last is the one it wrote most recently.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn pick_login(items: Vec<(String, crate::discover::KeychainItem)>) -> Picked {
     let mut picked = Picked {
         best: None,
@@ -974,6 +975,7 @@ mod tests {
         assert!(out.windows.is_empty());
         assert!(out.note.is_some());
     }
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_newest_login_wins_and_an_unreadable_item_is_remembered() {
         use crate::discover::KeychainItem::{Found, Missing, Unreadable};

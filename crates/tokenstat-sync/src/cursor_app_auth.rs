@@ -6,6 +6,10 @@
 //! from the `Cursor Safe Storage` Keychain item. Without decryption tokenstat
 //! treated the ciphertext as a session cookie and Cursor rejected every limits
 //! request, leaving the panel on a stale cache.
+//!
+//! Decryption is macOS only. Elsewhere the Keychain names and the decoder are
+//! compiled but unused, because a plain token still passes through.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 #[cfg(target_os = "macos")]
 use aes::cipher::KeyIvInit;
