@@ -1349,6 +1349,20 @@ final class ChatModel {
     private var chatListCache: [String: [ChatConversation]] = [:]
     private var sidebarListErrors: [String: (scope: WorkReference.Scope, message: String)] = [:]
     private static let chatListCacheCap = 30
+    /// The cross-project sidebar needs every registered folder's list at once.
+    @ObservationIgnored private var sidebarWorkspaceIDs: Set<String> = []
+
+    func retainSidebarWorkspaceLists(_ ids: [String]) {
+        sidebarWorkspaceIDs = Set(ids)
+        trimChatListCache()
+    }
+
+    private func trimChatListCache() {
+        while chatListCache.count > Self.chatListCacheCap,
+              let drop = chatListCache.keys.first(where: { !sidebarWorkspaceIDs.contains($0) }) {
+            chatListCache.removeValue(forKey: drop)
+        }
+    }
 
     /// The conversations to draw under this folder in the sidebar. The live
     /// list for the folder on screen, otherwise what its last load read, or
@@ -1407,10 +1421,7 @@ final class ChatModel {
         sidebarListErrors[folderID] = nil
         guard chatListCache[folderID] != list else { return }
         chatListCache[folderID] = list
-        if chatListCache.count > Self.chatListCacheCap,
-           let drop = chatListCache.keys.first(where: { $0 != folderID }) {
-            chatListCache.removeValue(forKey: drop)
-        }
+        trimChatListCache()
         noteRunningChats()
     }
 

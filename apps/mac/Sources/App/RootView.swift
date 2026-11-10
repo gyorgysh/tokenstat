@@ -2703,6 +2703,13 @@ struct RootView: View {
                 ForEach(visibleProjectFolders) { folder in
                     projectRow(folder)
                 }
+                .task(id: workspaces.folders.map(\.id) + [projectsSort.rawValue, showingProjectsFilter ? "filter" : ""]) {
+                    #if os(macOS)
+                    if showingProjectsFilter || projectsSort == .recent {
+                        await warmAllProjectChatLists()
+                    }
+                    #endif
+                }
                 #if os(macOS)
                 if workspaceDropBeforeID == WorkspaceDrag.end {
                     workspaceInsertionLine
@@ -3226,6 +3233,7 @@ struct RootView: View {
     }
 
     private func warmAllProjectChatLists() async {
+        chat.retainSidebarWorkspaceLists(workspaces.folders.map(\.id))
         await BridgeLaunch.wait()
         for folder in workspaces.folders {
             await chat.warmWorkspacePreviews(folder.id, includeMessages: false)
