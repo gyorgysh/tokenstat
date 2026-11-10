@@ -50,7 +50,7 @@ struct SidebarRowActions: View {
                     .accessibilityLabel(L10n.text("apple.sidebarrowactions.actions_for_0.29a5141b", "\(name)"))
             }
         }
-        .frame(width: 24, height: 24)
+        .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
         .accessibilityHidden(!visible)
@@ -63,11 +63,11 @@ struct SidebarRowActions: View {
 
     private func glyph(_ symbol: String) -> some View {
         Image(systemName: symbol)
-            .font(Theme.fit(11, weight: .semibold))
+            .font(Theme.fit(12, weight: .semibold))
             .foregroundStyle(controlHovered ? Theme.accent : Color.secondary)
-            .frame(width: 24, height: 24)
+            .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
             .background(controlHovered ? Theme.accentSoft : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5))
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .contentShape(.rect)
     }
 }

@@ -207,6 +207,18 @@ struct RootView: View {
     /// the title bar. Keep the longer list opt-in so a busy workspace does
     /// not turn the sidebar into a transcript index.
     @State private var expandedChatHistories = SidebarPreferences.shared.expandedIDs("history:")
+    /// Filter over repository and chat names in the Repositories sidebar.
+    @State private var projectsFilter = ""
+    /// Whether the filter field is open under the Repositories heading. It
+    /// stays shut until asked for, so the sidebar has one search, not two.
+    @State private var showingProjectsFilter = false
+    @State private var projectsDisplay = SidebarPreferences.shared.projectsDisplay
+    @State private var projectsSort = SidebarPreferences.shared.projectsSort
+    /// How many chats the chat list draws before "Show more". Not saved:
+    /// every launch starts at one page.
+    @State private var chatListLimit = SidebarProjectsLayout.chatPageSize
+    /// Day headings folded in the chat list, by `SidebarChatDay.id`.
+    @State private var collapsedChatDays: Set<String> = []
     /// Each folder's chat order as it stood when the pointer came over its
     /// list. See `holdingOrder`. A plain reference, not observed state: the
     /// pointer crossing a list must not redraw the whole window. The held
@@ -2615,21 +2627,42 @@ struct RootView: View {
         // directory, and a folder an agent touched once is not somewhere
         // anyone wants a terminal.
         SidebarGroupHeader(
-            title: L10n.text("common.projects"),
-            count: workspaces.folders.count,
+            title: projectsDisplay == .byChat ? L10n.text("common.chats") : L10n.text("common.projects"),
+            count: projectsDisplay == .byChat ? nil : projectsSectionCount,
             isExpanded: expandedSidebarSections.contains("projects")
         ) { toggleSidebarSection("projects") } trailing: {
-            sidebarSectionMenu()
+            #if os(macOS)
+            if !workspaces.folders.isEmpty {
+                SidebarViewSwitch(display: projectsDisplay) { setProjectsDisplay($0) }
+                SidebarHeaderIconButton(
+                    systemImage: ActionIcon.filter.symbol,
+                    help: L10n.text("common.sidebar.filter_repositories"),
+                    isOn: showingProjectsFilter || !projectsFilter.isEmpty
+                ) {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        if showingProjectsFilter {
+                            closeProjectsFilter()
+                        } else {
+                            showingProjectsFilter = true
+                            if !expandedSidebarSections.contains("projects") {
+                                toggleSidebarSection("projects")
+                            }
+                        }
+                    }
+                }
+            }
+            #endif
+            projectsSectionMenu()
             #if os(macOS)
             Button {
                 workspaces.requestAdd()
             } label: {
                 Image(systemName: "plus")
-                    .font(Theme.font(9, weight: .semibold))
+                    .font(Theme.font(12, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    // A 9pt glyph is a 9pt target. The frame and the shape
-                    // are what make it clickable rather than merely visible.
-                    .frame(width: 20, height: 20)
+                    // The glyph is small, the target is not. The frame and
+                    // the shape are what make it easy to hit, by pointer or touch.
+                    .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -2639,6 +2672,21 @@ struct RootView: View {
         }
 
         if expandedSidebarSections.contains("projects") {
+            #if os(macOS)
+            if !workspaces.folders.isEmpty && (showingProjectsFilter || !projectsFilter.isEmpty) {
+                SidebarFilterField(
+                    text: $projectsFilter,
+                    prompt: projectsDisplay == .byChat
+                        ? L10n.text("common.sidebar.filter_chats")
+                        : L10n.text("common.sidebar.filter_repositories")
+                ) {
+                    withAnimation(.easeOut(duration: 0.15)) { closeProjectsFilter() }
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.bottom, Theme.Space.xs)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            #endif
             if workspaces.folders.isEmpty {
                 if workspaces.directoryPresentation == .empty {
                     FirstProjectPrompt(compact: true) { workspaces.requestAdd() }
@@ -2648,8 +2696,13 @@ struct RootView: View {
                         Task { await workspaces.loadLocal() }
                     }
                 }
+            } else if projectsDisplay == .byChat {
+                projectsChatCentricList
+                    .task(id: workspaces.folders.map(\.id)) {
+                        await warmAllProjectChatLists()
+                    }
             } else {
-                ForEach(workspaces.folders) { folder in
+                ForEach(visibleProjectFolders) { folder in
                     projectRow(folder)
                 }
                 #if os(macOS)
@@ -2684,7 +2737,10 @@ struct RootView: View {
             }
             .buttonStyle(.plain)
             .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
-            .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false, enabled: workspaces.folders.count > 1) {
+            .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false,
+                                       enabled: projectsDisplay == .byRepository
+                                        && projectsSort == .manual
+                                        && workspaces.folders.count > 1) {
                 workspaces.moveWorkspace($0, before: nil)
                 workspaceDropBeforeID = nil
             } onTargeted: { on in
@@ -2695,6 +2751,147 @@ struct RootView: View {
                 }
             })
             #endif
+        }
+    }
+
+    /// Folders that survive the filter, in the chosen sort.
+    private var visibleProjectFolders: [WorkspaceFolder] {
+        let filtered = workspaces.folders.filter { folder in
+            let chats = chat.sidebarChats(in: folder.id).filter { !chat.isUntouched($0, in: folder.id) }
+            return SidebarProjectsLayout.matches(projectsFilter, folder: folder, chats: chats)
+        }
+        return SidebarProjectsLayout.orderedFolders(filtered, sort: projectsSort) { folder in
+            chat.sidebarChats(in: folder.id)
+                .map { $0.lastMessageAtMs ?? $0.updatedAtMs }
+                .max() ?? 0
+        }
+    }
+
+    /// Header badge: folders in repository mode, chats in chat mode.
+    private var projectsSectionCount: Int {
+        if projectsDisplay == .byChat {
+            return visibleChatEntries.count
+        }
+        return visibleProjectFolders.count
+    }
+
+    /// Every chat across folders that survives the filter, newest first.
+    /// The chat list is a timeline, so it always reads by recency and the
+    /// repository sort does not apply to it.
+    private var visibleChatEntries: [SidebarChatEntry] {
+        SidebarProjectsLayout.chatEntries(
+            folders: workspaces.folders,
+            chats: { folder in
+                chat.sidebarChats(in: folder.id).filter { !chat.isUntouched($0, in: folder.id) }
+            },
+            query: projectsFilter,
+            sort: .recent
+        )
+    }
+
+    @ViewBuilder
+    private var projectsChatCentricList: some View {
+        let entries = visibleChatEntries
+        if entries.isEmpty {
+            Text(projectsFilter.isEmpty
+                 ? L10n.text("apple.rootview.no_chats_yet.269208e4")
+                 : L10n.text("common.sidebar.no_matching_chats"))
+                .font(Theme.fit(12))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, 6)
+        } else {
+            let shown = Array(entries.prefix(chatListLimit))
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(SidebarProjectsLayout.dayGroups(shown)) { group in
+                    let collapsed = collapsedChatDays.contains(group.id)
+                    SidebarChatDayHeader(
+                        title: chatDayTitle(group.day),
+                        isWorking: group.day == .working,
+                        isCollapsed: collapsed
+                    ) {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            if collapsed {
+                                collapsedChatDays.remove(group.id)
+                            } else {
+                                collapsedChatDays.insert(group.id)
+                            }
+                        }
+                    }
+                    if !collapsed {
+                        ForEach(group.entries) { entry in
+                            chatListRow(entry)
+                        }
+                    }
+                }
+                if entries.count > shown.count {
+                    let more = min(SidebarProjectsLayout.chatPageSize, entries.count - shown.count)
+                    SidebarShowMoreRow(title: L10n.text("apple.rootview.show_0_more.b91c3640", "\(more)")) {
+                        chatListLimit += SidebarProjectsLayout.chatPageSize
+                    }
+                    .padding(.top, Theme.Space.xs)
+                }
+            }
+            .onChange(of: projectsFilter) { _, _ in
+                chatListLimit = SidebarProjectsLayout.chatPageSize
+            }
+        }
+    }
+
+    /// A chat in the cross-folder list. The same row as under a folder, with
+    /// the folder named where the age would be.
+    private func chatListRow(_ entry: SidebarChatEntry) -> some View {
+        let folder = entry.folder
+        let conversation = entry.conversation
+        return ChatSidebarConversationRow(
+            conversation: conversation,
+            folder: folder,
+            rename: { try await chat.rename(conversation, in: folder.id, to: $0) },
+            fork: {
+                let previousRoute = route
+                let copied = try await chat.fork(conversation, in: folder.id)
+                if route == previousRoute {
+                    chat.reveal(id: copied.id, in: folder.id)
+                    openSection(.chat, in: folder.id)
+                }
+            },
+            draft: chat.draftReference(for: conversation.id, in: folder.id),
+            runningSince: chat.turnStartedAt(for: conversation.id),
+            isSelected: chat.selected?.id == conversation.id
+                && !showingChatOverview
+                && route == .workspace(id: folder.id, section: .chat),
+            select: {
+                if chat.folderID == folder.id {
+                    openSection(.chat, in: folder.id) {
+                        Task { await chat.select(conversation) }
+                    }
+                } else {
+                    chat.reveal(id: conversation.id, in: folder.id)
+                    openSection(.chat, in: folder.id)
+                }
+            },
+            remove: {
+                Task { await chat.remove(conversation, in: folder.id) }
+            },
+            warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) },
+            caption: folder.isRemote
+                ? "\(folder.machineLabel ?? L10n.text("apple.rootview.remote.ffa98e02")) / \(folder.name)"
+                : folder.name
+        )
+        .id(Self.sidebarChatRowID(conversation.id))
+    }
+
+    private func chatDayTitle(_ day: SidebarChatDay) -> String {
+        switch day {
+        case .working: return L10n.text("common.working")
+        case .today: return L10n.text("common.today")
+        case .yesterday: return L10n.text("common.yesterday")
+        case .older: return L10n.text("common.sidebar.older")
+        // A date reads better than a weekday nobody remembers. Use the
+        // language alone, not the region, so "Nov 7" does not gain a period.
+        case .day(let date):
+            let language = Locale(identifier: Locale.preferredLanguages.first ?? "en")
+            return date.formatted(.dateTime.month(.abbreviated).day().locale(language))
         }
     }
 
@@ -2723,7 +2920,10 @@ struct RootView: View {
             && route.workspaceSection == .sessions
             && workspaces.isShowingTerminal(in: folder.id)
             && terminals.activeTerminal(in: folder.id) != nil
-        let isExpanded = expandedWorkspaces.contains(folder.id)
+        // A non-empty filter opens matching folders for the search, without
+        // writing that temporary disclosure into preferences.
+        let filterOpen = !projectsFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isExpanded = expandedWorkspaces.contains(folder.id) || filterOpen
         // A chat row under this folder is the lit one while that chat is in
         // front, the same test the conversation row itself makes.
         let showingChat = isCurrent
@@ -2733,6 +2933,7 @@ struct RootView: View {
             && chat.selected != nil
         HStack(spacing: 0) {
             Button {
+                if filterOpen { return }
                 if isExpanded {
                     setProjectExpanded(folder.id, false)
                 } else {
@@ -2780,7 +2981,10 @@ struct RootView: View {
                 action: { selectWorkspace(folder.id) }
             )
         }
-        .modifier(WorkspaceReorder(id: folder.id, enabled: workspaces.folders.count > 1) {
+        .modifier(WorkspaceReorder(
+            id: folder.id,
+            enabled: projectsSort == .manual && workspaces.folders.count > 1
+        ) {
             workspaces.moveWorkspace($0, before: folder.id)
             workspaceDropBeforeID = nil
         } onTargeted: { on in
@@ -2938,11 +3142,70 @@ struct RootView: View {
     }
 
     private func sidebarSectionMenu() -> some View {
-        ToolbarMenuButton(help: L10n.text("common.sidebar.section_options"), diameter: 20, glyphSize: 10) {
+        ToolbarMenuButton(help: L10n.text("common.sidebar.section_options"), diameter: Theme.Control.sidebarIcon, glyphSize: 12) {
             Button(L10n.text("common.sidebar.move_servers_above_projects"), .move) { moveSidebarSection("servers", before: "projects") }
                 .disabled(sidebarSectionOrder.first == "servers")
             Button(L10n.text("common.sidebar.move_projects_above_servers"), .move) { moveSidebarSection("projects", before: "servers") }
                 .disabled(sidebarSectionOrder.first == "projects")
+        }
+    }
+
+    private func projectsSectionMenu() -> some View {
+        ToolbarMenuButton(help: L10n.text("common.sidebar.section_options"), diameter: Theme.Control.sidebarIcon, glyphSize: 12) {
+            // The chat list is a timeline by day, so sorting is a folder
+            // view choice only.
+            if projectsDisplay == .byRepository {
+                Section(L10n.text("common.sidebar.sort_section")) {
+                    Picker(L10n.text("common.sidebar.sort_section"), selection: Binding(
+                        get: { projectsSort },
+                        set: { setProjectsSort($0) }
+                    )) {
+                        Label(L10n.text("common.sidebar.sort_manual"), systemImage: "hand.draw")
+                            .tag(SidebarProjectsSort.manual)
+                        Label(L10n.text("common.sidebar.sort_name"), systemImage: "textformat")
+                            .tag(SidebarProjectsSort.name)
+                        Label(L10n.text("common.sidebar.sort_recent"), systemImage: "clock")
+                            .tag(SidebarProjectsSort.recent)
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            }
+            // A section of its own: the menu draws the separator.
+            Section {
+                if sidebarSectionOrder.first == "projects" {
+                    Button(L10n.text("common.sidebar.move_servers_above_projects"), .move) { moveSidebarSection("servers", before: "projects") }
+                } else {
+                    Button(L10n.text("common.sidebar.move_projects_above_servers"), .move) { moveSidebarSection("projects", before: "servers") }
+                }
+            }
+        }
+    }
+
+    private func closeProjectsFilter() {
+        projectsFilter = ""
+        showingProjectsFilter = false
+    }
+
+    private func setProjectsDisplay(_ display: SidebarProjectsDisplay) {
+        projectsDisplay = display
+        SidebarPreferences.shared.projectsDisplay = display
+        // Keep Manual stored while chat mode is up: that view cannot drag
+        // folders, so it reads as Recent without overwriting the preference.
+        if display == .byChat {
+            Task { await warmAllProjectChatLists() }
+        }
+    }
+
+    private func setProjectsSort(_ sort: SidebarProjectsSort) {
+        projectsSort = sort
+        SidebarPreferences.shared.projectsSort = sort
+    }
+
+    private func warmAllProjectChatLists() async {
+        await BridgeLaunch.wait()
+        for folder in workspaces.folders {
+            await chat.warmWorkspacePreviews(folder.id, includeMessages: false)
         }
     }
 
@@ -3643,7 +3906,12 @@ struct RootView: View {
 
     @ViewBuilder
     private func chatHistoryRows(for folder: WorkspaceFolder) -> some View {
-        let list = chat.sidebarChats(in: folder.id).filter { !chat.isUntouched($0, in: folder.id) }
+        let all = chat.sidebarChats(in: folder.id).filter { !chat.isUntouched($0, in: folder.id) }
+        // A hit on the folder name keeps every chat under it; otherwise the
+        // query narrows to matching titles and branches.
+        let list = SidebarProjectsLayout.matches(projectsFilter, folder: folder, chats: [])
+            ? all
+            : SidebarProjectsLayout.filteredChats(all, query: projectsFilter)
         if list.isEmpty {
             EmptyView()
         } else {
@@ -3732,7 +4000,9 @@ struct RootView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .font(Theme.fit(11, weight: .medium))
+                    .font(Theme.fit(12, weight: .medium))
+                    .frame(maxHeight: .infinity)
+                    .contentShape(.rect)
                     .foregroundStyle(.secondary)
                     Spacer(minLength: Theme.Space.s)
                     // Past the warm ten the rest live in the full chat
@@ -3744,13 +4014,16 @@ struct RootView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .font(Theme.fit(11, weight: .medium))
+                        .font(Theme.fit(12, weight: .medium))
+                    .frame(maxHeight: .infinity)
+                    .contentShape(.rect)
                         .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.leading, ChatSidebarConversationRow.titleInset)
                 .padding(.trailing, Theme.Space.m)
-                .padding(.vertical, 4)
+                // Text links, but a full row's height to hit by pointer or touch.
+                .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
             }
         }
         // Hold the order while the pointer is over the list. Two running
@@ -4894,7 +5167,7 @@ private struct WorkspaceRow: View {
                 }
                 .padding(.horizontal, Theme.Space.s)
                 .frame(maxWidth: .infinity)
-                .frame(height: DisplayFit.dp(30))
+                .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -5099,6 +5372,194 @@ extension SidebarGroupHeader where Trailing == EmptyView {
     }
 }
 
+/// A glyph button for a sidebar heading, at the sidebar's minimum target, lit while its state is on.
+private struct SidebarHeaderIconButton: View {
+    let systemImage: String
+    let help: String
+    var isOn: Bool = false
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(Theme.font(12, weight: .semibold))
+                .foregroundStyle(isOn ? AnyShapeStyle(Theme.accent)
+                                 : (isHovering ? AnyShapeStyle(Color.primary) : AnyShapeStyle(.secondary)))
+                .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isOn ? Theme.accent.opacity(0.14) : (isHovering ? Theme.rowHighlight : .clear))
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// Folder or chat list, as two glyphs in one quiet pill. The choice is
+/// visible at a glance instead of hiding in the options menu.
+private struct SidebarViewSwitch: View {
+    let display: SidebarProjectsDisplay
+    let select: (SidebarProjectsDisplay) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            segment(.byRepository, symbol: ActionIcon.reveal.symbol,
+                    help: L10n.text("common.sidebar.view_by_repository"))
+            segment(.byChat, symbol: ActionIcon.comment.symbol,
+                    help: L10n.text("common.sidebar.view_by_chat"))
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Theme.rowHighlight.opacity(0.5))
+        )
+    }
+
+    private func segment(_ value: SidebarProjectsDisplay, symbol: String, help: String) -> some View {
+        let on = display == value
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { select(value) }
+        } label: {
+            Image(systemName: symbol)
+                .font(Theme.font(12, weight: .semibold))
+                .foregroundStyle(on ? AnyShapeStyle(Color.primary) : AnyShapeStyle(.secondary))
+                .frame(width: Theme.Control.sidebarIcon + 4, height: Theme.Control.sidebarIcon - 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(on ? Theme.rowSelectedNested : .clear)
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// The filter under the Repositories heading. Opens focused, and Escape
+/// clears and closes it, so it costs nothing while it is not in use.
+private struct SidebarFilterField: View {
+    @Binding var text: String
+    let prompt: String
+    let close: () -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Space.xs) {
+            Image(systemName: ActionIcon.filter.symbol)
+                .font(Theme.font(12, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .font(Theme.fit(13))
+                .focused($focused)
+                .onExitCommand(perform: close)
+            Button(action: close) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(Theme.font(13))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(L10n.text("apple.sshlibraryview.clear_search.3b7ea517"))
+            .accessibilityLabel(L10n.text("apple.sshlibraryview.clear_search.3b7ea517"))
+        }
+        .padding(.leading, Theme.Space.s + 2)
+        .padding(.trailing, 2)
+        .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
+        .background(Theme.rowHighlight.opacity(0.5), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .onAppear { focused = true }
+    }
+}
+
+/// "Show N more" as a whole row, so it is as easy to hit as the chats above it.
+private struct SidebarShowMoreRow: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: ActionIcon.more.symbol)
+                    .font(Theme.font(11, weight: .semibold))
+                    .frame(width: DisplayFit.dp(16))
+                Text(title)
+                    .font(Theme.fit(13, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(isHovering ? AnyShapeStyle(Color.primary) : AnyShapeStyle(.secondary))
+            .padding(.leading, ChatSidebarConversationRow.markInset)
+            .frame(maxWidth: .infinity)
+            .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
+                .padding(.horizontal, Theme.Space.xs)
+        )
+        .onHover { isHovering = $0 }
+    }
+}
+
+/// A day in the chat list: Today, Yesterday, a date, or Older. Quiet text
+/// with the fold chevron after it, so the titles below stay the loudest thing.
+private struct SidebarChatDayHeader: View {
+    let title: String
+    let isWorking: Bool
+    let isCollapsed: Bool
+    let toggle: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 5) {
+                if isWorking {
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 5, height: 5)
+                }
+                Text(title)
+                    .font(Theme.fit(12, weight: .medium))
+                    .foregroundStyle(isWorking ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                Image(systemName: "chevron.down")
+                    .font(Theme.font(9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+                    .opacity(isHovering || isCollapsed ? 1 : 0)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, ChatSidebarConversationRow.markInset)
+            .padding(.trailing, Theme.Space.m)
+            // The whole heading row folds the day, so it gets a full target.
+            .frame(minHeight: DisplayFit.dp(Theme.Control.sidebarIcon + 4), alignment: .bottom)
+            .padding(.top, Theme.Space.s)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(isCollapsed
+              ? L10n.text("apple.rootview.expand_0.e1580a27", title)
+              : L10n.text("apple.rootview.collapse_0.61eb8723", title))
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 private struct ChatSidebarConversationRow: View {
     /// Where the mark starts: a `SidebarRow`'s padding plus half the slack
     /// between its 18 pt glyph frame and the 16 pt mark.
@@ -5120,6 +5581,9 @@ private struct ChatSidebarConversationRow: View {
     let select: () -> Void
     let remove: () -> Void
     let warmPreview: () async -> Void
+    /// The folder's name, for the chat list where rows from every folder
+    /// share one list. Takes the age's seat: the day heading already says when.
+    var caption: String? = nil
 
     @State private var isHovering = false
     @State private var confirmsRemoval = false
@@ -5164,13 +5628,13 @@ private struct ChatSidebarConversationRow: View {
                 // Padding belongs to the label: every part of the highlighted
                 // row opens the chat, including its age and right-hand edge.
                 .padding(.leading, Self.markInset)
-                .padding(.trailing, Theme.Space.s + 2 + 28)
+                .padding(.trailing, Theme.Space.s + 2 + Theme.Control.sidebarIcon + 4)
                 .frame(maxWidth: .infinity)
-                .frame(height: DisplayFit.dp(30))
+                .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(conversation.title.isEmpty ? L10n.text("apple.rootview.untitled_conversation.31d248c4") : conversation.title)
+            .accessibilityLabel(accessibilityTitle)
             // Reserve the info button's seat even before hover, so neither
             // the title nor its status moves when the actions appear.
             HStack(spacing: 4) {
@@ -5224,6 +5688,12 @@ private struct ChatSidebarConversationRow: View {
             Text(L10n.text("apple.rootview.this_permanently_deletes_the_transcript.470ca3e0"))
         }
     }
+    private var accessibilityTitle: String {
+        let title = conversation.title.isEmpty ? L10n.text("apple.rootview.untitled_conversation.31d248c4") : conversation.title
+        guard let caption else { return title }
+        return "\(title), \(caption)"
+    }
+
     private var menu: [NativeMenuItem] {
         var items = [NativeMenuItem(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit, isEnabled: conversation.teamShare == nil) { renaming = true }]
         items += SidebarPinAction.items(reference: draft, name: conversation.title, folderName: folder.name)
@@ -5262,6 +5732,13 @@ extension ChatSidebarConversationRow {
             .foregroundStyle(Theme.accent)
             .fixedSize()
             .accessibilityLabel(L10n.text("common.working"))
+        } else if let caption {
+            Text(caption)
+                .font(Theme.fit(11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: DisplayFit.dp(96), alignment: .trailing)
         } else {
             Text(CompactAge.text(ms: conversation.lastMessageAtMs ?? conversation.updatedAtMs))
                 .font(Theme.numeric(11))
@@ -5551,9 +6028,9 @@ private struct ActiveSessionRow: View {
                         .frame(minWidth: 26, alignment: .trailing)
                 }
                 .padding(.leading, ChatSidebarConversationRow.markInset)
-                .padding(.trailing, Theme.Space.s + 2 + 28)
+                .padding(.trailing, Theme.Space.s + 2 + Theme.Control.sidebarIcon + 4)
                 .frame(maxWidth: .infinity)
-                .frame(height: DisplayFit.dp(30))
+                .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)

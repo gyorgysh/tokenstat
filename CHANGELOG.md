@@ -15,9 +15,12 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - On iPhone and iPad, chat controls stay visible while you scroll or follow live replies. Tap Hide controls in the top bar or swipe up on the chat tabs for more reading space; swipe down from the top or tap the labeled Show controls button to bring them back. Jumping to the latest reply keeps your choice. Pin to Home is in the chat menu.
 - Swipe from the leading edge to go back from a chat even when its controls are hidden.
+- The Mac sidebar can list chats instead of repositories: grouped under Today, Yesterday, the past week's dates and Older, 30 at a time with Show more, each named with its folder. A switch in the section heading picks the view, a filter opens from the same heading, and repositories can be sorted by hand, name or recent activity.
+- Sidebar rows and buttons on the Mac are larger and easier to hit with a pointer or a touch screen.
 
 ### Fixed
 
+- Chats running in another repository no longer keep showing Working in the Mac sidebar after they finish.
 - Android keeps the message field above the keyboard, including on small phones in landscape.
 
 ## [1.14.0] - 2026-11-07

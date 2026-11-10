@@ -1438,6 +1438,69 @@ final class ChatModel {
         if next != runningSince {
             runningSince = next
         }
+        scheduleSidebarRunningRefresh()
+    }
+
+    /// Folders whose sidebar cache still says a chat is working, but that
+    /// the live transcript poll is not covering. Without this, opening two
+    /// projects and leaving one keeps "Working" on chats that finished
+    /// minutes earlier.
+    @ObservationIgnored private var sidebarRunningRefreshTask: Task<Void, Never>?
+    /// Bumped when a refresh pass is replaced or cancelled so a deferred
+    /// cleanup cannot clear a newer task's handle or start a second loop.
+    @ObservationIgnored private var sidebarRunningRefreshGeneration: UInt64 = 0
+
+    private func foldersNeedingRunningRefresh() -> [String] {
+        chatListCache.compactMap { folderID, list in
+            guard list.contains(where: \.running) else { return nil }
+            // The open folder's status poll already rewrites its cache.
+            if folderID == self.folderID, pollingIdentity != nil { return nil }
+            return folderID
+        }
+    }
+
+    private func scheduleSidebarRunningRefresh() {
+        #if os(macOS)
+        let targets = foldersNeedingRunningRefresh()
+        guard !targets.isEmpty else {
+            sidebarRunningRefreshGeneration &+= 1
+            sidebarRunningRefreshTask?.cancel()
+            sidebarRunningRefreshTask = nil
+            return
+        }
+        guard sidebarRunningRefreshTask == nil else { return }
+        sidebarRunningRefreshGeneration &+= 1
+        let generation = sidebarRunningRefreshGeneration
+        sidebarRunningRefreshTask = Task { [weak self] in
+            defer {
+                Task { @MainActor in
+                    guard let self else { return }
+                    guard self.sidebarRunningRefreshGeneration == generation else { return }
+                    self.sidebarRunningRefreshTask = nil
+                    // A finish that left another folder still working must
+                    // start a fresh pass, rather than wait for the next
+                    // unrelated cache write.
+                    self.scheduleSidebarRunningRefresh()
+                }
+            }
+            while !Task.isCancelled {
+                guard let self else { return }
+                guard self.sidebarRunningRefreshGeneration == generation else { return }
+                let folders = self.foldersNeedingRunningRefresh()
+                if folders.isEmpty { return }
+                for folder in folders {
+                    guard !Task.isCancelled else { return }
+                    guard self.sidebarRunningRefreshGeneration == generation else { return }
+                    await self.warmWorkspacePreviews(folder, includeMessages: false)
+                }
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+            }
+        }
+        #endif
     }
 
     private var attachmentCacheGeneration: UInt64 = 0
