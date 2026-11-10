@@ -24,6 +24,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Codex and Claude Code chats show their plan in the Plan panel again, updated as they work, instead of writing it as chat messages. Codex now asks its questions as question cards rather than through a prompt the app could not show.
 - Chats running in another repository no longer keep showing Working in the Mac sidebar after they finish.
 - Android keeps the message field above the keyboard, including on small phones in landscape.
+- Menus on the Mac no longer close by themselves, and selecting text no longer drops the selection, while an agent or a build is writing files in one of your repositories.
 
 ## [1.14.0] - 2026-11-07
 
