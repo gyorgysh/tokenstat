@@ -10,7 +10,7 @@ namespace Tokenstat.Design;
 /// <summary>A native draggable divider, also reachable with the keyboard.</summary>
 internal sealed class ResizeHandle : UserControl
 {
-    private readonly Thumb _thumb = new() { IsTabStop = false, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+    private readonly Thumb _thumb = new() { IsTabStop = false, Background = Theme.ClearBrush };
     public event DragDeltaEventHandler DragDelta
     {
         add => _thumb.DragDelta += value;
@@ -28,10 +28,10 @@ internal sealed class ResizeHandle : UserControl
         IsTabStop = true;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(this, vertical ? L10n.Text("windows.resizehandle.drag_or_use_up_and_down") : L10n.Text("windows.resizehandle.drag_or_use_left_and_right_arrows_to_resiz.7cd7cd98"));
         ToolTipService.SetToolTip(this, L10n.Text("windows.resizehandle.drag_to_resize_double_click_to_reset.0feeacb9"));
-        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        Background = Theme.ClearBrush;
         ProtectedCursor = InputSystemCursor.Create(vertical ? InputSystemCursorShape.SizeNorthSouth : InputSystemCursorShape.SizeWestEast);
         PointerEntered += (_, _) => Background = Theme.AccentSoftBrush;
-        PointerExited += (_, _) => Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        PointerExited += (_, _) => Background = Theme.ClearBrush;
         _thumb.DragStarted += (_, _) => ColumnResize.InProgress = true;
         _thumb.DragCompleted += (_, _) => ColumnResize.InProgress = false;
         Unloaded += (_, _) => ColumnResize.InProgress = false;

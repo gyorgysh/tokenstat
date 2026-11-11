@@ -78,6 +78,7 @@ pub(crate) mod chat_images;
 pub(crate) mod chat_inspection;
 #[cfg(feature = "local-host")]
 pub mod chat_live;
+pub mod chat_plan;
 pub mod chat_question;
 #[cfg(feature = "local-host")]
 pub mod chat_receipts;

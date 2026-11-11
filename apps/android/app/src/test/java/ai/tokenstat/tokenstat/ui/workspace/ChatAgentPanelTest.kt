@@ -88,6 +88,17 @@ class ChatAgentPanelTest {
     }
 
     @Test
+    fun `steps follow the saved agent after switching`() {
+        val before = chatAgentSections(chatAgentChoices(backends, chat("codex")))
+        val after = chatAgentSections(chatAgentChoices(backends, chat("muse")))
+        assertEquals(listOf("Agent"), before)
+        assertEquals(listOf("Agent", "Model", "Effort"), after)
+        assertEquals("Model", ai.tokenstat.tokenstat.ui.components.pickerNextStep(after, "Agent"))
+        val plain = chatAgentSections(chatAgentChoices(backends, chat("sh")))
+        assertNull(ai.tokenstat.tokenstat.ui.components.pickerNextStep(plain, "Model"))
+    }
+
+    @Test
     fun `each heading says what its section is set to`() {
         val current = chat("muse", model = "opus", effort = "max")
         assertEquals("Muse", chatAgentSectionValue("Agent", backends, current))

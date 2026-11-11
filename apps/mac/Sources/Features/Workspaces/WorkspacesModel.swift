@@ -1030,8 +1030,14 @@ final class WorkspacesModel {
     func loadLocal() async -> Bool {
         let ecosystemLease = EcosystemPublisher.lease
         let scope = WorkSessionContext.shared.scope
-        isLoading = true
-        defer { isLoading = false }
+        // Only a load that has nothing to show yet, or one retrying an error,
+        // is "loading". The file watcher reloads on every quiet spell while an
+        // agent or a build writes files, and flipping this flag each time
+        // redrew the whole window twice a second: an open menu closed under
+        // the pointer and a text selection was dropped mid-drag.
+        let announces = !hasLoadedDirectory || directoryError != nil
+        if announces { isLoading = true }
+        defer { if announces { isLoading = false } }
         do {
             let loaded = try await Bridge.workspaces()
             // A different session owns the sidebar now. Say so, so launch
@@ -1047,19 +1053,24 @@ final class WorkspacesModel {
                     EcosystemProject(id: $0.id, name: $0.name, host: "This Mac")
                 }, lease: ecosystemLease, replacing: .local)
             }
-            localFolders = loaded
-            publishFolders()
-            hasLoadedDirectory = true
-            directoryError = nil
-            errorMessage = nil
+            // Observation reports every assignment, equal or not, so an
+            // unchanged answer must not be written back.
+            if localFolders != loaded {
+                localFolders = loaded
+                publishFolders()
+            }
+            if !hasLoadedDirectory { hasLoadedDirectory = true }
+            if directoryError != nil { directoryError = nil }
+            if errorMessage != nil { errorMessage = nil }
             if let counts = try? await Bridge.workspaceSummaries() {
                 let localIDs = Set(loaded.map(\.id))
-                summaries = summaries.filter { key, _ in
+                var next = summaries.filter { key, _ in
                     key.hasPrefix("remote:") || localIDs.contains(key)
                 }
                 for summary in counts {
-                    summaries[summary.id] = summary
+                    next[summary.id] = summary
                 }
+                if next != summaries { summaries = next }
             }
             return true
         } catch {
@@ -1526,7 +1537,8 @@ final class WorkspacesModel {
     /// Put local and remote folders together and keep the selection valid.
     private func publishFolders() {
         let merged = localFolders + remoteFolders.values.flatMap { $0 }
-        folders = Self.applyOrder(merged, WorkspacePreference.order())
+        let ordered = Self.applyOrder(merged, WorkspacePreference.order())
+        if ordered != folders { folders = ordered }
         // Chips a folder was left with, put back the first time it is listed.
         // Cheap: `restoreTabs` reads a string array and returns at once for a
         // folder it has already restored.

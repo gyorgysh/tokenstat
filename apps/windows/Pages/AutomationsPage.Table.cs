@@ -221,7 +221,7 @@ internal sealed partial class AutomationsPage
     }
     private static Button SortHeader(string title, bool selected, bool descending, Action sort)
     {
-        var button = new Button { Content = title + (selected ? descending ? " ↓" : " ↑" : ""), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0, 6, 0, 6), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
+        var button = new Button { Content = title + (selected ? descending ? " ↓" : " ↑" : ""), BorderThickness = new Thickness(0), Background = Theme.ClearBrush, Padding = new Thickness(0, 6, 0, 6), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
         button.Click += (_, _) => sort(); ToolTipService.SetToolTip(button, L10n.Text("windows.automationspage_table.sort_by_0.c17fa279", $"{title}")); return button;
     }
     private static Grid TableRow(double[] widths)

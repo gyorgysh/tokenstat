@@ -99,4 +99,18 @@ class TsPickerTest {
         assertNull(pickerSubmitTarget(listOf(choice("Muse", section = "Agent")), "nothing", ""))
         assertNull(pickerSubmitTarget(emptyList(), "", ""))
     }
+
+    @Test
+    fun `a stepped picker walks the tabs and finishes after the last`() {
+        val tabs = listOf("Agent", "Model", "Effort")
+        assertEquals("Model", pickerNextStep(tabs, "Agent"))
+        assertEquals("Effort", pickerNextStep(tabs, "Model"))
+        assertNull(pickerNextStep(tabs, "Effort"))
+    }
+
+    @Test
+    fun `an agent without effort finishes on the model step`() {
+        assertNull(pickerNextStep(listOf("Agent", "Model"), "Model"))
+        assertNull(pickerNextStep(listOf("Agent", "Model"), "Effort"))
+    }
 }

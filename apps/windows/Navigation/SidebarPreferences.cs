@@ -42,6 +42,23 @@ internal sealed class SidebarPreferences
         }
     }
 
+    /// <summary>Folder tree or one chat list across folders. Same raw values as the Mac.</summary>
+    public SidebarProjectsDisplay ProjectsDisplay
+    {
+        get => SidebarProjectsLayout.ParseDisplay(String("projectsDisplay"));
+        set => Save(saved => saved["projectsDisplay"] = SidebarProjectsLayout.Raw(value));
+    }
+
+    /// <summary>Manual, name, or recent activity. Same raw values as the Mac.</summary>
+    public SidebarProjectsSort ProjectsSort
+    {
+        get => SidebarProjectsLayout.ParseSort(String("projectsSort"));
+        set => Save(saved => saved["projectsSort"] = SidebarProjectsLayout.Raw(value));
+    }
+
+    private string? String(string key) =>
+        _saved[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
     public void RememberExpansion(string key, bool expanded) => Save(saved =>
     {
         if (saved["expanded"] is not JsonObject rows) saved["expanded"] = rows = new JsonObject();

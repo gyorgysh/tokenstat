@@ -601,7 +601,8 @@ struct ChatAgentChoices {
             PickerChoice(value: Choice.agent($0.value), label: $0.label,
                          detail: model.backend(for: $0.value)?.readiness == "needsSignIn" ? L10n.text("apple.chatsetupheader.sign_in_may_be_needed.c3dde98c") :
                             model.backend(for: $0.value)?.readiness == "expired" ? L10n.text("apple.chatsetupheader.stored_login_has_expired.bf189dae") : nil,
-                         section: L10n.text("apple.chatsetupheader.agent.11b39c93"))
+                         section: L10n.text("apple.chatsetupheader.agent.11b39c93"),
+                         monospaced: false)
         }
         if let backend, backend.installed != false {
             rows.append(
@@ -646,6 +647,16 @@ struct ChatAgentChoices {
             L10n.text("apple.chatsetupheader.effort.4387e5d3"): chat.effort?.isEmpty == false ? chat.effort : L10n.text("apple.chatsetupheader.default.21b111cb"),
         ]
         return values[section] ?? nil
+    }
+
+    /// The search prompt for one step of the panel.
+    func searchPrompt(_ section: String) -> String {
+        let prompts: [String: String] = [
+            L10n.text("apple.chatsetupheader.agent.11b39c93"): L10n.text("apple.chatsetupheader.search_agents.212fd04a"),
+            L10n.text("apple.chatsetupheader.model.5e2c614c"): L10n.text("apple.chatsetupheader.search_models.10421935"),
+            L10n.text("apple.chatsetupheader.effort.4387e5d3"): L10n.text("apple.chatsetupheader.search_efforts.f7909b52"),
+        ]
+        return prompts[section] ?? L10n.text("apple.chatsetupheader.filter_agents_models_and_efforts.315032da")
     }
 
     /// Three marks in one list, one per section, each reading the
@@ -804,9 +815,17 @@ struct ChatAgentPanel: View {
                     refresh: canRefresh ? { await model.reloadBackends() } : nil,
                     sectionValue: choices.currentValue,
                     sectionTabs: choices.selectableSections,
+                    stepped: true,
+                    stepPrompt: choices.searchPrompt,
+                    finish: onDone,
+                    stepPick: pick,
                     selectionSummary: choices.summary,
-                    pick: pick,
-                    accessory: { value in AnyView(star(for: value)) }
+                    pick: { _ in },
+                    accessory: { value in AnyView(star(for: value)) },
+                    icon: { value in
+                        guard case let .agent(id) = value else { return nil }
+                        return AnyView(HarnessMark(id: id, size: 26))
+                    }
                 )
                 .disabled(updating || locked)
                 .task(id: model.peer ?? "local") {
@@ -909,19 +928,21 @@ struct ChatAgentPanel: View {
 
     private var choices: ChatAgentChoices { ChatAgentChoices(model: model, chat: chat) }
 
-    private func pick(_ choice: ChatAgentChoices.Choice) {
-        guard !updating, !locked else { return }
+    private func pick(_ choice: ChatAgentChoices.Choice) async -> [String]? {
+        guard !updating, !locked else { return nil }
         let choices = self.choices
-        if case let .agent(id) = choice, model.backend(for: id)?.installed == false { return }
-        let owner = model.currentReference
+        if case let .agent(id) = choice, model.backend(for: id)?.installed == false { return nil }
+        guard let owner = model.currentReference, model.currentReference == owner,
+              model.selected?.id == chat.id, model.savedCopy == nil,
+              model.selected?.running == false else { return nil }
+        if choices.isSelected(choice) { return choices.selectableSections }
         updating = true
-        Task {
-            defer { updating = false }
-            guard let owner, model.currentReference == owner,
-                  model.selected?.id == chat.id, model.savedCopy == nil,
-                  model.selected?.running == false else { return }
-            await choices.apply(choice)
-        }
+        defer { updating = false }
+        await choices.apply(choice)
+        guard model.currentReference == owner, let updated = model.selected, updated.id == chat.id else { return nil }
+        let updatedChoices = ChatAgentChoices(model: model, chat: updated)
+        guard updatedChoices.isSelected(choice) else { return nil }
+        return updatedChoices.selectableSections
     }
 
     /// The favourite star, on model rows only. Same store as before, so what
@@ -934,10 +955,8 @@ struct ChatAgentPanel: View {
             } label: {
                 Image(systemName: favorites.contains(backend: backend.id, model: id)
                     ? "star.fill" : "star")
-                    #if !os(macOS)
-                    .frame(width: 44, height: 44)
+                    .frame(width: Theme.Control.heightComfortable, height: Theme.Control.heightComfortable)
                     .contentShape(.rect)
-                    #endif
                     .font(Theme.font(10, weight: .semibold))
                     .foregroundStyle(
                         favorites.contains(backend: backend.id, model: id)

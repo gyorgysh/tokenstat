@@ -83,7 +83,7 @@ ALLOWED = [
     # its selection mark: a second glyph on every line would be one symbol
     # repeated down a list.
     ("Design/SearchablePicker.swift", "Button { isPresented = true } label:"),
-    ("Design/SearchablePicker.swift", "Button { pick(choice.value) } label:"),
+    ("Design/SearchablePicker.swift", "Button { choose(choice) } label:"),
     # Slash-command completions are option rows: the command spelling and
     # description are the label, like the searchable picker choices above.
     ("Features/Workspaces/Chat/ChatSlashMenu.swift", "Button { model.draft = command.id } label:"),

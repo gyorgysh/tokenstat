@@ -141,11 +141,11 @@ struct SidebarDetailButton<Card: View>: View {
     var body: some View {
         Button { isPresented.toggle() } label: {
             Image(systemName: "info.circle")
-                .font(Theme.fit(12, weight: .medium))
+                .font(Theme.fit(13, weight: .medium))
                 .foregroundStyle(hovering || isPresented ? Theme.accent : Color.secondary)
-                .frame(width: 24, height: 24)
+                .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
                 .background(hovering || isPresented ? Theme.accentSoft : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5))
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)

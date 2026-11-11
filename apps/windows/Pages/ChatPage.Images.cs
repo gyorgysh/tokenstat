@@ -313,7 +313,7 @@ internal sealed partial class ChatPage
         var owner = ImageOwner();
         var viewerRoot = XamlRoot;
         var image = new Image { Stretch = Stretch.Uniform };
-        var surface = new Grid { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+        var surface = new Grid { Background = Theme.ClearBrush,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         surface.Children.Add(image);
         var swipe = new ChatImageSwipe();

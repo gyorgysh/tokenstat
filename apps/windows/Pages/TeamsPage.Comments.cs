@@ -55,9 +55,9 @@ internal sealed partial class TeamsPage
         var panel = new StackPanel { Spacing = Theme.SpaceS };
         // The well is the box, as in the main composer, so the field draws none.
         var box = new TextBox { Text = model.Text, PlaceholderText = L10n.Text("common.teams.comment_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
-            BorderThickness = new Thickness(0), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), MinHeight = 40, MaxHeight = 180 };
-        box.Resources["TextControlBackgroundFocused"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        box.Resources["TextControlBackgroundPointerOver"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            BorderThickness = new Thickness(0), Background = Theme.ClearBrush, MinHeight = 40, MaxHeight = 180 };
+        box.Resources["TextControlBackgroundFocused"] = Theme.ClearBrush;
+        box.Resources["TextControlBackgroundPointerOver"] = Theme.ClearBrush;
         box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
         var note = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         var recovered = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 12 };

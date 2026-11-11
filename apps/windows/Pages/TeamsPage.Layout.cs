@@ -184,7 +184,7 @@ internal sealed partial class TeamsPage
             Content = face,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(Theme.SpaceS),

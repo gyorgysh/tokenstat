@@ -1187,7 +1187,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         };
         var open = new Button
         {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch,

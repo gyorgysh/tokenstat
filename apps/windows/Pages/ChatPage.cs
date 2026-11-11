@@ -640,7 +640,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         };
         var button = new Button
         {
-            Background = new SolidColorBrush(Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -2007,153 +2007,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(setup);
         return row;
     }
-
-    /// <summary>
-    /// The agent, then a model or an effort only when one was chosen.
-    /// The panel this opens is where the defaults are named.
-    /// </summary>
-    private static string ComposerSummary(JsonNode? backend, string backendId, string model, string effort)
-    {
-        var parts = new List<string> { Format.Text(backend, "label", backendId) };
-        if (!string.IsNullOrEmpty(model))
-        {
-            parts.Add(model);
-        }
-        var efforts = backend?["efforts"] as JsonArray;
-        if (efforts is { Count: > 0 } && !string.IsNullOrEmpty(effort))
-        {
-            parts.Add(effort + " effort");
-        }
-        return string.Join(" · ", parts);
-    }
-
-    private UIElement CompactAgentMenu(bool locked)
-    {
-        var chat = _openChat ?? new JsonObject();
-        var backendId = Format.Text(chat, "backend");
-        var backend = Backend(backendId);
-        var model = Format.Text(chat, "model");
-        var effort = Format.Text(chat, "effort");
-        var label = ComposerSummary(backend, backendId, model, effort);
-        var field = new Grid { MaxWidth = 280, ColumnSpacing = 6 };
-        field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        field.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var mark = AgentMark.View(backendId, 16);
-        mark.VerticalAlignment = VerticalAlignment.Center;
-        AutomationProperties.SetAccessibilityView(mark, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-        field.Children.Add(mark);
-        var modelText = new TextBlock
-        {
-            Text = string.IsNullOrWhiteSpace(model) ? Format.Text(backend, "label", backendId) : model,
-            TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        Grid.SetColumn(modelText, 1);
-        field.Children.Add(modelText);
-        if (backend?["efforts"] is JsonArray { Count: > 0 } && !string.IsNullOrWhiteSpace(effort))
-        {
-            var effortText = new TextBlock { Text = "· " + effort, TextWrapping = TextWrapping.NoWrap,
-                VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(effortText, 2);
-            field.Children.Add(effortText);
-        }
-
-        var flyout = new Flyout();
-        var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };
-        panel.Children.Add(new TextBlock { Text = L10n.Text("windows.chatpage.agent_model_and_effort.217ff8ae"), FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        var search = new TextBox { PlaceholderText = L10n.Text("windows.chatpage.filter_agents_models_and_efforts.315032da") };
-        panel.Children.Add(search);
-        var choices = new StackPanel { Spacing = 4 };
-        panel.Children.Add(new ScrollViewer { MaxHeight = 360, Content = choices, HorizontalScrollMode = ScrollMode.Disabled });
-        void RenderChoices()
-        {
-            choices.Children.Clear();
-            void Group(string heading, IEnumerable<(string Value, string Label)> values, string field, string current)
-            {
-                var matches = values.Where(item => string.IsNullOrWhiteSpace(search.Text) || item.Label.Contains(search.Text, StringComparison.OrdinalIgnoreCase)).ToList();
-                if (matches.Count == 0) return;
-                choices.Children.Add(new TextBlock { Text = heading, Foreground = Theme.AccentBrush, Margin = new Thickness(0, 10, 0, 4), FontSize = 11 });
-                foreach (var item in matches)
-                {
-                    var text = new TextBlock { Text = item.Label, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-                    FrameworkElement label = text;
-                    if (field == "backend" && Readiness(Backend(item.Value)) is string note)
-                    {
-                        var lines = new StackPanel { Spacing = 1 };
-                        lines.Children.Add(text);
-                        lines.Children.Add(new TextBlock { Text = note, FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
-                        label = lines;
-                    }
-                    var pick = new Button
-                    {
-                        Content = field == "backend" ? AgentMark.Row(item.Value, label) : label,
-                        HorizontalAlignment = HorizontalAlignment.Stretch,
-                        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                        Background = item.Value == current ? Theme.AccentSoftBrush : Theme.PanelBrush,
-                        BorderThickness = new Thickness(0), Padding = new Thickness(8),
-                    };
-                    pick.Click += async (_, _) =>
-                    {
-                        if (_suppress) return;
-                        flyout.Hide();
-                        var patch = new JsonObject { [field] = item.Value };
-                        if (field == "backend" && Format.Text(Backend(item.Value), "gateTier") == "bypassOnly") patch["autonomy"] = "bypass";
-                        await UpdateAsync(patch);
-                        PaintConversation();
-                    };
-                    choices.Children.Add(pick);
-                }
-            }
-            // Installed agents only, like the Mac. The shell appears only on
-            // the chat that already uses it.
-            Group(L10n.Text("windows.chatpage.agent.b62db7d0"), _backends.Where(item => item is not null
-                    && (Format.Text(item, "id") != "sh" || backendId == "sh") && Installed(item))
-                .Select(item => (Format.Text(item, "id"), Format.Text(item, "label", Format.Text(item, "id")))), "backend", backendId);
-            foreach (var field in new[] { "model", "effort" })
-            {
-                if (!Installed(backend)) break;
-                if (backend?[field + "s"] is not JsonArray values || values.Count == 0) continue;
-                var options = new List<(string, string)> { ("", L10n.Text("windows.chatpage.default.21b111cb")) };
-                foreach (var value in values)
-                {
-                    var text = value?.ToString() ?? "";
-                    if (text.Length > 0) options.Add((text, text));
-                }
-                Group(field.ToUpperInvariant(), options, field, field == "model" ? model : effort);
-            }
-        }
-        search.TextChanged += (_, _) => RenderChoices();
-        RenderChoices();
-        if (backend is not null && Installed(backend) && AgentSignInDialog.Supported(backend))
-        {
-            var signIn = ActionIconGlyph.Button(L10n.Text("windows.agentsetup.open_terminal"), ActionIcon.SignIn, async (_, _) =>
-            {
-                flyout.Hide();
-                await OpenAgentSignInAsync(backend);
-            });
-            signIn.IsEnabled = !locked;
-            panel.Children.Add(signIn);
-        }
-        flyout.Content = new Border { Background = Theme.PanelBrush, Child = panel };
-        flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
-
-        var button = new Button
-        {
-            Content = field,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Flyout = flyout,
-            IsEnabled = !locked,
-            Background = Theme.PanelBrush,
-            BorderBrush = Theme.BorderBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(10, 6, 10, 6),
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label);
-        ToolTipService.SetToolTip(button, label);
-        return button;
-    }
+    private UIElement CompactAgentMenu(bool locked) => ChatAgentPicker.Build(new ChatAgentPickerSource(
+        Chat: () => _openChat,
+        Backends: () => _backends,
+        Update: TryUpdateAsync,
+        Repaint: PaintConversation,
+        Suppressed: () => _suppress,
+        SignIn: OpenAgentSignInAsync), locked);
 
     private void RebuildAttachStrip()
     {
@@ -2179,7 +2039,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             {
                 Content = chip, IsEnabled = !_queueing && !_sending && _fileTransfer is null,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Background = new SolidColorBrush(Colors.Transparent),
+                Background = Theme.ClearBrush,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0),
             };
@@ -2457,10 +2317,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    private async Task UpdateAsync(JsonObject patch)
+    private async Task UpdateAsync(JsonObject patch) => await TryUpdateAsync(patch);
+
+    private async Task<bool> TryUpdateAsync(JsonObject patch)
     {
-        if (_opening || SharedSource) return;
-        if (_openId is not string chat) return;
+        if (_opening || SharedSource) return false;
+        if (_openId is not string chat) return false;
         var generation = _openGeneration;
         patch["id"] = chat;
         try
@@ -2468,7 +2330,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _suppress = true;
             var updated = await CallChatAsync("chat.update", patch);
             AppServices.NotifyConversationsChanged();
-            if (!OpenChatIs(chat) || generation != _openGeneration) return;
+            if (!OpenChatIs(chat) || generation != _openGeneration) return false;
             // chat.update returns the saved record, which has no parked note.
             // Preserve the current note, which may have changed while awaiting.
             _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
@@ -2476,10 +2338,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             RefreshFastModeButton();
             ChatLaunchChoice.Save(_openChat);
             if (patch.ContainsKey("backend")) CheckSelectedSignIn();
+            return true;
         }
         catch (Exception ex)
         {
             Banner(ex.Message);
+            return false;
         }
         finally
         {
@@ -2766,14 +2630,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (remembered.Length == 0) return "";
         return FindPersona(remembered) is null ? null : remembered;
     }
-
-    /// <summary>A short note on an agent row when it may not run as is.</summary>
-    private static string? Readiness(JsonNode? backend) => Format.Text(backend, "readiness") switch
-    {
-        "needsSignIn" => L10n.Text("windows.chatpage.sign_in_may_be_needed.c3dde98c"),
-        "expired" => L10n.Text("windows.chatpage.stored_login_has_expired.bf189dae"),
-        _ => null,
-    };
 
     /// <summary>The open chat's agent is known to the host and not installed.</summary>
     private bool OpenBackendMissing()

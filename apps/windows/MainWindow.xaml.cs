@@ -69,7 +69,21 @@ public sealed partial class MainWindow : Window
     {
         Content = L10n.Text("common.projects"),
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        // The default header style disables the item, which greys out and
+        // blocks the view switch, filter, menu and add buttons it now holds.
+        IsEnabled = true,
     };
+    /// <summary>Filter over repository and chat names in the Repositories section.</summary>
+    private string _projectsFilter = "";
+    /// <summary>Whether the filter box is open. It stays shut until asked for.</summary>
+    private bool _showingProjectsFilter;
+    private TextBox? _projectsFilterBox;
+    /// <summary>Chats the chat list draws before Show more. Every launch starts at one page.</summary>
+    private int _chatListLimit = SidebarProjectsLayout.ChatPageSize;
+    /// <summary>Day headings folded in the chat list, by <see cref="SidebarChatDay.Id"/>.</summary>
+    private readonly HashSet<string> _collapsedChatDays = new(StringComparer.Ordinal);
+    private const string ChatDayPrefix = "wschatday:";
+    private const string ChatPagePrefix = "wschatpage:";
     private UIElement? _hostSplash;
     /// <summary>
     /// Folders whose sidebar chat list is showing ten instead of five, like
@@ -198,7 +212,7 @@ public sealed partial class MainWindow : Window
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
         SidebarChrome.SetAdaptiveThreshold(_nav, ShellWidths.Shared.Sidebar + ShellWidths.ContentMinimum);
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
-        _nav.Background = new SolidColorBrush(Colors.Transparent);
+        _nav.Background = Theme.ClearBrush;
         _nav.Resources["NavigationViewDefaultPaneBackground"] = _chromeSidebar;
         _nav.Resources["NavigationViewExpandedPaneBackground"] = _chromeSidebar;
         _nav.Resources["NavigationViewContentBackground"] = _chromeBackground;
@@ -283,7 +297,7 @@ public sealed partial class MainWindow : Window
         InitializeDesktopActions();
         _paneResize.Width = 6;
         _paneResize.HorizontalAlignment = HorizontalAlignment.Left;
-        _paneResize.Background = new SolidColorBrush(Colors.Transparent);
+        _paneResize.Background = Theme.ClearBrush;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_paneResize, L10n.Text("windows.mainwindow_xaml.resize_projects_panel.4be39519"));
         _paneResize.DragDelta += (_, drag) =>
         {
@@ -620,6 +634,8 @@ public sealed partial class MainWindow : Window
             {
                 RebuildFolderItems();
                 ResolveDesktopActions();
+                // New Chat may have opened before the folders arrived.
+                if (_newChatPage?.IsLoaded == true) _newChatPage.RefreshRepositories();
             });
             _ = RemoteWorkspaces.SweepAsync();
         }
@@ -651,7 +667,8 @@ public sealed partial class MainWindow : Window
                 && ((nav.Tag as string)?.StartsWith("ws:") == true
                     || (nav.Tag as string)?.StartsWith("machine:") == true
                     || (nav.Tag as string) == "workspaces:empty"
-                    || (nav.Tag as string) == "workspaces:add"))
+                    || (nav.Tag as string) == "workspaces:add"
+                    || (nav.Tag as string)?.StartsWith("wschat", StringComparison.Ordinal) == true))
             {
                 continue;
             }
@@ -664,7 +681,11 @@ public sealed partial class MainWindow : Window
         {
             _nav.MenuItems.Add(item);
         }
-        foreach (var folder in _localFolders)
+        // The chat view lists chats in place of folders. Its rows are built
+        // with the live data, in RebuildSidebarLiveCore.
+        var byChat = SidebarPreferences.Shared.ProjectsDisplay == SidebarProjectsDisplay.ByChat;
+        var sort = SidebarPreferences.Shared.ProjectsSort;
+        foreach (var folder in byChat ? new List<JsonNode?>() : OrderedLocalFolders(sort))
         {
             var id = Format.Text(folder, "id");
             var name = Format.Text(folder, "name", Format.Text(folder, "path", id));
@@ -674,23 +695,17 @@ public sealed partial class MainWindow : Window
             }
             _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"])));
         }
-        foreach (var peer in RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey))
+        // Another computer's folders sit beside this one's, as on the Mac:
+        // one level, named "Computer / folder", not nested under a computer
+        // row that pushes every folder and chat a step further in.
+        foreach (var peer in byChat ? Enumerable.Empty<IGrouping<string, RemoteFolder>>() : RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey))
         {
-            var label = peer.First().MachineLabel;
             var stale = RemoteWorkspaces.IsStale(peer.Key);
-            var machine = new NavigationViewItem
+            foreach (var folder in SidebarProjectsLayout.OrderFolders(peer, sort, folder => folder.Name, folder => FolderActivity(folder.Id)))
             {
-                Content = stale ? label + " · Offline" : label,
-                Tag = "machine:" + peer.Key,
-                Icon = new SymbolIcon { Symbol = Symbol.Globe },
-                SelectsOnInvoked = false,
-                IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:machine:" + peer.Key, true),
-            };
-            TrackSidebarExpansion(machine);
-            ToolTipService.SetToolTip(machine, stale ? label + " · Offline; showing saved folders" : label);
-            foreach (var folder in peer)
-                machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git));
-            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, machine));
+                var machine = folder.MachineLabel + (stale ? " · Offline" : "");
+                _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git, machine)));
+            }
         }
         if (_localFolders.Count == 0 && RemoteWorkspaces.CachedFolders().Count == 0)
         {
@@ -730,11 +745,35 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null)
+    /// <summary>This PC's folders in the chosen sort. Manual keeps the saved order.</summary>
+    private List<JsonNode?> OrderedLocalFolders(SidebarProjectsSort sort) =>
+        SidebarProjectsLayout.OrderFolders(_localFolders.ToList(), sort,
+            folder => Format.Text(folder, "name", Format.Text(folder, "id")),
+            folder => FolderActivity(Format.Text(folder, "id")));
+
+    /// <summary>The newest chat activity in a folder, for the Recent sort.</summary>
+    private long FolderActivity(string folderId)
+    {
+        long newest = 0;
+        foreach (var chat in _liveChats)
+        {
+            if (Format.Text(chat, "workspaceId") != folderId) continue;
+            var entry = new SidebarChatEntry(folderId, "", "", chat!);
+            if (entry.ActivityMs > newest) newest = entry.ActivityMs;
+        }
+        return newest;
+    }
+
+    /// <summary>Whether a folder row survives the sidebar filter.</summary>
+    private bool FolderPassesFilter(string folderId, string name, string machine) =>
+        SidebarProjectsLayout.FolderMatches(_projectsFilter, name, machine,
+            _liveChats.Where(chat => chat is not null && Format.Text(chat, "workspaceId") == folderId).Select(chat => chat!));
+
+    private NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null, string? machine = null)
     {
         var parent = new NavigationViewItem
         {
-            Content = FolderLabel(name, git),
+            Content = FolderLabel(name, git, machine),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = "ws:" + id + ":Launcher",
             IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ws:" + id + ":Launcher", true),
@@ -820,27 +859,33 @@ public sealed partial class MainWindow : Window
         more.Padding = new Thickness(0);
         if (!remote)
         {
-            var share = Buttons.ToolbarIcon(ActionIcon.Connect, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), (_, _) => OpenTeamFolder(id, name, path));
+            // The Mac draws a plain link here. Windows' Connect is the Wifi
+            // glyph for joining devices, so borrow Pair's link instead.
+            var share = Buttons.ToolbarIcon(ActionIcon.Pair, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), (_, _) => OpenTeamFolder(id, name, path));
             share.Width = share.Height = 22;
-            if (shared) SidebarChrome.RevealActions(parent, compose, more); else SidebarChrome.RevealActions(parent, share, compose, more);
+            // Hover-only like the Mac, shared or not: it takes the counts' seat.
+            SidebarChrome.RevealActions(parent, share, compose, more);
             parent.Content = SidebarChrome.ProjectContent(parent, label, remote, shared, share, compose, more);
         }
         else { SidebarChrome.RevealActions(parent, compose, more); parent.Content = SidebarChrome.ProjectContent(parent, label, remote, compose, more); }
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, shared ? name + " · " + L10n.Text("common.teams.checkout_shared") : name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, (machine is null ? "" : machine + " / ") + (shared ? name + " · " + L10n.Text("common.teams.checkout_shared") : name));
         return parent;
     }
 
     private void UpdateProjectsHeader()
     {
-        var header = new Grid { ColumnSpacing = Theme.SpaceS };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var byChat = SidebarPreferences.Shared.ProjectsDisplay == SidebarProjectsDisplay.ByChat;
+        var folderCount = _localFolders.Count + RemoteWorkspaces.CachedFolders().Count;
+        var hasFolders = folderCount > 0;
+        var controls = new Grid { ColumnSpacing = Theme.SpaceS };
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var expanded = SidebarPreferences.Shared.IsExpanded("section:projects", true);
+        var heading = byChat ? L10n.Text("common.chats") : L10n.Text("common.projects");
         var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS,
             Children = { new FontIcon { Glyph = expanded ? "\uE70D" : "\uE76C", FontSize = 9 },
-                new TextBlock { Text = L10n.Text("common.projects").ToUpperInvariant(), FontSize = 11 } } };
+                new TextBlock { Text = heading.ToUpperInvariant(), FontSize = 11 } } };
         var toggle = new Button { Content = title, Background = null, BorderThickness = new Thickness(0),
             Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Left, Opacity = 0.55 };
@@ -852,23 +897,203 @@ public sealed partial class MainWindow : Window
             UpdateProjectsHeader();
             ApplySidebarSectionLayout();
         };
-        header.Children.Add(toggle);
-        var count = new TextBlock { Text = (_localFolders.Count + RemoteWorkspaces.CachedFolders().Count()).ToString(),
-            FontSize = 11, Opacity = 0.45, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(count, 1);
-        header.Children.Add(count);
-        var options = SidebarSectionMenu();
-        header.ContextFlyout = options;
-        var more = ActionIconGlyph.MoreButton(L10n.Text("common.sidebar.section_options"), options);
-        more.Width = more.Height = 22;
-        Grid.SetColumn(more, 2);
-        header.Children.Add(more);
-        var add = Buttons.ToolbarIcon(ActionIcon.Create, L10n.Text("common.add_project"), async (_, _) => await AddWorkspaceAsync());
-        add.Width = add.Height = 22;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "sidebar.addProject");
-        Grid.SetColumn(add, 3);
-        header.Children.Add(add);
+        controls.Children.Add(toggle);
+        if (!byChat)
+        {
+            var count = new TextBlock { Text = folderCount.ToString(),
+                FontSize = 11, Opacity = 0.45, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(count, 1);
+            controls.Children.Add(count);
+        }
+        // Touch-sized like the Mac heading: a view switch, the filter, the
+        // section menu, then the add control.
+        var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        if (hasFolders)
+        {
+            var switcher = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0, Margin = new Thickness(0, 0, 4, 0) };
+            switcher.Children.Add(HeaderIcon(Buttons.ToolbarIcon(ActionIcon.Reveal, L10n.Text("common.sidebar.view_by_repository"),
+                (_, _) => SetProjectsDisplay(SidebarProjectsDisplay.ByRepository), isAccent: !byChat)));
+            switcher.Children.Add(HeaderIcon(Buttons.ToolbarIcon(ActionIcon.Comment, L10n.Text("common.sidebar.view_by_chat"),
+                (_, _) => SetProjectsDisplay(SidebarProjectsDisplay.ByChat), isAccent: byChat)));
+            trailing.Children.Add(switcher);
+            var filtering = _showingProjectsFilter || _projectsFilter.Length > 0;
+            var filter = HeaderIcon(Buttons.ToolbarIcon(ActionIcon.Filter, L10n.Text("common.sidebar.filter_repositories"),
+                (_, _) => ToggleProjectsFilter(), isAccent: filtering));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(filter, "sidebar.filterProjects");
+            trailing.Children.Add(filter);
+        }
+        var options = ProjectsSectionMenu(byChat);
+        controls.ContextFlyout = options;
+        trailing.Children.Add(HeaderIcon(ActionIconGlyph.MoreButton(L10n.Text("common.sidebar.section_options"), options)));
+        if (byChat && hasFolders)
+        {
+            var add = HeaderIcon(Buttons.ToolbarIcon(ActionIcon.Create, L10n.Text("common.sidebar.add_menu"), (_, _) => { }));
+            add.Flyout = ProjectsAddMenu();
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "sidebar.addMenu");
+            trailing.Children.Add(add);
+        }
+        else
+        {
+            // A folder with a plus, not a bare plus: in the folder view this
+            // only ever adds a repository.
+            var add = HeaderIcon(Buttons.ToolbarIcon(ActionIcon.Reveal, L10n.Text("common.add_project"), async (_, _) => await AddWorkspaceAsync()));
+            add.Content = new FontIcon { Glyph = "\uE8F4", FontSize = 14 };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "sidebar.addProject");
+            trailing.Children.Add(add);
+        }
+        Grid.SetColumn(trailing, 2);
+        controls.Children.Add(trailing);
+
+        var header = new StackPanel { Spacing = Theme.SpaceXs };
+        header.Children.Add(controls);
+        if (hasFolders && (_showingProjectsFilter || _projectsFilter.Length > 0))
+        {
+            // One box, kept across header rebuilds so typing never loses focus.
+            var box = ProjectsFilterBox();
+            box.PlaceholderText = byChat ? L10n.Text("common.sidebar.filter_chats") : L10n.Text("common.sidebar.filter_repositories");
+            if (box.Parent is Panel previous) previous.Children.Remove(box);
+            header.Children.Add(box);
+        }
         _workspacesHeader.Content = header;
+    }
+
+    /// <summary>A heading control at the sidebar's touch target.</summary>
+    private static Button HeaderIcon(Button button)
+    {
+        button.Width = button.Height = 28;
+        return button;
+    }
+
+    private TextBox ProjectsFilterBox()
+    {
+        if (_projectsFilterBox is not null) return _projectsFilterBox;
+        var box = new TextBox { MinHeight = 32, Margin = new Thickness(0, 0, 0, 2) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(box, "sidebar.projectsFilter");
+        box.TextChanged += (_, _) =>
+        {
+            if (box.Text == _projectsFilter) return;
+            _projectsFilter = box.Text;
+            _chatListLimit = SidebarProjectsLayout.ChatPageSize;
+            RebuildSidebarLive();
+            ApplySidebarSectionLayout();
+        };
+        box.KeyDown += (_, args) =>
+        {
+            if (args.Key != Windows.System.VirtualKey.Escape) return;
+            args.Handled = true;
+            CloseProjectsFilter();
+        };
+        _projectsFilterBox = box;
+        return box;
+    }
+
+    private void ToggleProjectsFilter()
+    {
+        if (_showingProjectsFilter || _projectsFilter.Length > 0)
+        {
+            CloseProjectsFilter();
+            return;
+        }
+        _showingProjectsFilter = true;
+        if (!SidebarPreferences.Shared.IsExpanded("section:projects", true))
+        {
+            SidebarPreferences.Shared.RememberExpansion("section:projects", true);
+            ApplySidebarSectionLayout();
+        }
+        UpdateProjectsHeader();
+        var box = ProjectsFilterBox();
+        DispatcherQueue.TryEnqueue(() => box.Focus(FocusState.Programmatic));
+    }
+
+    private void CloseProjectsFilter()
+    {
+        var hadQuery = _projectsFilter.Length > 0;
+        _showingProjectsFilter = false;
+        _projectsFilter = "";
+        if (_projectsFilterBox is not null) _projectsFilterBox.Text = "";
+        UpdateProjectsHeader();
+        if (hadQuery)
+        {
+            RebuildSidebarLive();
+            ApplySidebarSectionLayout();
+        }
+    }
+
+    private void SetProjectsDisplay(SidebarProjectsDisplay display)
+    {
+        if (SidebarPreferences.Shared.ProjectsDisplay == display) return;
+        SidebarPreferences.Shared.ProjectsDisplay = display;
+        _chatListLimit = SidebarProjectsLayout.ChatPageSize;
+        RebuildFolderItems();
+    }
+
+    private void SetProjectsSort(SidebarProjectsSort sort)
+    {
+        if (SidebarPreferences.Shared.ProjectsSort == sort) return;
+        SidebarPreferences.Shared.ProjectsSort = sort;
+        RebuildFolderItems();
+    }
+
+    /// <summary>
+    /// The section menu. Sorting is a folder view choice: the chat list is a
+    /// timeline by day.
+    /// </summary>
+    private MenuFlyout ProjectsSectionMenu(bool byChat)
+    {
+        var menu = new MenuFlyout();
+        if (!byChat)
+        {
+            var current = SidebarPreferences.Shared.ProjectsSort;
+            foreach (var (sort, key) in new[]
+            {
+                (SidebarProjectsSort.Manual, "common.sidebar.sort_manual"),
+                (SidebarProjectsSort.Name, "common.sidebar.sort_name"),
+                (SidebarProjectsSort.Recent, "common.sidebar.sort_recent"),
+            })
+            {
+                var item = new RadioMenuFlyoutItem { Text = L10n.Text(key), GroupName = "projectsSort", IsChecked = sort == current };
+                var chosen = sort;
+                item.Click += (_, _) => SetProjectsSort(chosen);
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new MenuFlyoutSeparator());
+        }
+        ContextMenus.Add(menu, L10n.Text("common.sidebar.move_servers_above_projects"),
+            () => MoveSidebarSection("servers", "projects"), () => SidebarPreferences.Shared.SectionOrder[0] != "servers");
+        ContextMenus.Add(menu, L10n.Text("common.sidebar.move_projects_above_servers"),
+            () => MoveSidebarSection("projects", "servers"), () => SidebarPreferences.Shared.SectionOrder[0] != "projects");
+        return menu;
+    }
+
+    /// <summary>
+    /// The chat view's add control. A list of chats is where a new chat is
+    /// most often wanted, so it leads, with a repository to start it in.
+    /// Adding a repository stays one choice away.
+    /// </summary>
+    private MenuFlyout ProjectsAddMenu()
+    {
+        var menu = new MenuFlyout();
+        ContextMenus.Add(menu, L10n.Text("windows.mainwindow_xaml.new_chat.db18382a"), () => OpenNewChat());
+        var within = new MenuFlyoutSubItem { Text = L10n.Text("common.sidebar.new_chat_in") };
+        foreach (var folder in _localFolders)
+        {
+            var id = Format.Text(folder, "id");
+            if (id.Length == 0) continue;
+            var item = new MenuFlyoutItem { Text = Format.Text(folder, "name", id) };
+            item.Click += (_, _) => OpenNewChat(id);
+            within.Items.Add(item);
+        }
+        foreach (var folder in RemoteWorkspaces.CachedFolders())
+        {
+            var id = folder.Id;
+            var item = new MenuFlyoutItem { Text = folder.MachineLabel + " / " + folder.Name };
+            item.Click += (_, _) => OpenNewChat(id);
+            within.Items.Add(item);
+        }
+        menu.Items.Add(within);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        ContextMenus.AddAsync(menu, L10n.Text("common.add_project"), AddWorkspaceAsync);
+        return menu;
     }
 
     private MenuFlyout SidebarSectionMenu()
@@ -919,32 +1144,95 @@ public sealed partial class MainWindow : Window
                 else _nav.MenuItems.Add(_sshGroup);
                 _sshGroup.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ssh:" + SSHSection.Hosts, true);
                 var expanded = SidebarPreferences.Shared.IsExpanded("section:projects", true);
+                var local = L10n.Text("windows.mainwindow_xaml.this_pc.638a348b");
                 foreach (var item in _nav.MenuItems.OfType<NavigationViewItem>())
-                    if (item.Tag is string tag && (tag.StartsWith("ws:", StringComparison.Ordinal)
-                        || tag.StartsWith("machine:", StringComparison.Ordinal) || tag is "workspaces:add" or "workspaces:empty"))
-                        item.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+                {
+                    if (item.Tag is not string tag || !(tag.StartsWith("ws:", StringComparison.Ordinal)
+                        || tag.StartsWith("machine:", StringComparison.Ordinal) || tag.StartsWith("wschat", StringComparison.Ordinal)
+                        || tag is "workspaces:add" or "workspaces:empty")) continue;
+                    var shown = expanded;
+                    // The filter hides folders with no matching name or chat.
+                    // A machine stays while any of its folders does.
+                    if (shown && _projectsFilter.Trim().Length > 0)
+                    {
+                        if (tag.StartsWith("ws:", StringComparison.Ordinal) && tag.EndsWith(":Launcher", StringComparison.Ordinal))
+                        {
+                            var id = tag["ws:".Length..^":Launcher".Length];
+                            shown = RemoteWorkspaces.CachedFolder(id) is { } remoteFolder
+                                ? FolderPassesFilter(id, remoteFolder.Name, remoteFolder.MachineLabel)
+                                : FolderPassesFilter(id, Format.Text(_localFolders.FirstOrDefault(f => Format.Text(f, "id") == id), "name", id), local);
+                        }
+                        else if (tag.StartsWith("machine:", StringComparison.Ordinal))
+                        {
+                            var any = false;
+                            foreach (var child in item.MenuItems.OfType<NavigationViewItem>())
+                            {
+                                if (child.Tag is not string childTag || !childTag.StartsWith("ws:", StringComparison.Ordinal)
+                                    || !childTag.EndsWith(":Launcher", StringComparison.Ordinal)) continue;
+                                var id = childTag["ws:".Length..^":Launcher".Length];
+                                var folder = RemoteWorkspaces.CachedFolder(id);
+                                var match = FolderPassesFilter(id, folder?.Name ?? id, folder?.MachineLabel ?? "");
+                                child.Visibility = match ? Visibility.Visible : Visibility.Collapsed;
+                                any |= match;
+                            }
+                            shown = any;
+                        }
+                    }
+                    else if (tag.StartsWith("machine:", StringComparison.Ordinal))
+                    {
+                        foreach (var child in item.MenuItems.OfType<NavigationViewItem>()) child.Visibility = Visibility.Visible;
+                    }
+                    item.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+                }
                 _nav.SelectedItem = selected;
             }
             finally { _suppressNav = suppressed; }
         });
     }
 
-    private static UIElement FolderLabel(string name, JsonNode? git)
+    private static UIElement FolderLabel(string name, JsonNode? git, string? machine = null)
     {
         var label = new Grid { ColumnSpacing = 6 };
         label.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         label.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        label.Children.Add(new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (machine is null)
+        {
+            label.Children.Add(new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+        }
+        else
+        {
+            // "Computer / folder". The computer gives way first, so a long
+            // computer name never hides which folder this is.
+            var names = new Grid();
+            names.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            names.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            names.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            names.Children.Add(new TextBlock { Text = machine, FontSize = 13, Opacity = 0.6, MaxWidth = 90,
+                TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
+            var slash = new TextBlock { Text = " / ", FontSize = 13, Opacity = 0.6 };
+            Grid.SetColumn(slash, 1);
+            names.Children.Add(slash);
+            var folderName = new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
+            Grid.SetColumn(folderName, 2);
+            names.Children.Add(folderName);
+            label.Children.Add(names);
+        }
+        // Always present, even empty: it holds the right-hand seat the row's
+        // hover actions take over, so the name keeps its width either way.
+        // The counts sit flush right inside it, like the Mac's trailing frame.
+        var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         if (git is not null && Format.Flag(git, "isRepo"))
         {
-            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             var added = Format.Long(git, "added");
             var removed = Format.Long(git, "removed");
             if (added > 0) line.Children.Add(new TextBlock { Text = "+" + added, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffAdded) });
             if (removed > 0) line.Children.Add(new TextBlock { Text = "−" + removed, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffRemoved) });
-            Grid.SetColumn(line, 1);
-            label.Children.Add(line);
         }
+        var seat = new Grid { Name = SidebarChrome.CountsName, VerticalAlignment = VerticalAlignment.Center };
+        seat.Children.Add(line);
+        Grid.SetColumn(seat, 1);
+        label.Children.Add(seat);
         return label;
     }
 
@@ -1011,7 +1299,7 @@ public sealed partial class MainWindow : Window
         // the terminal and the screen own a black one, and a local value wins.
         if (page.ReadLocalValue(Control.BackgroundProperty) == DependencyProperty.UnsetValue)
         {
-            page.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            page.Background = Theme.ClearBrush;
         }
         if (_toolbarSource is not null)
         {
@@ -1368,6 +1656,20 @@ public sealed partial class MainWindow : Window
     private void NavOnItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
         if (args.InvokedItemContainer is not NavigationViewItem item || item.Tag is not string tag) return;
+        if (tag.StartsWith(ChatDayPrefix, StringComparison.Ordinal))
+        {
+            var day = tag[ChatDayPrefix.Length..];
+            if (day == "empty") return;
+            if (!_collapsedChatDays.Remove(day)) _collapsedChatDays.Add(day);
+            RebuildSidebarLive();
+            return;
+        }
+        if (tag.StartsWith(ChatPagePrefix, StringComparison.Ordinal))
+        {
+            _chatListLimit += SidebarProjectsLayout.ChatPageSize;
+            RebuildSidebarLive();
+            return;
+        }
         if (!tag.StartsWith("ws:", StringComparison.Ordinal) || !tag.EndsWith(":Launcher", StringComparison.Ordinal)) return;
         // After the native row has finished with the click: its own expand
         // toggle and any selection change both happen first.
@@ -2041,6 +2343,13 @@ public sealed partial class MainWindow : Window
     private void RebuildSidebarLiveCore()
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
+        if (SidebarPreferences.Shared.ProjectsDisplay == SidebarProjectsDisplay.ByChat)
+        {
+            RebuildChatListCore();
+            KeepSelectedRow(selectedTag);
+            return;
+        }
+        QueueRecentReorder();
         var sessionsByFolder = new Dictionary<string, List<JsonNode>>(StringComparer.Ordinal);
         foreach (var session in _liveSessions)
         {
@@ -2127,7 +2436,17 @@ public sealed partial class MainWindow : Window
             }
             NavigationRows.Reconcile(parent.MenuItems, desiredSessions, SidebarLive.SessionPrefix, 0, _nav);
             var desiredChats = new List<NavigationViewItem>();
-            if (chatsByFolder.TryGetValue(folderId, out var chats) && chats.Count > 0)
+            if (chatsByFolder.TryGetValue(folderId, out var chats) && _projectsFilter.Trim().Length > 0)
+            {
+                // A hit on the folder name keeps every chat under it;
+                // otherwise the filter narrows to matching chats.
+                var folderLabel = RemoteWorkspaces.CachedFolder(folderId) is { } remoteFolder
+                    ? (remoteFolder.Name, remoteFolder.MachineLabel)
+                    : (Format.Text(folder, "name", folderId), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"));
+                if (!SidebarProjectsLayout.FolderNameMatches(_projectsFilter, folderLabel.Item1, folderLabel.Item2))
+                    chats = chats.Where(chat => SidebarProjectsLayout.ChatMatches(_projectsFilter, chat)).ToList();
+            }
+            if (chats is not null && chats.Count > 0)
             {
                 var expanded = _liveChatExpanded.Contains(folderId);
                 int? selectedIndex = null;
@@ -2179,6 +2498,119 @@ public sealed partial class MainWindow : Window
             _nav.SelectedItem = back;
             _suppressNav = false;
         }
+    }
+
+    /// <summary>Puts the selection back on a row a rebuild replaced, without navigating.</summary>
+    private void KeepSelectedRow(string? selectedTag)
+    {
+        if (selectedTag is not null
+            && ((_nav.SelectedItem as NavigationViewItem)?.Tag as string) != selectedTag
+            && FindNavItem(selectedTag) is NavigationViewItem back)
+        {
+            _suppressNav = true;
+            _nav.SelectedItem = back;
+            _suppressNav = false;
+        }
+    }
+
+    /// <summary>
+    /// The Recent sort follows chat activity, which changes with every poll.
+    /// Rebuild the folder rows only when the order actually moved.
+    /// </summary>
+    private void QueueRecentReorder()
+    {
+        if (SidebarPreferences.Shared.ProjectsSort != SidebarProjectsSort.Recent) return;
+        var shown = _nav.MenuItems.OfType<NavigationViewItem>()
+            .Select(row => row.Tag as string)
+            .Where(tag => tag is not null && tag.StartsWith("ws:", StringComparison.Ordinal) && tag.EndsWith(":Launcher", StringComparison.Ordinal))
+            .ToList();
+        var wanted = OrderedLocalFolders(SidebarProjectsSort.Recent)
+            .Select(folder => "ws:" + Format.Text(folder, "id") + ":Launcher").ToList();
+        if (!shown.SequenceEqual(wanted)) DispatcherQueue.TryEnqueue(RebuildFolderItems);
+    }
+
+    /// <summary>
+    /// Every chat across folders as one timeline: Working, Today, Yesterday,
+    /// the past week's dates, then Older, a page at a time. Same rows as under
+    /// a folder, with the folder named where the age would be.
+    /// </summary>
+    private void RebuildChatListCore()
+    {
+        var localLabel = L10n.Text("windows.mainwindow_xaml.this_pc.638a348b");
+        var all = new List<SidebarChatEntry>();
+        foreach (var chat in _liveChats)
+        {
+            if (chat is null) continue;
+            var folderId = Format.Text(chat, "workspaceId");
+            if (folderId.Length == 0 || Format.Text(chat, "id").Length == 0) continue;
+            if (RemoteWorkspaces.CachedFolder(folderId) is { } remote)
+                all.Add(new SidebarChatEntry(folderId, remote.Name, remote.MachineLabel, chat));
+            else if (_localFolders.FirstOrDefault(folder => Format.Text(folder, "id") == folderId) is { } local)
+                all.Add(new SidebarChatEntry(folderId, Format.Text(local, "name", folderId), localLabel, chat));
+        }
+        var entries = SidebarProjectsLayout.ChatEntries(all, _projectsFilter);
+        var desired = new List<NavigationViewItem>();
+        if (entries.Count == 0)
+        {
+            var empty = new TextBlock
+            {
+                Text = _projectsFilter.Trim().Length > 0
+                    ? L10n.Text("common.sidebar.no_matching_chats") : L10n.Text("common.sidebar.no_chats_yet"),
+                FontSize = 12, Opacity = 0.5, Margin = new Thickness(4, 2, 0, 2),
+            };
+            desired.Add(new NavigationViewItem { Content = empty, Tag = ChatDayPrefix + "empty", SelectsOnInvoked = false, IsTabStop = false });
+        }
+        else
+        {
+            var shown = entries.Take(_chatListLimit).ToList();
+            foreach (var group in SidebarProjectsLayout.DayGroups(shown, DateTime.Now))
+            {
+                var collapsed = _collapsedChatDays.Contains(group.Day.Id);
+                desired.Add(ChatDayRow(group.Day, collapsed));
+                if (collapsed) continue;
+                foreach (var entry in group.Entries)
+                {
+                    var folder = _localFolders.FirstOrDefault(row => Format.Text(row, "id") == entry.FolderId);
+                    var caption = RemoteWorkspaces.CachedFolder(entry.FolderId) is null
+                        ? entry.FolderName : entry.MachineLabel + " / " + entry.FolderName;
+                    desired.Add(SidebarLive.ChatItem(entry.FolderId, entry.Chat, entry.FolderName, folder, caption));
+                }
+            }
+            if (entries.Count > shown.Count)
+            {
+                var more = Math.Min(SidebarProjectsLayout.ChatPageSize, entries.Count - shown.Count);
+                var label = new TextBlock { Text = L10n.Text("windows.mainwindow_xaml.show_0_more.b91c3640", $"{more}"),
+                    FontSize = 12, Opacity = 0.7 };
+                desired.Add(new NavigationViewItem { Content = label, Tag = ChatPagePrefix + "more", SelectsOnInvoked = false });
+            }
+        }
+        var at = _nav.MenuItems.IndexOf(_workspacesHeader) + 1;
+        NavigationRows.Reconcile(_nav.MenuItems, desired, "wschat", at, _nav);
+        ApplySidebarSectionLayout();
+    }
+
+    /// <summary>A day heading in the chat list. Clicking folds its chats.</summary>
+    private static NavigationViewItem ChatDayRow(SidebarChatDay day, bool collapsed)
+    {
+        var title = day.Kind switch
+        {
+            SidebarChatDayKind.Working => L10n.Text("common.working"),
+            SidebarChatDayKind.Today => L10n.Text("common.today"),
+            SidebarChatDayKind.Yesterday => L10n.Text("common.yesterday"),
+            SidebarChatDayKind.Older => L10n.Text("common.sidebar.older"),
+            // A date reads better than a weekday nobody remembers.
+            _ => day.Date.ToString("MMM d", System.Globalization.CultureInfo.CurrentUICulture),
+        };
+        var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 6, 0, 0) };
+        line.Children.Add(new FontIcon { Glyph = collapsed ? "\uE76C" : "\uE70D", FontSize = 9, Opacity = 0.55 });
+        if (day.Kind == SidebarChatDayKind.Working)
+            line.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 6, Height = 6, Fill = Theme.AccentBrush, VerticalAlignment = VerticalAlignment.Center });
+        line.Children.Add(new TextBlock { Text = title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Opacity = 0.6 });
+        // The tag doubles as the reconcile key, so a fold redraws the row.
+        line.Tag = (title, collapsed);
+        var row = new NavigationViewItem { Content = line, Tag = ChatDayPrefix + day.Id, SelectsOnInvoked = false };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, title);
+        return row;
     }
 
     private static int ChildIndex(NavigationViewItem parent, string tag)
@@ -2277,7 +2709,7 @@ public sealed partial class MainWindow : Window
             Width = expanded ? double.NaN : 44, Height = 44, Padding = new Thickness(expanded ? 0 : 4),
             HorizontalAlignment = expanded ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
             MinWidth = 0, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0),
+            Background = Theme.ClearBrush, BorderThickness = new Thickness(0),
         };
         if (avatar is not null) ProfileHoverRing.Attach(avatar, footer);
         var label = AppServices.Update.IsReady || AppServices.Update.IsAvailable ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : L10n.Text("windows.mainwindow_xaml.account_0.d8cd9318", $"{name}");
@@ -2325,7 +2757,7 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(settings, 1);
         bar.Children.Add(settings);
         return new Border { Child = bar, Padding = new Thickness(0), Margin = new Thickness(6),
-            Background = new SolidColorBrush(Colors.Transparent) };
+            Background = Theme.ClearBrush };
     }
 
     private void TrySize()
@@ -2448,10 +2880,10 @@ public sealed partial class MainWindow : Window
 
     private IReadOnlyList<NewChatRepository> NewChatRepositories() => _localFolders
         .Where(folder => Format.Text(folder, "id").Length > 0)
-        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path")))
+        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path"), IsLocal: true))
         .Concat(RemoteWorkspaces.CachedFolders()
             .Where(folder => RemoteWorkspaces.IsConnected(folder.PeerKey))
-            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path))).ToArray();
+            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path, IsLocal: false))).ToArray();
 
     private void OpenNewChat(string? repository = null)
     {

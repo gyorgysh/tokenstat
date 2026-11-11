@@ -24,6 +24,8 @@ internal sealed record ChatQuestionItem(
 internal static class ChatQuestionText
 {
     public const string Fence = "tokenstat-question";
+    /// <summary>A plan the agent wrote for the activity panel. The host reads it, so the reply drops it.</summary>
+    public const string PlanFence = "tokenstat-plan";
     // Match the host scanner, including the newline before the closing fence.
     private const int BlockMaxBytes = 64 * 1024;
 
@@ -33,9 +35,10 @@ internal static class ChatQuestionText
     /// </summary>
     public static string Strip(string text, bool streaming = true)
     {
-        if (!text.Contains(Fence, StringComparison.Ordinal)) return text;
+        if (!text.Contains(Fence, StringComparison.Ordinal) && !text.Contains(PlanFence, StringComparison.Ordinal)) return text;
         var kept = new List<string>();
         var inside = false;
+        var isPlan = false;
         var block = new List<string>();
         long bodyBytes = 0;
         var lines = text.Split('\n');
@@ -45,9 +48,11 @@ internal static class ChatQuestionText
             var trimmed = line.Trim();
             // The host reads the info string trimmed, so "``` tokenstat-question"
             // is a question there too and must not show as raw JSON here.
-            if (!inside && trimmed.StartsWith("```", StringComparison.Ordinal) && trimmed[3..].Trim() == Fence)
+            var info = trimmed.StartsWith("```", StringComparison.Ordinal) ? trimmed[3..].Trim() : "";
+            if (!inside && (info == Fence || info == PlanFence))
             {
                 inside = true;
+                isPlan = info == PlanFence;
                 block = [line];
                 bodyBytes = 0;
                 continue;
@@ -63,9 +68,11 @@ internal static class ChatQuestionText
                         var body = string.Join("\n", block.Skip(1).SkipLast(1));
                         var value = System.Text.Encoding.UTF8.GetByteCount(body) < BlockMaxBytes
                             ? System.Text.Json.Nodes.JsonNode.Parse(body) : null;
-                        valid = value is System.Text.Json.Nodes.JsonObject && value["question"] is { } question
-                            && question.GetValueKind() == System.Text.Json.JsonValueKind.String
-                            && !string.IsNullOrWhiteSpace(question.GetValue<string>());
+                        valid = isPlan
+                            ? value is System.Text.Json.Nodes.JsonObject && value["steps"] is System.Text.Json.Nodes.JsonArray
+                            : value is System.Text.Json.Nodes.JsonObject && value["question"] is { } question
+                                && question.GetValueKind() == System.Text.Json.JsonValueKind.String
+                                && !string.IsNullOrWhiteSpace(question.GetValue<string>());
                     }
                     catch (System.Text.Json.JsonException) { }
                     if (!valid) kept.AddRange(block);

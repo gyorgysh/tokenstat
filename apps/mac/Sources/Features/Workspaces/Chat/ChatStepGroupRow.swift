@@ -17,6 +17,9 @@ struct ChatStepGroupRow: View {
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
+    #if os(macOS)
+    @State private var hovering = false
+    #endif
 
     #if os(macOS)
     private static let titleFont = Theme.font(13, weight: .medium)
@@ -31,6 +34,18 @@ struct ChatStepGroupRow: View {
             if group.plain { plainLine }
             else { standardRow }
         }
+        #if os(macOS)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(hovering ? Theme.rowHighlight.opacity(0.55) : .clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(hovering ? Theme.border.opacity(0.9) : .clear, lineWidth: 1)
+        )
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+        #endif
         .animation(smoothStreaming && !reduceMotion ? .easeOut(duration: 0.18) : nil, value: group.running)
     }
 
@@ -60,6 +75,7 @@ struct ChatStepGroupRow: View {
                     DiffStat(added: Int(group.added), removed: Int(group.removed), font: Self.titleFont.weight(.regular))
                         .fixedSize()
                 }
+                failureMark(font: Self.titleFont.weight(.regular))
                 Spacer(minLength: 0)
                 if group.open {
                     Image(systemName: "chevron.down")
@@ -116,8 +132,9 @@ struct ChatStepGroupRow: View {
                 header
                 ForEach(group.activityPreview) { activity in
                     HStack(spacing: Theme.Space.s) {
-                        Image(systemName: activity.running ? "arrow.right" : "checkmark")
+                        Image(systemName: activity.running ? "arrow.right" : (activity.failed ? "xmark" : "checkmark"))
                             .font(Theme.font(10, weight: .medium))
+                            .foregroundStyle(activity.failed && !activity.running ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.secondary))
                             .frame(width: 16)
                         Text(SeatStep.word(verb: activity.verb, running: activity.running))
                             .font(Self.titleFont)
@@ -180,6 +197,7 @@ struct ChatStepGroupRow: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 0)
+            failureMark(font: Self.metaFont)
             if group.added + group.removed > 0 {
                 DiffStat(added: Int(group.added), removed: Int(group.removed), font: Self.metaFont)
                     .fixedSize()
@@ -191,6 +209,24 @@ struct ChatStepGroupRow: View {
                     .fixedSize()
             }
         }
+    }
+
+    /// A quiet red count of failed steps. A lone step just says Failed.
+    @ViewBuilder
+    private func failureMark(font: Font) -> some View {
+        if group.failures > 0, !group.running {
+            Text(failureText)
+                .font(font)
+                .foregroundStyle(Theme.danger.opacity(0.85))
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    private var failureText: String {
+        group.memberIDs.count == 1
+            ? L10n.text("common.failed")
+            : L10n.text("apple.chatdetail.failed_count", "\(group.failures)")
     }
 
     private var symbol: String {
@@ -256,7 +292,8 @@ struct ChatStepGroupRow: View {
             [SeatStep.word(verb: $0.verb, running: $0.running), $0.target]
                 .filter { !$0.isEmpty }.joined(separator: " ")
         }
-        return ([title, summary].compactMap { $0 } + actions)
+        let failure = group.failures > 0 && !group.running ? failureText : nil
+        return ([title, summary, failure].compactMap { $0 } + actions)
             .filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }

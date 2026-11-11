@@ -4093,6 +4093,15 @@ impl Store {
             chat.autonomy == "standard",
             takes_notes_mid_turn(&chat),
         ));
+        if let Some(note) = crate::chat_question::native_tool_note(&chat.backend) {
+            composed.append_standing(note);
+        }
+        // How to keep a plan the chat can show: the plan block, or a pointer
+        // to the agent's own todo tool. Nothing for a backend that already
+        // keeps one unprompted.
+        if let Some(plan) = crate::chat_plan::rule(&chat.backend) {
+            composed.append_standing(&plan);
+        }
         // Two separate things ride the same channel this turn. The standing
         // rules repeat for as long as they are unchanged; the handover is sent
         // exactly once, to the agent that has just been handed a conversation
@@ -4806,6 +4815,7 @@ impl Store {
         let mut assistant_text = String::new();
         let mut muse_sign_in_required = false;
         let mut questions = crate::chat_question::Scanner::default();
+        let mut plans = crate::chat_plan::Scanner::default();
         let deadline = self.get(id).ok().and_then(|chat| {
             (chat.budget_seconds > 0)
                 .then(|| Instant::now() + Duration::from_secs(chat.budget_seconds))
@@ -4865,7 +4875,9 @@ impl Store {
                     }
                     muse_sign_in_required |= backend == "muse"
                         && events.iter().any(crate::transcript::muse_sign_in_required);
-                    questions.shift(collect_agent_text(&events, &mut assistant_text));
+                    let removed = collect_agent_text(&events, &mut assistant_text);
+                    questions.shift(removed);
+                    plans.shift(removed);
                     self.record_events(id, backend, events);
                     self.record_tool_images(id, backend, activity_revision, parser.take_images());
                     if muse_sign_in_required {
@@ -4877,6 +4889,18 @@ impl Store {
                     // Mid-turn, so the card is in front of the person while
                     // an answer can still reach this turn.
                     self.record_questions(id, backend, questions.scan(&assistant_text));
+                    if let Some(plan) = plans.scan(&assistant_text) {
+                        parser.report_plan(&plan);
+                        if let Some(snapshot) = parser.take_inspection() {
+                            self.record_inspection(
+                                id,
+                                backend,
+                                activity_revision,
+                                launch_model,
+                                snapshot,
+                            );
+                        }
+                    }
                 }
             }
             // Check budgets on every bounded chunk, including a fast backlog
@@ -4947,7 +4971,9 @@ impl Store {
             let events = measured(parser.push_events(&chunk.bytes));
             muse_sign_in_required |=
                 backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
-            questions.shift(collect_agent_text(&events, &mut assistant_text));
+            let removed = collect_agent_text(&events, &mut assistant_text);
+            questions.shift(removed);
+            plans.shift(removed);
             self.record_events(id, backend, events);
             self.record_tool_images(id, backend, activity_revision, parser.take_images());
         }
@@ -4957,10 +4983,18 @@ impl Store {
         }
         muse_sign_in_required |=
             backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
-        questions.shift(collect_agent_text(&events, &mut assistant_text));
+        let removed = collect_agent_text(&events, &mut assistant_text);
+        questions.shift(removed);
+        plans.shift(removed);
         self.record_events(id, backend, events);
         self.record_tool_images(id, backend, activity_revision, parser.take_images());
         self.record_questions(id, backend, questions.finish(&assistant_text));
+        if let Some(plan) = plans.finish(&assistant_text) {
+            parser.report_plan(&plan);
+            if let Some(snapshot) = parser.take_inspection() {
+                self.record_inspection(id, backend, activity_revision, launch_model, snapshot);
+            }
+        }
         self.record_response_attachments(id, backend, &assistant_text, response_output_dir);
         let exit = manager.info(pty).ok().and_then(|info| info.exit_code);
         let stopped = self

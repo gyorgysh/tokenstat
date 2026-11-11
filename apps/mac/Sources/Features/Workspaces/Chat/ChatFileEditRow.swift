@@ -18,7 +18,8 @@ struct ChatFileEditRow: View {
     /// small one. A hand toggle still wins.
     var expandsOutput: Bool = false
     var compact: Bool = false
-    private var usesCompactStyle: Bool { compact && !state.failed }
+    /// A failed edit keeps the chat's density, marked rather than boxed.
+    private var usesCompactStyle: Bool { compact }
     #if os(macOS)
     private static let nameFont = Theme.callout.weight(.semibold)
     private static let metaFont = Theme.mono(11)
@@ -101,11 +102,11 @@ struct ChatFileEditRow: View {
                     ProgressView()
                         .controlSize(.mini)
                 } else {
-                    Image(systemName: "doc.text")
+                    Image(systemName: state.failed ? "xmark.circle" : "doc.text")
                         .font(Theme.font(12, weight: .medium))
                 }
             }
-            .foregroundStyle(tint)
+            .foregroundStyle(state.failed ? Theme.danger : tint)
             .frame(width: 16)
 
             Text(usesCompactStyle ? state.path : state.fileName)
@@ -205,13 +206,13 @@ struct ChatFileEditRow: View {
     }
 
     private var tint: Color {
-        if state.failed { return Theme.danger }
+        if state.failed { return Color.secondary }
         if state.running { return Theme.accent }
         return Theme.accent
     }
 
     private var bar: Color {
-        if state.failed { return Theme.danger }
+        if state.failed { return Theme.danger.opacity(0.6) }
         // Finished reads accent like its header: the bar marks the card, and
         // the added/removed meaning already lives in the patch lines and the
         // stat, which keep their diff colours.
@@ -219,7 +220,6 @@ struct ChatFileEditRow: View {
     }
 
     private var border: Color {
-        if state.failed { return Theme.danger.opacity(0.45) }
         if state.running { return Theme.accent.opacity(0.45) }
         return Theme.border
     }

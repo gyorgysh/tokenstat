@@ -7,6 +7,7 @@ static void Check(bool answer, string message) { if (!answer) throw new Exceptio
 ChatUsageTests.Run();
 TeamTranscriptTests.Run();
 ChartViewportTests.Run();
+ChatAgentStepsTests.Run();
 TeamPageTests.Run();
 await TeamCommentTests.RunAsync();
 await TeamAskTests.RunAsync();
@@ -595,12 +596,14 @@ var mustSee = new List<ChatPage.DisplayItem>
 foreach (var level in Enum.GetValues<ChatDetail>())
 {
     var shown = FoldRows(mustSee, level);
-    foreach (var must in new[] { "u1", "p1", "t3", "e1", "f1", "x1" })
+    foreach (var must in new[] { "u1", "p1", "f1", "x1" })
     {
         Check(shown.Any(row => row.Id == must) && ChatDetailFold.Owner(must, shown) is null, $"{level} never folds {must}");
     }
 }
-Check(Ids(FoldRows(mustSee, ChatDetail.Minimal)) == "u1,g:t1,p1,g:t2,t3,e1,f1,x1", "an approval splits the work where it happened");
+var minimalFailures = FoldRows(mustSee, ChatDetail.Minimal);
+Check(Ids(minimalFailures) == "u1,g:t1,p1,g:t2,f1,x1", "an approval splits the work where it happened: " + Ids(minimalFailures));
+Check(GroupOf(minimalFailures, "g:t2")! is { Steps: 3, Failures: 2 }, "failed steps fold with the work and the line counts them");
 Check(Ids(FoldRows([Ask("u1"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0.5)], ChatDetail.Minimal)) == "u1,a1,x1",
     "nothing to fold keeps the usage row");
 Check(Ids(FoldRows([Ask("u1"), Tool("t1", "Read"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0)], ChatDetail.Minimal)) == "u1,g:t1,a1,x1",
@@ -654,7 +657,8 @@ Check(ChatDetailFold.Preview("\n\n## **Plan** it\nmore") == "Plan** it" && ChatD
     "previews drop markdown marks");
 var perStep = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Grep"), Tool("t3", "Bash"),
     EditRow("e1", "src/a.cs", 6, 2), Tool("t4", "Read"), Say("a1"), Tool("t5", "Bash", failed: true)], ChatDetail.Compact);
-Check(Ids(perStep) == "u1,g:k1,g:t1,g:t3,g:e1,g:t4,a1,t5,changes:e1", "Compact is a line per step: " + Ids(perStep));
+Check(Ids(perStep) == "u1,g:k1,g:t1,g:t3,g:e1,g:t4,a1,g:t5,changes:e1", "Compact is a line per step: " + Ids(perStep));
+Check(GroupOf(perStep, "g:t5")! is { Style: ChatStepGroupStyle.Step, Failures: 1, Plain: true }, "a failed step is a marked line, not a card");
 Check(new[] { "g:k1", "g:t1", "g:t3", "g:e1", "g:t4" }.All(id => GroupOf(perStep, id)!.Plain), "every Compact line is plain");
 Check(GroupOf(perStep, "g:t3")! is { Style: ChatStepGroupStyle.Step, Verb: "Bash" }, "a command is its own line");
 Check(GroupOf(perStep, "g:e1")! is { Style: ChatStepGroupStyle.Step, Verb: "Edit", Subject: "src/a.cs", Added: 6, Removed: 2 },

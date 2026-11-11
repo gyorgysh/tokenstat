@@ -39,7 +39,9 @@ struct ToolRow: View {
     /// diff that streams in after appear must still open on its own.
     @State private var snippetToggled = false
 
-    private var usesCompactStyle: Bool { compact && !failed }
+    /// A failed step keeps the chat's density. Agents retry all the time,
+    /// so a failed read is a step like any other, marked rather than boxed.
+    private var usesCompactStyle: Bool { compact }
 
     private var snippetIsOutput: Bool {
         snippet.contains { $0.hasPrefix("|") }
@@ -116,11 +118,11 @@ struct ToolRow: View {
                         ProgressView()
                             .controlSize(.mini)
                     } else {
-                        Image(systemName: symbol)
+                        Image(systemName: failed ? "xmark.circle" : symbol)
                             .font(Theme.font(12, weight: .medium))
                     }
                 }
-                .foregroundStyle(tint)
+                .foregroundStyle(failed ? Theme.danger : tint)
                 .frame(width: 16)
 
                 Text(SeatStep.word(verb: verb, running: running))
@@ -250,7 +252,7 @@ struct ToolRow: View {
     }
 
     private var tint: Color {
-        if failed { return Theme.danger }
+        if failed { return Color.secondary }
         if running { return Theme.accent }
         switch verb {
         case "Shell", "Bash": return Theme.warning
@@ -259,7 +261,6 @@ struct ToolRow: View {
     }
 
     private var border: Color {
-        if failed { return Theme.danger.opacity(0.45) }
         if running { return Theme.accent.opacity(0.45) }
         return Theme.border
     }

@@ -201,9 +201,12 @@ internal static class SidebarLive
 
     /// <summary>
     /// One recent conversation row: title, backend and age. Tapping opens the
-    /// conversation in its folder chat, like the Mac sidebar row.
+    /// conversation in its folder chat, like the Mac sidebar row. A
+    /// <paramref name="caption"/> replaces the age: the chat list names the
+    /// folder there, because its day heading already says when.
     /// </summary>
-    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null, JsonNode? folder = null)
+    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null, JsonNode? folder = null,
+        string? caption = null)
     {
         folderName ??= L10n.Text("windows.sidebarlive.project.98595978");
         var id = Format.Text(chat, "id");
@@ -252,8 +255,9 @@ internal static class SidebarLive
         panel.Children.Add(label);
         var age = new TextBlock
         {
-            Text = ms is null ? "" : RelativeShort(ms.Value),
+            Text = caption ?? (ms is null ? "" : CompactAge(ms.Value)),
             FontSize = 10, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = caption is null ? double.PositiveInfinity : 110, TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
         if (chat["pull"] is JsonObject pull) trailing.Children.Add(WorkspaceBranchPull.Badge(pull));
@@ -267,7 +271,7 @@ internal static class SidebarLive
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };
-        if (row.Content is FrameworkElement view) view.Tag = (title, detail, backend);
+        if (row.Content is FrameworkElement view) view.Tag = (title, detail + caption, backend);
         ChatPreviewCache.Attach(row, folderId, id);
         AutomationProperties.SetAutomationId(row, "sidebar.chat." + id);
         AutomationProperties.SetName(row, title + ". " + detail);
@@ -395,7 +399,7 @@ internal static class SidebarLive
         var open = new Button
         {
             Content = row,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0, 1, 0, 0),
             BorderBrush = Theme.BorderBrush,
             Padding = new Thickness(12, 8, 12, 8),
@@ -593,6 +597,27 @@ internal static class SidebarLive
             return L10n.Text("windows.sidebarlive.days_ago", (int)age.TotalDays);
         }
         return moment.LocalDateTime.ToString("d", CultureInfo.CurrentCulture);
+    }
+
+    /// <summary>
+    /// The chat row's age, the Mac's CompactAge: "now", "5m", "3h", "4d",
+    /// "6w", "1y". Never a full date, so the title keeps the row's width.
+    /// </summary>
+    public static string CompactAge(long ms)
+    {
+        DateTimeOffset moment;
+        try { moment = DateTimeOffset.FromUnixTimeMilliseconds(ms); }
+        catch { return ""; }
+        var seconds = (DateTimeOffset.Now - moment).TotalSeconds;
+        return seconds switch
+        {
+            < 60 => L10n.Text("windows.sidebarlive.now"),
+            < 3600 => L10n.Text("windows.sidebarlive.age_minutes", (int)(seconds / 60)),
+            < 86_400 => L10n.Text("windows.sidebarlive.age_hours", (int)(seconds / 3600)),
+            < 86_400 * 14 => L10n.Text("windows.sidebarlive.age_days", (int)(seconds / 86_400)),
+            < 86_400 * 365 => L10n.Text("windows.sidebarlive.age_weeks", (int)(seconds / (86_400 * 7))),
+            _ => L10n.Text("windows.sidebarlive.age_years", (int)(seconds / (86_400 * 365))),
+        };
     }
 
     /// <summary>Display name for a harness, the same spelling the Mac uses.</summary>

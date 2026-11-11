@@ -226,6 +226,12 @@ enum Theme {
         /// over a moving transcript. The same 44pt target serves touch
         /// on both phone and desktop.
         static let heightComfortable: CGFloat = 44
+        /// A sidebar row. Comfortable to hit with a finger on a touch screen
+        /// without turning the sidebar into a phone list.
+        static let sidebarRow: CGFloat = 36
+        /// An icon button in the sidebar or a section heading. Never smaller
+        /// than the platform's minimum target, however small its glyph.
+        static let sidebarIcon: CGFloat = 28
         /// Buttons that sit beside each other in a footer.
         static let pairedWidth: CGFloat = 88
         /// Row height for a list a person scans rather than reads.

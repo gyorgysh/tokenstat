@@ -66,6 +66,10 @@ internal static class Theme
         foreach (var key in new[] { "ButtonBorderBrush", "ButtonBorderBrushPointerOver", "TextControlBorderBrush",
             "TextControlBorderBrushPointerOver", "TabViewItemHeaderBorderBrush" })
             resources[key] = BorderBrush;
+        // Native resting backgrounds are transparent white; see Clear.
+        foreach (var key in new[] { "SubtleFillColorTransparentBrush", "NavigationViewItemBackground",
+            "ListViewItemBackground", "ComboBoxItemBackground", "AppBarButtonBackground", "HyperlinkButtonBackground" })
+            resources[key] = ClearBrush;
         resources["TextControlBorderBrushFocused"] = AccentBrush;
         resources["TabViewBackground"] = TabStripBrush;
     }
@@ -237,6 +241,14 @@ internal static class Theme
     public static SolidColorBrush BorderBrush => Brush(static () => Border);
     public static SolidColorBrush ControlSeatBrush => Brush(static () => ControlSeat);
     public static SolidColorBrush AccentSoftBrush => Brush(static () => AccentSoft);
+    /// <summary>
+    /// Fully transparent, in the hover colour's hue. WinUI fades a control's
+    /// background between states, and Colors.Transparent is transparent white:
+    /// fading from it to the dark hover colour passes through a light grey,
+    /// so every hover flashed white. Fading from this one changes only alpha.
+    /// </summary>
+    public static Color Clear => Color.FromArgb(0, RowHighlight.R, RowHighlight.G, RowHighlight.B);
+    public static SolidColorBrush ClearBrush => Brush(static () => Clear);
 
     public const double CardRadius = 14;
     public const double CardPadding = 16;

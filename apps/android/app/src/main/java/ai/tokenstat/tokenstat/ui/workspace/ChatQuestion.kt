@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -23,6 +24,9 @@ data class ChatQuestion(
 )
 
 const val QUESTION_FENCE = "tokenstat-question"
+/// A plan the agent wrote for the activity panel. The host reads it, so the
+/// reply drops it the same way.
+const val PLAN_FENCE = "tokenstat-plan"
 // Match the host scanner, including the newline before the closing fence.
 private const val QUESTION_BLOCK_MAX_BYTES = 64 * 1024
 
@@ -30,9 +34,10 @@ private const val QUESTION_BLOCK_MAX_BYTES = 64 * 1024
 /// block still streaming is cut from its opening line, so half a JSON object
 /// never flashes on screen.
 fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
-    if (!text.contains(QUESTION_FENCE)) return text
+    if (!text.contains(QUESTION_FENCE) && !text.contains(PLAN_FENCE)) return text
     val kept = mutableListOf<String>()
     var inside = false
+    var isPlan = false
     val block = mutableListOf<String>()
     var bodyBytes = 0L
     val lines = text.split("\n")
@@ -40,8 +45,10 @@ fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
         val trimmed = line.trim()
         // The host reads the info string trimmed, so "``` tokenstat-question"
         // is a question there too and must not show as raw JSON here.
-        if (!inside && trimmed.startsWith("```") && trimmed.substring(3).trim() == QUESTION_FENCE) {
+        val info = if (trimmed.startsWith("```")) trimmed.substring(3).trim() else ""
+        if (!inside && (info == QUESTION_FENCE || info == PLAN_FENCE)) {
             inside = true
+            isPlan = info == PLAN_FENCE
             block.add(line)
             bodyBytes = 0
             continue
@@ -53,7 +60,9 @@ fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
                 val value = if (body.length < QUESTION_BLOCK_MAX_BYTES && body.toByteArray(Charsets.UTF_8).size < QUESTION_BLOCK_MAX_BYTES)
                     runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull() else null
                 val question = value?.get("question") as? JsonPrimitive
-                if (question?.isString != true || question.content.isBlank()) kept.addAll(block)
+                val valid = if (isPlan) value?.get("steps") is JsonArray
+                    else question?.isString == true && question.content.isNotBlank()
+                if (!valid) kept.addAll(block)
                 block.clear()
                 inside = false
             } else {

@@ -2676,5 +2676,8 @@
   "android.workspacetaskresult.uncommitted_files_in_this_folder.9b817339": "Uncommitted files in this folder",
   "android.workspacetaskresult.working_tree_matches_the_last_commit.419b69e6": "Working tree matches the last commit",
   "android.notifications.permission_blocked": "Android notifications are off for tokenstat. Allow them in system settings to receive alerts.",
-  "android.notifications.open_settings": "Open notification settings"
+  "android.notifications.open_settings": "Open notification settings",
+  "android.chatagentpanel.search_agents.212fd04a": "Search agents",
+  "android.chatagentpanel.search_models.10421935": "Search models",
+  "android.chatagentpanel.search_efforts.f7909b52": "Search efforts"
 }

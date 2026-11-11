@@ -490,7 +490,7 @@ internal sealed partial class ChatPage
 
     /// <summary>What a group row shows, so it is rebuilt only when that changes.</summary>
     private static string StepGroupKey(ChatStepGroup? group) => group is null ? ""
-        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Plain}|{group.Verb}|{group.Subject}";
+        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Failures}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Plain}|{group.Verb}|{group.Subject}";
 
     /// <summary>
     /// Compact: the verb, what it acted on and the lines it changed, in one
@@ -539,12 +539,13 @@ internal sealed partial class ChatPage
         };
         row.Children.Add(detail);
         if (group.Added + group.Removed > 0) row.Children.Add(DiffStat(group.Added, group.Removed, plain: true));
+        if (FailureMark(group, 13, mono: false) is { } plainFailure) row.Children.Add(plainFailure);
         var button = new Button
         {
             Content = row,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Left,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(Theme.SpaceS, 3, Theme.SpaceS, 3),
             CornerRadius = new CornerRadius(Theme.CardRadius),
@@ -615,7 +616,7 @@ internal sealed partial class ChatPage
                 Content = line,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                Background = Theme.ClearBrush,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0),
             };
@@ -651,7 +652,7 @@ internal sealed partial class ChatPage
         if (group.Plain) return PlainStepLine(id, group);
         var tint = group.Running ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
-        for (var column = 0; column < 6; column++)
+        for (var column = 0; column < 7; column++)
         {
             row.ColumnDefinitions.Add(new ColumnDefinition
             {
@@ -710,6 +711,11 @@ internal sealed partial class ChatPage
             Grid.SetColumn(stat, 4);
             row.Children.Add(stat);
         }
+        if (FailureMark(group, 11, mono: true) is { } failure)
+        {
+            Grid.SetColumn(failure, 5);
+            row.Children.Add(failure);
+        }
         if (group.Cost is > 0 and var cost)
         {
             var spend = new TextBlock
@@ -720,7 +726,7 @@ internal sealed partial class ChatPage
                 Foreground = Theme.AccentBrush,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(spend, 5);
+            Grid.SetColumn(spend, 6);
             row.Children.Add(spend);
         }
 
@@ -729,7 +735,7 @@ internal sealed partial class ChatPage
             Content = row,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(Theme.SpaceS, 6, Theme.SpaceS, 6),
             CornerRadius = new CornerRadius(Theme.CardRadius),
@@ -753,6 +759,24 @@ internal sealed partial class ChatPage
         Padding = new Thickness(Theme.SpaceS, 0, 0, 0),
         Child = view,
     };
+
+    /// <summary>A quiet red count of failed steps. A lone step just says Failed.</summary>
+    private static TextBlock? FailureMark(ChatStepGroup group, double size, bool mono)
+    {
+        if (group.Failures == 0 || group.Running) return null;
+        var text = new TextBlock
+        {
+            Text = group.MemberIds.Count == 1
+                ? L10n.Text("common.failed")
+                : L10n.Text("windows.chatdetail.failed_count", group.Failures.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            FontSize = size,
+            Foreground = Theme.Brush(static () => Theme.Danger),
+            Opacity = 0.85,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        if (mono) text.FontFamily = Fonts.Mono;
+        return text;
+    }
 
     private static string StepGroupTitle(ChatStepGroup group) => group.Style switch
     {
@@ -1273,7 +1297,7 @@ internal sealed partial class ChatPage
             Content = row,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Left,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = Theme.ClearBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(Theme.SpaceS, 3, Theme.SpaceS, 3),
         };

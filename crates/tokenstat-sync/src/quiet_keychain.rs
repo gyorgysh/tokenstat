@@ -184,6 +184,9 @@ fn request_mode(
 
 fn authorization_target(service: &str, account: &str) -> bool {
     (service == "ai.meta.dev.credentials" && account == "meta")
+        || (cfg!(target_os = "macos")
+            && service == crate::cursor_app_auth::safe_storage_service()
+            && crate::cursor_app_auth::safe_storage_accounts().contains(&account))
         || ((service == "Claude Code-credentials"
             || service.starts_with("Claude Code-credentials-"))
             && !account.is_empty()
@@ -201,12 +204,56 @@ pub fn authorize_usage(source: &str) -> Result<(), String> {
             crate::claude_limits::keychain_services(),
             std::env::var("USER").unwrap_or_default(),
         ),
+        "cursor" => return authorize_cursor_safe_storage(),
         "muse" => (vec!["ai.meta.dev.credentials".into()], "meta".into()),
         _ => return Err("This provider does not support Keychain authorization.".into()),
     };
     authorize_items(&services, &account, |service, interactive| {
         request_mode(service, &account, None, interactive)
     })
+}
+
+#[cfg(target_os = "macos")]
+fn authorize_cursor_safe_storage() -> Result<(), String> {
+    let service = crate::cursor_app_auth::safe_storage_service();
+    authorize_cursor_items(
+        crate::cursor_app_auth::safe_storage_accounts(),
+        |account, interactive| request_mode(service, account, None, interactive),
+    )
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn authorize_cursor_items(
+    accounts: &[&str],
+    mut read: impl FnMut(&str, bool) -> Reply,
+) -> Result<(), String> {
+    let mut denied = Vec::new();
+    for account in accounts {
+        let reply = read(account, false);
+        match reply.status {
+            0 if reply.has_login => return Ok(()),
+            0 | -25300 => {}
+            _ => denied.push(*account),
+        }
+    }
+    if let Some(account) = denied.first() {
+        let reply = read(account, true);
+        authorization_result(reply.status)?;
+        if !reply.has_login {
+            return Err("Access was granted, but the Cursor Safe Storage item could not be read. Sign in to the Cursor app, then refresh plan limits.".into());
+        }
+        let remembered = read(account, false);
+        if remembered.status == 0 && remembered.has_login {
+            return Ok(());
+        }
+        return Err("Background access is still unavailable. If you chose Allow Once, choose Always Allow on the next attempt. You can retry later in Account → Plan limits.".into());
+    }
+    Err("Could not read Cursor Safe Storage. Open Cursor to sign in, then try again in Account → Plan limits.".into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn authorize_cursor_safe_storage() -> Result<(), String> {
+    Err("Cursor Safe Storage authorization is only available on macOS.".into())
 }
 
 fn successful_reply(service: &str, data: Option<Vec<u8>>, interactive: bool) -> Reply {
@@ -224,7 +271,10 @@ fn successful_reply(service: &str, data: Option<Vec<u8>>, interactive: bool) -> 
             token
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| !s.trim().is_empty())
-        });
+        })
+        || (cfg!(target_os = "macos")
+            && service == crate::cursor_app_auth::safe_storage_service()
+            && data.as_ref().is_some_and(|bytes| !bytes.is_empty()));
     Reply {
         status: 0,
         data: if interactive { None } else { data },
@@ -346,6 +396,50 @@ mod tests {
             successful_reply("ai.meta.dev.credentials", Some(b"{}".to_vec()), interactive)
         });
         assert!(plugins.is_err());
+    }
+
+    #[test]
+    fn cursor_authorization_accepts_redacted_interactive_reply_and_checks_silent_access() {
+        let mut calls = Vec::new();
+        let result = authorize_cursor_items(&["Cursor Key"], |account, interactive| {
+            calls.push((account.to_string(), interactive));
+            if calls.len() == 1 {
+                return unavailable();
+            }
+            Reply {
+                status: 0,
+                data: if interactive {
+                    None
+                } else {
+                    Some(b"secret".to_vec())
+                },
+                has_login: true,
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(
+            calls
+                .iter()
+                .map(|(_, interactive)| *interactive)
+                .collect::<Vec<_>>(),
+            vec![false, true, false]
+        );
+
+        let mut calls = 0;
+        let result = authorize_cursor_items(&["Cursor Key", "Cursor"], |_, interactive| {
+            calls += 1;
+            if interactive {
+                Reply {
+                    status: 0,
+                    data: None,
+                    has_login: true,
+                }
+            } else {
+                unavailable()
+            }
+        });
+        assert!(result.unwrap_err().contains("Always Allow"));
+        assert_eq!(calls, 4);
     }
 
     #[test]

@@ -1067,20 +1067,23 @@ final class ChatModel {
 
     /// Opening a project's sessions also prepares its recent chat previews,
     /// without changing the active conversation or starting an agent.
-    func warmWorkspacePreviews(_ folder: String, includeMessages: Bool = true) async {
+    /// False when the folder's list could not be read. Every other outcome,
+    /// including a cancelled or superseded read, counts as answered.
+    @discardableResult
+    func warmWorkspacePreviews(_ folder: String, includeMessages: Bool = true) async -> Bool {
         #if os(macOS)
         let scope = WorkSessionContext.shared.scope
         let epoch = previewCacheEpoch
         let route = Bridge.chatRoute(workspaceID: folder, peer: nil)
         if route.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
         guard let scope, let host = route.peer ?? WorkSessionContext.shared.localHostIdentity,
-              !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+              !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return true }
         let listRead = beginChatListRead(workspaceID: route.workspaceID, peer: route.peer, scope: scope)
         do {
             let answer = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
-            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return true }
             if continuityScope == nil { continuityScope = scope }
-            guard continuityScope == scope else { return }
+            guard continuityScope == scope else { return true }
             let list = applyChatList(answer, read: listRead, current: sidebarChats(in: folder))
             storeChatListCache(Self.uniqued(list), folderID: folder)
             // Directory reads belong to the account and repository, not the
@@ -1088,7 +1091,7 @@ final class ChatModel {
             // unrelated chat must not discard these titles without a retry.
             // Expanded sidebar projects need titles, not every transcript.
             // Leave message warming to hover or explicitly opening a project.
-            guard includeMessages, previewCacheEpoch == epoch else { return }
+            guard includeMessages, previewCacheEpoch == epoch else { return true }
             let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: route.workspaceID)
             let worth = Self.uniqued(list).filter { !isUnused($0, in: folder) }
             let candidates = ChatHistoryWindow.previews(in: worth,
@@ -1097,14 +1100,14 @@ final class ChatModel {
                 }
             for chat in candidates {
                 guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-                      previewCacheEpoch == epoch else { return }
+                      previewCacheEpoch == epoch else { return true }
                 if folderID == folder && selected?.id == chat.id { continue }
                 let key = prefix + WorkReferenceKey.encode(chat.id)
                 if recentMessages.contains(key) { continue }
                 while previewReads.count >= 2 {
                     try await Task.sleep(for: .milliseconds(40))
                     guard scope == WorkSessionContext.shared.scope,
-                          previewCacheEpoch == epoch else { return }
+                          previewCacheEpoch == epoch else { return true }
                 }
                 if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
                 guard previewReads.insert(key).inserted else { continue }
@@ -1113,12 +1116,12 @@ final class ChatModel {
                     let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
                         limit: ChatPaging.previewPageEvents, peer: route.peer, includeUsage: false)
                     guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-                          previewCacheEpoch == epoch else { return }
+                          previewCacheEpoch == epoch else { return true }
                     if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
                     let rows = try await previewProjector.project(page.events,
                         backend: chat.backend, running: chat.running)
                     guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-                          previewCacheEpoch == epoch else { return }
+                          previewCacheEpoch == epoch else { return true }
                     if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
                     recentMessages.store(rows, for: key, speculative: true) {
                         String(reflecting: $0).utf8.count
@@ -1130,15 +1133,20 @@ final class ChatModel {
                     continue
                 }
             }
+            return true
         } catch {
-            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-                  chatListCache[folder] == nil else { return }
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return true }
+            // A list already on screen stays; the caller hears the read failed.
+            guard chatListCache[folder] == nil else { return false }
             sidebarListErrors[folder] = (scope, error.localizedDescription)
             if sidebarListErrors.count > Self.chatListCacheCap,
                let drop = sidebarListErrors.keys.first(where: { $0 != folder }) {
                 sidebarListErrors.removeValue(forKey: drop)
             }
+            return false
         }
+        #else
+        return true
         #endif
     }
 
@@ -1349,6 +1357,29 @@ final class ChatModel {
     private var chatListCache: [String: [ChatConversation]] = [:]
     private var sidebarListErrors: [String: (scope: WorkReference.Scope, message: String)] = [:]
     private static let chatListCacheCap = 30
+    /// The cross-project sidebar needs every registered folder's list at once.
+    @ObservationIgnored private var sidebarWorkspaceIDs: Set<String> = []
+
+    /// Pins these folders' lists past the cache cap. An empty list releases
+    /// them, once no sidebar view needs every folder at once.
+    func retainSidebarWorkspaceLists(_ ids: [String]) {
+        sidebarWorkspaceIDs = Set(ids)
+        trimChatListCache(keeping: nil)
+    }
+
+    /// Whether a list for this folder has been read at least once.
+    func hasSidebarList(for folderID: String) -> Bool {
+        chatListCache[folderID] != nil
+    }
+
+    /// Drops lists past the cap, never a pinned one and never `keeping`, the
+    /// list that was just stored.
+    private func trimChatListCache(keeping: String?) {
+        while chatListCache.count > Self.chatListCacheCap,
+              let drop = chatListCache.keys.first(where: { $0 != keeping && !sidebarWorkspaceIDs.contains($0) }) {
+            chatListCache.removeValue(forKey: drop)
+        }
+    }
 
     /// The conversations to draw under this folder in the sidebar. The live
     /// list for the folder on screen, otherwise what its last load read, or
@@ -1407,10 +1438,7 @@ final class ChatModel {
         sidebarListErrors[folderID] = nil
         guard chatListCache[folderID] != list else { return }
         chatListCache[folderID] = list
-        if chatListCache.count > Self.chatListCacheCap,
-           let drop = chatListCache.keys.first(where: { $0 != folderID }) {
-            chatListCache.removeValue(forKey: drop)
-        }
+        trimChatListCache(keeping: folderID)
         noteRunningChats()
     }
 
@@ -1438,6 +1466,79 @@ final class ChatModel {
         if next != runningSince {
             runningSince = next
         }
+        scheduleSidebarRunningRefresh()
+    }
+
+    /// Folders whose sidebar cache still says a chat is working, but that
+    /// the live transcript poll is not covering. Without this, opening two
+    /// projects and leaving one keeps "Working" on chats that finished
+    /// minutes earlier.
+    @ObservationIgnored private var sidebarRunningRefreshTask: Task<Void, Never>?
+    /// Bumped when a refresh pass is replaced or cancelled so a deferred
+    /// cleanup cannot clear a newer task's handle or start a second loop.
+    @ObservationIgnored private var sidebarRunningRefreshGeneration: UInt64 = 0
+
+    private func foldersNeedingRunningRefresh() -> [String] {
+        chatListCache.compactMap { folderID, list in
+            guard list.contains(where: \.running) else { return nil }
+            // The open folder's status poll already rewrites its cache.
+            if folderID == self.folderID, pollingIdentity != nil { return nil }
+            return folderID
+        }
+    }
+
+    private func scheduleSidebarRunningRefresh() {
+        #if os(macOS)
+        let targets = foldersNeedingRunningRefresh()
+        guard !targets.isEmpty else {
+            sidebarRunningRefreshGeneration &+= 1
+            sidebarRunningRefreshTask?.cancel()
+            sidebarRunningRefreshTask = nil
+            return
+        }
+        guard sidebarRunningRefreshTask == nil else { return }
+        sidebarRunningRefreshGeneration &+= 1
+        let generation = sidebarRunningRefreshGeneration
+        sidebarRunningRefreshTask = Task { [weak self] in
+            defer {
+                Task { @MainActor in
+                    guard let self else { return }
+                    guard self.sidebarRunningRefreshGeneration == generation else { return }
+                    self.sidebarRunningRefreshTask = nil
+                    // A finish that left another folder still working must
+                    // start a fresh pass, rather than wait for the next
+                    // unrelated cache write.
+                    self.scheduleSidebarRunningRefresh()
+                }
+            }
+            // A folder whose read fails keeps its stale "working" list, so it
+            // would be asked again every pass. A sleeping peer must not be
+            // dialled every two seconds: back off, doubling up to a minute.
+            var backoff: [String: (wait: Duration, next: ContinuousClock.Instant)] = [:]
+            while !Task.isCancelled {
+                guard let self else { return }
+                guard self.sidebarRunningRefreshGeneration == generation else { return }
+                let folders = self.foldersNeedingRunningRefresh()
+                if folders.isEmpty { return }
+                for folder in folders {
+                    guard !Task.isCancelled else { return }
+                    guard self.sidebarRunningRefreshGeneration == generation else { return }
+                    if let held = backoff[folder], held.next > .now { continue }
+                    if await self.warmWorkspacePreviews(folder, includeMessages: false) {
+                        backoff[folder] = nil
+                    } else {
+                        let wait = min((backoff[folder]?.wait ?? .seconds(2)) * 2, .seconds(60))
+                        backoff[folder] = (wait, .now + wait)
+                    }
+                }
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+            }
+        }
+        #endif
     }
 
     private var attachmentCacheGeneration: UInt64 = 0

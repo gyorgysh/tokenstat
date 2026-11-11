@@ -3,6 +3,13 @@ package ai.tokenstat.tokenstat.ui.components
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,9 +52,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.rowSelected
+import kotlinx.coroutines.launch
 
 /// A picker that opens a panel you can type into, for lists a menu cannot
 /// carry. Port of `Sources/Design/SearchablePicker.swift`.
@@ -129,6 +139,15 @@ fun <T> pickerSubmitTarget(
     return filtered.first().value
 }
 
+/// Where a stepped picker goes after a row in `section` is picked: the next
+/// tab, or null when that was the last step and the panel should close.
+/// A section that is no longer a tab (the agent changed under it) also ends.
+fun pickerNextStep(sectionTabs: List<String>, section: String): String? {
+    val index = sectionTabs.indexOf(section)
+    if (index < 0) return null
+    return sectionTabs.getOrNull(index + 1)
+}
+
 /// The panel shell: a bottom sheet with the title and Done, matching the
 /// sheet the iPhone puts the same list in.
 @OptIn(ExperimentalMaterial3Api::class)
@@ -189,12 +208,24 @@ fun <T> TsPickerOptionList(
     /// uses these so the model and effort lists are visible before anybody
     /// scrolls past the agents. Two or more turn them on.
     sectionTabs: List<String> = emptyList(),
+    /// Walk the tabs in order: picking a row moves on to the next tab, and
+    /// picking in the last one calls `onFinish`. Search covers only the
+    /// current step, because a step is one question. The tabs stay tappable,
+    /// so any earlier answer is one tap away.
+    stepped: Boolean = false,
+    /// The search prompt for one step, "Search models" rather than a prompt
+    /// that names all three.
+    stepPrompt: ((String) -> String)? = null,
+    onFinish: (() -> Unit)? = null,
+    onStepPick: (suspend (T) -> List<String>?)? = null,
     selectionSummary: String? = null,
     enabled: Boolean = true,
     /// Trailing accessory per row, for the model picker's favourite star.
     accessory: (@Composable (T) -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
+    val scope = rememberCoroutineScope()
+    var choosing by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     var refreshRequest by remember { mutableStateOf(0) }
@@ -205,9 +236,38 @@ fun <T> TsPickerOptionList(
     // The section the list shows, or empty for all of them: when there are
     // no tabs, and while a search runs across every tab.
     val activeSection = when {
-        !tabbed || query.isNotEmpty() -> ""
+        !tabbed -> ""
+        query.isNotEmpty() && !stepped -> ""
         selectedSection in sectionTabs -> selectedSection
         else -> sectionTabs.first()
+    }
+    val stepIndex = sectionTabs.indexOf(activeSection)
+    // Which way the list slides on a step change.
+    var movingForward by remember { mutableStateOf(true) }
+    fun show(section: String) {
+        movingForward = sectionTabs.indexOf(section) >= stepIndex
+        selectedSection = section
+        query = ""
+    }
+    // Picking answers the current step and asks the next one. Picking the row
+    // that is already marked counts too: it is how somebody says "that one is
+    // fine" and moves on.
+    fun choose(choice: PickerChoice<T>) {
+        if (choosing) return
+        if (!stepped || onStepPick == null) {
+            pick(choice.value)
+            return
+        }
+        choosing = true
+        scope.launch {
+            try {
+                val updatedTabs = onStepPick(choice.value) ?: return@launch
+                val next = pickerNextStep(updatedTabs, choice.section)
+                if (next != null) show(next) else onFinish?.invoke()
+            } finally {
+                choosing = false
+            }
+        }
     }
     LaunchedEffect(refreshRequest) {
         if (refreshRequest == 0) return@LaunchedEffect
@@ -239,17 +299,48 @@ fun <T> TsPickerOptionList(
                     },
                 )
             }
+            if (tabbed) {
+                TsPickerTabStrip(
+                    sectionTabs = sectionTabs,
+                    activeSection = activeSection,
+                    stepped = stepped,
+                    sectionValue = sectionValue,
+                    onSelect = { section -> if (!choosing && enabled) { if (stepped) show(section) else { selectedSection = section; query = "" } } },
+                )
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (stepped && stepIndex > 0) {
+                    val previous = sectionTabs[stepIndex - 1]
+                    Icon(
+                        ActionIcon.Back.vector,
+                        L10n.text("common.back"),
+                        tint = colors.accent,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .clickable(enabled = enabled && !choosing) { show(previous) }
+                            .padding(10.dp),
+                    )
+                }
                 TsSearchField(
-                    prompt = prompt,
+                    prompt = stepPrompt?.takeIf { stepped && activeSection.isNotEmpty() }?.invoke(activeSection) ?: prompt,
                     query = query,
                     onQueryChange = { query = it },
                     modifier = Modifier.weight(1f),
-                    onSubmit = {
-                        if (enabled) pickerSubmitTarget(choices, query, activeSection)?.let(pick)
+                    onSubmit = submit@{
+                        if (!enabled || choosing) return@submit
+                        val target = if (stepped && query.isBlank()) {
+                            // Done on an empty field keeps the marked row and
+                            // moves on.
+                            filtered.firstOrNull { isSelected(it.value) } ?: filtered.firstOrNull()
+                        } else {
+                            pickerSubmitTarget(choices, query, activeSection)
+                                ?.let { value -> filtered.firstOrNull { it.value == value } }
+                        }
+                        target?.let(::choose)
                     },
                 )
                 if (onRefresh != null) {
@@ -265,39 +356,22 @@ fun <T> TsPickerOptionList(
                     )
                 }
             }
-            // One tab per setting, with its current value under its name.
-            // This was a row of small All/Agent/Model/Effort pills that people
-            // did not notice, so the agent list read as the whole panel. A tab
-            // that says "Model, opus" is the summary and the way in at once.
-            // Typing searches every tab, and no tab is marked while it does.
-            if (tabbed) {
-                val outer = RoundedCornerShape(10.dp)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(outer)
-                        .background(colors.background)
-                        .border(1.dp, colors.border, outer)
-                        .padding(3.dp)
-                        .semantics { contentDescription = L10n.text("android.tspicker.filter_settings.4e47a723") },
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    sectionTabs.forEach { section ->
-                        TsPickerSectionTab(
-                            title = section,
-                            value = sectionValue?.invoke(section).orEmpty(),
-                            selected = activeSection == section,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            selectedSection = section
-                            query = ""
-                        }
-                    }
-                }
-            }
         }
         HorizontalDivider(color = colors.border)
-        if (filtered.isEmpty()) {
+        AnimatedContent(
+            targetState = activeSection,
+            transitionSpec = {
+                if (!stepped) {
+                    EnterTransition.None togetherWith ExitTransition.None
+                } else {
+                    val direction = if (movingForward) 1 else -1
+                    (slideInHorizontally { it / 4 * direction } + fadeIn()) togetherWith fadeOut()
+                }
+            },
+            label = "picker-step",
+        ) { section ->
+        val shown = if (section == activeSection) filtered else pickerFiltered(choices, query, section)
+        if (shown.isEmpty()) {
             Column(
                 Modifier.fillMaxWidth().padding(Space.l),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -321,9 +395,9 @@ fun <T> TsPickerOptionList(
                 Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(horizontal = Space.s),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                pickerSections(filtered).forEachIndexed { index, (section, rows) ->
-                    if (section.isNotEmpty() && activeSection.isEmpty()) {
-                        item(key = "section-$section") {
+                pickerSections(shown).forEachIndexed { index, (rowSection, rows) ->
+                    if (rowSection.isNotEmpty() && section.isEmpty()) {
+                        item(key = "section-$rowSection") {
                             Column {
                                 if (index > 0) {
                                     HorizontalDivider(
@@ -331,23 +405,74 @@ fun <T> TsPickerOptionList(
                                         modifier = Modifier.padding(top = Space.xs),
                                     )
                                 }
-                                TsPickerSectionHeading(section, sectionValue?.invoke(section))
+                                TsPickerSectionHeading(rowSection, sectionValue?.invoke(rowSection))
                             }
                         }
                     }
-                    items(rows.size, key = { "$section-${rows[it].label}-$it" }) { position ->
+                    items(rows.size, key = { "$rowSection-${rows[it].label}-$it" }) { position ->
                         val choice = rows[position]
                         TsPickerRow(
                             choice = choice,
                             isSelected = isSelected(choice.value),
                             monospaced = monospaced,
-                            enabled = enabled,
-                            onPick = { pick(choice.value) },
+                            enabled = enabled && !choosing,
+                            onPick = { choose(choice) },
                             accessory = accessory,
                         )
                     }
                 }
             }
+        }
+        }
+    }
+}
+
+/// One tab per setting, with its current value under its name.
+///
+/// This was a row of small All/Agent/Model/Effort pills that people did not
+/// notice, so the agent list read as the whole panel. A tab that says "Model,
+/// opus" is the summary and the way in at once. Stepped, the tabs carry a
+/// number, turn into a check once answered, and sit between chevrons, so the
+/// strip reads as progress rather than as three filters.
+@Composable
+private fun TsPickerTabStrip(
+    sectionTabs: List<String>,
+    activeSection: String,
+    stepped: Boolean,
+    sectionValue: ((String) -> String?)?,
+    onSelect: (String) -> Unit,
+) {
+    val colors = LocalTsColors.current
+    val outer = RoundedCornerShape(10.dp)
+    val activeIndex = sectionTabs.indexOf(activeSection)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(outer)
+            .background(colors.background)
+            .border(1.dp, colors.border, outer)
+            .padding(3.dp)
+            .semantics { contentDescription = L10n.text("android.tspicker.filter_settings.4e47a723") },
+        horizontalArrangement = Arrangement.spacedBy(if (stepped) 0.dp else 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        sectionTabs.forEachIndexed { index, section ->
+            if (stepped && index > 0) {
+                Icon(
+                    ActionIcon.Disclosure.vector,
+                    null,
+                    tint = colors.textTertiary,
+                    modifier = Modifier.size(12.dp),
+                )
+            }
+            TsPickerSectionTab(
+                title = section,
+                value = sectionValue?.invoke(section).orEmpty(),
+                selected = activeSection == section,
+                step = if (stepped) index + 1 else null,
+                answered = stepped && index < activeIndex,
+                modifier = Modifier.weight(1f),
+            ) { onSelect(section) }
         }
     }
 }
@@ -456,6 +581,9 @@ private fun TsPickerSectionTab(
     value: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
+    /// The step's number in a stepped picker, null in a plain tab strip.
+    step: Int? = null,
+    answered: Boolean = false,
     onSelect: () -> Unit,
 ) {
     val colors = LocalTsColors.current
@@ -470,13 +598,38 @@ private fun TsPickerSectionTab(
             .padding(horizontal = Space.s, vertical = 5.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
-            title.uppercase(),
-            style = TsType.caption2.copy(fontWeight = FontWeight.SemiBold),
-            color = if (selected) colors.accent else colors.textSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (step != null) {
+                val lit = selected || answered
+                Box(
+                    Modifier
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(if (lit) colors.accent else colors.textTertiary.copy(alpha = 0.25f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (answered) {
+                        Icon(ActionIcon.Done.vector, null, tint = Color.White, modifier = Modifier.size(10.dp))
+                    } else {
+                        Text(
+                            "$step",
+                            style = TsType.caption2.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                            color = if (lit) Color.White else colors.textSecondary,
+                        )
+                    }
+                }
+            }
+            Text(
+                title.uppercase(),
+                style = TsType.caption2.copy(fontWeight = FontWeight.SemiBold),
+                color = if (selected) colors.accent else colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
             value,
             style = TsType.callout.copy(

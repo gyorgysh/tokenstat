@@ -17,6 +17,12 @@ struct ChatQuestionTests {
         let block = "\(fence)\n{\"question\":\"Which database?\",\"options\":[\"A\",\"B\"]}\n```"
 
         require(ChatQuestionText.stripping("Plain reply.") == "Plain reply.", "text without a block is untouched")
+        let plan = "```tokenstat-plan\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```"
+        require(ChatQuestionText.stripping("Working.\n\(plan)\nDone.") == "Working.\nDone.", "a plan block is hidden from the reply")
+        require(ChatQuestionText.stripping("```tokenstat-plan\nnot json\n```", streaming: false).contains("not json"),
+                "a broken plan block stays readable")
+        require(ChatQuestionText.stripping("```tokenstat-plan\n{\"question\":\"Q?\"}\n```", streaming: false).contains("question"),
+                "a plan block without steps is not hidden")
         require(ChatQuestionText.stripping("Before:\n\(block)\nGoing with A.") == "Before:\nGoing with A.",
                 "a finished block leaves the prose on either side")
         require(ChatQuestionText.stripping("Before:\n\(fence)\n{\"question\":\"Wh") == "Before:",

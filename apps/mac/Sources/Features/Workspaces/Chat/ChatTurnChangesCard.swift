@@ -13,6 +13,11 @@ struct ChatTurnChangesCard: View {
     var review: ((String?) -> Void)?
     var reviewHelp: String? = nil
     @State private var showingAll = false
+    #if os(macOS)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var reviewHovering = false
+    @State private var hoveredFile: String?
+    #endif
 
     static let shownFiles = 4
 
@@ -44,6 +49,15 @@ struct ChatTurnChangesCard: View {
                     Button(L10n.text("apple.chatchanges.review"), .preview) { review(nil) }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .fixedSize()
+                        #if os(macOS)
+                        .brightness(reviewHovering ? 0.04 : 0)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(reviewHovering ? Theme.accent.opacity(0.45) : .clear, lineWidth: 1)
+                        )
+                        .onHover { reviewHovering = $0 }
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: reviewHovering)
+                        #endif
                         .help(reviewHelp ?? L10n.text("apple.chatchanges.review_help"))
                 }
             }
@@ -90,13 +104,25 @@ struct ChatTurnChangesCard: View {
                     .fixedSize()
             }
             .padding(.vertical, 3)
+            .padding(.horizontal, 4)
             #if !os(macOS)
             .frame(minHeight: 36)
             #endif
             .contentShape(.rect)
+            #if os(macOS)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(hoveredFile == file.path ? Theme.rowHighlight.opacity(0.55) : .clear)
+            )
+            #endif
         }
         .buttonStyle(.plain)
         .disabled(review == nil)
+        #if os(macOS)
+        .onHover { hovering in
+            hoveredFile = hovering ? file.path : (hoveredFile == file.path ? nil : hoveredFile)
+        }
+        #endif
         .help(file.path)
         .accessibilityLabel(L10n.text("apple.chatchanges.file_row", file.fileName, "\(file.added)", "\(file.removed)"))
     }

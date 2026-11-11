@@ -75,6 +75,13 @@ pub fn limits() -> ProviderLimits {
             ));
         }
         Ok(CursorToken::Missing) | Err(_) => {
+            #[cfg(target_os = "macos")]
+            if crate::discover::cursor_safe_storage_unreadable() {
+                return ProviderLimits::unavailable(
+                    "cursor",
+                    "Cursor's saved sign-in is unavailable in Keychain. Allow access to read its plan limits.",
+                );
+            }
             return ProviderLimits::unavailable(
                 "cursor",
                 "No Cursor session was found, so its limits cannot be read.",

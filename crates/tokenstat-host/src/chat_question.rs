@@ -82,7 +82,7 @@ impl Scanner {
     /// so far, and must only ever grow.
     pub fn scan(&mut self, text: &str) -> Vec<Question> {
         let mut found = Vec::new();
-        while let Some((body, end)) = next_block(text, &mut self.from) {
+        while let Some((body, end)) = next_block(text, &mut self.from, FENCE) {
             self.from = end;
             if let Some(question) = parse(body) {
                 found.push(question);
@@ -106,8 +106,13 @@ impl Scanner {
     }
 }
 
-/// The next complete block at or after `from`: its body and where it ends.
-fn next_block<'a>(text: &'a str, from: &mut usize) -> Option<(&'a str, usize)> {
+/// The next complete `fence` block at or after `from`: its body and where it
+/// ends. Shared with `chat_plan`, which rides the same reply channel.
+pub(crate) fn next_block<'a>(
+    text: &'a str,
+    from: &mut usize,
+    fence: &str,
+) -> Option<(&'a str, usize)> {
     let mut search = *from;
     loop {
         let rest = text.get(search..)?;
@@ -130,7 +135,7 @@ fn next_block<'a>(text: &'a str, from: &mut usize) -> Option<(&'a str, usize)> {
         let after = &text[at + 3..];
         let newline = after.find('\n')?;
         let info = after[..newline].trim();
-        if !opens_line || info != FENCE {
+        if !opens_line || info != fence {
             search = at + 3;
             *from = search;
             continue;
@@ -257,6 +262,20 @@ pub fn rule(asks_before_tools: bool, takes_notes: bool) -> String {
          answer would be wrong."
     };
     format!("{format} {when} Do not mention this format unless you use it.")
+}
+
+/// A sentence for a backend whose CLI also offers a question tool of its own
+/// that this app never sees. Without it a question asked through that tool
+/// reaches nobody.
+pub fn native_tool_note(backend: &str) -> Option<&'static str> {
+    match backend {
+        "codex" => Some(
+            "Ask the person only with that block, never with a request_user_input \
+             tool: this app cannot show that tool's prompt, so its question would \
+             reach nobody.",
+        ),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

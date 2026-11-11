@@ -9,16 +9,26 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.15.0]
+## [1.15.0] - 2026-11-11
 
 ### Improved
 
-- On iPhone and iPad, chat controls stay visible while you scroll or follow live replies. Tap Hide controls in the top bar or swipe up on the chat tabs for more reading space; swipe down from the top or tap the labeled Show controls button to bring them back. Jumping to the latest reply keeps your choice. Pin to Home is in the chat menu.
+- The chat agent picker guides you through choosing an agent, model and effort. You can search each list or go back to change a choice.
+- On Windows, the new chat page puts the repository, message and agent settings together. Choose a folder on this computer or a connected one, and write a message or attach files before opening the chat.
+- On iPhone and iPad, chat controls stay visible while you scroll or follow live replies. Tap Hide controls in the top bar or swipe up on the chat tabs for more reading space. Swipe down from the top or tap the labeled Show controls button to bring them back. Jumping to the latest reply keeps your choice. Pin to Home is in the chat menu.
 - Swipe from the leading edge to go back from a chat even when its controls are hidden.
+- The sidebar on Mac and Windows can list chats instead of repositories, grouped under Today, Yesterday, the past week's dates and Older, 30 at a time with Show more. Each chat shows its folder. A switch in the section heading picks the view, a filter opens from the same heading, and repositories can be sorted by hand, name or recent activity. In the chat list, the + button starts a new chat in any repository or adds a repository.
+- Sidebar rows and buttons on the Mac are larger and easier to hit with a pointer or a touch screen.
+- In Minimal and Compact chat detail, a failed step folds like any other step instead of taking a red card, and its line shows Failed or how many failed. On the Mac, step lines also highlight on hover.
+- Claude plan limits now come from Claude Code itself, so they stay current after Claude Code renews its login, and each model's weekly window is shown. An optional live feed in Account > Plan limits reads them from Claude Code's status line. It keeps your own status line running and restores it when you turn the feed off.
 
 ### Fixed
 
+- Codex, Claude Code and Muse chats show their plan in the Plan panel again, updated as they work, instead of writing it as chat messages. OpenCode is asked to keep its plan there too. Codex now asks questions as question cards instead of through a prompt the app could not show.
+- Chats running in another repository no longer keep showing Working in the Mac sidebar after they finish.
 - Android keeps the message field above the keyboard, including on small phones in landscape.
+- Menus on the Mac no longer close by themselves, and selecting text no longer drops the selection, while an agent or a build is writing files in one of your repositories.
+- Cursor plan limits are current again with Cursor 3.27, which encrypts its saved sign-in. If Keychain blocks access to it, Account and Home offer to allow access instead of saying no session was found.
 
 ## [1.14.0] - 2026-11-07
 

@@ -324,6 +324,11 @@ impl Activity {
         self.plan_reported = true;
     }
 
+    /// A plan the agent wrote in its reply (`chat_plan`), as `[{text, status}]`.
+    pub(crate) fn reported_plan(&mut self, steps: &Value) {
+        self.plan(steps, "text", "agent");
+    }
+
     fn agent(&mut self, mut agent: Agent) {
         self.agents_reported = true;
         if let Some(previous) = self.agents.iter_mut().find(|old| old.id == agent.id) {
@@ -829,7 +834,13 @@ impl Activity {
         let payload = &value["payload"];
         let event = &payload["event"];
         if value["payload_type"] == "todo.snapshot.updated" {
-            self.plan(&payload["items"], "text", "agent");
+            // Muse 1.4 moved the list under `facts`. Earlier builds put it
+            // straight on the payload.
+            let items = payload
+                .pointer("/facts/items")
+                .filter(|items| items.is_array())
+                .unwrap_or(&payload["items"]);
+            self.plan(items, "text", "agent");
         } else if value["payload_type"] == "runtime.session"
             && event["kind"] == "todo_snapshot_updated"
         {
@@ -1515,5 +1526,29 @@ mod tests {
         let snapshot = parser.take_inspection().unwrap();
         assert_eq!(snapshot.activity.plan[0].text, "Inspect 🦀");
         assert_eq!(snapshot.activity.plan[0].status, "inProgress");
+    }
+
+    #[test]
+    fn muse_todo_snapshot_reads_its_facts() {
+        let mut muse = Activity::default();
+        muse.observe(
+            "muse",
+            &json!({"payload_type":"todo.snapshot.updated","payload":{"kind":"todo_snapshot_updated","facts":{"revision":2,"source_tool":"write_todos","items":[{"text":"Create a.txt","status":"completed"},{"text":"Create b.txt","status":"in_progress"}]}}}),
+        );
+        assert_eq!(muse.plan.len(), 2);
+        assert_eq!(muse.plan[0].status, "completed");
+        assert_eq!(muse.plan[1].text, "Create b.txt");
+        assert_eq!(muse.plan[1].status, "inProgress");
+    }
+
+    #[test]
+    fn empty_reported_plan_publishes_its_metadata() {
+        let mut parser = crate::transcript::Parser::new("codex");
+        parser.report_plan(&json!([]));
+        let snapshot = parser
+            .take_inspection()
+            .expect("empty plan is still a report");
+        assert!(snapshot.activity.plan_reported);
+        assert_eq!(snapshot.activity.plan_source.as_deref(), Some("agent"));
     }
 }

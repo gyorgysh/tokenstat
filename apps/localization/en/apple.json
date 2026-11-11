@@ -629,6 +629,7 @@
   "apple.chatdetail.exploring": "Exploring",
   "apple.chatdetail.explored": "Explored",
   "apple.chatdetail.thought": "Thought",
+  "apple.chatdetail.failed_count": "{0} failed",
   "apple.chatdetail.steps.one": "{0} step",
   "apple.chatdetail.steps.other": "{0} steps",
   "apple.chatdetail.files_edited.one": "{0} file edited",
@@ -5830,5 +5831,8 @@
   "apple.usage.keychain.notice.allowed": "Keychain access was allowed. You can manage usage in Account → Plan limits.",
   "apple.usage.claude_live.title": "Live Claude limits",
   "apple.usage.claude_live.detail": "Claude Code passes its limits to tokenstat after every reply, through its status line. Turning this off removes it again.",
-  "apple.usage.claude_live.detail_chained": "Claude Code passes its limits to tokenstat after every reply. Your own status line keeps working, and turning this off puts it back as it was."
+  "apple.usage.claude_live.detail_chained": "Claude Code passes its limits to tokenstat after every reply. Your own status line keeps working, and turning this off puts it back as it was.",
+  "apple.chatsetupheader.search_agents.212fd04a": "Search agents",
+  "apple.chatsetupheader.search_models.10421935": "Search models",
+  "apple.chatsetupheader.search_efforts.f7909b52": "Search efforts"
 }

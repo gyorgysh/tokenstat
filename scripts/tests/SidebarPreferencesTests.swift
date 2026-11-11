@@ -49,6 +49,14 @@ struct SidebarPreferencesTests {
         precondition(reopened.sectionOrder == ["projects", "servers"], "Missing known sections need stable defaults")
         defaults.set("unrecognized", forKey: "shell.sidebar.sectionOrder")
         precondition(reopened.sectionOrder == ["projects", "servers"], "Malformed order must not block launch")
+
+        precondition(reopened.projectsDisplay == .byRepository)
+        precondition(reopened.projectsSort == .manual)
+        reopened.projectsDisplay = .byChat
+        reopened.projectsSort = .recent
+        let again = SidebarPreferences(defaults: UserDefaults(suiteName: suite)!)
+        precondition(again.projectsDisplay == .byChat)
+        precondition(again.projectsSort == .recent)
         print("Sidebar preferences passed")
     }
 }

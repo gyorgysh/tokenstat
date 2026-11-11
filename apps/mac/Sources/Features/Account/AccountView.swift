@@ -600,7 +600,7 @@ struct AccountView: View {
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                if ["claude_code", "muse"].contains(provider.source),
+                if ["claude_code", "muse", "cursor"].contains(provider.source),
                    provider.note?.localizedCaseInsensitiveContains("keychain") == true {
                     UsageKeychainAccessButton(source: provider.source)
                 }

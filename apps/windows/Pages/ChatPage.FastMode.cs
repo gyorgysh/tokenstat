@@ -60,7 +60,7 @@ internal sealed partial class ChatPage
             : grokSpeed ? L10n.Text("common.chat.fast_mode_select_grok") : L10n.Text("common.chat.fast_mode_select_opus");
         button.Visibility = models is null ? Visibility.Collapsed : Visibility.Visible;
         button.IsEnabled = available && !FastModeLocked() && !_savingFastMode && !_opening;
-        button.Background = fast ? Theme.AccentSoftBrush : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Background = fast ? Theme.AccentSoftBrush : Theme.ClearBrush;
         button.Foreground = fast ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
         ToolTipService.SetToolTip(button, help);
         AutomationProperties.SetName(button, title);
