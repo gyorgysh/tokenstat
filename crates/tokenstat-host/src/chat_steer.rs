@@ -23,6 +23,84 @@ impl Store {
         .then_some(live)
     }
 
+    /// The caller holds the conversation acceptance lock. A question uses a
+    /// host-owned receipt shared by every device, so an interrupted answer
+    /// cannot be sent a second time through either the live or idle path.
+    pub(super) fn steer_question_under_acceptance(
+        &self,
+        id: &str,
+        question_id: &str,
+        note: &str,
+        chat: &Conversation,
+        pty: &str,
+        live: &crate::chat_live::Launch,
+    ) -> Result<(), DispatchError> {
+        crate::account_session::check_current()?;
+        crate::workspace_policy::require_current_access()?;
+        let key = crate::chat_receipts::question_key(question_id);
+        let digest = crate::chat_receipts::digest(note, &[]);
+        self.write_receipt(
+            id,
+            &key,
+            crate::chat_receipts::Receipt {
+                state: crate::chat_receipts::ReceiptState::Pending,
+                digest: digest.clone(),
+                at_ms: now_ms(),
+                event_at_ms: None,
+            },
+        )?;
+        if let Err(error) = crate::account_session::check_current()
+            .map_err(DispatchError::from)
+            .and_then(|()| crate::workspace_policy::require_current_access())
+        {
+            self.drop_receipt(id, &key)
+                .map_err(DispatchError::delivery_unknown)?;
+            return Err(error);
+        }
+        let input = crate::chat_turn::user_text(note, &[], &chat.backend);
+        match live.steer(pty, &input, &[]) {
+            Ok(()) => {}
+            Err(crate::chat_live::SteerError::Refused(error)) => {
+                self.drop_receipt(id, &key)
+                    .map_err(DispatchError::delivery_unknown)?;
+                return Err(DispatchError::new("steer_refused", error));
+            }
+            Err(crate::chat_live::SteerError::Unknown(error)) => {
+                return Err(DispatchError::delivery_unknown(error));
+            }
+        }
+        let at_ms = now_ms();
+        self.append(
+            id,
+            &StoredEvent::User {
+                text: note.into(),
+                at_ms,
+                steer: true,
+            },
+        )
+        .map_err(DispatchError::delivery_unknown)?;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.events_path(id))
+            .and_then(|file| file.sync_all())
+            .map_err(|error| DispatchError::delivery_unknown(error.to_string()))?;
+        self.mark_last_message(id, at_ms, "user")
+            .map_err(DispatchError::delivery_unknown)?;
+        self.write_receipt(
+            id,
+            &key,
+            crate::chat_receipts::Receipt {
+                state: crate::chat_receipts::ReceiptState::Accepted,
+                digest,
+                at_ms,
+                event_at_ms: Some(at_ms),
+            },
+        )
+        .map_err(DispatchError::delivery_unknown)?;
+        Ok(())
+    }
+
     /// Timeout never means cancel the active turn or resend the same words.
     pub fn steer_send(
         &self,
