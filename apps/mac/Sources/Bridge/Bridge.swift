@@ -108,6 +108,7 @@ enum Bridge {
     }
 
     private static let routeLock = NSLock()
+    nonisolated(unsafe) private static var routeRevision: UInt64 = 0
     nonisolated(unsafe) private static var route = Route(
         transport: InProcessTransport(),
         isHosted: false
@@ -219,6 +220,7 @@ enum Bridge {
     private static func adopt(_ next: Route) {
         routeLock.lock()
         route = next
+        routeRevision &+= 1
         routeLock.unlock()
         // Local only, once per adopted transport. Optional diagnostics must
         // not hold up the handshake or start an account request themselves.
@@ -442,7 +444,7 @@ enum Bridge {
     /// Nothing else may post these four names. A notification that drives a
     /// view is posted on the thread that view runs on.
     private static func postHostState(_ name: Notification.Name) {
-        hostStateNotifier.post(name, troubled: name != .hostRecoveryFinished)
+        hostStateNotifier.post(name, troubled: name != .hostRecoveryFinished, silent: name == .hostBecameSilent)
     }
 
     private static func postHostRecoveryStarted() {
@@ -455,7 +457,28 @@ enum Bridge {
 
     private static func postHostBecameSilent() {
         postHostState(.hostBecameSilent)
+        hostStateNotifier.monitorSilence(healthy: .hostRecoveryFinished) {
+            // Use a separate urgent connection, so a slow request or a full
+            // ordinary pool cannot make a healthy helper appear unavailable.
+            routeLock.lock()
+            let checked = route
+            let revision = routeRevision
+            routeLock.unlock()
+            guard checked.isHosted,
+                  let response = try? checked.transport.callUrgent(
+                    method: "protocol", params: "{}", patience: Patience.interactive
+                  ),
+                  let data = response.data(using: .utf8),
+                  let envelope = try? JSONDecoder().decode(BridgeEnvelope<HostProbe>.self, from: data),
+                  envelope.ok, envelope.result != nil else { return false }
+            routeLock.lock()
+            let current = revision == routeRevision
+            routeLock.unlock()
+            return current
+        }
     }
+
+    private struct HostProbe: Decodable { let protocolVersion: String }
 
     private static func postHostBecameUnreachable() {
         postHostState(.hostBecameUnreachable)

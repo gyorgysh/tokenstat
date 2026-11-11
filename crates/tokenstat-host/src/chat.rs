@@ -1489,6 +1489,7 @@ impl Store {
         }
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         let mut answer = answer.to_string();
+        let mut answer_was_steered = false;
         let note = {
             crate::workspace_policy::require_current_access()?;
             self.withdraw_pending_answers(id);
@@ -1502,16 +1503,45 @@ impl Store {
             // The agent already has that earlier answer, whatever is typed now.
             // Record what it was given, or the card could only ever be closed
             // by retyping those exact words.
-            if let Some(sent) =
+            if let Some((sent, steered)) =
                 receipt.and_then(|receipt| self.delivered_answer(id, &question, receipt))
             {
                 answer = sent;
+                answer_was_steered = steered;
             }
             let replay = receipt.is_some();
             let answer = answer.as_str();
             let note = crate::chat_question::answer_note(&question, answer);
             if !replay && self.turn_is_live(id)? {
                 let chat = self.get(id)?;
+                if let Some((pty, live)) = self.native_steer(id) {
+                    self.steer_question_under_acceptance(
+                        id,
+                        question_id,
+                        &note,
+                        &chat,
+                        &pty,
+                        &live,
+                    )?;
+                    self.append(
+                        id,
+                        &StoredEvent::Answer {
+                            question_id: question_id.into(),
+                            text: answer.into(),
+                            delivery: "note".into(),
+                            at_ms: now_ms(),
+                        },
+                    )
+                    .map_err(DispatchError::delivery_unknown)?;
+                    OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(self.events_path(id))
+                        .and_then(|file| file.sync_all())
+                        .map_err(|error| DispatchError::delivery_unknown(error.to_string()))?;
+                    let _ = self.drop_receipt(id, &crate::chat_receipts::question_key(question_id));
+                    return Ok(json!({ "delivery": "note" }));
+                }
                 let delivery = if takes_notes_mid_turn(&chat) {
                     "note"
                 } else {
@@ -1559,12 +1589,13 @@ impl Store {
             Some(question_id),
             false,
         )?;
+        let delivery = if answer_was_steered { "note" } else { "sent" };
         self.append(
             id,
             &StoredEvent::Answer {
                 question_id: question_id.into(),
                 text: answer,
-                delivery: "sent".into(),
+                delivery: delivery.into(),
                 at_ms: now_ms(),
             },
         )
@@ -1579,7 +1610,7 @@ impl Store {
             .and_then(|file| file.sync_all())
             .map_err(|error| DispatchError::delivery_unknown(error.to_string()))?;
         let _ = self.drop_receipt(id, &crate::chat_receipts::question_key(question_id));
-        Ok(json!({ "delivery": "sent", "conversation": outcome.into_conversation() }))
+        Ok(json!({ "delivery": delivery, "conversation": outcome.into_conversation() }))
     }
 
     /// The answer an accepted idle launch already gave the agent, read back
@@ -1590,7 +1621,7 @@ impl Store {
         id: &str,
         question: &str,
         receipt: &crate::chat_receipts::Receipt,
-    ) -> Option<String> {
+    ) -> Option<(String, bool)> {
         if receipt.state != crate::chat_receipts::ReceiptState::Accepted {
             return None;
         }
@@ -1602,7 +1633,7 @@ impl Store {
                 answer = row["text"]
                     .as_str()
                     .and_then(|text| text.strip_prefix(&prefix))
-                    .map(str::to_owned);
+                    .map(|text| (text.to_owned(), row["steer"].as_bool().unwrap_or(false)));
             }
             Ok(answer.is_none())
         })
@@ -9244,6 +9275,132 @@ mod tests {
     }
 
     #[test]
+    fn question_answers_use_native_steering_and_keep_uncertain_receipts() {
+        for outcome in [Some(true), Some(false), None] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Arc::new(Store::at(root.path().join("chat")));
+            prepare_live_chat(&store, "chat-test");
+            retune_chat(&store, "chat-test", "codex", "bypass");
+            let question = ask(&store, "chat-test", "Which database?");
+            let mailbox = tempfile::tempdir().unwrap();
+            let directory = mailbox.path().to_path_buf();
+            fs::write(directory.join("ready.json"), "true").unwrap();
+            let manager = tokenstat_pty::manager();
+            let process = manager
+                .spawn(&tokenstat_pty::Spawn {
+                    command: std::env::current_exe()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    args: vec![
+                        "--ignored".into(),
+                        "--exact".into(),
+                        "chat::tests::native_steering_process_fixture".into(),
+                    ],
+                    cwd: root.path().into(),
+                    workspace_id: None,
+                    hidden: true,
+                    rows: 24,
+                    cols: 80,
+                    no_color: true,
+                    dark: None,
+                    environment: Vec::new(),
+                })
+                .unwrap();
+            store
+                .active
+                .lock()
+                .unwrap()
+                .insert("chat-test".into(), process.id.clone());
+            store.live_speed.lock().unwrap().insert(
+                "chat-test".into(),
+                (
+                    process.id.clone(),
+                    Arc::new(crate::chat_live::Launch::test_mailbox(mailbox)),
+                ),
+            );
+            let response_dir = directory.clone();
+            let process_id = process.id.clone();
+            let responder = std::thread::spawn(move || {
+                let until = Instant::now() + Duration::from_secs(5);
+                loop {
+                    for entry in fs::read_dir(&response_dir).unwrap().flatten() {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        if let Some(id) = name
+                            .strip_prefix("request-")
+                            .and_then(|name| name.strip_suffix(".json"))
+                        {
+                            let request: Value =
+                                serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
+                            assert_eq!(
+                                request["steer"],
+                                "Answer to your question \"Which database?\": B"
+                            );
+                            if let Some(accepted) = outcome {
+                                let reply = response_dir.join(format!("response-{id}.json"));
+                                let temporary = reply.with_extension("tmp");
+                                fs::write(
+                                    &temporary,
+                                    json!({"ok":accepted,"error":"refused"}).to_string(),
+                                )
+                                .unwrap();
+                                fs::rename(temporary, reply).unwrap();
+                            } else {
+                                tokenstat_pty::manager().kill(&process_id).unwrap();
+                            }
+                            return;
+                        }
+                    }
+                    assert!(Instant::now() < until, "No native question answer arrived");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+            let result = store.answer_question("chat-test", &question, "B");
+            responder.join().unwrap();
+            let events = store.events("chat-test", 0).unwrap().0;
+            let answers: Vec<_> = events
+                .iter()
+                .filter(|row| row["kind"] == "answer")
+                .collect();
+            let users: Vec<_> = events.iter().filter(|row| row["kind"] == "user").collect();
+            if outcome == Some(true) {
+                assert_eq!(result.unwrap()["delivery"], "note");
+                assert_eq!(answers.len(), 1);
+                assert_eq!(users.len(), 1);
+                assert_eq!(users[0]["steer"], true);
+                assert!(parked_note(&store, "chat-test").is_none());
+            } else {
+                assert!(result.is_err());
+                assert!(answers.is_empty() && users.is_empty());
+                if outcome.is_none() {
+                    assert_eq!(result.unwrap_err().code, crate::error::DELIVERY_UNKNOWN);
+                    assert_eq!(
+                        store
+                            .answer_question("chat-test", &question, "B")
+                            .unwrap_err()
+                            .code,
+                        crate::error::DELIVERY_UNKNOWN
+                    );
+                    assert_eq!(
+                        fs::read_dir(&directory)
+                            .unwrap()
+                            .flatten()
+                            .filter(|entry| entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with("request-"))
+                            .count(),
+                        1
+                    );
+                } else {
+                    assert!(store.open_question("chat-test", &question).is_ok());
+                }
+            }
+            let _ = manager.kill(&process.id);
+        }
+    }
+
+    #[test]
     fn an_answer_to_a_turn_that_cannot_take_notes_waits_for_it_to_end() {
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(Store::at(root.path().join("chat")));
@@ -9597,6 +9754,51 @@ mod tests {
                 "a durable answer retires its receipt"
             );
         }
+    }
+
+    #[test]
+    fn a_replayed_native_answer_keeps_its_original_text_and_delivery() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        let question = ask(&store, "chat-test", "Pick one?");
+        let note = crate::chat_question::answer_note("Pick one?", "B");
+        let at_ms = now_ms();
+        store
+            .append(
+                "chat-test",
+                &StoredEvent::User {
+                    text: note.clone(),
+                    at_ms,
+                    steer: true,
+                },
+            )
+            .unwrap();
+        let key = crate::chat_receipts::question_key(&question);
+        store
+            .write_receipt(
+                "chat-test",
+                &key,
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Accepted,
+                    digest: crate::chat_receipts::digest(&note, &[]),
+                    at_ms,
+                    event_at_ms: Some(at_ms),
+                },
+            )
+            .unwrap();
+        let result = store.answer_question("chat-test", &question, "A").unwrap();
+        assert_eq!(result["delivery"], "note");
+        let events = store.events("chat-test", 0).unwrap().0;
+        let answers: Vec<_> = events
+            .iter()
+            .filter(|row| row["kind"] == "answer")
+            .collect();
+        assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0]["text"], "B");
+        assert_eq!(answers[0]["delivery"], "note");
+        assert_eq!(events.iter().filter(|row| row["kind"] == "user").count(), 1);
+        assert!(parked_note(&store, "chat-test").is_none());
     }
 
     #[test]
@@ -16078,7 +16280,10 @@ mod tests {
             event_at_ms: Some(5),
         };
         assert_eq!(
-            store.delivered_answer(id, question, &receipt).as_deref(),
+            store
+                .delivered_answer(id, question, &receipt)
+                .map(|(answer, _)| answer)
+                .as_deref(),
             Some("first answer")
         );
         let mut forward = Vec::new();

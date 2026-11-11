@@ -9,6 +9,14 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.15.1] - 2026-11-11
+
+### Fixed
+
+- Answers to question cards reach a running Codex or Claude turn when live steering is available.
+- The Mac sidebar keeps repository controls and headings readable in narrow windows.
+- The local helper warning clears when the helper answers again.
+
 ## [1.15.0] - 2026-11-11
 
 ### Improved

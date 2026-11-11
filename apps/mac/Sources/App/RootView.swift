@@ -5370,24 +5370,39 @@ private struct SidebarGroupHeader<Trailing: View>: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: Theme.Space.xs) {
-            Group {
-                if let isExpanded {
-                    Button(action: toggle) {
-                        header(chevron: isExpanded ? "chevron.down" : "chevron.right")
-                    }
-                    .buttonStyle(.plain)
-                    .onHover { isHovering = $0 }
-                    .help(isExpanded ? L10n.text("apple.rootview.collapse_0.61eb8723", "\(title)") : L10n.text("apple.rootview.expand_0.e1580a27", "\(title)"))
-                } else {
-                    header(chevron: nil)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.xs) {
+                heading.fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                HStack(spacing: Theme.Space.xs) { trailing }
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            // At the minimum sidebar width, keep the label readable and move
+            // the controls below it instead of wrapping one letter per line.
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                heading.frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: Theme.Space.xs) {
+                    Spacer(minLength: 0)
+                    trailing
                 }
             }
-            trailing
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.top, Theme.Space.l)
         .padding(.bottom, Theme.Space.xs)
+    }
+
+    @ViewBuilder private var heading: some View {
+        if let isExpanded {
+            Button(action: toggle) {
+                header(chevron: isExpanded ? "chevron.down" : "chevron.right")
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .help(isExpanded ? L10n.text("apple.rootview.collapse_0.61eb8723", "\(title)") : L10n.text("apple.rootview.expand_0.e1580a27", "\(title)"))
+        } else {
+            header(chevron: nil)
+        }
     }
 
     private func header(chevron: String?) -> some View {
@@ -5399,6 +5414,7 @@ private struct SidebarGroupHeader<Trailing: View>: View {
                     .frame(width: 8)
             }
             SectionLabel(text: title, count: count)
+                .lineLimit(1)
         }
         .contentShape(.rect)
     }
