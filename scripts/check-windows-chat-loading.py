@@ -141,7 +141,11 @@ class Checks {
         await activity.ShowActivityAsync("goal");
         if (!activity._commandDialogOpening || activity._inspectionCalls != 1) throw new Exception("Two Activity taps raced inspection into duplicate dialogs");
         activity._inspectionReply.SetResult();
-        for (var i = 0; i < 10000 && activity._commandDialog is null; i++) await Task.Yield();
+        for (var i = 0; i < 200 && activity._commandDialog is null; i++)
+        {
+            if (activityOpening.IsFaulted) throw activityOpening.Exception!.GetBaseException();
+            await Task.Delay(5);
+        }
         if (activity._commandDialog is not { } dialog) throw new Exception("Current activity dialog did not open");
         await activity.ShowActivityAsync("plan");
         if (activity._inspectionCalls != 1) throw new Exception("An open Activity dialog started another inspection");
@@ -167,7 +171,14 @@ class Checks {
         await stopping.ShowActivityAsync("plan");
         if (stopping._inspectionCalls != 1) throw new Exception("Stop completion allowed overlapping Activity dialogs");
         stopping._inspectionReply.SetResult();
-        for (var i = 0; i < 10000 && stopping._commandDialog is null; i++) await Task.Yield();
+        // Yield alone can starve a RunContinuationsAsynchronously reply on a
+        // busy CI runner. Pump with short delays and surface a faulted Activity
+        // instead of timing out with an empty dialog.
+        for (var i = 0; i < 200 && stopping._commandDialog is null; i++)
+        {
+            if (pendingActivity.IsFaulted) throw pendingActivity.Exception!.GetBaseException();
+            await Task.Delay(5);
+        }
         if (stopping._commandDialog is not { } stoppedDialog) throw new Exception("Pending Activity did not complete after Stop");
         stoppedDialog.Completion.SetResult(); await pendingActivity;
         Console.WriteLine("Windows actual Activity dialog: concurrent taps, open viewer, stale owners and failed inspections release a single modal claim");

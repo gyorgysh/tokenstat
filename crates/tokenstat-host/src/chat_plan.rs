@@ -174,7 +174,9 @@ mod tests {
         ));
         // No newline after the glued prose yet: finish() must still apply it.
         assert!(scanner.scan(&text).is_none());
-        let plan = scanner.finish(&text).expect("glued closing fence still parses");
+        let plan = scanner
+            .finish(&text)
+            .expect("glued closing fence still parses");
         assert_eq!(plan[2]["status"], "completed");
     }
 

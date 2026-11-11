@@ -194,7 +194,10 @@ fn closing_fence(text: &str, from: usize) -> Option<(usize, usize)> {
 fn closing_fence_prefix(line: &str) -> Option<usize> {
     // Trim a trailing CR left by a CRLF reply split on `\n` alone.
     let line = line.strip_suffix('\r').unwrap_or(line);
-    let indent = line.bytes().take_while(|&b| b == b' ' || b == b'\t').count();
+    let indent = line
+        .bytes()
+        .take_while(|&b| b == b' ' || b == b'\t')
+        .count();
     let rest = &line[indent..];
     let ticks = rest.bytes().take_while(|&b| b == b'`').count();
     if ticks < 3 {

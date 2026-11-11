@@ -530,10 +530,7 @@ impl CodexLimitScan {
         // An older block walked after a newer plan change still carries the
         // previous era's windows. Refuse them here so out-of-order absorbs
         // cannot rebuild the Pro weekly beside Plus.
-        if self
-            .era_at_ms
-            .is_some_and(|era| observed_at_ms < era)
-        {
+        if self.era_at_ms.is_some_and(|era| observed_at_ms < era) {
             return;
         }
 
