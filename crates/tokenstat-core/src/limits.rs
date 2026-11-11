@@ -593,13 +593,35 @@ impl CodexLimitScan {
         // readings of the same limit.
         readings.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(&b.1.label)));
 
+        // The block Codex wrote last is the set of limits the account has
+        // now. Anything older has been replaced or withdrawn since.
+        let newest_at = readings.first().map(|(at, _)| *at);
+
         let mut kept: Vec<(i64, UsageWindow)> = Vec::new();
-        for (at, window) in readings {
-            // Already rolled over, so the percentage is somebody's history
-            // rather than their quota. Codex stops reporting a limit the
-            // moment no turn uses it, and a window nobody refreshed would
-            // otherwise sit on the card claiming to be full.
+        for (at, mut window) in readings {
+            // Already rolled over, so the old percentage is history, not
+            // quota. Codex stops reporting a limit while no turn uses it, so
+            // the window it last wrote is still the account's window, just
+            // fresh: nothing used, and no reset until the next turn starts
+            // the clock. Show it as 0% used, as Codex itself does. A window
+            // from an older block, or one belonging to a named model, has no
+            // such claim and is dropped.
             if window.resets_at_ms.is_some_and(|ms| ms <= now_ms) {
+                let current_block = Some(at) == newest_at;
+                let general = matches!(
+                    window.scope.as_deref(),
+                    Some("primary") | Some("secondary") | Some(CODEX_ACCOUNT_SCOPE)
+                );
+                let seen = kept
+                    .iter()
+                    .any(|(_, other)| other.label == window.label && other.scope == window.scope);
+                if !current_block || !general || seen {
+                    continue;
+                }
+                window.percent = 0.0;
+                window.resets_at_ms = None;
+                window.severity = LimitSeverity::from_percent(0.0);
+                kept.push((at, window));
                 continue;
             }
             // The same allowance under two ids: Codex moved the model's
@@ -685,11 +707,20 @@ impl CodexLimitScan {
 
         let observed_at_ms = kept.iter().map(|(at, _)| *at).max().unwrap_or(0);
         let mut windows: Vec<UsageWindow> = kept.into_iter().map(|(_, w)| w).collect();
-        // General usage is the first thing to read. Preserve reset ordering
-        // within each group without letting a secondary window lead the card.
+        // General usage is the first thing to read. Within each group the
+        // shorter window leads, the way people read it: 5-hour, then weekly.
+        // Going by length rather than reset time keeps a fresh window with no
+        // reset yet in its usual place.
         windows.sort_by_key(|w| {
+            let length = match w.label.as_str() {
+                "5-hour" => 0,
+                "weekly" => 1,
+                "monthly" => 2,
+                _ => 3,
+            };
             (
                 w.scope.as_deref() != Some(CODEX_ACCOUNT_SCOPE),
+                length,
                 w.resets_at_ms.unwrap_or(i64::MAX),
             )
         });
@@ -1223,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn a_window_that_already_rolled_over_is_not_reported() {
+    fn a_window_that_already_rolled_over_reads_as_unused() {
         let dir = std::env::temp_dir().join(format!("tokenstat-codex-past-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1238,8 +1269,20 @@ mod tests {
         .unwrap();
 
         let found = limits_in(&file, 1_789_162_000_000).expect("the week is still running");
-        assert_eq!(found.windows.len(), 1, "the spent five hour window is gone");
-        assert_eq!(found.windows[0].label, "weekly");
+        let shown: Vec<(String, f64, Option<i64>)> = found
+            .windows
+            .iter()
+            .map(|w| (w.label.clone(), w.percent, w.resets_at_ms))
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                // Rolled over with no turn since: a fresh window, nothing used,
+                // and no clock until the next turn starts one.
+                ("5-hour".to_string(), 0.0, None),
+                ("weekly".to_string(), 45.0, Some(1_789_680_207_000)),
+            ]
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
