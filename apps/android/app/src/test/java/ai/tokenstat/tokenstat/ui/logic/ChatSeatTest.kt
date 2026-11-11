@@ -165,6 +165,15 @@ class ChatSeatTest {
     }
 
     @Test
+    fun `thinking phrases rotate through soft lines`() {
+        val phrases = ChatSeat.thinkingPhrases()
+        assertEquals(6, phrases.size)
+        assertEquals("Thinking", phrases[0])
+        assertEquals("Planning next moves", phrases[1])
+        assertEquals(phrases.toSet().size, phrases.size)
+    }
+
+    @Test
     fun `a tool row speaks in the present then the past`() {
         assertEquals("Reading", ChatSeat.word("Read", true))
         assertEquals("Read", ChatSeat.word("Read", false))

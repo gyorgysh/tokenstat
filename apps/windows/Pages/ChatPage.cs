@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using Tokenstat.Design;
 using Tokenstat.Design.Persona;
 using Tokenstat.Navigation;
@@ -61,6 +62,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private StackPanel _composerWell = new();
     private StackPanel _composerContext = new();
     private Grid _composerRow = new();
+    private Border? _composerShell;
     private readonly TextBox _draft = new()
     {
         AcceptsReturn = true,
@@ -1467,7 +1469,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     /// The turn still being written: the conversation's own face beside what
     /// it is doing, like the Mac working indicator. Thinking pastimes rather
     /// than holding a pose, because one loop held for a minute reads as a
-    /// hang. The face is the motion, so the label beside it stays still.
+    /// hang. Soft phrases beside the face rotate while it thinks.
     /// </summary>
     private FrameworkElement WorkingRow(PersonaMood mood, string words)
     {
@@ -1475,34 +1477,86 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             ? new PersonaPastime(FaceSeed(), 26, PersonaPastime.Repertoire.Thought)
             : new PersonaMark(FaceSeed(), 26, mood);
         face.VerticalAlignment = VerticalAlignment.Center;
+        var halo = new Ellipse
+        {
+            Width = 30,
+            Height = 30,
+            Fill = Theme.AccentSoftBrush,
+            Opacity = 0.9,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Visibility = mood is PersonaMood.Thinking or PersonaMood.Waiting
+                ? Visibility.Visible
+                : Visibility.Collapsed,
+        };
+        var faceStack = new Grid { Width = 30, Height = 30 };
+        faceStack.Children.Add(halo);
+        faceStack.Children.Add(face);
         var grid = new Grid { ColumnSpacing = Theme.SpaceS };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition
         {
             Width = new GridLength(1, GridUnitType.Star),
         });
-        grid.Children.Add(face);
+        grid.Children.Add(faceStack);
         var label = new TextBlock
         {
             Text = words,
             FontSize = 12,
-            Opacity = 0.7,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            Foreground = Theme.AccentBrush,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap,
             MaxLines = 1,
         };
-        AutomationProperties.SetName(label, words);
-        Grid.SetColumn(label, 1);
-        grid.Children.Add(label);
         var seat = new Border
         {
             Height = WorkingSeatHeight,
             Padding = new Thickness(Theme.SpaceM, 0, Theme.SpaceM, 0),
             Child = grid,
         };
+        var phrases = SeatStep.ThinkingPhrases();
+        if (mood == PersonaMood.Thinking && phrases.Count > 1)
+        {
+            var index = 0;
+            var timer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(Random.Shared.Next(2400, 3601)),
+            };
+            timer.Tick += (_, _) =>
+            {
+                index = (index + 1) % phrases.Count;
+                label.Opacity = 0.35;
+                label.Text = phrases[index];
+                var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+                {
+                    From = 0.35,
+                    To = 1,
+                    Duration = TimeSpan.FromMilliseconds(280),
+                };
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, label);
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
+                var board = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+                board.Children.Add(fade);
+                board.Begin();
+                AutomationProperties.SetName(label, label.Text);
+                AutomationProperties.SetName(seat, label.Text);
+                timer.Interval = TimeSpan.FromMilliseconds(Random.Shared.Next(2400, 3601));
+            };
+            timer.Start();
+            SeatUnload(seat, () => timer.Stop());
+        }
+        AutomationProperties.SetName(label, words);
+        Grid.SetColumn(label, 1);
+        grid.Children.Add(label);
         AutomationProperties.SetName(seat, words);
         return seat;
+    }
+
+    private static void SeatUnload(FrameworkElement element, Action stop)
+    {
+        element.Unloaded += (_, _) => stop();
     }
 
     /// <summary>
@@ -1934,15 +1988,18 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         FitControls(_composerDock.ActualWidth);
         row.SizeChanged += (_, args) => FitControls(args.NewSize.Width);
         well.Children.Add(row);
-        return new Border
+        var shell = _composerShell = new Border
         {
             Background = Theme.PanelBrush,
-            BorderBrush = Theme.BorderBrush,
+            BorderBrush = Busy()
+                ? Theme.Brush(static () => Windows.UI.Color.FromArgb(115, Theme.Accent.R, Theme.Accent.G, Theme.Accent.B))
+                : Theme.BorderBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16),
             Padding = new Thickness(10),
             Child = well,
         };
+        return shell;
     }
 
     private void FitSetupViewport()
@@ -2062,6 +2119,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RebuildComposerActions()
     {
+        if (_composerShell is not null)
+        {
+            _composerShell.BorderBrush = Busy()
+                ? Theme.Brush(static () => Windows.UI.Color.FromArgb(115, Theme.Accent.R, Theme.Accent.G, Theme.Accent.B))
+                : Theme.BorderBrush;
+        }
         if (SharedSource) { _composerActions.Children.Clear(); _composerSteering = false; return; }
         if (_dropImport is not null) {
             _composerActions.Children.Clear();
@@ -2080,6 +2143,28 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerSteering = false;
         if (Busy())
         {
+            var running = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = Theme.SpaceS,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            running.Children.Add(new ProgressRing
+            {
+                Width = 12,
+                Height = 12,
+                IsActive = true,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            running.Children.Add(new TextBlock
+            {
+                Text = L10n.Text("common.working"),
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                Foreground = Theme.AccentBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            _composerActions.Children.Add(running);
             var steering = _composerSteering = SteerKnownAvailable();
             var queue = ActionIconGlyph.PrimaryButton(steering && Format.Flag(_openChat, "nativeSteer") ? L10n.Text("common.chat.steer") : steering ? L10n.Text("windows.chatpage.next_step.298a9207") : L10n.Text("windows.chatpage.queue.3b2fe03e"), ActionIcon.Send, async (_, _) => await SendAsync());
             var tip = steering

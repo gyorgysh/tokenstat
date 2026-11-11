@@ -198,7 +198,7 @@ internal sealed class PersonaPastime : Grid
 
     /// <summary>How long it stays quiet before finding something to do.</summary>
     private static (double Lo, double Hi) QuietFor(Repertoire doing) =>
-        doing == Repertoire.Leisure ? (2.6, 5.4) : (4.0, 7.5);
+        doing == Repertoire.Leisure ? (2.6, 5.4) : (1.2, 2.4);
 
     /// <summary>
     /// How many tellings of an activity to sit through. Counted in the

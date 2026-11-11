@@ -39,8 +39,15 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -94,6 +101,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -3275,7 +3283,7 @@ private fun ChatWorkingIndicator(
     val colors = LocalTsColors.current
     val mood = when {
         waiting -> PersonaMood.Waiting
-        step != null -> PersonaMood.Running
+        !step.isNullOrBlank() -> PersonaMood.Running
         speaking -> PersonaMood.Speaking
         else -> PersonaMood.Thinking
     }
@@ -3285,7 +3293,22 @@ private fun ChatWorkingIndicator(
             while (true) { value = android.os.SystemClock.elapsedRealtime(); kotlinx.coroutines.delay(1_000) }
         }
     }
-    val base = ChatSeat.seatLabel(waiting, step, speaking)
+    val phrases = remember { ChatSeat.thinkingPhrases() }
+    var phraseIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(mood) {
+        phraseIndex = 0
+        if (mood != PersonaMood.Thinking || phrases.size <= 1) return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(kotlin.random.Random.nextLong(2_400, 3_601))
+            phraseIndex = (phraseIndex + 1) % phrases.size
+        }
+    }
+    val base = when {
+        waiting -> L10n.text("common.waiting")
+        step != null && step.isNotBlank() -> step
+        speaking -> ChatSeat.seatLabel(false, null, true)
+        else -> phrases.getOrElse(phraseIndex) { ChatSeat.seatLabel(false, null, false) }
+    }
     val seconds = startedAt?.let { ((now - it).coerceAtLeast(0) / 1_000) }
     val elapsed = seconds?.let { if (it < 60) L10n.text("common.chat.elapsed.seconds", "$it") else L10n.text("common.chat.elapsed.minutes", "${it / 60}") }
     val label = if (elapsed == null) base else "$base · $elapsed"
@@ -3298,15 +3321,33 @@ private fun ChatWorkingIndicator(
             .padding(horizontal = Space.m)
             .clearAndSetSemantics { contentDescription = label },
     ) {
-        PersonaMark(seed = seed, size = 26.dp, mood = mood)
-        Text(
-            label,
-            style = TsType.caption,
-            color = colors.textSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(30.dp)) {
+            if (mood == PersonaMood.Thinking || mood == PersonaMood.Waiting) {
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .background(colors.accent.copy(alpha = 0.18f), CircleShape),
+                )
+            }
+            PersonaMark(seed = seed, size = 26.dp, mood = mood)
+        }
+        androidx.compose.animation.AnimatedContent(
+            targetState = base,
+            transitionSpec = {
+                (slideInVertically { it / 2 } + fadeIn()) togetherWith
+                    (slideOutVertically { -it / 2 } + fadeOut())
+            },
+            label = "seat-phrase",
             modifier = Modifier.weight(1f),
-        )
+        ) { phrase ->
+            Text(
+                if (elapsed == null) phrase else "$phrase · $elapsed",
+                style = TsType.caption,
+                color = colors.accent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -3400,8 +3441,9 @@ internal fun ChatComposer(
     val focus = LocalFocusManager.current
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val scrollExtras = compactKeyboard && constraints.hasBoundedHeight
-        TsCard(Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Box(Modifier.fillMaxWidth()) {
+            TsCard(Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Column(
                     modifier = if (scrollExtras) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier,
                     verticalArrangement = Arrangement.spacedBy(Space.s),
@@ -3521,7 +3563,24 @@ internal fun ChatComposer(
                         }
                     }
                     if (expandedField) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
-                    if (sending) {
+                    if (locked) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                            modifier = Modifier.padding(end = Space.xs),
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 1.5.dp,
+                                color = colors.accent,
+                            )
+                            Text(
+                                L10n.text("common.working"),
+                                style = TsType.caption,
+                                color = colors.accent,
+                                maxLines = 1,
+                            )
+                        }
                         IconButton(onClick = onStop) {
                             Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
                         }
@@ -3548,6 +3607,14 @@ internal fun ChatComposer(
                         }
                     }
                 }
+            }
+            }
+            if (locked) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .border(1.dp, colors.accent.copy(alpha = 0.45f), RoundedCornerShape(cardRadiusDp)),
+                )
             }
         }
     }

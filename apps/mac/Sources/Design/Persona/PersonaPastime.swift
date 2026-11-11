@@ -52,7 +52,7 @@ struct PersonaPastime: View {
         var quietFor: ClosedRange<Double> {
             switch self {
             case .leisure: return 2.6...5.4
-            case .thought: return 4.0...7.5
+            case .thought: return 1.2...2.4
             }
         }
 

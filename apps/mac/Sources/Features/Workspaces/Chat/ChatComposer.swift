@@ -199,7 +199,7 @@ struct ChatComposer: View {
         .background(model.landingDraft == nil ? Theme.panel : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(model.landingDraft == nil ? Theme.border : Color.clear, lineWidth: 1)
+                .strokeBorder(wellStroke, lineWidth: 1)
         }
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: onDropProviders)
         #if os(macOS)
@@ -274,18 +274,27 @@ struct ChatComposer: View {
     /// time a turn starts, ends, or the clock passes another digit.
     private var turnStatus: some View {
         ZStack(alignment: .trailing) {
-            Text(L10n.text("apple.chatcomposer.working_00h_00m.df5f29d2"))
-                .hidden()
-                .accessibilityHidden(true)
+            HStack(spacing: Theme.Space.s) {
+                ProgressView().controlSize(.mini)
+                Text(L10n.text("apple.chatcomposer.working_00h_00m.df5f29d2"))
+            }
+            .hidden()
+            .accessibilityHidden(true)
             if running {
-                if let since = model.turnStartedAt(for: chat.id) {
-                    TurnElapsedText(since: since)
-                } else {
-                    // The stamp lands on the same write that reports running,
-                    // so this is a single frame at most: the word without the
-                    // clock beats no word at all.
-                    Text(L10n.text("common.working"))
-                        .accessibilityLabel(L10n.text("common.working"))
+                HStack(spacing: Theme.Space.s) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(Theme.accent)
+                        .accessibilityHidden(true)
+                    if let since = model.turnStartedAt(for: chat.id) {
+                        TurnElapsedText(since: since)
+                    } else {
+                        // The stamp lands on the same write that reports running,
+                        // so this is a single frame at most: the word without the
+                        // clock beats no word at all.
+                        Text(L10n.text("common.working"))
+                            .accessibilityLabel(L10n.text("common.working"))
+                    }
                 }
             }
         }
@@ -294,6 +303,13 @@ struct ChatComposer: View {
         .foregroundStyle(Theme.accent)
         .lineLimit(1)
         .fixedSize()
+    }
+
+    /// Idle keeps the ordinary border. A running turn picks up a quiet accent
+    /// stroke so the composer itself says the chat is busy.
+    private var wellStroke: Color {
+        if model.landingDraft != nil { return .clear }
+        return running ? Theme.accent.opacity(0.45) : Theme.border
     }
 
     /// Stop and Send, over an invisible copy of the buttons on screen.

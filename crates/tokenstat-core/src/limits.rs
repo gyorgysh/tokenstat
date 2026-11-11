@@ -464,10 +464,17 @@ type CodexWindowKey = (String, String, u64, String);
 /// from the latest block that named one. Codex sends sparse updates and
 /// carries the unchanged fields forward itself, so a block can arrive with
 /// windows and no plan while the account plainly still has one.
+///
+/// A named plan change starts a new era: windows observed before that
+/// timestamp are dropped, so a Pro weekly reading cannot demote a later
+/// Plus 5-hour window into "current model" and hide it from the badge.
 #[derive(Default)]
 struct CodexLimitScan {
     windows: std::collections::HashMap<CodexWindowKey, (i64, UsageWindow)>,
     plan: Option<(i64, String)>,
+    /// When the current plan name was first adopted. Prior-era windows are
+    /// refused even if an older block is absorbed after a newer one.
+    era_at_ms: Option<i64>,
 }
 
 impl CodexLimitScan {
@@ -498,8 +505,36 @@ impl CodexLimitScan {
                 .as_ref()
                 .is_none_or(|(at, _)| observed_at_ms >= *at);
             if newer {
+                if self
+                    .plan
+                    .as_ref()
+                    .is_some_and(|(_, previous)| previous != plan)
+                {
+                    // Plans change the window set. Keep only readings from
+                    // this era onward so a Pro weekly cannot outrank Plus.
+                    self.era_at_ms = Some(observed_at_ms);
+                    self.windows.retain(|_, (at, _)| *at >= observed_at_ms);
+                }
                 self.plan = Some((observed_at_ms, plan.to_string()));
+            } else if self
+                .plan
+                .as_ref()
+                .is_some_and(|(_, current)| current != plan)
+            {
+                // Newer plan already won. An older block from another plan
+                // must not rebuild that era's windows after the fact.
+                return;
             }
+        }
+
+        // An older block walked after a newer plan change still carries the
+        // previous era's windows. Refuse them here so out-of-order absorbs
+        // cannot rebuild the Pro weekly beside Plus.
+        if self
+            .era_at_ms
+            .is_some_and(|era| observed_at_ms < era)
+        {
+            return;
         }
 
         let limit_id = limits.limit_id();
@@ -586,6 +621,55 @@ impl CodexLimitScan {
 
         if kept.is_empty() {
             return None;
+        }
+
+        // Plus writes primary 5-hour + secondary weekly in one block, without
+        // calling it account-wide. An older Pro "general" weekly still in the
+        // merge would make finish() treat that 5-hour as a model window and
+        // the composer headline would drop it. Prefer a newer same-timestamp
+        // 5-hour+weekly cohort; sparse single-window updates of the same plan
+        // must not retire the weekly on their own.
+        let newest_plus_shaped = kept
+            .iter()
+            .filter(|(_, window)| {
+                window.label == "5-hour"
+                    && matches!(
+                        window.scope.as_deref(),
+                        Some("primary") | Some("secondary") | Some(CODEX_ACCOUNT_SCOPE)
+                    )
+            })
+            .filter_map(|(five_at, _)| {
+                kept.iter()
+                    .any(|(week_at, window)| {
+                        *week_at == *five_at
+                            && window.label == "weekly"
+                            && matches!(
+                                window.scope.as_deref(),
+                                Some("primary") | Some("secondary") | Some(CODEX_ACCOUNT_SCOPE)
+                            )
+                    })
+                    .then_some(*five_at)
+            })
+            .max();
+        if let Some(cohort_at) = newest_plus_shaped {
+            kept.retain(|(at, window)| {
+                !(window.scope.as_deref() == Some(CODEX_ACCOUNT_SCOPE)
+                    && window.label != "5-hour"
+                    && *at < cohort_at)
+            });
+            let still_has_general = kept
+                .iter()
+                .any(|(_, window)| window.scope.as_deref() == Some(CODEX_ACCOUNT_SCOPE));
+            if !still_has_general {
+                for (at, window) in &mut kept {
+                    if *at == cohort_at
+                        && matches!(window.scope.as_deref(), Some("primary") | Some("secondary"))
+                        && matches!(window.label.as_str(), "5-hour" | "weekly" | "monthly")
+                    {
+                        window.scope = Some(CODEX_ACCOUNT_SCOPE.to_string());
+                    }
+                }
+            }
         }
 
         // Only now is there something to contrast a model's windows with.
@@ -1012,8 +1096,9 @@ mod tests {
         // The case this exists for: the account's weekly allowance ran out, so
         // Codex fell back to a model with its own allowance and reported only
         // that model's windows from then on. Reading the newest block alone
-        // showed the model at 88% and hid the account at 100%, which is the
-        // one that stopped the work.
+        // showed the model and hid the account at 100%, which is the one that
+        // stopped the work. A later plain multi-window account reading is a
+        // different shape and is covered by the Plus merge tests below.
         let dir = std::env::temp_dir().join(format!("tokenstat-codex-two-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1025,14 +1110,12 @@ mod tests {
                 "\n",
                 r#"{"timestamp":"2026-09-10T21:32:16.000Z","payload":{"rate_limits":{"limit_id":"codex_bengalfox","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1789093407},"secondary":{"used_percent":45.0,"window_minutes":10080,"resets_at":1789680207}}}}"#,
                 "\n",
-                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":88.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":84.0,"window_minutes":10080,"resets_at":1789680207}}}}"#,
-                "\n",
             ),
         )
         .unwrap();
 
-        // Just after the last block was written.
-        let now_ms = 1_789_162_000_000;
+        // After the model block, before its five-hour window rolls over.
+        let now_ms = 1_789_090_000_000;
         let found = limits_in(&file, now_ms).expect("both allowances are readable");
 
         let labels: Vec<String> = found
@@ -1044,20 +1127,102 @@ mod tests {
             labels,
             vec![
                 "weekly (general)",
-                "5-hour (current model)",
-                "weekly (current model)",
+                "5-hour (GPT-5.3-Codex-Spark)",
+                "weekly (GPT-5.3-Codex-Spark)",
             ],
-            "general first, then model windows by reset time"
+            "general first, then the named model's windows"
         );
         assert_eq!(found.windows[0].percent, 100.0);
         assert_eq!(found.windows[0].severity, LimitSeverity::Critical);
-        assert_eq!(found.windows[1].percent, 88.0);
-        // The named block's week is the same week as the plain one's, seen
-        // under the older id, so it appears once at its newer reading.
-        assert_eq!(found.windows[2].percent, 84.0);
+        assert_eq!(found.windows[1].percent, 100.0);
+        assert_eq!(found.windows[2].percent, 45.0);
         assert_eq!(found.plan.as_deref(), Some("prolite"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plan_change_from_pro_to_plus_keeps_the_five_hour_as_general() {
+        // Pro wrote a single weekly as general. Plus then wrote 5-hour + weekly
+        // under the plain codex id. Merging those eras used to leave the Pro
+        // weekly in place, demote Plus's 5-hour to "current model", and hide
+        // it from the composer headline.
+        let found = reading_from(
+            "pro-plus",
+            concat!(
+                r#"{"timestamp":"2026-09-10T21:01:58.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":72.0,"window_minutes":10080,"resets_at":1789641363},"secondary":null,"plan_type":"pro"}}}"#,
+                "\n",
+                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":18.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":40.0,"window_minutes":10080,"resets_at":1789680207},"plan_type":"plus"}}}"#,
+                "\n",
+            ),
+            1_789_162_000_000,
+        )
+        .expect("Plus windows are readable");
+
+        let shown: Vec<String> = found
+            .windows
+            .iter()
+            .map(|w| format!("{} ({})", w.label, w.scope.clone().unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            shown,
+            vec!["5-hour (general)", "weekly (general)"],
+            "Plus account windows stay general after the plan change"
+        );
+        assert_eq!(found.windows[0].percent, 18.0);
+        assert_eq!(found.windows[1].percent, 40.0);
+        assert_eq!(found.plan.as_deref(), Some("plus"));
+    }
+
+    #[test]
+    fn a_newer_plus_shaped_reading_without_plan_type_still_replaces_pro_general() {
+        // Sparse Plus blocks often omit plan_type. The window shape alone has
+        // to retire the older single weekly so the 5-hour is not demoted.
+        let found = reading_from(
+            "plus-shape",
+            concat!(
+                r#"{"timestamp":"2026-09-10T21:01:58.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":72.0,"window_minutes":10080,"resets_at":1789641363},"secondary":null,"plan_type":"pro"}}}"#,
+                "\n",
+                r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":18.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":40.0,"window_minutes":10080,"resets_at":1789680207}}}}"#,
+                "\n",
+            ),
+            1_789_162_000_000,
+        )
+        .expect("Plus-shaped windows are readable");
+
+        let shown: Vec<String> = found
+            .windows
+            .iter()
+            .map(|w| format!("{} ({})", w.label, w.scope.clone().unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            shown,
+            vec!["5-hour (general)", "weekly (general)"],
+            "newer multi-window account reading wins without a named plan"
+        );
+        assert_eq!(found.plan.as_deref(), Some("pro"));
+        assert_eq!(found.windows[0].percent, 18.0);
+    }
+
+    #[test]
+    fn an_older_pro_block_absorbed_after_plus_cannot_rebuild_the_weekly() {
+        // Rollouts are walked newest-first by mtime, so a Plus block can be
+        // absorbed before an older Pro one. The era gate must still refuse
+        // the Pro weekly or the 5-hour is demoted again.
+        let mut scan = CodexLimitScan::default();
+        scan.absorb(
+            r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":18.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":40.0,"window_minutes":10080,"resets_at":1789680207},"plan_type":"plus"}}}"#,
+        );
+        scan.absorb(
+            r#"{"timestamp":"2026-09-10T21:01:58.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":72.0,"window_minutes":10080,"resets_at":1789641363},"secondary":null,"plan_type":"pro"}}}"#,
+        );
+        let (windows, _, plan) = scan.finish(1_789_162_000_000).expect("Plus windows remain");
+        let shown: Vec<String> = windows
+            .iter()
+            .map(|w| format!("{} ({})", w.label, w.scope.clone().unwrap_or_default()))
+            .collect();
+        assert_eq!(shown, vec!["5-hour (general)", "weekly (general)"]);
+        assert_eq!(plan.as_deref(), Some("plus"));
     }
 
     #[test]
@@ -1122,8 +1287,8 @@ mod tests {
             .collect();
         assert_eq!(
             shown,
-            vec!["5-hour (primary)", "weekly (secondary)"],
-            "with no account-wide block beside them the old names stand"
+            vec!["5-hour (general)", "weekly (general)"],
+            "a plain multi-window account reading is general on its own"
         );
         assert_eq!(found.windows[0].percent, 12.0);
         assert_eq!(found.windows[1].percent, 30.0);

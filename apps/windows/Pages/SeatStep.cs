@@ -17,6 +17,20 @@ internal static class SeatStep
     public const int DetailCap = 32;
     public const int ScanCap = 4096;
 
+    /// <summary>
+    /// Soft lines the live seat rotates through while the agent is thinking.
+    /// Short and similar in weight so a change of phrase reads as the same wait.
+    /// </summary>
+    public static IReadOnlyList<string> ThinkingPhrases() =>
+    [
+        L10n.Text("common.chat.seat.thinking"),
+        L10n.Text("common.chat.seat.planning_next_moves"),
+        L10n.Text("common.chat.seat.working_it_out"),
+        L10n.Text("common.chat.seat.considering"),
+        L10n.Text("common.chat.seat.figuring_it_out"),
+        L10n.Text("common.chat.seat.turning_it_over"),
+    ];
+
     public static string Phrase(string? verb, string? target)
     {
         var name = TrimVerb(verb);
@@ -77,7 +91,7 @@ internal static class SeatStep
         if (waiting) return L10n.Text("common.waiting");
         if (!string.IsNullOrWhiteSpace(step)) return step!;
         if (speaking) return L10n.Text("windows.seatstep.replying.b2663dd7");
-        return L10n.Text("windows.seatstep.thinking.a20d12c5");
+        return L10n.Text("common.chat.seat.thinking");
     }
 
     /// <summary>

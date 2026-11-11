@@ -569,6 +569,7 @@ struct ChatWorkingIndicator: View {
     /// What a running tool is doing, in words. Empty leaves the mood's own word.
     var step: String? = nil
     var startedAt: Date? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -576,34 +577,142 @@ struct ChatWorkingIndicator: View {
             // held that long stops reading as thought and starts reading as a
             // hang. So the character keeps changing what thinking looks like.
             // Everything else here is short and says exactly one thing.
-            if mood == .thinking {
-                PersonaPastime(seed: seed, size: 26, doing: .thought, pokeable: false)
-                    .accessibilityHidden(true)
-            } else {
-                PersonaMark(seed: seed, size: 26, state: mood)
-                    .accessibilityHidden(true)
+            ZStack {
+                if !reduceMotion, mood == .thinking || mood == .waiting {
+                    Circle()
+                        .fill(Theme.accent.opacity(0.18))
+                        .frame(width: 30, height: 30)
+                        .accessibilityHidden(true)
+                }
+                Group {
+                    if mood == .thinking {
+                        PersonaPastime(seed: seed, size: 26, doing: .thought, pokeable: false)
+                    } else {
+                        PersonaMark(seed: seed, size: 26, state: mood)
+                    }
+                }
+                .accessibilityHidden(true)
             }
-            Group {
-                if let startedAt { TurnElapsedText(since: startedAt, prefix: label) }
-                else { Text(label) }
+            .frame(width: 30, height: 30)
+            // Face swaps must not animate or the seat height jitters. Phrase
+            // morph keeps its own withAnimation below.
+            .transaction { $0.animation = nil }
+            // Just the words beside the character, no chrome. The light that
+            // sweeps across them is what says the turn is still going.
+            HStack(spacing: 6) {
+                SeatLivePhrase(mood: mood, step: step, animate: !reduceMotion)
+                    .layoutPriority(1)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                if let startedAt {
+                    TurnElapsedClock(since: startedAt)
+                }
             }
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: TranscriptFollow.seatHeight)
-        .transaction { $0.animation = nil }
         .accessibilityElement(children: .combine)
     }
+}
 
-    /// A running tool names the step. Every other mood uses its own word.
-    private var label: String {
-        if mood == .working, let step, !step.isEmpty { return step }
+/// The seat's status line: rotating soft phrases while thinking, then a morph
+/// into the next concrete activity when a tool or reply starts.
+private struct SeatLivePhrase: View {
+    var mood: PersonaMood
+    var step: String?
+    var animate: Bool
+    @State private var phraseIndex = 0
+
+    private var text: String {
+        if mood == .working, let step, !step.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return step
+        }
+        if mood == .thinking {
+            let phrases = SeatStep.thinkingPhrases
+            guard !phrases.isEmpty else { return mood.label }
+            return phrases[phraseIndex % phrases.count]
+        }
         return mood.label
+    }
+
+    var body: some View {
+        // One Text whose string changes inside an animation, so the glyphs
+        // morph from one phrase into the next instead of swapping lines.
+        Text(text)
+            .font(Theme.font(13, weight: .medium))
+            .foregroundStyle(Theme.accent)
+            .contentTransition(.interpolate)
+            .overlay { if animate { SeatShimmer(text: text) } }
+            .animation(morphAnimation, value: text)
+            .onChange(of: mood) { _, _ in
+                phraseIndex = 0
+            }
+            .task(id: mood) {
+                guard mood == .thinking, animate else { return }
+                let phrases = SeatStep.thinkingPhrases
+                guard phrases.count > 1 else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(Int.random(in: 4400...5600)))
+                    guard !Task.isCancelled, mood == .thinking else { return }
+                    withAnimation(morphAnimation) {
+                        phraseIndex = (phraseIndex + 1) % phrases.count
+                    }
+                }
+            }
+    }
+
+    private var morphAnimation: Animation {
+        animate ? .easeInOut(duration: 0.7) : .linear(duration: 0)
+    }
+}
+
+/// A soft band of light that sweeps across the words on a steady loop.
+///
+/// It is the one motion that says "still going" at a glance without asking
+/// for attention: slow, even, and clipped to the letters so nothing around
+/// the pill moves. Driven by the clock rather than view state, so a phrase
+/// change never restarts or stutters it.
+private struct SeatShimmer: View {
+    var text: String
+    private let period: Double = 2.6
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            GeometryReader { geo in
+                let t = context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: period) / period
+                let band = max(geo.size.width * 0.45, 40)
+                let travel = geo.size.width + band * 2
+                LinearGradient(
+                    colors: [.clear, .white.opacity(0.55), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: band)
+                .offset(x: -band + travel * t)
+            }
+        }
+        .mask(Text(text).font(Theme.font(13, weight: .medium)))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Elapsed clock alone, so the rotating phrase can sit beside it.
+private struct TurnElapsedClock: View {
+    let since: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: since, by: 1)) { context in
+            Text(TurnElapsed.phrase(since: since, now: context.date))
+                .font(Theme.font(12, weight: .regular))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(TurnElapsed.durationWords(since: since, now: context.date))
+        }
     }
 }
 

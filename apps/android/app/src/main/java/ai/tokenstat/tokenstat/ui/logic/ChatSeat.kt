@@ -15,6 +15,16 @@ object ChatSeat {
     const val DETAIL_CAP = 32
     const val SCAN_CAP = 4096
 
+    /// Soft lines the live seat rotates through while the agent is thinking.
+    fun thinkingPhrases(): List<String> = listOf(
+        L10n.text("common.chat.seat.thinking"),
+        L10n.text("common.chat.seat.planning_next_moves"),
+        L10n.text("common.chat.seat.working_it_out"),
+        L10n.text("common.chat.seat.considering"),
+        L10n.text("common.chat.seat.figuring_it_out"),
+        L10n.text("common.chat.seat.turning_it_over"),
+    )
+
     fun phrase(verb: String?, target: String?): String {
         val name = trimVerb(verb)
         val line = firstLine(scan(target))
@@ -56,7 +66,7 @@ object ChatSeat {
         if (waiting) return L10n.text("common.waiting")
         if (step != null && step.isNotBlank()) return step
         if (speaking) return L10n.text("android.chatseat.replying.b2663dd7")
-        return L10n.text("android.chatseat.thinking.a20d12c5")
+        return L10n.text("common.chat.seat.thinking")
     }
 
     /// Present while the step runs, past once it has finished.
