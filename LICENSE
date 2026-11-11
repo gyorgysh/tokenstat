@@ -1,128 +1,286 @@
 tokenstat
-Source-Available Licence, version 2
+Source-Available Licence, version 3
 
-Copyright (c) pueev OÜ. All rights reserved.
+Copyright (c) pueev OÜ. Contributions remain copyright their respective
+owners. All rights reserved except as expressly granted below.
 
-**This is not an open source licence.** It does not meet the Open Source
-Definition and it is not a free software licence. The source is published so
-that it can be read, studied and checked, not so that it can be reused.
-Calling it "open source with restrictions" would be dishonest, so it is not
-called that anywhere in this repository.
-
-It states its terms plainly so that nobody has to guess.
+This custom source-available licence permits use, contributions, modification
+and source redistribution, including commercial use, subject to the branding,
+distribution and service restrictions below. It does not qualify as an open
+source or free software licence.
 
 
-1. WHY THIS SOURCE IS PUBLISHED
+1. PURPOSE AND DEFINITIONS
 
-tokenstat's central claim is about what happens to your data: what is read,
-what is kept, and what may leave your machine. A claim like that is worth
-nothing if nobody can check it. Every line that touches your data is published
-so that anyone can read it and verify the claim for themselves.
+The source is published so that anyone can inspect how tokenstat handles data,
+contribute improvements, share source changes, and build and run their own
+versions.
 
-Trust, and verify. That is the whole of the intent, and the permissions below
-are scoped to exactly that.
+"Software" means the material covered by section 2, including copies,
+modifications, derivative works, and portions of that material. "You" means
+the person or entity exercising permissions under this licence.
 
+"Source Form" means the preferred form for making modifications, including
+human-readable source code, documentation, configuration and build scripts.
 
-2. WHAT THIS COVERS
-
-This licence covers everything in this repository: `crates/`, `apps/`,
-`xtask/`, `scripts/`, `fixtures/`, the documentation, and any build produced
-from them.
-
-Third-party dependencies keep their own licences. Third-party trademarks and
-logos included here, including those under `apps/mac/Resources/`, belong to
-their owners and are not licensed by this document. See TRADEMARK.md.
-
-
-3. WHAT YOU MAY DO
-
-You may, at no charge:
-
-  (a) read, study, analyse and learn from this source code, for any purpose,
-      including a commercial one;
-  (b) copy it as needed to do so, by cloning the repository or by forking it
-      on the hosting platform where it is published, and keep that fork
-      visible as the platform's forking normally works;
-  (c) modify your own copy privately, including to experiment with it, test
-      it, or satisfy yourself about its behaviour;
-  (d) build it and run your build on machines you control, for your own use,
-      including inside your company;
-  (e) run an official build published by pueev OÜ, for any purpose, including
-      a commercial one, on as many machines as you like;
-  (f) discuss, describe, review and criticise what you find, publicly,
-      including quoting portions of the source where that is needed to make a
-      point, and including publishing a patch or a diff as a proposed fix.
-
-Nothing here restricts fair use, fair dealing, or any other right you have
-under applicable law.
+"Build" means a compiled, packaged or otherwise prepared executable version
+of the Software, or a product containing such a version, including binaries,
+libraries, installers, app bundles, APKs, IPAs, container images, firmware,
+and compiled or obfuscated web applications. This includes modified versions
+and products incorporating only part of the Software. An archive of Source
+Form is not a Build merely because it includes scripts that can be run by an
+interpreter. Adding source files to a Build does not make it Source Form.
 
 
-4. WHAT YOU MAY NOT DO
+2. SCOPE
 
-Without written permission from pueev OÜ, you may not:
+This licence covers the original material in this repository, including
+crates/, apps/, xtask/, scripts/, fixtures/, documentation, and builds made
+from that material, unless a file expressly carries separate terms.
 
-  (a) distribute, publish, sublicense, sell, rent or otherwise make available
-      this source code or any part of it, whether modified or not, other than
-      the platform fork and the quoting permitted by section 3;
-  (b) distribute or publish a build produced from it, whether modified or not,
-      by any means, including any app store, package manager, software
-      marketplace, or download page;
-  (c) incorporate it, or any part of it, into any other software, product or
-      library, whether or not that software is distributed;
-  (d) create and distribute a derivative work based on it;
-  (e) use it, or a build of it, to provide a service to third parties, whether
-      or not for a fee;
-  (f) use it to train or fine-tune a machine learning model whose outputs are
-      made available to third parties;
-  (g) remove or alter this notice or the licence headers in the source files.
-
-Private modification and private use under section 3 are permitted. It is
-publication and reuse that are reserved, not curiosity.
+Third-party code, dependencies, fonts, models and other assets retain their
+own licences. This licence neither replaces those terms nor grants rights
+that their owners have not granted. Third-party trademarks and logos belong
+to their owners. See TRADEMARK.md and the applicable third-party notices.
 
 
-5. TRADEMARKS
+3. PERMISSIONS AND CONDITIONS
+
+Each copyright holder grants You a worldwide, non-exclusive, royalty-free
+licence, for the duration of copyright and subject to this licence, to:
+
+  (a) use, inspect, copy, study, build and run the Software for any purpose,
+      including personal, internal business and commercial purposes;
+  (b) modify the Software, create derivative works, and incorporate it into
+      other software, products or services;
+  (c) publish, mirror, fork and redistribute the Software in Source Form,
+      modified or unmodified, free of charge or for a fee; and
+  (d) operate Your own versions, including self-hosting, for personal use or
+      internal use within Your organization.
+
+These permissions include keeping a public source-code fork, editing and
+experimenting with the code, testing locally, and building and running Your
+own modified copies for personal or internal organizational use.
+
+These permissions are subject to sections 4 and 5 and these conditions:
+
+  (i) Retain applicable copyright, attribution, licence and third-party
+      notices. Include this licence with every redistribution in Source Form.
+  (ii) Identify modified source distributions as modified and identify their
+       distributor. Do not imply that they are official pueev OÜ releases.
+  (iii) The covered Software remains subject to this licence in every copy
+        or derivative work. You may set separate terms for Your own original
+        additions, but may not grant rights to the covered Software that
+        bypass this licence's restrictions. Each recipient receives the
+        permissions in this licence directly from its copyright holders.
+
+You need not publish Your modifications or private Builds, submit changes
+upstream, or pay pueev OÜ to exercise these rights.
+Nothing here limits fair use, fair dealing or other rights under applicable
+law. No rights to third-party services, accounts or infrastructure are granted.
+
+
+4. DISTRIBUTION OF BUILDS AND THIRD-PARTY SERVICES RESERVED
+
+Only pueev OÜ may distribute Builds to others or offer the Software as a
+service to third parties, or authorize others to do so, subject to the
+existing and separate rights preserved in section 7.
+Without separate written permission from pueev OÜ, You may not publish,
+upload, distribute, sell, rent, sublicense or otherwise make a Build available
+to others, directly or through another person or entity. This applies to all
+platforms, including mobile, desktop and server software; to free and paid
+Builds; and to modified, unmodified and renamed Builds.
+
+Reserved channels include all app stores and software marketplaces, public
+and private beta channels (including TestFlight and store test tracks),
+package and container registries, download pages, release attachments, direct
+file transfers, and mobile sideloading. Renaming a Build does not remove this
+restriction.
+
+You may create and run Builds for Your own use, including internal use within
+Your organization, and deploy them on devices or infrastructure under Your
+or Your organization's control. You may use hosting, storage and continuous
+integration providers acting solely on Your behalf for this permitted use,
+provided access to Build artifacts is restricted to You and those
+acting on Your behalf. This does not authorize public artifact downloads or
+independent use or redistribution by those providers.
+
+Without separate written permission from pueev OÜ, You may not make the
+Software's functionality available to third parties as a hosted, managed,
+remote-access, API or other service, free or paid, even if they receive no
+Build. Personal and internal organizational hosting is permitted. Using the
+Software internally in a business is permitted; offering access to its
+functionality to customers or other third parties is not. Sharing reports
+or other output that does not contain the covered Software is not, by itself,
+distribution of the Software or provision of such a service.
+
+Delivering a client-side Build, including WebAssembly or a compiled or
+obfuscated web application, is distribution even if it is downloaded
+automatically by a browser. Sharing Source Form and instructions that let
+recipients build their own copies is permitted.
+
+pueev OÜ may authorize store operators, distributors and service providers to
+host, sign, test and deliver its authorized Builds under separate terms.
+Receiving or running an official Build does not grant general redistribution
+rights. Authorized store and end-user rights are preserved under section 7.
+
+
+5. PRODUCT NAMES AND TRADEMARKS
 
 No trademark rights are granted. "tokenstat", "tokenstat.ai", the tokenstat
-logo and the tokenstat wordmark are trademarks of pueev OÜ. Nominative use
-stays fine: saying that you read, tested or wrote about tokenstat needs no
-permission. See TRADEMARK.md.
+logo and wordmark are reserved to pueev OÜ. See TRADEMARK.md.
+
+Distribution of Builds is reserved under section 4 regardless of their name
+or branding. Renaming, rebranding or modifying the Software does not grant
+permission to distribute a Build. This section grants no distribution rights.
+
+As a condition of the permissions in section 3, without separate written
+permission from pueev OÜ, You may not use "tokenstat" (in any capitalization),
+the tokenstat logo or wordmark, or a confusingly similar name or mark as
+product or service branding, in a store listing, or as a public package
+identity. You must not imply endorsement or affiliation with pueev OÜ.
+These conditions do not authorize any third-party service prohibited by
+section 4.
+
+Accurate attribution and descriptive references, such as "based on tokenstat"
+or "compatible with tokenstat", are permitted. You may retain original names
+in source-code forks, source paths, internal identifiers, licence notices and
+technical compatibility references where they do not serve as the branding
+of a distributed product or publicly offered service. A source fork may keep
+its repository name if it is clearly identified as unofficial. These
+exceptions do not authorize distribution of Builds under any name.
+Private builds need not be renamed. Running an official build under its
+original name is also permitted.
 
 
 6. CONTRIBUTIONS
 
-This repository does not accept code contributions, and pull requests are
-closed unread. Sending code by any other route does not change that, and it
-transfers no copyright, which is exactly why such code cannot be merged.
-Report the problem instead. See CONTRIBUTING.md.
+Code, documentation, translations and other contributions are welcome.
+A "Contribution" is material You intentionally submit to pueev OÜ for
+inclusion in the Software, such as through a pull request, and for which You
+accept these contribution terms. Merely publishing a fork, reporting an issue,
+or posting material marked "Not a Contribution" does not make it a Contribution.
+
+A Contribution is a proposal. pueev OÜ may accept, request changes to, defer
+or decline it. Submission creates no obligation to review, merge, maintain
+or include it in any release. The grants in this section take effect when
+You submit the Contribution with Your acceptance of these terms, whether or
+not it is later merged or released.
+
+You retain any copyright You hold in Your Contribution. A Contribution does
+not grant You ownership of pueev OÜ, its trademarks or pre-existing work, or
+any equity, governance, approval or royalty entitlement. These terms do not
+exclude authorship or other rights that applicable law makes non-waivable.
+The grants below cover any copyright interest You control arising from Your
+Contribution, including any such interest in the combined Software.
+
+By submitting a Contribution and accepting these terms, You:
+
+  (a) license Your Contribution to recipients under this licence; and
+  (b) additionally grant pueev OÜ a perpetual, worldwide, non-exclusive,
+      royalty-free, irrevocable copyright licence to use, copy, modify,
+      prepare derivative works of, publicly display and perform, distribute,
+      and sublicense Your Contribution as part of tokenstat and its derivative
+      works under this licence, any future version of this licence published
+      by pueev OÜ, or other terms, including commercial and app-store terms.
+      This grant includes permission to authorize store
+      operators, distribution partners and end users to exercise those rights,
+      including for hosting, testing, marketing, signing, delivery, updates,
+      re-downloads, backups, and store-authorized family and enterprise use.
+      pueev OÜ may transfer this grant with the tokenstat business or project
+      to a successor. It is not subject to the restrictions in sections 3,
+      4 and 5 and requires no further approval or royalty payment to You.
+
+The additional grant in paragraph (b) survives later changes to the project
+licence or contribution terms. pueev OÜ need not obtain renewed acceptance to
+exercise that grant for a Contribution already submitted with Your acceptance
+of these terms. It does not bind You to new contributor obligations introduced
+in a later version.
+
+For each of these grants, You also grant the corresponding recipients a
+patent licence to make, have made, use, offer for sale, sell and import Your
+Contribution, limited to patent claims You can license that are necessarily
+infringed by Your Contribution alone or by its combination with the Software
+as submitted. The grant to public recipients is subject to this licence;
+the additional grant to pueev OÜ is perpetual, worldwide, non-exclusive,
+royalty-free, irrevocable, sublicensable and transferable with the tokenstat
+business or project to a successor for the purposes in paragraph (b).
+
+You confirm that You have authority to grant these rights, including any
+necessary employer permission. Identify third-party material and its terms
+in Your submission; You do not grant rights to material You do not control.
+Contributions containing separately licensed material require compatibility
+review before acceptance. Contributions create no obligation of support.
+To the extent legally permitted, You consent to modification, combination
+and distribution of Your Contribution as authorized above and agree not to
+assert moral rights to prevent those authorized acts. This does not purport
+to transfer or waive rights that cannot legally be transferred or waived.
+
+When You use bots or AI agents, a person or entity with the necessary
+authority must make these grants. The grants cover only rights You hold or
+are authorized to license. Using a tool does not establish ownership or clear
+third-party rights. An authorized person must record acceptance for the
+submission or under a documented standing acceptance that identifies the
+covered accounts, automation and licence version. Automated acknowledgements
+alone are insufficient. Mechanical dependency updates and separately
+licensed third-party material follow the review process in CONTRIBUTING.md;
+no licence to a dependency is granted merely by submitting an update.
+
+These grants do not transfer Your copyright or prevent You from using or
+licensing Your own original work elsewhere. They do not authorize You to
+distribute a Build containing other covered Software, or to use the tokenstat
+branding. See CONTRIBUTING.md for acceptance.
 
 
-7. VERSIONS ALREADY RELEASED UNDER THE GPL
+7. PREVIOUS RELEASES AND OTHER TERMS
 
-Releases up to and including v0.1.3 were published under GPL-3.0-only. That
-grant is irrevocable for those versions and this licence does not withdraw it.
-Anything released under the GPL stays available under the GPL. This licence
-governs this version and everything after it.
+This version of the licence applies to copies of the Software published with
+it. It does not retroactively replace the terms attached to earlier releases
+or grant rights to third-party material under different terms.
+
+Previously granted rights are not withdrawn by this licence.
+
+This repository licence does not replace an end-user licence or store
+agreement applicable to an official Build, and publishing a new repository
+licence does not amend existing customer or store agreements. Rights already
+granted for official Builds remain governed by those agreements. For an
+official Build authorized by pueev OÜ, the applicable separate store,
+distribution and end-user terms control to the extent of a conflict with
+this licence, including permitted installation, use, copying, backup,
+re-download, updates and store-authorized family or enterprise access.
+This exception is limited to those authorized activities and does not permit
+third-party publication of Builds or public services. Non-waivable consumer
+and other statutory rights are unaffected. This document is not a replacement
+custom App Store end-user licence agreement.
+
+pueev OÜ may offer separate written permissions for rights it owns or is
+authorized to license. Public recipients receive no right to choose a future
+licence version unless it is separately offered for their copy. This does not
+limit the future relicensing rights granted to pueev OÜ by section 6(b).
 
 
-8. NO WARRANTY
+8. NO WARRANTY OR LIABILITY
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS",
+WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 9. TERMINATION
 
-Your permissions under section 3 end automatically if you breach section 4.
-They are restored if you stop the breach and pueev OÜ has not notified you
-otherwise.
+Your permissions under section 3 terminate automatically if You breach this
+licence. They are automatically reinstated if You cure the breach within
+30 days after You first discover it or receive notice of it. Otherwise,
+reinstatement requires written permission from the affected copyright holders.
+Termination does not terminate the rights of recipients who remain compliant,
+or revoke contribution grants already made under section 6. It does not
+terminate rights under separate agreements preserved by section 7.
 
 
 10. CONTACT
 
-Permission requests, including to redistribute or to build a product on this
-code: the address listed at https://tokenstat.ai.
+Requests for separate permissions: the address listed at https://tokenstat.ai.

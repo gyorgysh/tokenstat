@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-// Source-available for review, NOT open source. See LICENSE: no rights to
-// redistribute, publish, or ship a build are granted. Read it, study it, run
-// your own build of it.
+// Source-available: source sharing and own builds are permitted.
+// Distribution of builds is reserved. See LICENSE for terms.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using Microsoft.UI.Xaml;

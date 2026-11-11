@@ -6,7 +6,7 @@
  * If this file and `src/abi.rs` ever disagree, `abi.rs` is correct.
  *
  * SPDX-License-Identifier: LicenseRef-tokenstat-source-available
- * Source-available for review, NOT open source. See LICENSE.
+ * Source-available, not open source. See LICENSE for permissions and restrictions.
  */
 
 #ifndef TOKENSTAT_FFI_H

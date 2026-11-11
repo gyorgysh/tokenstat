@@ -436,31 +436,38 @@ format, and release steps.
 
 ## License
 
-**Source-available, not open source.** One licence covers the whole
-repository: see [LICENSE](LICENSE).
+The custom [tokenstat Source-Available Licence, version 3](LICENSE) allows
+contributions, source sharing, modifications, and personal or internal business
+use. You may fork the source on GitHub, edit it, test locally, and build and
+run your own version without submitting your changes upstream.
 
-Every line is published so it can be read. tokenstat's claim is about what
-happens to your data, and a claim nobody can check is marketing. So: read it,
-study it, fork it on GitHub, build it, run your build on your own machines,
-and say publicly what you find. Trust, and verify.
+Separate written permission from pueev OÜ is required to:
 
-What is reserved is publication. You may not redistribute the source or a
-build of it, put it in another product, or offer it as a service. pueev OÜ
-ships the only builds of tokenstat. The name is not part of the grant either:
-**"tokenstat" and the tokenstat logo are trademarks of pueev OÜ**. See
-[TRADEMARK.md](TRADEMARK.md).
+- Distribute builds on any platform, including through app stores, download
+  pages, installers, mobile sideloading or container registries. Renaming or
+  changing the code does not grant distribution rights.
+- Offer the software as a service to third parties, free or paid.
+- Use the tokenstat name, logo or wordmark as product or service branding.
+  Accurate attribution and clearly unofficial source forks are allowed;
+  see [TRADEMARK.md](TRADEMARK.md).
 
-Releases up to v0.1.3 went out under GPL-3.0. That grant stands for those
-versions and cannot be withdrawn. The licence above governs everything from
-here.
+Keep the licence and applicable notices with shared source. Third-party
+components retain their own terms. The distribution restrictions mean this
+licence does not meet the Open Source Definition. See [LICENSING.md](LICENSING.md)
+for examples.
+
+Earlier releases retain their original terms, including earlier GPL grants.
+Existing official-app end-user and store agreements remain in effect; this
+repository licence does not replace the app-store EULA.
 
 ### Contributions
 
-This repository does not accept pull requests, so that pueev OÜ remains the
-sole copyright holder and can keep shipping the apps. **Issues are very
-welcome** and are the more useful thing anyway: a harness that is not read yet,
-counts that disagree with the tool itself, or anything in the privacy claim
-that does not match the code. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Pull requests and issues are welcome. Contributors retain their copyright and
+accept the contribution terms in [LICENSE, section 6](LICENSE), including an
+additional grant allowing pueev OÜ to distribute their contributions under
+commercial and app-store terms. PRs are proposals; submission does not
+guarantee review, merge or inclusion in a release. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 ### Connect an agent through MCP

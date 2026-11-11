@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-// Source-available for review, NOT open source. See LICENSE: no rights to
-// redistribute, publish, or ship a build. See LICENSE.
+// Source-available: source sharing and own builds are permitted.
+// Distribution of builds is reserved. See LICENSE for terms.
 
 //! Live power, CPU and memory for a connected peer.
 //!
