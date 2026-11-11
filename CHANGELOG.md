@@ -11,11 +11,17 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ## [1.15.1] - 2026-11-11
 
+### Improved
+
+- Busy chats show clearer activity indicators, with changing status phrases while an agent works.
+
 ### Fixed
 
 - Answers to question cards reach a running Codex or Claude turn when live steering is available.
 - The Mac sidebar keeps repository controls and headings readable in narrow windows.
 - The local helper warning clears when the helper answers again.
+- Plan updates reach the Plan panel even when text follows a closing code fence. Reply text after a question or plan block stays in the chat.
+- Codex usage limits now match your current plan, so an older Pro reading no longer hides Plus limits.
 
 ## [1.15.0] - 2026-11-11
 
