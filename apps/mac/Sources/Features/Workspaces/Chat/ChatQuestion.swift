@@ -69,9 +69,12 @@ enum ChatQuestionText {
                 continue
             }
             if inside {
-                block.append(line)
-                if trimmed == "```" {
-                    let body = block.dropFirst().dropLast().joined(separator: "\n")
+                // Host closing_fence: ticks may share the line with the next
+                // sentence (` ```Yes,...`), so trailing text stays as prose.
+                // Probe the raw line (leading space/tab only) so a full trim
+                // cannot eat spaces that belong to the glued sentence.
+                if let trailing = Self.closingFenceTrailing(in: line) {
+                    let body = block.dropFirst().joined(separator: "\n")
                     let value = body.utf8.count < blockMaxBytes
                         ? try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any] : nil
                     let question = value?["question"] as? String
@@ -80,10 +83,14 @@ enum ChatQuestionText {
                         : question?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                     if !valid {
                         kept.append(contentsOf: block)
+                        kept.append(line)
+                    } else if !trailing.isEmpty {
+                        kept.append(trailing)
                     }
                     block = []
                     inside = false
                 } else {
+                    block.append(line)
                     bodyBytes += line.utf8.count + (index < lines.count - 1 ? 1 : 0)
                     if bodyBytes > blockMaxBytes {
                         kept.append(contentsOf: block)
@@ -99,5 +106,27 @@ enum ChatQuestionText {
         return kept.joined(separator: "\n")
             .replacingOccurrences(of: "\n\n\n", with: "\n\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Prose after a closing run of backticks, or an empty string when the
+    /// line is only the fence. `nil` when the line does not close a fence.
+    private static func closingFenceTrailing(in line: String) -> String? {
+        var index = line.startIndex
+        while index < line.endIndex, line[index] == " " || line[index] == "\t" {
+            index = line.index(after: index)
+        }
+        var ticks = 0
+        var cursor = index
+        while cursor < line.endIndex, line[cursor] == "`" {
+            ticks += 1
+            cursor = line.index(after: cursor)
+        }
+        guard ticks >= 3 else { return nil }
+        var trailing = line[cursor...]
+        if trailing.last == "\r" { trailing = trailing.dropLast() }
+        while trailing.first == " " || trailing.first == "\t" {
+            trailing = trailing.dropFirst()
+        }
+        return String(trailing)
     }
 }

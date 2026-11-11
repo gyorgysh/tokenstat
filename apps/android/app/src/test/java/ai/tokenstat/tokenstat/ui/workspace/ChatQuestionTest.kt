@@ -19,6 +19,18 @@ class ChatQuestionTest {
     @Test
     fun blocksAreStrippedFromTheReply() {
         assertEquals("Plain reply.", stripQuestionBlocks("Plain reply."))
+        assertEquals(
+            "Yes, done.",
+            stripQuestionBlocks("```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n```Yes, done."),
+        )
+        assertEquals(
+            "Yes, done.",
+            stripQuestionBlocks("```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n  ```Yes, done."),
+        )
+        assertEquals(
+            "Yes, shipping.",
+            stripQuestionBlocks("$fence\n{\"question\":\"Ship?\"}\n```Yes, shipping."),
+        )
         assertEquals("Before:\nGoing with A.", stripQuestionBlocks("Before:\n$block\nGoing with A."))
         assertEquals("Before:", stripQuestionBlocks("Before:\n$fence\n{\"question\":\"Wh"))
         assertEquals("", stripQuestionBlocks(block))

@@ -19,6 +19,12 @@ struct ChatQuestionTests {
         require(ChatQuestionText.stripping("Plain reply.") == "Plain reply.", "text without a block is untouched")
         let plan = "```tokenstat-plan\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```"
         require(ChatQuestionText.stripping("Working.\n\(plan)\nDone.") == "Working.\nDone.", "a plan block is hidden from the reply")
+        require(ChatQuestionText.stripping("```tokenstat-plan\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n```Yes, done.") == "Yes, done.",
+                "a closing fence glued to prose still hides a valid plan")
+        require(ChatQuestionText.stripping("```tokenstat-plan\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n  ```Yes, done.") == "Yes, done.",
+                "an indented glued closing fence still hides a valid plan")
+        require(ChatQuestionText.stripping("\(fence)\n{\"question\":\"Ship?\"}\n```Yes, shipping.") == "Yes, shipping.",
+                "a glued question fence keeps the trailing prose")
         require(ChatQuestionText.stripping("```tokenstat-plan\nnot json\n```", streaming: false).contains("not json"),
                 "a broken plan block stays readable")
         require(ChatQuestionText.stripping("```tokenstat-plan\n{\"question\":\"Q?\"}\n```", streaming: false).contains("question"),

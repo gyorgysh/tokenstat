@@ -161,6 +161,24 @@ mod tests {
     }
 
     #[test]
+    fn a_closing_fence_glued_to_prose_still_updates_the_plan() {
+        // The final update often arrives as ` ```Yes,...` with no newline after
+        // the ticks. That must still close the block or the plan sticks mid-run.
+        let mut scanner = Scanner::default();
+        let mut text = block(
+            r#"{"steps":[{"step":"Inspect","status":"completed"},{"step":"Build","status":"completed"},{"step":"Validate","status":"in_progress"}]}"#,
+        );
+        assert_eq!(scanner.scan(&text).unwrap()[2]["status"], "in_progress");
+        text.push_str(&format!(
+            "```{FENCE}\n{{\"steps\":[{{\"step\":\"Inspect\",\"status\":\"completed\"}},{{\"step\":\"Build\",\"status\":\"completed\"}},{{\"step\":\"Validate\",\"status\":\"completed\"}}]}}\n```Yes, done."
+        ));
+        // No newline after the glued prose yet: finish() must still apply it.
+        assert!(scanner.scan(&text).is_none());
+        let plan = scanner.finish(&text).expect("glued closing fence still parses");
+        assert_eq!(plan[2]["status"], "completed");
+    }
+
+    #[test]
     fn scanner_survives_buffer_trimming_before_final_plan() {
         let mut scanner = Scanner::default();
         let prefix = "a".repeat(1000);

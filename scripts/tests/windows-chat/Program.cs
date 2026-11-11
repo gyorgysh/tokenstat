@@ -737,6 +737,12 @@ Console.WriteLine("Windows folded history: collapsed and expanded windows reach 
 var questionFence = "```" + ChatQuestionText.Fence;
 var questionBlock = questionFence + "\n{\"question\":\"Which database?\"}\n```";
 Check(ChatQuestionText.Strip("Plain reply.") == "Plain reply.", "text without a block is untouched");
+Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n```Yes, done.") == "Yes, done.",
+    "a closing fence glued to prose still hides a valid plan");
+Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n  ```Yes, done.") == "Yes, done.",
+    "an indented glued closing fence still hides a valid plan");
+Check(ChatQuestionText.Strip(questionFence + "\n{\"question\":\"Ship?\"}\n```Yes, shipping.") == "Yes, shipping.",
+    "a glued question fence keeps the trailing prose");
 Check(ChatQuestionText.Strip("Before:\n" + questionBlock + "\nGoing with A.") == "Before:\nGoing with A.", "a finished block leaves the prose around it");
 Check(ChatQuestionText.Strip("Before:\n" + questionFence + "\n{\"question\":\"Wh") == "Before:", "a streaming block is cut from its opening line");
 Check(ChatQuestionText.Strip(questionBlock) == "", "a reply that is only a question has no prose");

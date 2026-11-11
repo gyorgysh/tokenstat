@@ -162,7 +162,10 @@ pub(crate) fn next_block<'a>(
     }
 }
 
-/// The line that is only a closing fence: where it starts, and where it ends.
+/// The line that closes a fence: where the body ends, and where following
+/// text starts. A model often streams the closing ticks and the next sentence
+/// on one line (` ```Yes,...`), so anything after the ticks belongs after the
+/// block rather than inside it.
 fn closing_fence(text: &str, from: usize) -> Option<(usize, usize)> {
     let mut line_start = from;
     loop {
@@ -171,11 +174,33 @@ fn closing_fence(text: &str, from: usize) -> Option<(usize, usize)> {
         // Until then the closing backticks may still be arriving.
         let n = rest.find('\n')?;
         let (line, next) = (&rest[..n], line_start + n + 1);
-        if line.trim() == "```" {
+        if let Some(after_ticks) = closing_fence_prefix(line) {
+            let trailing = &line[after_ticks..];
+            if trailing.chars().any(|c| !c.is_whitespace()) {
+                let skip = trailing.len() - trailing.trim_start().len();
+                return Some((line_start, line_start + after_ticks + skip));
+            }
             return Some((line_start, next));
         }
         line_start = next;
     }
+}
+
+/// Byte offset in `line` just past a closing run of backticks, when this line
+/// closes a fence. Only space/tab indentation counts, matching an opening
+/// fence. Trailing prose after the ticks is allowed so a glued ` ```Yes`
+/// still ends the block; plan/question bodies are JSON and must not start a
+/// line with ticks.
+fn closing_fence_prefix(line: &str) -> Option<usize> {
+    // Trim a trailing CR left by a CRLF reply split on `\n` alone.
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let indent = line.bytes().take_while(|&b| b == b' ' || b == b'\t').count();
+    let rest = &line[indent..];
+    let ticks = rest.bytes().take_while(|&b| b == b'`').count();
+    if ticks < 3 {
+        return None;
+    }
+    Some(indent + ticks)
 }
 
 /// Read one block body. Anything malformed is dropped: a broken question is
@@ -396,6 +421,25 @@ mod tests {
         assert!(scanner.scan(&text).is_empty());
         assert_eq!(scanner.finish(&text).len(), 1);
         assert!(scanner.finish(&text).is_empty(), "and only once");
+    }
+
+    #[test]
+    fn a_closing_fence_glued_to_prose_still_ends_the_block() {
+        // Streaming often lands the ticks and the next sentence on one line.
+        let text = format!("```{FENCE}\n{{\"question\":\"Ship?\"}}\n```Yes, shipping.\n");
+        let found = Scanner::default().scan(&text);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].question, "Ship?");
+
+        // The reply may end on that glued line with no final newline yet.
+        let mut scanner = Scanner::default();
+        let pending = format!("```{FENCE}\n{{\"question\":\"Ship?\"}}\n```Yes, shipping.");
+        assert!(scanner.scan(&pending).is_empty());
+        assert_eq!(scanner.finish(&pending).len(), 1);
+
+        // Indentation and a CRLF reply must still close.
+        let crlf = format!("```{FENCE}\r\n{{\"question\":\"Ship?\"}}\r\n  ```Yes\r\n");
+        assert_eq!(Scanner::default().scan(&crlf).len(), 1);
     }
 
     #[test]

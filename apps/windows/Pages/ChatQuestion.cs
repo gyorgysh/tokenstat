@@ -59,13 +59,16 @@ internal static class ChatQuestionText
             }
             if (inside)
             {
-                block.Add(line);
-                if (trimmed == "```")
+                // Host closing_fence: ticks may share the line with the next
+                // sentence (` ```Yes,...`), so trailing text stays as prose.
+                // Probe the raw line (leading space/tab only) so a full trim
+                // cannot eat spaces that belong to the glued sentence.
+                if (ClosingFenceTrailing(line) is { } trailing)
                 {
                     var valid = false;
                     try
                     {
-                        var body = string.Join("\n", block.Skip(1).SkipLast(1));
+                        var body = string.Join("\n", block.Skip(1));
                         var value = System.Text.Encoding.UTF8.GetByteCount(body) < BlockMaxBytes
                             ? System.Text.Json.Nodes.JsonNode.Parse(body) : null;
                         valid = isPlan
@@ -75,12 +78,21 @@ internal static class ChatQuestionText
                                 && !string.IsNullOrWhiteSpace(question.GetValue<string>());
                     }
                     catch (System.Text.Json.JsonException) { }
-                    if (!valid) kept.AddRange(block);
+                    if (!valid)
+                    {
+                        kept.AddRange(block);
+                        kept.Add(line);
+                    }
+                    else if (trailing.Length > 0)
+                    {
+                        kept.Add(trailing);
+                    }
                     block.Clear();
                     inside = false;
                 }
                 else
                 {
+                    block.Add(line);
                     bodyBytes += System.Text.Encoding.UTF8.GetByteCount(line) + (index < lines.Length - 1 ? 1 : 0);
                     if (bodyBytes > BlockMaxBytes)
                     {
@@ -95,5 +107,18 @@ internal static class ChatQuestionText
         }
         if (!streaming) kept.AddRange(block);
         return string.Join("\n", kept).Replace("\n\n\n", "\n\n").Trim();
+    }
+
+    /// <summary>Prose after closing backticks, or empty when the line is only the fence. Null when it does not close.</summary>
+    private static string? ClosingFenceTrailing(string line)
+    {
+        var index = 0;
+        while (index < line.Length && (line[index] == ' ' || line[index] == '\t')) index++;
+        var ticks = 0;
+        while (index + ticks < line.Length && line[index + ticks] == '`') ticks++;
+        if (ticks < 3) return null;
+        var trailing = line[(index + ticks)..];
+        if (trailing.EndsWith('\r')) trailing = trailing[..^1];
+        return trailing.TrimStart(' ', '\t');
     }
 }
