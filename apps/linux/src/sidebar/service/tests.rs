@@ -165,3 +165,89 @@ fn damaged_file_is_retained_and_read_failure_does_not_claim_an_empty_loaded_stor
     assert_eq!(std::fs::read(path).unwrap(), b"broken");
     assert!(service.reading().is_none() && service.error().is_some());
 }
+
+#[test]
+fn display_and_sort_intents_survive_late_reads_and_independent_writes() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("preferences.json");
+    let preferences = Preferences::at(path.clone());
+    let mut service = Service::new(Some(preferences.clone()));
+    let read = service.next_job().unwrap();
+    let stale_read = read.execute();
+    service.set_projects_display(ProjectsDisplay::ByChat);
+    service.set_projects_sort(ProjectsSort::Recent);
+    assert!(service.finish(&read, stale_read));
+    assert_eq!(
+        service.reading().unwrap().projects_display(),
+        ProjectsDisplay::ByChat
+    );
+    assert_eq!(
+        service.reading().unwrap().projects_sort(),
+        ProjectsSort::Recent
+    );
+    let first_write = service.next_job().unwrap();
+    let first_result = first_write.execute();
+    service.set_projects_display(ProjectsDisplay::ByRepository);
+    assert!(service.finish(&first_write, first_result));
+    assert_eq!(
+        service.reading().unwrap().projects_display(),
+        ProjectsDisplay::ByRepository
+    );
+    drain(&mut service);
+    let reopened = Store {
+        preferences: Preferences::at(path),
+    }
+    .read()
+    .unwrap();
+    assert_eq!(reopened.projects_display(), ProjectsDisplay::ByRepository);
+    assert_eq!(reopened.projects_sort(), ProjectsSort::Recent);
+}
+
+#[test]
+fn chat_detail_migrates_old_names_and_a_new_choice_wins_a_late_read() {
+    use crate::commands::ChatDetail;
+    let preferences = Preferences::default();
+    preferences
+        .update(|values| {
+            values.insert("chat.detail".into(), json!("compact"));
+            values.insert("unrelated".into(), json!("keep"));
+            Ok(())
+        })
+        .unwrap();
+    let mut service = Service::new(Some(preferences.clone()));
+    let old_read = service.next_job().unwrap();
+    let old_result = old_read.execute();
+    service.set_chat_detail(ChatDetail::Detailed);
+    service.finish(&old_read, old_result);
+    assert_eq!(
+        service.reading().unwrap().chat_detail(),
+        ChatDetail::Detailed
+    );
+    assert!(!service.reading().unwrap().needs_chat_detail_migration());
+    drain(&mut service);
+    let reopened = Store {
+        preferences: preferences.clone(),
+    }
+    .read()
+    .unwrap();
+    assert_eq!(reopened.chat_detail(), ChatDetail::Detailed);
+    preferences
+        .read(|values| assert_eq!(values["unrelated"], "keep"))
+        .unwrap();
+    preferences
+        .update(|values| {
+            values.remove("chat.detailLevel");
+            Ok(())
+        })
+        .unwrap();
+    let old = Store {
+        preferences: preferences.clone(),
+    }
+    .read()
+    .unwrap();
+    assert!(old.needs_chat_detail_migration());
+    assert_eq!(old.chat_detail(), ChatDetail::Minimal);
+    Store { preferences }
+        .mutate(&Mutation::ChatDetail(old.chat_detail()))
+        .unwrap();
+}

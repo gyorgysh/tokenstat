@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use tokenstat_linux::{
     navigation::Navigation,
     project_edit::Directory,
-    sidebar::{Mutation, Store},
+    sidebar::{Mutation, ProjectsDisplay, ProjectsSort, Store},
 };
 
 const KEYS: [&str; 12] = [
@@ -29,6 +29,8 @@ fn state(store: &Store, windows: &[Directory]) -> Value {
     json!({
         "raw":store.preferences.read(Clone::clone).unwrap(),
         "order":snapshot.section_order(),
+        "display":snapshot.projects_display().as_str(),
+        "sort":snapshot.projects_sort().as_str(),
         "expanded":KEYS.map(|key| json!({"key":key,"yes":snapshot.is_expanded(key,true),"no":snapshot.is_expanded(key,false)})),
         "ids":PREFIXES.map(|prefix|json!({"prefix":prefix,"ids":snapshot.expanded_ids(prefix)})),
         "windows":windows.iter().map(|window|json!({"projects":window.projects_expanded(),"rows":IDS.map(|id|json!({"id":id,"expanded":window.expanded(id)}))})).collect::<Vec<_>>()
@@ -105,6 +107,21 @@ fn run(input: Value) -> Value {
                     })
                     .unwrap();
             }
+            "display" => {
+                let display = match step["value"].as_str().unwrap() {
+                    "byChat" => ProjectsDisplay::ByChat,
+                    _ => ProjectsDisplay::ByRepository,
+                };
+                store.mutate(&Mutation::Display(display)).unwrap();
+            }
+            "sort" => {
+                let sort = match step["value"].as_str().unwrap() {
+                    "name" => ProjectsSort::Name,
+                    "recent" => ProjectsSort::Recent,
+                    _ => ProjectsSort::Manual,
+                };
+                store.mutate(&Mutation::Sort(sort)).unwrap();
+            }
             "move" => {
                 store
                     .mutate(&Mutation::Move {
@@ -158,8 +175,13 @@ pub fn snapshot() -> Value {
                 "shell.sidebar.expanded.project:a":choice,"shell.sidebar.expanded.project:number":1,
                 "shell.sidebar.expanded.future:row":{"layout":{"version":8}},
                 "shell.sidebar.expanded.project:remote:peer:a":false,
-                "shell.sidebar.expanded.section:projects":choice});
+                "shell.sidebar.expanded.section:projects":choice, "shell.sidebar.projectsDisplay":choice, "shell.sidebar.projectsSort":choice});
             let steps = json!([
+                {"op":"display","value":"byChat"},
+                {"op":"sort","value":"recent"},
+                {"op":"sort","value":"name"},
+                {"op":"display","value":"byRepository"},
+                {"op":"sort","value":"manual"},
                 {"op":"open"},
                 {"op":"directory","ids":["a","b","remote:peer:a","é"]},
                 {"op":"project","id":"a","expanded":false},
@@ -188,6 +210,14 @@ pub fn snapshot() -> Value {
                 {"op":"directory","window":2,"ids":["a","b","c","remote:peer:a","é"]}
             ]);
             cases.push(run(json!({"seed":seed,"steps":steps})));
+        }
+    }
+    for display in ["byRepository", "byChat", "future"] {
+        for sort in ["manual", "name", "recent", "future"] {
+            cases.push(run(json!({"seed":{
+                "shell.sidebar.projectsDisplay": display,
+                "shell.sidebar.projectsSort": sort
+            }, "steps":[]})));
         }
     }
     json!({"cases":cases})

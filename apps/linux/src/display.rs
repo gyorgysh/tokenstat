@@ -267,6 +267,8 @@ pub fn integer(n: u64) -> String {
 /// conventions (including 12-hour preferences) still need native integration.
 #[cfg(unix)]
 pub fn local_short_time(epoch_ms: i64) -> Option<String> {
+    // time_t can be narrower than i64 on supported Unix targets.
+    #[allow(clippy::useless_conversion)]
     let seconds: libc::time_t = epoch_ms.div_euclid(1000).try_into().ok()?;
     let mut parts = std::mem::MaybeUninit::<libc::tm>::uninit();
     // SAFETY: the input and output pointers are valid for this call.
@@ -348,6 +350,39 @@ pub fn friendly_date(iso: &str, local_output: bool) -> String {
         tm.tm_mday,
         tm.tm_year + 1900
     )
+}
+
+/// Initial abbreviated local month and day for sidebar chat groups.
+#[cfg(unix)]
+pub fn local_month_day(epoch_seconds: i64) -> Option<String> {
+    #[allow(clippy::useless_conversion)]
+    let epoch: libc::time_t = epoch_seconds.try_into().ok()?;
+    let mut parts = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // SAFETY: localtime_r receives valid input and output pointers.
+    if unsafe { libc::localtime_r(&epoch, parts.as_mut_ptr()) }.is_null() {
+        return None;
+    }
+    // SAFETY: a successful localtime_r initialized the output.
+    let parts = unsafe { parts.assume_init() };
+    let locale = Locale::current(libc::LC_TIME_MASK)?;
+    let mut bytes = [0_u8; 128];
+    // SAFETY: the buffer, format, tm and locale remain valid for this call.
+    let count = unsafe {
+        libc::strftime_l(
+            bytes.as_mut_ptr().cast(),
+            bytes.len(),
+            c"%b".as_ptr(),
+            &parts,
+            locale.0,
+        )
+    };
+    (count > 0).then(|| {
+        format!(
+            "{} {}",
+            String::from_utf8_lossy(&bytes[..count]),
+            parts.tm_mday
+        )
+    })
 }
 
 #[cfg(test)]

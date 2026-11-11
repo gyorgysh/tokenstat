@@ -68,11 +68,34 @@ impl Desktop {
                 })
         };
         if self.chat_directory.set_owner(owner) {
+            self.retire_composer(cx);
+            self.chat_folds.clear();
+            for (_, reader) in self.chat_readers.drain() {
+                reader.update(cx, |reader, cx| reader.retire(cx));
+            }
             self.chat_actions.retain(&Default::default());
             self.selected_chat = None;
             self.chat_overview = false;
             self.chat_history.release_all();
         }
+        use crate::sidebar::{ProjectsDisplay, ProjectsSort, timeline::WarmMode};
+        let expanded = self.project_directory.projects_expanded();
+        let timeline = self.projects_display == ProjectsDisplay::ByChat && expanded;
+        let mode = if !expanded {
+            None
+        } else if timeline {
+            Some(WarmMode::Timeline)
+        } else if self.projects_sort == ProjectsSort::Recent {
+            Some(if self.projects_filter.is_some() {
+                WarmMode::RecentFiltered
+            } else {
+                WarmMode::Recent
+            })
+        } else if self.projects_filter.is_some() {
+            Some(WarmMode::Filter)
+        } else {
+            None
+        };
         let folders = self
             .data
             .as_ref()
@@ -80,33 +103,77 @@ impl Desktop {
             .into_iter()
             .flatten()
             .filter(|folder| {
-                self.project_directory.projects_expanded()
-                    && self.project_directory.expanded(&folder.id)
+                expanded && (mode.is_some() || self.project_directory.expanded(&folder.id))
             })
             .map(|folder| folder.id.clone())
             .collect::<Vec<_>>();
-        self.chat_directory.retain_mounts(&folders);
-        let with_rows = folders
-            .iter()
-            .filter(|folder| {
-                self.chat_directory.rows(folder).iter().any(|row| {
-                    history::shown(
-                        row,
-                        self.selected_chat.as_ref().map(|(_, id)| id.as_str()),
-                        self.draft_fact(folder, &row.id, cx),
-                    )
+        self.chat_directory
+            .retain_sidebar_lists(if mode.is_some() { &folders } else { &[] });
+        if self
+            .timeline_warm
+            .reconcile(mode, self.chat_directory.owner(), &folders)
+        {
+            self.chat_directory.retire_sidebar_reads();
+        }
+        let mut mounts = folders.clone();
+        if self.active
+            && !self.chat_overview
+            && let (
+                Route::Workspace {
+                    id,
+                    section: WorkspaceSection::Chat,
+                },
+                Some((selected, _)),
+            ) = (&self.navigation.route, &self.selected_chat)
+            && crate::work::text::equal(id, selected)
+            && !mounts
+                .iter()
+                .any(|folder| crate::work::text::equal(folder, id))
+        {
+            mounts.push(id.clone());
+        }
+        self.chat_directory.retain_mounts(&mounts);
+        if timeline {
+            self.chat_history.release_all();
+        } else {
+            let with_rows = folders
+                .iter()
+                .filter(|folder| {
+                    self.project_directory.expanded(folder)
+                        && self.chat_directory.rows(folder).iter().any(|row| {
+                            history::shown(
+                                row,
+                                self.selected_chat.as_ref().map(|(_, id)| id.as_str()),
+                                self.draft_fact(folder, &row.id, cx),
+                            )
+                        })
                 })
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        self.chat_history.retain_holds(&with_rows);
-        for folder in &folders {
-            if let Some(read) = self.chat_directory.mount(folder)
-                && self.client.is_some()
-            {
-                self.dispatch_chat_directory(read, cx);
+                .cloned()
+                .collect::<Vec<_>>();
+            self.chat_history.retain_holds(&with_rows);
+        }
+        if self.client.is_some() {
+            if let Some(mode) = mode {
+                while let Some(folder) = self.timeline_warm.next(self.chat_directory.has_pending())
+                {
+                    if mode == WarmMode::Filter && self.chat_directory.has_sidebar_list(&folder) {
+                        continue;
+                    }
+                    if let Some(read) = self.chat_directory.begin(&folder) {
+                        self.dispatch_chat_directory(read, cx);
+                        break;
+                    }
+                }
+            } else {
+                for folder in &folders {
+                    if let Some(read) = self.chat_directory.mount(folder) {
+                        self.dispatch_chat_directory(read, cx);
+                    }
+                }
             }
         }
+        self.sync_selected_chat_reader(cx);
+        self.sync_chat_watch(cx);
         // Held order is unobserved state, released when its list disappears.
         if let Some((folder, _)) = &self.hovered_chat
             && !folders.iter().any(|id| id == folder)
@@ -115,7 +182,7 @@ impl Desktop {
             self.hovered_chat = None;
         }
     }
-    fn dispatch_chat_directory(&mut self, read: Read, cx: &mut Context<Self>) {
+    pub(super) fn dispatch_chat_directory(&mut self, read: Read, cx: &mut Context<Self>) {
         let Some(client) = self.client.clone() else {
             return;
         };
@@ -157,7 +224,7 @@ impl Desktop {
                 });
             },
         );
-        crate::chat::transport::read(request, consumer, cx);
+        crate::chat::transport::read_deferred(request, consumer, cx);
     }
 
     fn retry_chat_directory(&mut self, folder: &str, cx: &mut Context<Self>) {
@@ -297,6 +364,7 @@ impl Desktop {
         if cx.global::<HomeShared>().quit_requested {
             return;
         }
+        self.open_chat_reader(&target.folder.id, target.conversation.clone(), cx);
         self.selected_chat = Some((target.folder.id.clone(), target.conversation.id.clone()));
         self.chat_overview = false;
         self.requested_work = target.reference;
@@ -374,6 +442,29 @@ impl Desktop {
             self.select_sidebar_chat(target, cx);
         }
     }
+    pub(super) fn visible_project_chats(&self, folder: &Repository, cx: &App) -> Vec<Conversation> {
+        let selected = self.selected_chat.as_ref().map(|(_, id)| id.as_str());
+        let folder_matches = crate::sidebar::layout::matches(
+            folder,
+            &[],
+            &self.projects_filter_query,
+            &self.sidebar_collation,
+        );
+        self.chat_directory
+            .rows(&folder.id)
+            .iter()
+            .filter(|row| {
+                history::shown(row, selected, self.draft_fact(&folder.id, &row.id, cx))
+                    && (folder_matches
+                        || crate::sidebar::layout::conversation_matches(
+                            row,
+                            crate::work::text::trim(&self.projects_filter_query),
+                            &self.sidebar_collation,
+                        ))
+            })
+            .cloned()
+            .collect()
+    }
     pub(super) fn project_children(
         &self,
         folder: &Repository,
@@ -382,12 +473,7 @@ impl Desktop {
     ) -> gpui::Stateful<Div> {
         let raw = self.chat_directory.rows(&folder.id);
         let selected = self.selected_chat.as_ref().map(|(_, id)| id.as_str());
-        // An initial draft read remains unknown until its restored snapshot is ready.
-        let rows = raw
-            .iter()
-            .filter(|row| history::shown(row, selected, self.draft_fact(&folder.id, &row.id, cx)))
-            .cloned()
-            .collect::<Vec<_>>();
+        let rows = self.visible_project_chats(folder, cx);
         let ordered = history::holding_order(&rows, self.chat_history.held(&folder.id));
         let selected_index = selected.and_then(|id| {
             ordered
@@ -418,7 +504,7 @@ impl Desktop {
             }
         }));
         for conversation in &ordered[range.clone()] {
-            content = content.child(self.conversation_row(folder, conversation, dark, cx));
+            content = content.child(self.conversation_row(folder, conversation, false, dark, cx));
         }
         if ordered.len() > history::COLLAPSED_LIMIT {
             let expanded = self.chat_history.expanded(&folder.id);
@@ -480,6 +566,7 @@ impl Desktop {
                                 cx,
                             );
                             view.chat_overview = true;
+                            view.sync_chat_watch(cx);
                             view.gap = Some(
                                 "Desktop preview: the conversation overview is still being ported."
                                     .into(),
@@ -570,10 +657,11 @@ impl Desktop {
         }
         content
     }
-    fn conversation_row(
+    pub(super) fn conversation_row(
         &self,
         folder: &Repository,
         conversation: &Conversation,
+        caption: bool,
         dark: bool,
         cx: &Context<Self>,
     ) -> gpui::Stateful<Div> {
@@ -661,7 +749,31 @@ impl Desktop {
             } else {
                 tertiary(dark)
             });
-        if let Some(status) = self
+        if caption && !conversation.running {
+            let label = if folder.machine_id.is_some() {
+                format!(
+                    "{} / {}",
+                    folder
+                        .machine_label
+                        .as_deref()
+                        .unwrap_or(&l("apple.rootview.remote.ffa98e02")),
+                    folder.name
+                )
+            } else {
+                folder.name.clone()
+            };
+            trailing = trailing.child(
+                text(
+                    label,
+                    FontToken {
+                        points: self.layout.fit.text(11.),
+                        weight: 400,
+                    },
+                )
+                .max_w(px(self.layout.fit.scale(96.)))
+                .truncate(),
+            );
+        } else if let Some(status) = self
             .chat_statuses
             .get(&(folder.id.clone(), conversation.id.clone()))
         {

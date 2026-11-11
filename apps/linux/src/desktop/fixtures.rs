@@ -38,9 +38,9 @@ impl Fixture {
     }
     pub fn render(
         self,
-        view: &Desktop,
-        window: &Window,
-        cx: &Context<Desktop>,
+        view: &mut Desktop,
+        window: &mut Window,
+        cx: &mut Context<Desktop>,
     ) -> gpui::Stateful<Div> {
         match self {
             Self::Day(f) => f.render(view, window, cx),

@@ -4,12 +4,15 @@
 //! The complete transcript/composer presentation remains in progress.
 
 pub mod actions;
+#[cfg(unix)]
+pub mod delivery;
 pub mod directory;
 pub mod fixtures;
 pub mod flights;
 pub mod history;
 pub mod list_mutations;
 pub mod menu;
+pub mod outbox;
 pub mod paging;
 pub mod polling;
 pub mod projector;

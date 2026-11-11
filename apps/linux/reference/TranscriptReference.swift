@@ -12,8 +12,8 @@ func edit(_ s:ChatEditState)->[String:Any]{[
     "startedAtMs":s.startedAtMs,"endedAtMs":optional(s.endedAtMs)]}
 func group(_ g:ChatStepGroup)->[String:Any]{[
     "style":String(describing:g.style),"open":g.open,"memberIDs":g.memberIDs,"steps":g.steps,"files":g.files,"added":g.added,"removed":g.removed,
-    "reads":g.reads,"searches":g.searches,"pages":g.pages,"running":g.running,"liveVerb":optional(g.liveVerb),"liveTarget":optional(g.liveTarget),
-    "recentActivity":g.recentActivity.map{["id":$0.id,"verb":$0.verb,"target":$0.target,"running":$0.running]},
+    "reads":g.reads,"searches":g.searches,"pages":g.pages,"failures":g.failures,"running":g.running,"liveVerb":optional(g.liveVerb),"liveTarget":optional(g.liveTarget),
+    "recentActivity":g.recentActivity.map{["id":$0.id,"verb":$0.verb,"target":$0.target,"running":$0.running,"failed":$0.failed]},
     "startedAtMs":optional(g.startedAtMs),"endedAtMs":optional(g.endedAtMs),"cost":optional(g.cost),"preview":optional(g.preview),
     "plain":g.plain,"verb":optional(g.verb),"subject":optional(g.subject)]}
 func row(_ row:ChatDisplayItem)->[String:Any]{

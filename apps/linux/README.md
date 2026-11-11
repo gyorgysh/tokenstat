@@ -28,7 +28,12 @@ failure. The calendar uses the shared host's rows, levels, scope and
 streaks, with initial pointer hover/day selection, day-detail hover card and
 pinned inspector breakdowns. `--shell-fixture` uses
 synthetic data and never opens a host socket or
-archive. It also exposes the Linux menu surface on macOS for input checks.
+archive. Its synthetic repository and conversation rows let the repository/chat
+switch, filter, sort menu and grouped timeline be exercised on macOS. The
+connected preview uses the same initial sidebar controls and sequentially reads
+project chat directories. These controls still require real Linux input,
+accessibility and visual acceptance, and some source actions remain unported.
+The fixture also exposes the Linux menu surface on macOS for input checks.
 Feature contents and many commands remain visibly unported. Neither mode is
 a complete desktop, a visual-parity signoff or a stable download.
 
@@ -494,6 +499,14 @@ The desktop entry is a packaging template until the parity UI is ready.
 Run `bin/tokenstat-desktop --probe-ui` explicitly to open the experiment.
 
 ## Isolated preview on macOS
+
+The offline shell can also be started directly after the build, with synthetic
+content and no host or archive access:
+
+```sh
+apps/linux/target/debug/tokenstat-linux --shell-fixture
+```
+
 
 macOS is only a preview environment for this client. Use separate data and
 identity directories for the test daemon. The app requires an explicit socket

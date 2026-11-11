@@ -28,9 +28,83 @@ pub(super) fn pump(app: &mut App) {
 impl Desktop {
     pub(super) fn sync_sidebar_preferences(&mut self, cx: &mut Context<Self>) {
         if let Some(preferences) = cx.global::<HomeShared>().sidebar.reading() {
+            let detail = preferences.chat_detail();
+            let migrate_detail = preferences.needs_chat_detail_migration();
             self.project_directory.apply_preferences(&preferences);
             self.chat_history.initialize(&preferences);
+            if !self.projects_display_initialized {
+                self.projects_display = preferences.projects_display();
+                self.projects_display_initialized = true;
+            }
+            if !self.projects_sort_initialized {
+                self.projects_sort = preferences.projects_sort();
+                self.projects_sort_initialized = true;
+            }
+            self.apply_chat_detail(detail, cx);
+            if migrate_detail {
+                cx.global_mut::<HomeShared>()
+                    .sidebar
+                    .set_chat_detail(detail);
+                pump(cx);
+            }
         }
+    }
+    pub(super) fn apply_chat_detail(&mut self, detail: ChatDetail, cx: &mut Context<Self>) {
+        if self.detail == detail {
+            return;
+        }
+        self.detail = detail;
+        install_native_menus(detail, cx);
+        let folders = self.chat_readers.keys().cloned().collect::<Vec<_>>();
+        for folder in folders {
+            self.sync_chat_fold(&folder, cx);
+        }
+        cx.notify();
+    }
+    pub(super) fn set_projects_display(
+        &mut self,
+        display: crate::sidebar::ProjectsDisplay,
+        cx: &mut Context<Self>,
+    ) {
+        if cx.global::<HomeShared>().quit_requested {
+            return;
+        }
+        self.projects_display = display;
+        self.projects_display_initialized = true;
+        if let Some(field) = &self.projects_filter {
+            let prompt = l(if display == crate::sidebar::ProjectsDisplay::ByChat {
+                "common.sidebar.filter_chats"
+            } else {
+                "common.sidebar.filter_repositories"
+            });
+            field.update(cx, |field, cx| {
+                field.set_placeholder(prompt);
+                cx.notify();
+            });
+        }
+        cx.global_mut::<HomeShared>()
+            .sidebar
+            .set_projects_display(display);
+        self.sync_chat_directories(cx);
+        pump(cx);
+        cx.notify();
+    }
+    pub(super) fn set_projects_sort(
+        &mut self,
+        sort: crate::sidebar::ProjectsSort,
+        cx: &mut Context<Self>,
+    ) {
+        if cx.global::<HomeShared>().quit_requested {
+            return;
+        }
+        self.projects_sort = sort;
+        self.projects_sort_initialized = true;
+        cx.global_mut::<HomeShared>()
+            .sidebar
+            .set_projects_sort(sort);
+        self.sync_chat_directories(cx);
+        pump(cx);
+        cx.notify();
     }
     pub(super) fn set_projects_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
         if cx.global::<HomeShared>().quit_requested {

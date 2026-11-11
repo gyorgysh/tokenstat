@@ -148,6 +148,16 @@ struct Shared {
 }
 impl Global for Shared {}
 
+/// Schedule a mounted view's request after its current entity update finishes.
+/// `read` checks the consumer immediately, so calling it while that consumer's
+/// entity is leased would re-enter GPUI's entity map and panic. The deferred
+/// check also prevents an already-retired request from starting any IO.
+pub fn read_deferred(request: Request, consumer: Consumer, app: &mut App) {
+    app.defer(move |app| {
+        let _ = read(request, consumer, app);
+    });
+}
+
 /// Called only at a mounted consumer's read boundary. Constructing a reader or
 /// initializing an offline fixture never connects a socket.
 pub fn read(request: Request, consumer: Consumer, app: &mut App) -> Option<Lease> {

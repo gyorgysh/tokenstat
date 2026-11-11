@@ -2,9 +2,12 @@
 
 //! Source-shaped desktop shell preview. Unported contents remain explicit gaps.
 
+mod chat_composer;
 mod chat_mutations;
 mod chat_rows;
 mod chat_status;
+mod chat_view;
+mod composer_input;
 mod confirmation_view;
 mod day_view;
 mod draft_marks;
@@ -23,6 +26,7 @@ mod insights_local;
 mod project_dialogs;
 mod project_fixtures;
 mod project_rows;
+mod sidebar_chats;
 mod sidebar_preferences;
 mod work_metadata;
 
@@ -107,11 +111,28 @@ struct Desktop {
     navigation: Navigation,
     layout: ShellLayout,
     project_directory: crate::project_edit::Directory,
+    sidebar_scroll: gpui::ScrollHandle,
     chat_directory: crate::chat::directory::Model,
+    chat_readers: std::collections::HashMap<String, gpui::Entity<crate::chat::reader::Reader>>,
+    chat_folds: std::collections::HashMap<String, chat_view::ChatFold>,
+    chat_watch: Option<chat_view::ChatWatch>,
+    composer: Option<chat_composer::Composer>,
+    held_composers: std::collections::HashMap<String, chat_composer::Composer>,
     chat_actions: crate::chat::actions::Model,
     fork_alert: Option<chat_mutations::OpenAlert>,
     fork_alert_ticket: u64,
     chat_history: crate::chat::history::State,
+    projects_display: crate::sidebar::ProjectsDisplay,
+    projects_display_initialized: bool,
+    projects_sort: crate::sidebar::ProjectsSort,
+    projects_sort_initialized: bool,
+    projects_filter: Option<gpui::Entity<crate::input_field::Field>>,
+    projects_filter_query: String,
+    sidebar_collation: crate::sidebar::collation::SidebarCollation,
+    timeline_warm: crate::sidebar::timeline::WarmTask,
+    timeline_limit: usize,
+    collapsed_chat_days: std::collections::HashSet<crate::sidebar::layout::Day>,
+    hovered_chat_day: Option<crate::sidebar::layout::Day>,
     hovered_chat: Option<(String, String)>,
     selected_chat: Option<(String, String)>,
     chat_overview: bool,
@@ -290,6 +311,9 @@ impl Desktop {
     }
 
     fn command(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        if command == Command::Quit {
+            self.save_composer(cx);
+        }
         if self.rename_dialog.is_some() {
             self.rename_command(command, window, cx);
             return;
@@ -308,6 +332,39 @@ impl Desktop {
                 Command::Zoom => window.zoom_window(),
                 _ => {}
             }
+            return;
+        }
+        if self.composer_visible()
+            && let Some(composer) = &self.composer
+            && composer.field.read(cx).focus.is_focused(window)
+            && matches!(
+                command,
+                Command::Undo
+                    | Command::Redo
+                    | Command::Cut
+                    | Command::Copy
+                    | Command::Paste
+                    | Command::SelectAll
+            )
+        {
+            composer
+                .field
+                .update(cx, |field, cx| field.command(command, cx));
+            return;
+        }
+        if let Some(field) = &self.projects_filter
+            && field.read(cx).focus.is_focused(window)
+            && matches!(
+                command,
+                Command::Undo
+                    | Command::Redo
+                    | Command::Cut
+                    | Command::Copy
+                    | Command::Paste
+                    | Command::SelectAll
+            )
+        {
+            field.update(cx, |field, cx| field.command(command, cx));
             return;
         }
         if let Some(screen) = &self.account_insights
@@ -333,8 +390,22 @@ impl Desktop {
         match command {
             Command::Project(action) => self.project_command(action, project, window, cx),
             Command::Chat(action) => self.chat_command(action, chat, window, cx),
+            Command::SetProjectsSort(sort) => self.set_projects_sort(sort, cx),
+            Command::MoveSidebarSection(servers_first) => {
+                let (section, before) = if servers_first {
+                    ("servers", "projects")
+                } else {
+                    ("projects", "servers")
+                };
+                cx.global_mut::<home_shared::HomeShared>()
+                    .sidebar
+                    .move_section(section.into(), before.into());
+                sidebar_preferences::pump(cx);
+                cx.notify();
+            }
             Command::PreviousConversation => self.step_sidebar_chat(-1, cx),
             Command::NextConversation => self.step_sidebar_chat(1, cx),
+            Command::ToggleSteps => self.toggle_chat_groups(cx),
             Command::ToggleSidebar => self
                 .layout
                 .toggle_sidebar(f32::from(window.viewport_size().width), None),
@@ -372,8 +443,11 @@ impl Desktop {
                 }
             }
             Command::SetChatDetail(detail) => {
-                self.detail = detail;
-                install_native_menus(detail, cx);
+                self.apply_chat_detail(detail, cx);
+                cx.global_mut::<home_shared::HomeShared>()
+                    .sidebar
+                    .set_chat_detail(detail);
+                sidebar_preferences::pump(cx);
             }
             Command::OpenApplicationMenu(index) => {
                 self.open_application_menu(index, true, window, cx);
@@ -453,6 +527,17 @@ impl Desktop {
         }
         if self.home_editor.is_some() {
             self.home_editor_key(event, window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if event.keystroke.key == "escape"
+            && self.menu.is_none()
+            && self
+                .projects_filter
+                .as_ref()
+                .is_some_and(|field| field.read(cx).focus.is_focused(window))
+        {
+            self.close_projects_filter(window, cx);
             cx.stop_propagation();
             return;
         }
@@ -739,12 +824,14 @@ impl Desktop {
             .id("repositories-scroll")
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll();
-        let count = self
+            .overflow_y_scroll()
+            .track_scroll(&self.sidebar_scroll);
+        let repository_count = self
             .data
             .as_ref()
             .and_then(|d| d.repositories.as_ref().ok())
             .map(Vec::len);
+        let count = repository_count.map(|_| self.visible_project_folders(cx).len());
         list = list.child(
             div()
                 .flex()
@@ -778,7 +865,12 @@ impl Desktop {
                         ))
                         .child(
                             text(
-                                l("common.projects"),
+                                if self.projects_display == crate::sidebar::ProjectsDisplay::ByChat
+                                {
+                                    l("common.chats")
+                                } else {
+                                    l("common.projects")
+                                },
                                 FontToken {
                                     points: 12.,
                                     weight: 600,
@@ -786,18 +878,67 @@ impl Desktop {
                             )
                             .text_color(secondary(dark)),
                         )
-                        .when_some(count.filter(|&n| n > 0), |d, n| {
-                            d.child(
-                                text(
-                                    n.to_string(),
-                                    FontToken {
-                                        points: 10.,
-                                        weight: 400,
-                                    },
+                        .when_some(
+                            count.filter(|&n| {
+                                n > 0
+                                    && self.projects_display
+                                        == crate::sidebar::ProjectsDisplay::ByRepository
+                            }),
+                            |d, n| {
+                                d.child(
+                                    text(
+                                        n.to_string(),
+                                        FontToken {
+                                            points: 10.,
+                                            weight: 400,
+                                        },
+                                    )
+                                    .text_color(secondary(dark)),
                                 )
-                                .text_color(secondary(dark)),
-                            )
-                        }),
+                            },
+                        ),
+                )
+                .when(repository_count.is_some_and(|n| n > 0), |d| {
+                    d.child(self.projects_display_switch(dark, cx)).child(
+                        div()
+                            .id("sidebar-filter-toggle")
+                            .size(px(20.))
+                            .rounded(px(6.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .when(self.projects_filter.is_some(), |button| {
+                                button.bg(palette::ROW_SELECTED_NESTED.resolve(dark))
+                            })
+                            .tooltip(|_, cx| {
+                                cx.new(|_| Tooltip(l("common.sidebar.filter_repositories")))
+                                    .into()
+                            })
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                view.toggle_projects_filter(window, cx)
+                            }))
+                            .child(icon("line.3.horizontal.decrease", 12., secondary(dark))),
+                    )
+                })
+                .child(
+                    div()
+                        .id("sidebar-projects-options")
+                        .size(px(20.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .when(self.menu.is_none(), |d| {
+                            d.tooltip(|_, cx| {
+                                cx.new(|_| Tooltip(l("common.sidebar.section_options")))
+                                    .into()
+                            })
+                        })
+                        .on_click(cx.listener(|view, event: &gpui::ClickEvent, window, cx| {
+                            view.open_projects_options(event.position(), window, cx)
+                        }))
+                        .child(icon("ellipsis", 12., secondary(dark))),
                 )
                 .child(
                     div()
@@ -814,12 +955,21 @@ impl Desktop {
                 ),
         );
         if self.project_directory.projects_expanded() {
+            if self.projects_filter.is_some() && repository_count.is_some_and(|n| n > 0) {
+                list = list.child(self.projects_filter_field(dark, cx));
+            }
             match self.data.as_ref().map(|d| &d.repositories) {
                 Some(Ok(repositories)) => {
-                    for repo in repositories {
-                        list = list.child(self.project_row(repo, dark, cx));
-                        if self.project_directory.expanded(&repo.id) {
-                            list = list.child(self.project_children(repo, dark, cx));
+                    if self.projects_display == crate::sidebar::ProjectsDisplay::ByChat
+                        && !repositories.is_empty()
+                    {
+                        list = list.child(self.projects_chat_timeline(dark, cx));
+                    } else {
+                        for repo in self.visible_project_folders(cx) {
+                            list = list.child(self.project_row(repo, dark, cx));
+                            if self.project_directory.expanded(&repo.id) {
+                                list = list.child(self.project_children(repo, dark, cx));
+                            }
                         }
                     }
                 }
@@ -1028,7 +1178,13 @@ impl Desktop {
         }
     }
 
-    fn content(&self, width: f32, dark: bool, cx: &Context<Self>) -> Div {
+    fn content(
+        &mut self,
+        width: f32,
+        dark: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         if self.navigation.route == Route::default() {
             return self.home_content(width, dark, cx);
         }
@@ -1048,6 +1204,19 @@ impl Desktop {
             }
         ) {
             return self.local_insights_content(width, dark, cx);
+        }
+        if let Route::Workspace {
+            id,
+            section: WorkspaceSection::Chat,
+        } = &self.navigation.route
+            && !self.chat_overview
+            && self
+                .selected_chat
+                .as_ref()
+                .is_some_and(|(folder, _)| folder == id)
+        {
+            let id = id.clone();
+            return self.chat_content(&id, dark, window, cx);
         }
         div()
             .flex()
@@ -1331,6 +1500,15 @@ impl Render for Desktop {
                 dialog.field.update(cx, |field, _| field.dark = dark);
             }
         }
+        if let Some(field) = &self.projects_filter {
+            let dark = matches!(
+                window.appearance(),
+                WindowAppearance::Dark | WindowAppearance::VibrantDark
+            );
+            if field.read(cx).dark != dark {
+                field.update(cx, |field, _| field.dark = dark);
+            }
+        }
         if let Some(fixture) = self.fixture {
             if matches!(fixture,fixtures::Fixture::Project(f) if f.is_fork_error()) {
                 return fixture.render(self, window, cx).into_any_element();
@@ -1515,6 +1693,16 @@ impl Render for Desktop {
                         d.opacity(0.4)
                     })
                     .on_click(cx.listener(|view, _, _, cx| {
+                        if let Route::Workspace {
+                            id,
+                            section: WorkspaceSection::Chat,
+                        } = &view.navigation.route
+                            && !view.chat_overview
+                        {
+                            let id = id.clone();
+                            view.chat_refresh(&id, cx);
+                            return;
+                        }
                         if !view.home.loading && !view.home.refreshing {
                             view.refresh(cx);
                             view.refresh_home(view.home.requested_scope, true, cx);
@@ -1575,13 +1763,16 @@ impl Render for Desktop {
                 .h_full()
                 .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move()),
         );
+        let chat_scrolls_itself = matches!(&self.navigation.route, Route::Workspace { id, section: WorkspaceSection::Chat }
+            if !self.chat_overview && self.selected_chat.as_ref().is_some_and(|(folder, _)| folder == id));
         detail = detail.child(band).child(bar).child(
             div()
                 .id("desktop-content")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .child(self.content(content_width, dark, cx)),
+                .when(!chat_scrolls_itself, |d| d.overflow_y_scroll())
+                .when(chat_scrolls_itself, |d| d.flex().flex_col())
+                .child(self.content(content_width, dark, window, cx)),
         );
         if matches!(
             self.navigation.route,
@@ -1742,6 +1933,7 @@ fn open_window(client: Option<Client>, fixture: Option<fixtures::Fixture>, cx: &
                 root_focus.focus(window);
                 cx.observe_window_activation(window, |view: &mut Desktop, window, cx| {
                     view.active = window.is_window_active();
+                    view.sync_chat_watch(cx);
                     if !window.is_window_active() {
                         view.close_menu(window);
                         cx.notify();
@@ -1833,11 +2025,28 @@ fn open_window(client: Option<Client>, fixture: Option<fixtures::Fixture>, cx: &
                     navigation: Navigation::default(),
                     layout: ShellLayout::default(),
                     project_directory: Default::default(),
+                    sidebar_scroll: gpui::ScrollHandle::new(),
                     chat_directory: Default::default(),
+                    chat_readers: Default::default(),
+                    chat_folds: Default::default(),
+                    chat_watch: None,
+                    composer: None,
+                    held_composers: Default::default(),
                     chat_actions: Default::default(),
                     fork_alert: None,
                     fork_alert_ticket: 0,
                     chat_history: Default::default(),
+                    projects_display: Default::default(),
+                    projects_display_initialized: false,
+                    projects_sort: Default::default(),
+                    projects_sort_initialized: false,
+                    projects_filter: None,
+                    projects_filter_query: String::new(),
+                    sidebar_collation: crate::sidebar::collation::SidebarCollation::current(),
+                    timeline_warm: Default::default(),
+                    timeline_limit: crate::sidebar::layout::CHAT_PAGE_SIZE,
+                    collapsed_chat_days: Default::default(),
+                    hovered_chat_day: None,
                     hovered_chat: None,
                     selected_chat: None,
                     chat_overview: false,
@@ -1865,6 +2074,9 @@ fn open_window(client: Option<Client>, fixture: Option<fixtures::Fixture>, cx: &
                 {
                     let folders = folders.clone();
                     view.accept_project_directory(folders, cx);
+                    if fixture.is_none() {
+                        view.seed_shell_chats(cx.global::<home_shared::HomeShared>().clock_ms);
+                    }
                 }
                 view.refresh(cx);
                 view.refresh_home(view.home.requested_scope, false, cx);

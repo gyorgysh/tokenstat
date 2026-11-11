@@ -30,6 +30,9 @@ impl AssetSource for Symbols {
         };
         let shape = match name {
             "house" => r#"<path d="M3 11 12 3l9 8M5.5 9.5V21h5v-7h3v7h5V9.5"/>"#,
+            "bubble.left" => {
+                r#"<path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/>"#
+            }
             "folder" => {
                 r#"<path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2ZM3 10h18"/>"#
             }
@@ -103,6 +106,7 @@ impl AssetSource for Symbols {
             "chevron.down" => r#"<path d="m5 9 7 7 7-7"/>"#,
             "chevron.up" => r#"<path d="m5 15 7-7 7 7"/>"#,
             "checkmark" => r#"<path d="m4 12 5 5L20 6"/>"#,
+            "line.3.horizontal.decrease" => r#"<path d="M3 6h18M6 12h12M9 18h6"/>"#,
             "line.3.horizontal" => r#"<path d="M4 6h16M4 12h16M4 18h16"/>"#,
             "arrow.uturn.backward" => r#"<path d="m8 3-5 5 5 5M3 8h11a7 7 0 0 1 0 14h-2"/>"#,
             "arrow.uturn.backward.circle.fill" => {

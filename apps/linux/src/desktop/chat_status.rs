@@ -126,25 +126,29 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let mut readings = Vec::new();
-        if visible && self.project_directory.projects_expanded() {
+        if visible
+            && self.project_directory.projects_expanded()
+            && self.projects_display == crate::sidebar::ProjectsDisplay::ByChat
+        {
+            for (folder, row) in self.timeline_visible_rows(cx) {
+                readings.push((
+                    (folder.id.clone(), row.id.clone()),
+                    Reading {
+                        running: row.running,
+                        since: self.chat_directory.running_since(&row.id),
+                        updated: row.last_message_at_ms.unwrap_or(row.updated_at_ms),
+                        dark,
+                    },
+                ));
+            }
+        } else if visible && self.project_directory.projects_expanded() {
             for folder in self
-                .data
-                .as_ref()
-                .and_then(|data| data.repositories.as_ref().ok())
+                .visible_project_folders(cx)
                 .into_iter()
-                .flatten()
                 .filter(|folder| self.project_directory.expanded(&folder.id))
             {
                 let selected = self.selected_chat.as_ref().map(|(_, id)| id.as_str());
-                let rows = self
-                    .chat_directory
-                    .rows(&folder.id)
-                    .iter()
-                    .filter(|row| {
-                        history::shown(row, selected, self.draft_fact(&folder.id, &row.id, cx))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
+                let rows = self.visible_project_chats(folder, cx);
                 let ordered = history::holding_order(&rows, self.chat_history.held(&folder.id));
                 let index = selected.and_then(|id| {
                     ordered

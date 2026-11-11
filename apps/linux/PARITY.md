@@ -593,7 +593,7 @@ and verified, but the missing remote directory owner remains a visible gap.
 boolean-only expansion values, history/server expanded-ID queries and section
 order normalization/moves that preserve unknown future values. The compiled
 reference executes the original class and RootView disclosure setters/arrival
-expressions in 63 traces (1,701 checkpoints), covering malformed preferences,
+expressions in 75 traces (2,028 checkpoints), covering malformed preferences,
 Unicode-equivalent IDs, disappearing/returning projects and separate windows.
 Only the disclosure portion of directory arrival is compared here; retained
 workbench cleanup and missing-route behavior have separate owners and gates.
@@ -610,11 +610,17 @@ New terminal and Home project navigation reveal and persist its disclosure.
 Authoritative removal fallback does not force open the next project's row.
 macOS previews and synthetic fixtures never use production preferences.
 
-The store's section ordering/server APIs do not port their missing UI owners.
-Conversation history disclosures now have the initial owner described below.
-Server disclosures, section-order controls, terminal/job children,
-launch-location restoration, active keyboard/AX behavior and native first-paint
-timing remain open. Store/owner tests are not startup or visual signoff.
+The initial GPUI sidebar now exposes the repository/chat switch, filter and
+folder sorting, plus cross-folder day groups, collapse and 30-row pagination.
+It persists display/sort preferences and warms all project lists serially with
+scope/task retirement. A Foundation comparison covers 18 layout cases and a
+small actual ICU collation sample; 264 local Gregorian calendar cases cover DST,
+midnight and skipped-date transitions. Mouse checks in the synthetic macOS
+preview exercise switching, filtering, Escape and selecting a sort. These are
+not full locale, real-host, Linux input/AX or visual acceptance. Non-Gregorian
+calendars, locale-specific date titles and section-menu/new-chat actions still
+need work. Server disclosures, actual section ordering, terminal/job children,
+launch-location restoration and native first-paint timing remain open.
 
 ## Initial conversation children
 
@@ -630,8 +636,9 @@ setup/resume fields. The frontend now decodes the full private record in memory;
 "title-only" describes this warming/cache purpose, not a narrower wire payload.
 The Home projection still receives only its consumed fields.
 
-Directory caches belong to each window and retain at most 30 projects. Only
-simultaneous transport is shared across matching account/helper/folder readers.
+Directory caches belong to each window and normally retain at most 30 projects;
+folders needed by the cross-project list/filter remain pinned past that cap
+until the view releases them. Only simultaneous transport is shared across matching account/helper/folder readers.
 Closing a window or collapsing a project retires its waiter without canceling
 another window's producer. Results are not a global transport cache. Account
 changes clear the private directory; same-scope helper replacement keeps verified
@@ -1236,3 +1243,60 @@ it closed, and subsequent probes use transparent parent/sheet/glass windows.
 No real tokenstat window, preferences, host, registry or folder was involved.
 Project removal remains incomplete until those native and wider owner gates
 are resolved. Existing full-screen and real Linux gates still apply.
+
+## Initial conversation draft editor
+
+The conversation reader now mounts a multiline GPUI editor owned by the scoped
+conversation reference. Text edits enter the existing app-owned draft service;
+restored attachment metadata is preserved, and the sidebar mark follows store
+membership. Switching conversations saves the outgoing text and restores the
+incoming record. If store registration has not adopted the outgoing words, the
+window retains that editor in memory so a switch does not discard its text.
+Storage errors are visible and expose a retry action. The editor has IME range
+handling, selection, clipboard/undo commands, line navigation and scrolling.
+
+An isolated macOS GPUI preview exercised typing two lines, switching away and
+back, Unicode paste and scrolling a longer draft. The macOS preview uses its
+private in-memory draft store; this is not a restart-persistence test. Existing
+portable draft-store tests cover private disk writes and recovery independently.
+Sending is deliberately unavailable until the outbox, revision, receipt and
+ambiguous-delivery owners are wired. Attachment editing, queue/steer, real IME
+composition, accessibility, native Linux interaction and visual parity remain
+open.
+
+## Initial outbox storage
+
+[chat/outbox.rs](src/chat/outbox.rs) supplies the device-local queue format and
+serializes transactions across threads and processes. It enforces scoped keys,
+queue capacity, unique message IDs, private atomic files, process-wide delivery
+leases and the source's conditional revision advancement. Sending and
+uncertain deliveries remain receipt holds after reopening. Stale prepare and
+reorder requests cannot overwrite current writing. Failed reads and writes do
+not replace damaged or oversized records.
+
+The isolated [outbox comparison](../../scripts/tests/linux-swiftui-outbox.py)
+compiles the original Swift store and verifies both write orders, attachments,
+receipt-hold records and acceptance/revision behavior against the Rust store.
+Portable tests cover simultaneous same-process store users, stale operations,
+corruption, queue limits and revision overflow. This is a storage foundation:
+no GUI queue, host dispatch, receipt reconciliation, account/peer ownership,
+attachment staging or native Linux end-to-end delivery has been connected yet.
+
+## Initial captured delivery transaction
+
+[chat/delivery.rs](src/chat/delivery.rs) captures a durable outbox item from a
+scoped draft and dispatches it through the existing local or remote host RPC.
+It checks the captured owner before dispatch, checks a remote peer's protocol
+and workspace access, records `sending` before the request, and retains the
+same delivery identity and first-attempt time. A lost or unreadable answer
+remains unresolved and is checked with `chat.receipt` on the next attempt;
+an unknown receipt never causes a resend. Accepted replies advance only the
+matching waiting context, and captured acknowledgments can clear only the
+matching original draft through the existing conditional draft deletion.
+
+Fake-socket tests exercise accepted sends, lost acknowledgments followed by an
+accepted receipt, unknown receipts, changed conversation revisions, peer access,
+retired owners and changed drafts. This is not yet an active composer action:
+agent sign-in/setup, attachment upload, slash commands, queue presentation,
+reader reconciliation and actual UI ownership still need integration. Native
+Linux execution and end-to-end delivery remain unverified.

@@ -219,6 +219,7 @@ impl Desktop {
             return;
         }
         self.navigation.navigate(route);
+        self.sync_chat_watch(cx);
         self.sync_account_insights(cx);
         self.sync_local_insights(cx);
         self.remember_work_route(cx);
@@ -228,6 +229,7 @@ impl Desktop {
             return;
         }
         self.navigation.open_rail(place);
+        self.sync_chat_watch(cx);
         self.sync_account_insights(cx);
         self.sync_local_insights(cx);
         self.remember_work_route(cx);

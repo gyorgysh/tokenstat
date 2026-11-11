@@ -53,6 +53,10 @@ on:
       - 'Cargo.*'
       - 'rust-toolchain.toml'
       - 'scripts/tests/linux-swiftui-contract.py'
+      - 'scripts/tests/linux-swiftui-sidebar-layout.py'
+      - 'scripts/tests/linux-swiftui-sidebar-collation.py'
+      - 'scripts/tests/linux-swiftui-sidebar-calendar.py'
+      - 'scripts/tests/linux-sidebar-calendar.py'
       - 'scripts/tests/linux-swiftui-getting-started.py'
       - 'scripts/tests/linux-swiftui-scan.py'
       - 'scripts/tests/linux-swiftui-fetch.py'
@@ -61,6 +65,7 @@ on:
       - 'scripts/tests/linux-swiftui-insights-date.py'
       - 'scripts/tests/linux-swiftui-chats.py'
       - 'scripts/tests/linux-swiftui-drafts.py'
+      - 'scripts/tests/linux-swiftui-outbox.py'
       - 'scripts/tests/linux-swiftui-chat-mutations.py'
       - 'scripts/tests/linux-swiftui-fork.py'
       - 'scripts/tests/linux-swiftui-reader.py'
@@ -127,6 +132,10 @@ on:
       - 'Cargo.*'
       - 'rust-toolchain.toml'
       - 'scripts/tests/linux-swiftui-contract.py'
+      - 'scripts/tests/linux-swiftui-sidebar-layout.py'
+      - 'scripts/tests/linux-swiftui-sidebar-collation.py'
+      - 'scripts/tests/linux-swiftui-sidebar-calendar.py'
+      - 'scripts/tests/linux-sidebar-calendar.py'
       - 'scripts/tests/linux-swiftui-getting-started.py'
       - 'scripts/tests/linux-swiftui-scan.py'
       - 'scripts/tests/linux-swiftui-fetch.py'
@@ -135,6 +144,7 @@ on:
       - 'scripts/tests/linux-swiftui-insights-date.py'
       - 'scripts/tests/linux-swiftui-chats.py'
       - 'scripts/tests/linux-swiftui-drafts.py'
+      - 'scripts/tests/linux-swiftui-outbox.py'
       - 'scripts/tests/linux-swiftui-chat-mutations.py'
       - 'scripts/tests/linux-swiftui-fork.py'
       - 'scripts/tests/linux-swiftui-reader.py'
@@ -188,11 +198,21 @@ jobs:
         run: |
           cargo clippy --manifest-path apps/linux/Cargo.toml --no-default-features --all-targets --locked -- -D warnings
           cargo test --manifest-path apps/linux/Cargo.toml --no-default-features --lib --locked
+          python3 scripts/tests/linux-sidebar-calendar.py
       - name: Dependency licences for the standalone client
         run: bash scripts/check-dep-licences.sh --manifest-path apps/linux/Cargo.toml --locked
       - name: Compare with compiled SwiftUI source and state behavior
         if: runner.os == 'macOS'
         run: python3 scripts/tests/linux-swiftui-contract.py
+      - name: Compare original sidebar layout
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-sidebar-layout.py
+      - name: Compare native sidebar collation
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-sidebar-collation.py
+      - name: Compare original local calendar
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-sidebar-calendar.py
       - name: Compare original first-scan card states
         if: runner.os == 'macOS'
         run: python3 scripts/tests/linux-swiftui-getting-started.py
@@ -214,6 +234,10 @@ jobs:
       - name: Compare original draft stores and independent process locks
         if: runner.os == 'macOS'
         run: python3 scripts/tests/linux-swiftui-drafts.py
+
+      - name: Compare Swift and Rust outbox storage
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/linux-swiftui-outbox.py
       - name: Compare original fork tasks and route effects
         if: runner.os == 'macOS'
         run: python3 scripts/tests/linux-swiftui-fork.py

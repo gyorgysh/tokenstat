@@ -125,6 +125,10 @@ impl Window {
     pub fn rows(&self) -> &[super::transcript::Row] {
         &self.rows
     }
+    /// Retain an immutable projection while view-specific folding runs off-thread.
+    pub fn shared_rows(&self) -> Arc<Vec<super::transcript::Row>> {
+        self.rows.clone()
+    }
     pub fn events_revision(&self) -> u64 {
         self.events_revision
     }

@@ -229,6 +229,10 @@ fn read(path: &Path, limit: usize) -> anyhow::Result<Records> {
 /// Match Foundation's escaped solidus and compact date spelling so the same
 /// byte quota applies to writing, including small scientific date values.
 pub fn encode(records: &Records) -> anyhow::Result<Vec<u8>> {
+    encode_value(records)
+}
+/// Encode Codable-shaped records using Foundation's compact JSON spelling.
+pub(crate) fn encode_value<T: serde::Serialize>(records: &T) -> anyhow::Result<Vec<u8>> {
     struct Formatter;
     impl serde_json::ser::Formatter for Formatter {
         fn write_string_fragment<W: ?Sized + Write>(

@@ -26,12 +26,10 @@ fn main() {
         (Some(0), false, true),
         (Some(1), false, false),
     ] {
-        let state = State {
-            snapshot: events.map(snapshot),
-            loading,
-            error: error.then(|| "offline".into()),
-            ..State::default()
-        };
+        let mut state = State::default();
+        state.snapshot = events.map(snapshot);
+        state.loading = loading;
+        state.error = error.then(|| "offline".into());
         empty.push(state.inspector_empty_archive());
     }
     let mut groups = Vec::new();
@@ -42,11 +40,9 @@ fn main() {
         (Tab::Models, Some("café")),
         (Tab::Projects, None),
     ] {
-        let mut state = State {
-            snapshot: Some(snapshot(1)),
-            tab,
-            ..State::default()
-        };
+        let mut state = State::default();
+        state.snapshot = Some(snapshot(1));
+        state.tab = tab;
         state.selected = key.map(|k| serde_json::from_value(row(k)).unwrap());
         groups.push(
             state

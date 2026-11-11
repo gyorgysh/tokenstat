@@ -60,6 +60,7 @@ pub struct Model {
     rows: HashMap<String, Vec<Conversation>>,
     errors: HashMap<String, String>,
     mounted: HashSet<String>,
+    retained: HashSet<String>,
     pending: HashMap<String, Read>,
     next: u64,
     stamps: HashMap<String, i64>,
@@ -105,6 +106,26 @@ impl Model {
         let visible = folders.iter().map(|id| key(id)).collect::<HashSet<_>>();
         self.mounted.retain(|id| visible.contains(id));
         self.pending.retain(|id, _| visible.contains(id));
+    }
+    /// Keep cross-project lists past the ordinary cache cap while a sidebar
+    /// view needs all folders. Releasing the set immediately trims extras.
+    pub fn retain_sidebar_lists(&mut self, folders: &[String]) {
+        self.retained = folders.iter().map(|id| key(id)).collect();
+        self.trim_cache(None);
+    }
+    /// An empty verified list is still a loaded list.
+    pub fn has_sidebar_list(&self, folder: &str) -> bool {
+        self.rows.contains_key(&key(folder))
+    }
+    /// Retire view-owned waiters when a sidebar task identity changes. The
+    /// shared transport may still serve another window or a successor request.
+    pub fn retire_sidebar_reads(&mut self) {
+        self.pending.clear();
+        self.mounted.clear();
+    }
+    /// A timeline warm task waits for existing directory reads to settle.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
     }
     /// Explicit Retry joins an already-dispatched read instead of duplicating it.
     pub fn begin(&mut self, folder: &str) -> Option<Read> {
@@ -154,7 +175,7 @@ impl Model {
                 let rows = self.steer.apply(rows, &read.steer, &current);
                 self.rows.insert(id.clone(), rows);
                 self.errors.remove(&id);
-                self.trim_cache(&id);
+                self.trim_cache(Some(&id));
                 self.reconcile_stamps(now);
             }
             Err(error) if !self.rows.contains_key(&id) => {
@@ -233,16 +254,23 @@ impl Model {
             rows.insert(0, record);
         }
         self.rows.insert(key(folder), rows);
-        self.trim_cache(&key(folder));
+        self.trim_cache(Some(&key(folder)));
         self.errors.remove(&key(folder));
         self.reconcile_stamps(now);
         true
     }
-    fn trim_cache(&mut self, id: &str) {
-        if self.rows.len() > CACHE_CAP
-            && let Some(drop) = self.rows.keys().find(|other| other.as_str() != id).cloned()
-        {
-            self.rows.remove(&drop);
+    fn trim_cache(&mut self, keeping: Option<&str>) {
+        while self.rows.len() > CACHE_CAP {
+            let drop = self
+                .rows
+                .keys()
+                .find(|id| Some(id.as_str()) != keeping && !self.retained.contains(*id))
+                .cloned();
+            if let Some(drop) = drop {
+                self.rows.remove(&drop);
+            } else {
+                break;
+            }
         }
     }
     /// Acknowledged deletion overlays every older captured list for this project.

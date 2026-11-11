@@ -18,6 +18,7 @@ pub(crate) struct Field {
     pub enabled: bool,
     pub focus: FocusHandle,
     pub dark: bool,
+    pub plain: bool,
     placeholder: String,
     layout: Option<ShapedLine>,
     bounds: Option<Bounds<Pixels>>,
@@ -49,6 +50,7 @@ impl Field {
             enabled: true,
             focus: cx.focus_handle(),
             dark: false,
+            plain: false,
             placeholder,
             layout: None,
             bounds: None,
@@ -56,6 +58,9 @@ impl Field {
             dragging: false,
             caret: true,
         }
+    }
+    pub fn set_placeholder(&mut self, placeholder: String) {
+        self.placeholder = placeholder;
     }
     pub fn command(&mut self, command: Command, cx: &mut Context<Self>) {
         if !self.enabled {
@@ -354,13 +359,18 @@ impl Render for Field {
             .track_focus(&self.focus)
             .w_full()
             .h(px(control::HEIGHT))
-            .px(px(7.))
+            .px(px(if self.plain { 0. } else { 7. }))
             .flex()
             .items_center()
             .rounded(px(8.))
             .border_1()
             .border_color(palette::BORDER.resolve(dark))
             .bg(palette::PANEL.resolve(dark))
+            .when(self.plain, |d| {
+                d.h(px(26.))
+                    .border_color(rgba(0x00000000))
+                    .bg(rgba(0x00000000))
+            })
             .cursor(CursorStyle::IBeam)
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(

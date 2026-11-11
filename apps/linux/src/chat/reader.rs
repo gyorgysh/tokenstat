@@ -14,7 +14,7 @@ use super::{
         Completion, Read, ReadKind, Window,
         publication::{Step, Ticket},
     },
-    polling::{Cancellation, Joined, LocalFuture, Opening, Runtime},
+    polling::{Cadence, Cancellation, Joined, LocalFuture, Opening, Runtime, Watch, Watcher},
     projector::Lane,
     query::Reply,
     transport::{self, ReadError, Request},
@@ -25,11 +25,13 @@ use crate::{
 };
 use gpui::{App, AsyncApp, Context, Task, WeakEntity};
 use std::{
+    cell::RefCell,
     rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
+    time::Instant,
 };
 type ReadingScope = Rc<dyn Fn(&Scope, &App) -> bool>;
 
@@ -115,6 +117,8 @@ pub struct Reader {
     services: Services,
     metadata: Option<Metadata>,
     next_metadata: u64,
+    watcher: Watcher<u64>,
+    event_lane: super::polling::Lane<u64>,
 }
 impl Reader {
     /// The reading-scope provider is the original global continuity-scope
@@ -128,11 +132,14 @@ impl Reader {
     ) -> Self {
         let entity = cx.entity_id();
         cx.on_release(move |reader: &mut Self, app| {
+            reader.watcher.cancel();
+            reader.event_lane.cancel(None);
             reader.services.opening.cancel();
             reader.cancel_metadata();
             transport::release_entity(entity, app);
         })
         .detach();
+        let runtime = Runtime::gpui(cx);
         Self {
             window: Window::default(),
             services: Services {
@@ -144,6 +151,8 @@ impl Reader {
             },
             metadata: None,
             next_metadata: 0,
+            watcher: Watcher::new(runtime.clone()),
+            event_lane: super::polling::Lane::new(runtime),
         }
     }
     pub fn window(&self) -> &Window {
@@ -183,6 +192,8 @@ impl Reader {
         }
         let changed = change(self, cx, |window| window.select(owner, folder, chat, fresh));
         if changed {
+            self.watcher.cancel();
+            self.event_lane.cancel(None);
             self.services.opening.cancel();
             self.cancel_metadata();
             transport::release_entity(cx.entity_id(), cx);
@@ -190,6 +201,8 @@ impl Reader {
         changed
     }
     pub fn retire(&mut self, cx: &mut Context<Self>) {
+        self.watcher.cancel();
+        self.event_lane.cancel(None);
         self.services.opening.cancel();
         self.cancel_metadata();
         transport::release_entity(cx.entity_id(), cx);
@@ -197,6 +210,129 @@ impl Reader {
     }
     pub fn cancel_opening(&self) {
         self.services.opening.cancel();
+    }
+    /// Enrollment is lazy and dropping the last watch retires its event read.
+    pub fn watch_events(&self, cx: &mut Context<Self>) -> Option<Watch> {
+        self.watch_events_with_status(cx, || {})
+    }
+
+    /// The view owns status list reconciliation; this clock only requests it.
+    /// Approvals and response attachments still have separate missing owners.
+    pub fn watch_events_with_status(
+        &self,
+        cx: &mut Context<Self>,
+        status: impl Fn() + 'static,
+    ) -> Option<Watch> {
+        let session = Session::capture(&self.window)?;
+        let owner = session.generation;
+        let reader = cx.weak_entity();
+        let app = cx.to_async();
+        let clock = Instant::now();
+        let cadence = Rc::new(RefCell::new(Cadence::default()));
+        let cycle_reader = reader.clone();
+        let cycle_session = session.clone();
+        let cycle_app = app.clone();
+        let cycle_cadence = cadence.clone();
+        let cycle_lane = self.event_lane.clone();
+        let interval_reader = reader;
+        let interval_session = session;
+        let interval_app = app;
+        let stop_lane = self.event_lane.clone();
+        let status = Rc::new(status);
+        Some(self.watcher.watch(
+            owner,
+            move || {
+                let reader = cycle_reader.clone();
+                let session = cycle_session.clone();
+                let app = cycle_app.clone();
+                let cadence = cycle_cadence.clone();
+                let lane = cycle_lane.clone();
+                let status = status.clone();
+                Box::pin(async move {
+                    let ready = app
+                        .update(|app| {
+                            reader.upgrade().is_some_and(|reader| {
+                                let reader = reader.read(app);
+                                reader.session_current(&session, app) && !reader.window.opening()
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !ready {
+                        return;
+                    }
+                    if cadence
+                        .borrow_mut()
+                        .claim_status(clock.elapsed().as_secs_f64(), false)
+                    {
+                        status();
+                    }
+                    lane.start(owner, false, false, move |permit| {
+                        let reader = reader.clone();
+                        let session = session.clone();
+                        let mut app = app.clone();
+                        let cadence = cadence.clone();
+                        Box::pin(async move {
+                            let revision = reader
+                                .update(&mut app, |reader, cx| {
+                                    (permit.allows() && reader.session_current(&session, cx))
+                                        .then(|| reader.window.events_revision())
+                                })
+                                .ok()
+                                .flatten();
+                            let Some(revision) = revision else { return };
+                            let mut success = false;
+                            loop {
+                                let joined = reader
+                                    .update(&mut app, |reader, cx| {
+                                        if !permit.allows() || !reader.session_current(&session, cx)
+                                        {
+                                            return None;
+                                        }
+                                        Some(reader.tail(true, permit.cancellation(), cx))
+                                    })
+                                    .ok()
+                                    .flatten();
+                                let Some(joined) = joined else { break };
+                                let done = joined.await;
+                                success = done.accepted;
+                                if !done.accepted || !done.more_tail || !permit.allows() {
+                                    break;
+                                }
+                            }
+                            let current = reader
+                                .update(&mut app, |reader, cx| {
+                                    (permit.allows() && reader.session_current(&session, cx))
+                                        .then(|| reader.window.events_revision() != revision)
+                                })
+                                .ok()
+                                .flatten();
+                            if let Some(changed) = current {
+                                cadence.borrow_mut().note(
+                                    success,
+                                    changed,
+                                    clock.elapsed().as_secs_f64(),
+                                );
+                            }
+                        })
+                    });
+                })
+            },
+            move || {
+                let busy = interval_app
+                    .update(|app| {
+                        interval_reader.upgrade().is_some_and(|reader| {
+                            let reader = reader.read(app);
+                            reader.session_current(&interval_session, app)
+                                && reader.window.selected().is_some_and(|chat| chat.running)
+                        })
+                    })
+                    .unwrap_or(false);
+                cadence
+                    .borrow()
+                    .interval(busy, false, clock.elapsed().as_secs_f64())
+            },
+            move || stop_lane.cancel(Some(&owner)),
+        ))
     }
     pub fn open(&self, quiet: bool, caller: Cancellation, cx: &mut Context<Self>) -> Task<bool> {
         let Some(session) = Session::capture(&self.window) else {

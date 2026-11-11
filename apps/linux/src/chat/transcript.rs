@@ -119,6 +119,7 @@ pub struct Activity {
     pub verb: String,
     pub target: String,
     pub running: bool,
+    pub failed: bool,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,6 +135,7 @@ pub struct StepGroup {
     pub reads: usize,
     pub searches: usize,
     pub pages: usize,
+    pub failures: usize,
     pub running: bool,
     pub live_verb: Option<String>,
     pub live_target: Option<String>,
@@ -159,6 +161,7 @@ impl StepGroup {
             reads: 0,
             searches: 0,
             pages: 0,
+            failures: 0,
             running: false,
             live_verb: None,
             live_target: None,
@@ -243,8 +246,8 @@ macro_rules! fields_eq {
 }
 pub(super) use fields_eq;
 fields_eq!(Row; is_steer,id,kind,last_sequence,group_id,plain_step,image_attachments,image_row_ids,source_backend);
-fields_eq!(Activity; id,verb,target,running);
-fields_eq!(StepGroup; style,open,member_ids,steps,files,added,removed,reads,searches,pages,running,live_verb,live_target,recent_activity,started_at_ms,ended_at_ms,cost,preview,plain,verb,subject);
+fields_eq!(Activity; id,verb,target,running,failed);
+fields_eq!(StepGroup; style,open,member_ids,steps,files,added,removed,reads,searches,pages,failures,running,live_verb,live_target,recent_activity,started_at_ms,ended_at_ms,cost,preview,plain,verb,subject);
 fields_eq!(ChangedFile; path,added,removed,patches);
 fields_eq!(TurnChanges; id,files);
 impl PartialEq for Kind {

@@ -122,9 +122,9 @@ impl HomeFixture {
     }
     pub fn render(
         self,
-        view: &Desktop,
-        window: &Window,
-        cx: &Context<Desktop>,
+        view: &mut Desktop,
+        window: &mut Window,
+        cx: &mut Context<Desktop>,
     ) -> gpui::Stateful<Div> {
         let content = if view.navigation.route == Route::default() {
             match self.surface {
@@ -141,7 +141,7 @@ impl HomeFixture {
                 | Surface::InsightsAccountLoading => view.account_insights_content(self.dark, cx),
             }
         } else {
-            view.content(window.viewport_size().width.into(), self.dark, cx)
+            view.content(window.viewport_size().width.into(), self.dark, window, cx)
         };
         let mut root = div()
             .id("home-parity-fixture")

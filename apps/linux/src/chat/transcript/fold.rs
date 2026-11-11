@@ -152,13 +152,13 @@ fn standard_compact(
                     emit(group, std::slice::from_ref(row), &mut out, is_open);
                 }
             }
-            Kind::Tool { state } if compact && !state.failed => {
+            Kind::Tool { state } if compact => {
                 flush(&mut run, &mut out, false);
                 let mut group = make(GroupStyle::Step, std::slice::from_ref(row), state.running);
                 group.plain = true;
                 emit(group, std::slice::from_ref(row), &mut out, is_open);
             }
-            Kind::Edit { state } if compact && !state.failed => {
+            Kind::Edit { state } if compact => {
                 flush(&mut run, &mut out, false);
                 let mut group = make(GroupStyle::Step, std::slice::from_ref(row), state.running);
                 group.plain = true;
@@ -246,8 +246,7 @@ fn minimal_turn(turn: &[Row], live: bool, is_open: &impl Fn(&str) -> bool, out: 
                 usage.push(row);
             }
             Kind::Thinking { .. } => members.push(row.clone()),
-            Kind::Tool { state } if !state.failed => members.push(row.clone()),
-            Kind::Edit { state } if !state.failed => members.push(row.clone()),
+            Kind::Tool { .. } | Kind::Edit { .. } => members.push(row.clone()),
             _ => {
                 flush(&mut members, out, &mut last_header, false);
                 out.push(row.clone());
@@ -352,7 +351,9 @@ fn make(style: GroupStyle, members: &[Row], running: bool) -> StepGroup {
                     &state.verb,
                     &state.target,
                     state.running,
+                    state.failed,
                 );
+                group.failures += usize::from(state.failed);
                 group.reads += usize::from(state.verb == "Read");
                 group.searches += usize::from(is_search(&state.verb));
                 group.pages += usize::from(state.verb == "WebFetch");
@@ -365,7 +366,15 @@ fn make(style: GroupStyle, members: &[Row], running: bool) -> StepGroup {
             }
             Kind::Edit { state } => {
                 group.steps += 1;
-                activity(&mut group, member, "Edit", &state.path, state.running);
+                activity(
+                    &mut group,
+                    member,
+                    "Edit",
+                    &state.path,
+                    state.running,
+                    state.failed,
+                );
+                group.failures += usize::from(state.failed);
                 paths.insert(nfc(&state.path));
                 group.added += u64::from(state.added);
                 group.removed += u64::from(state.removed);
@@ -396,7 +405,14 @@ fn make(style: GroupStyle, members: &[Row], running: bool) -> StepGroup {
     group.running = any_running || running;
     group
 }
-fn activity(group: &mut StepGroup, member: &Row, verb: &str, target: &str, running: bool) {
+fn activity(
+    group: &mut StepGroup,
+    member: &Row,
+    verb: &str,
+    target: &str,
+    running: bool,
+    failed: bool,
+) {
     if group.style != GroupStyle::Work {
         return;
     }
@@ -415,6 +431,7 @@ fn activity(group: &mut StepGroup, member: &Row, verb: &str, target: &str, runni
         verb: verb.into(),
         target: trim_space(line).into(),
         running,
+        failed,
     });
     if group.recent_activity.len() > 3 {
         let i = group

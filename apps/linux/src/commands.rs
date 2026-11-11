@@ -16,6 +16,8 @@ pub enum Command {
     About,
     NewWindow,
     AddRepository,
+    SetProjectsSort(crate::sidebar::ProjectsSort),
+    MoveSidebarSection(bool),
     CloseWindow,
     CloseAllWindows,
     SearchWork,
@@ -49,6 +51,25 @@ pub enum ChatDetail {
     Compact,
     Standard,
     Detailed,
+}
+impl ChatDetail {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Minimal => "minimal",
+            Self::Compact => "compact",
+            Self::Standard => "standard",
+            Self::Detailed => "detailed",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "minimal" => Some(Self::Minimal),
+            "compact" => Some(Self::Compact),
+            "standard" => Some(Self::Standard),
+            "detailed" => Some(Self::Detailed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

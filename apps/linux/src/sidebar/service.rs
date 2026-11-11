@@ -3,7 +3,7 @@
 //! App-owned sidebar IO is independent of account epochs and window lifetime.
 //! Optimistic intents survive a late read and a failed, unrelated key write.
 
-use super::{Mutation, Snapshot, Store};
+use super::{Mutation, ProjectsDisplay, ProjectsSort, Snapshot, Store};
 use crate::work::preferences::Preferences;
 use std::collections::{BTreeMap, VecDeque};
 
@@ -83,6 +83,15 @@ impl Service {
     /// Preserve future values by applying the move to current worker storage.
     pub fn move_section(&mut self, section: String, before: String) {
         self.mutate(Mutation::Move { section, before });
+    }
+    pub fn set_projects_display(&mut self, display: ProjectsDisplay) {
+        self.mutate(Mutation::Display(display));
+    }
+    pub fn set_projects_sort(&mut self, sort: ProjectsSort) {
+        self.mutate(Mutation::Sort(sort));
+    }
+    pub fn set_chat_detail(&mut self, detail: crate::commands::ChatDetail) {
+        self.mutate(Mutation::ChatDetail(detail));
     }
     fn mutate(&mut self, mutation: Mutation) {
         if self.closing || !mutation.valid() {

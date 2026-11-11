@@ -333,3 +333,49 @@ fn rename_transport_uses_captured_project_route_and_retirement_prevents_dispatch
     );
     worker.join().unwrap();
 }
+
+#[test]
+fn cross_project_lists_can_exceed_the_cache_cap_and_release_without_losing_retained_rows() {
+    let mut model = model();
+    let retained = (0..40).map(|i| format!("folder-{i}")).collect::<Vec<_>>();
+    model.retain_sidebar_lists(&retained);
+    for folder in &retained {
+        model.seed(folder, Ok(vec![row(folder)]), 0);
+    }
+    model.seed("empty", Ok(vec![]), 0);
+    assert!(model.has_sidebar_list("empty"));
+    assert!(retained.iter().all(|folder| model.has_sidebar_list(folder)));
+    model.retain_sidebar_lists(&retained[..5]);
+    assert!(
+        retained[..5]
+            .iter()
+            .all(|folder| model.has_sidebar_list(folder))
+    );
+    assert_eq!(
+        retained
+            .iter()
+            .filter(|folder| model.has_sidebar_list(folder))
+            .count()
+            + usize::from(model.has_sidebar_list("empty")),
+        30
+    );
+    model.seed("new", Ok(vec![row("new")]), 0);
+    assert!(model.has_sidebar_list("new"));
+    assert!(
+        retained[..5]
+            .iter()
+            .all(|folder| model.has_sidebar_list(folder))
+    );
+}
+
+#[test]
+fn retired_sidebar_read_cannot_publish_or_cancel_a_successor() {
+    let mut directory = model();
+    let old = directory.begin("folder").unwrap();
+    directory.retire_sidebar_reads();
+    let next = directory.begin("folder").unwrap();
+    assert!(!directory.finish(&old, Ok(vec![row("old")]), 1));
+    assert!(directory.is_current(&next));
+    assert!(directory.finish(&next, Ok(vec![row("new")]), 2));
+    assert_eq!(directory.rows("folder")[0].id, "new");
+}

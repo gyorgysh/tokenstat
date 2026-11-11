@@ -30,6 +30,11 @@ def harness():
         ("Bridge/GitPullModels.swift", "struct BranchPull:"),
         ("Features/Workspaces/GitPullView.swift", "extension BranchPull {"),
         ("Bridge/Models.swift", "struct ChatConversation:"),
+        ("App/SidebarPreferences.swift", "enum SidebarProjectsSort:"),
+        ("App/SidebarProjectsLayout.swift", "struct SidebarChatEntry:"),
+        ("App/SidebarProjectsLayout.swift", "enum SidebarChatDay:"),
+        ("App/SidebarProjectsLayout.swift", "struct SidebarChatDayGroup:"),
+        ("App/SidebarProjectsLayout.swift", "enum SidebarProjectsLayout {"),
         ("Features/Workspaces/Chat/ChatHistoryWindow.swift", "enum ChatHistoryWindow {"),
         ("Features/Workspaces/WorkspaceDirectoryPresentation.swift", "enum WorkspaceDirectoryPresentation:"),
         ("Design/CompactAge.swift", "enum CompactAge {"),
@@ -75,7 +80,7 @@ def harness():
     chunks.append(trailing.replace(old, old[:-1] + ", now: ChatFixtureInput.now)"))
     chunks.append(r'''
 struct ChatRoutingState: Codable, Hashable, Sendable {}
-struct WorkspaceFolder {var id="/fixture/alpha";var name="alpha"}
+struct WorkspaceFolder: Hashable, Sendable {var id="/fixture/alpha";var name="alpha";var machineLabel: String? = nil}
 struct ChatFixture: Decodable {
     var name: String;var rows: [ChatConversation];var presentation: String
     var expanded: Bool;var selected: String?;var hovered: String?;var shift: Bool
@@ -150,6 +155,7 @@ private struct ProjectChildrenSurface: View {
     let chat=ChatModel();let terminals=Terminals();let automations=Automations();let workflows=Workflows()
     let chatOrderHold=ChatOrderHold()
     var route: Route {.workspace(id:"/fixture/alpha",section:.chat)}
+    var projectsFilter=""
     var showingChatOverview=false
     var expandedChatHistories: Set<String> {ChatFixtureInput.value.expanded ? ["/fixture/alpha"] : []}
     init() {chatOrderHold.order["/fixture/alpha"]=ChatFixtureInput.value.held}

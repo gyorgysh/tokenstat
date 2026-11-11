@@ -248,6 +248,8 @@ func colour(_ value: Color, dark: Bool) -> [Any] {
     data = swift_string(json.dumps(rust["projects"],ensure_ascii=False))
     reference += f'\n@MainActor func projectSnapshot() async throws -> [String:Any] {{ try await ProjectMenuReference.snapshot(JSONSerialization.jsonObject(with:Data({data}.utf8)) as! [String:Any]) }}\n'
     sidebar = (ROOT/"apps/linux/reference/SidebarReference.swift").read_text()
+    sidebar = sidebar.replace("/* SOURCE_DISPLAY */", declaration("App/SidebarPreferences.swift", "enum SidebarProjectsDisplay: String, CaseIterable, Sendable {"))
+    sidebar = sidebar.replace("/* SOURCE_SORT */", declaration("App/SidebarPreferences.swift", "enum SidebarProjectsSort: String, CaseIterable, Sendable {"))
     sidebar = sidebar.replace("/* SOURCE_PREFERENCES */", declaration("App/SidebarPreferences.swift", "final class SidebarPreferences {").replace("UserDefaults", "Defaults"))
     for name, marker in [("SECTION_SETTER", "private func setSidebarSectionExpanded("), ("PROJECT_SETTER", "private func setProjectExpanded(")]:
         sidebar = sidebar.replace(f"/* SOURCE_{name} */", declaration("App/RootView.swift", marker))

@@ -10,10 +10,13 @@ enum SidebarReference {
         static let standard = Defaults()
         var values: [String:Any] = [:]
         func object(forKey key: String) -> Any? { values[key] }
+        func string(forKey key: String) -> String? { values[key] as? String }
         func array(forKey key: String) -> [Any]? { values[key] as? [Any] }
         func dictionaryRepresentation() -> [String:Any] { values }
         func set(_ value: Any, forKey key: String) { values[key] = value }
     }
+    /* SOURCE_DISPLAY */
+    /* SOURCE_SORT */
     /* SOURCE_PREFERENCES */
     final class Window {
         var expandedWorkspaces: Set<String> = []
@@ -35,7 +38,7 @@ enum SidebarReference {
     static let prefixes = ["project:", "history:", "server:", "section:", "future:"]
     static func state(_ windows: [Window]) -> [String:Any] {
         let preferences = SidebarPreferences.shared
-        return ["raw":Defaults.standard.values,"order":preferences.sectionOrder,
+        return ["raw":Defaults.standard.values,"order":preferences.sectionOrder,"display":preferences.projectsDisplay.rawValue,"sort":preferences.projectsSort.rawValue,
             "expanded":keys.map { ["key":$0,"yes":preferences.isExpanded($0,default:true),"no":preferences.isExpanded($0,default:false)] as [String:Any] },
             "ids":prefixes.map { ["prefix":$0,"ids":preferences.expandedIDs($0).sorted()] as [String:Any] },
             "windows":windows.map { window in ["projects":window.expandedSidebarSections.contains("projects"),"rows":ids.map { ["id":$0,"expanded":window.expandedWorkspaces.contains($0)] as [String:Any] }] as [String:Any] }]
@@ -52,6 +55,8 @@ enum SidebarReference {
             case "project": windows[index].project(step["id"] as! String,step["expanded"] as! Bool)
             case "section": windows[index].section(step["expanded"] as! Bool)
             case "expansion": SidebarPreferences.shared.rememberExpansion(step["key"] as! String, expanded:step["expanded"] as! Bool)
+            case "display": SidebarPreferences.shared.projectsDisplay = SidebarProjectsDisplay(rawValue: step["value"] as! String)!
+            case "sort": SidebarPreferences.shared.projectsSort = SidebarProjectsSort(rawValue: step["value"] as! String)!
             case "move": SidebarPreferences.shared.move(step["section"] as! String,before:step["before"] as! String)
             case "external": for (key,value) in step["values"] as! [String:Any] { Defaults.standard.values[key] = value }
             default: fatalError("Unknown sidebar fixture operation")

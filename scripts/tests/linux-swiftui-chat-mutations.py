@@ -70,7 +70,7 @@ def main():
         transport = json.loads(run([ROOT / "apps/linux/target/debug/examples/chat-transport-executor"],
                                    capture_output=True, text=True, timeout=60).stdout)
         assert transport == {
-            "sharedPages": True, "immutableReplies": True, "codedRefusal": True,
+            "deferredMountedRead": True, "deferredRetiredBeforeAdmission": True, "sharedPages": True, "immutableReplies": True, "codedRefusal": True,
             "windowIsolation": True, "rawRowsAtomic": True,
             "bothInvalidationBranches": True, "sameDomainReadTypes": 3,
             "cancelledWaiter": True, "successorSlot": True,

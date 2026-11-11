@@ -361,6 +361,52 @@ fn main() {
             assert_eq!(take(&inbox,cx).await.0,"release");
             assert!(inbox.lock().unwrap().try_recv().is_err());
             assert!(fixture.host.pending.lock().unwrap().try_recv().is_err());
+            // A mounted view begins its directory read while GPUI holds the
+            // view's update lease. Its current predicate reads that same view:
+            // admission must wait until the update has ended.
+            let directory_query = Query::directory("folder");
+            let check_query = directory_query.clone();
+            let deferred_view = cx.update(|app| {
+                let view = app.new(|_| true);
+                let weak = view.downgrade();
+                let entity = view.entity_id();
+                let request = fixture.request(directory_query);
+                let delivered = fixture.delivered.clone();
+                view.update(app, |_, cx| {
+                    transport::read_deferred(request, Consumer::new(entity,
+                        move |app| weak.upgrade().is_some_and(|view| *view.read(app)),
+                        move |result, _| delivered.send(("deferred-mounted", result)).unwrap()), cx);
+                });
+                view
+            }).unwrap();
+            let pending = take(&fixture.host.pending,cx).await;
+            assert_request(&pending,&check_query);
+            answer(pending,success(json!([])),cx).await;
+            let (label, result) = take(&inbox,cx).await;
+            assert_eq!(label,"deferred-mounted");
+            assert!(matches!(result.unwrap(), Reply::Directory(_)));
+            drop(deferred_view);
+            // The same deferred admission must not start a producer if its
+            // mounted operation was retired before its entity update returned.
+            let retired_view = cx.update(|app| {
+                let view = app.new(|_| true);
+                let weak = view.downgrade();
+                let entity = view.entity_id();
+                let request = fixture.request(Query::directory("retired"));
+                let delivered = fixture.delivered.clone();
+                view.update(app, |current, cx| {
+                    transport::read_deferred(request, Consumer::new(entity,
+                        move |app| weak.upgrade().is_some_and(|view| *view.read(app)),
+                        move |result, _| delivered.send(("retired-before-admission", result)).unwrap()), cx);
+                    *current = false;
+                });
+                view
+            }).unwrap();
+            cx.spawn(async |_| {}).await;
+            assert!(fixture.host.pending.lock().unwrap().try_recv().is_err());
+            assert!(inbox.lock().unwrap().try_recv().is_err());
+            drop(retired_view);
+
             // Actual retained controller entities, not the earlier direct
             // Window adapters. Selection/construction alone starts no IO.
             let (reader_a,reader_b)=cx.update(|app| {
@@ -412,6 +458,30 @@ fn main() {
             until(||cx.update(|app|reader_a.read(app).window().display_revision()>display).unwrap(),cx).await;
             cx.update(|app| {let window=reader_a.read(app).window();assert_eq!(window.events_revision(),revision);assert_eq!(window.display_revision(),display+1);}).unwrap();
             assert!(fixture.host.pending.lock().unwrap().try_recv().is_err());
+
+            // The mounted reader watcher starts the event lane, drains a
+            // multi-page tail, and retires a held response when its view goes
+            // inactive. A successor watch can safely share that held producer.
+            let watch=cx.update(|app|reader_a.update(app,|reader,cx|reader.watch_events(cx).unwrap())).unwrap();
+            let stop=watch.cancellation();let watched=cx.spawn(async move |_|watch.await);
+            let first_poll=take(&fixture.host.pending,cx).await;
+            assert_eq!(first_poll.request["params"]["method"],"chat.events");
+            answer(first_poll,success(json!({"events":[{"kind":"agent","seq":3,"event":{"kind":"text","delta":" live"}}],"nextOffset":52,"tailCursor":"tail52","hasMore":true})),cx).await;
+            let second_poll=take(&fixture.host.pending,cx).await;
+            assert_eq!(second_poll.request["params"]["params"]["offset"],52);
+            answer(second_poll,success(json!({"events":[{"kind":"agent","seq":4,"event":{"kind":"text","delta":" more"}}],"nextOffset":53,"tailCursor":"tail53"})),cx).await;
+            until(||cx.update(|app|reader_a.read(app).window().offset()==53).unwrap(),cx).await;
+            let held=take(&fixture.host.pending,cx).await;
+            assert_eq!(held.request["params"]["params"]["offset"],53);
+            stop.cancel();watched.await;
+            let successor=cx.update(|app|reader_a.update(app,|reader,cx|reader.watch_events(cx).unwrap())).unwrap();
+            let successor_stop=successor.cancellation();let successor_task=cx.spawn(async move |_|successor.await);
+            // Allow the successor to enroll in the suspended flight.
+            cx.background_executor().timer(Duration::from_millis(30)).await;
+            answer(held,success(json!({"events":[{"kind":"agent","seq":5,"event":{"kind":"text","delta":" resumed"}}],"nextOffset":54,"tailCursor":"tail54"})),cx).await;
+            until(||cx.update(|app|reader_a.read(app).window().offset()==54).unwrap(),cx).await;
+            successor_stop.cancel();successor_task.await;
+            cx.update(|app| {let events=reader_a.read(app).window().events();assert_eq!(events.iter().filter_map(|event|event.seq).collect::<Vec<_>>(),[0,1,2,3,4,5]);}).unwrap();
 
             let reset=cx.update(|app|reader_a.update(app,|reader,cx|reader.tail(true,Cancellation::default(),cx))).unwrap();
             let request=take(&fixture.host.pending,cx).await;answer(request,success(json!({"events":[],"nextOffset":0,"reset":true})),cx).await;
@@ -598,7 +668,7 @@ fn main() {
             cx.update(|app| {let window=reader.read(app).window();assert_eq!(window.events().iter().filter_map(|event|event.seq).collect::<Vec<_>>(),[11,12]);assert!(!window.opening());}).unwrap();
             assert!(fixture.host.pending.lock().unwrap().try_recv().is_err());drop(reader);
             assert_eq!(std::thread::current().id(),foreground);
-            println!("{}",json!({"sharedPages":true,"immutableReplies":true,"windowIsolation":true,"rawRowsAtomic":true,"codedRefusal":true,"bothInvalidationBranches":true,"sameDomainReadTypes":3,"cancelledWaiter":true,"successorSlot":true,"batchedLeaseCancellation":true,"batchedEntityRelease":true,"noCompletedCache":true,"retiredBeforeIo":true,"deferredRetirement":true,"ownProducerBoundary":true,"cancelBeforeRetry":true,"scopeRetirement":true,"asyncSharedReplies":true,"asyncViewRelease":true,"retainedReaders":true,"readerMetadataObserver":true,"readerReadOverlap":true,"readerResetOpeningShare":true,"readerDeferredCleanup":true,"readerSelectionFence":true,"readerOwnerLifetime":true,"readerNoopInvalidation":true,"readerLegacyFallback":true,"readerReadingScope":true,"readerHelperFallback":true,"readerHostIdentity":true,"foregroundResume":true,"windowsOpened":0,"productionHostOrStoreOpened":false}));
+            println!("{}",json!({"deferredMountedRead":true,"deferredRetiredBeforeAdmission":true,"sharedPages":true,"immutableReplies":true,"windowIsolation":true,"rawRowsAtomic":true,"codedRefusal":true,"bothInvalidationBranches":true,"sameDomainReadTypes":3,"cancelledWaiter":true,"successorSlot":true,"batchedLeaseCancellation":true,"batchedEntityRelease":true,"noCompletedCache":true,"retiredBeforeIo":true,"deferredRetirement":true,"ownProducerBoundary":true,"cancelBeforeRetry":true,"scopeRetirement":true,"asyncSharedReplies":true,"asyncViewRelease":true,"retainedReaders":true,"readerMetadataObserver":true,"readerReadOverlap":true,"readerResetOpeningShare":true,"readerDeferredCleanup":true,"readerSelectionFence":true,"readerOwnerLifetime":true,"readerNoopInvalidation":true,"readerLegacyFallback":true,"readerReadingScope":true,"readerHelperFallback":true,"readerHostIdentity":true,"foregroundResume":true,"windowsOpened":0,"productionHostOrStoreOpened":false}));
             drop(fixture);
             cx.update(|app| app.quit()).unwrap();
         }).detach();
