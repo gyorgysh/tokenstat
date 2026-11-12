@@ -29,6 +29,7 @@ struct ClientWorkspaceHistoryView: View {
     @State private var errorMessage: String?
     @State private var loaded = false
     @State private var pictures = HistoryAvatarIndex.empty
+    @State private var picturesKey: HistoryAvatarCache.Key?
 
     private var current: WorkspaceFolder { live ?? folder }
 
@@ -52,12 +53,17 @@ struct ClientWorkspaceHistoryView: View {
             await ClientRefresh.pull("workspace-history-\(workspaceID)") { await load() }
         }
         .task { await load() }
-        .task(id: pictureKey) {
+        .task(id: pictureCacheKey) {
             let from = commits.first(where: { !$0.unpushed })?.id ?? ""
-            pictures = .empty
-            let loaded = (try? await Bridge.commitAvatars(workspaceID: workspaceID, peer: peer, oid: from)) ?? .empty
+            let key = pictureCacheKey
+            if let cached = HistoryAvatarCache.shared.exact(key) {
+                pictures = cached; picturesKey = key; return
+            }
+            guard let loaded = try? await Bridge.commitAvatars(workspaceID: workspaceID, peer: peer, oid: from) else { return }
             guard !Task.isCancelled else { return }
+            HistoryAvatarCache.shared.store(loaded, for: key)
             pictures = loaded.normalized()
+            picturesKey = key
         }
         .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
             guard note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
@@ -96,7 +102,7 @@ struct ClientWorkspaceHistoryView: View {
                 } label: {
                     ClientCommitRow(
                         commit: commit,
-                        avatar: pictures.url(
+                        avatar: displayedPictures.url(
                             commitID: commit.id,
                             email: commit.email,
                             mine: commit.mine == true,
@@ -116,9 +122,13 @@ struct ClientWorkspaceHistoryView: View {
     /// Newest pushed commit, so a later unpushed commit can reuse that
     /// author's picture by email. The peer is part of the key because two
     /// machines can host the same workspace id.
-    private var pictureKey: String {
+    private var pictureCacheKey: HistoryAvatarCache.Key {
         let from = commits.first(where: { !$0.unpushed })?.id ?? ""
-        return "\(peer)|\(workspaceID)|\(from)"
+        return .init(owner: WorkSessionContext.shared.generation, peer: peer, workspace: workspaceID, from: from)
+    }
+    private var displayedPictures: HistoryAvatarIndex {
+        if picturesKey == pictureCacheKey { return pictures }
+        return HistoryAvatarCache.shared.exact(pictureCacheKey) ?? HistoryAvatarCache.shared.recent(pictureCacheKey) ?? .empty
     }
 
     private var place: String {

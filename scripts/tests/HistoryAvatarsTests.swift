@@ -4,7 +4,7 @@ import Foundation
 
 @main
 struct HistoryAvatarsTests {
-    static func main() {
+    @MainActor static func main() {
         func check(_ condition: Bool, _ message: String) {
             precondition(condition, message)
         }
@@ -60,5 +60,17 @@ struct HistoryAvatarsTests {
             folded.url(commitID: "DEF", email: nil, mine: false, accountAvatar: nil) == "https://avatars.example/ok",
             "lookup uses the folded commit id"
         )
+        let cache = HistoryAvatarCache()
+        let key = HistoryAvatarCache.Key(owner: 1, peer: "host-a", workspace: "repo", from: "old")
+        let time = Date(timeIntervalSince1970: 1000)
+        cache.store(faces, for: key, now: time)
+        check(cache.exact(key, now: time)?.byCommit["aaaa"] == "https://avatars.example/ada", "reopening uses the cached mapping")
+        var next = key; next.from = "new"
+        check(cache.exact(next, now: time) == nil && cache.recent(next, now: time) != nil, "new commits retain known authors while refreshing")
+        next.peer = "host-b"
+        check(cache.recent(next, now: time) == nil, "different hosts cannot share mappings")
+        next = key; next.owner = 2
+        check(cache.recent(next, now: time) == nil, "account changes cannot reuse mappings")
+        check(cache.exact(key, now: time.addingTimeInterval(301)) == nil, "old mappings expire")
     }
 }

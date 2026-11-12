@@ -13,6 +13,43 @@ struct HistoryPictureRequest: Equatable, Sendable {
     var from: String
 }
 
+/// Public avatar indexes are small, but fetching them again on every mount
+/// makes every row flash through its fallback color. Scope entries to the
+/// signed-in session and host as well as the workspace.
+@MainActor
+final class HistoryAvatarCache {
+    struct Key: Hashable {
+        var owner: UInt64
+        var peer: String
+        var workspace: String
+        var from: String
+    }
+    private struct Entry { var index: HistoryAvatarIndex; var at: Date }
+    static let shared = HistoryAvatarCache()
+    private var entries: [Key: Entry] = [:]
+    private let lifetime: TimeInterval = 300
+
+    func exact(_ key: Key, now: Date = Date()) -> HistoryAvatarIndex? {
+        guard let entry = entries[key], now.timeIntervalSince(entry.at) >= 0,
+              now.timeIntervalSince(entry.at) < lifetime else { return nil }
+        return entry.index
+    }
+
+    func recent(_ key: Key, now: Date = Date()) -> HistoryAvatarIndex? {
+        entries.filter { candidate, entry in
+            candidate.owner == key.owner && candidate.peer == key.peer && candidate.workspace == key.workspace
+                && now.timeIntervalSince(entry.at) >= 0 && now.timeIntervalSince(entry.at) < lifetime
+        }.max { $0.value.at < $1.value.at }?.value.index
+    }
+
+    func store(_ index: HistoryAvatarIndex, for key: Key, now: Date = Date()) {
+        entries[key] = Entry(index: index.normalized(), at: now)
+        if entries.count > 64, let oldest = entries.min(by: { $0.value.at < $1.value.at })?.key {
+            entries.removeValue(forKey: oldest)
+        }
+    }
+}
+
 /// Public profile pictures for the authors of one history list.
 ///
 /// The host asks the repository's forge for one page of commits and returns

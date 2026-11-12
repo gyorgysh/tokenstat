@@ -5,6 +5,19 @@ using Tokenstat.Pages;
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
 ChatUsageTests.Run();
+var avatarCache = new HistoryAvatarCache();
+var avatarKey = new HistoryAvatarCache.Key(1, "peer:folder", "commit-a");
+var avatarCalls = 0;
+async Task<JsonNode?> ReadAvatar() { avatarCalls++; await Task.Yield(); return JsonNode.Parse("""{"byCommit":{"abc":"https://example.com/a"}}"""); }
+var avatars = await Task.WhenAll(avatarCache.GetAsync(avatarKey, ReadAvatar), avatarCache.GetAsync(avatarKey, ReadAvatar));
+Check(avatarCalls == 1 && avatars[0] is not null && avatars[1] is not null, "history views share an in-flight avatar lookup");
+avatars[0]!["byCommit"]!["abc"] = "changed";
+Check((await avatarCache.GetAsync(avatarKey, ReadAvatar))!["byCommit"]!["abc"]!.GetValue<string>() == "https://example.com/a", "a view cannot mutate another view's cached mapping");
+await avatarCache.GetAsync(avatarKey with { Owner = 2 }, ReadAvatar);
+Check(avatarCalls == 2, "account changes do not reuse history pictures");
+var retryKey = avatarKey with { From = "retry" };
+Check(await avatarCache.GetAsync(retryKey, () => Task.FromResult<JsonNode?>(null)) is null, "a failed lookup stays empty");
+Check(await avatarCache.GetAsync(retryKey, ReadAvatar) is not null && avatarCalls == 3, "a later open retries a failed lookup");
 TeamTranscriptTests.Run();
 ChartViewportTests.Run();
 ChatAgentStepsTests.Run();

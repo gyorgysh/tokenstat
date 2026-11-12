@@ -227,6 +227,7 @@ struct WorkspaceHistoryView: View {
     /// Forge pictures for the authors of the list on screen. Empty until the
     /// lookup returns, and empty for good when there is nothing to show.
     @State private var pictures = HistoryAvatarIndex.empty
+    @State private var picturesKey: HistoryAvatarCache.Key?
 
     var body: some View {
         historyBody
@@ -238,13 +239,18 @@ struct WorkspaceHistoryView: View {
                 guard let id = folder?.id else { return }
                 await model.loadHistory(for: id)
             }
-            .task(id: pictureRequest) {
+            .task(id: pictureCacheKey) {
                 let request = pictureRequest
-                pictures = .empty
+                let key = pictureCacheKey
                 guard !request.workspaceID.isEmpty else { return }
-                let loaded = (try? await Bridge.commitAvatars(workspaceID: request.workspaceID, oid: request.from)) ?? .empty
+                if let cached = HistoryAvatarCache.shared.exact(key) {
+                    pictures = cached; picturesKey = key; return
+                }
+                guard let loaded = try? await Bridge.commitAvatars(workspaceID: request.workspaceID, oid: request.from) else { return }
                 guard !Task.isCancelled else { return }
+                HistoryAvatarCache.shared.store(loaded, for: key)
                 pictures = loaded.normalized()
+                picturesKey = key
             }
     }
 
@@ -256,6 +262,14 @@ struct WorkspaceHistoryView: View {
         let commits = model.history[id] ?? []
         let from = commits.first(where: { !$0.unpushed })?.id ?? ""
         return HistoryPictureRequest(workspaceID: id, from: from)
+    }
+    private var pictureCacheKey: HistoryAvatarCache.Key {
+        let request = pictureRequest
+        return .init(owner: WorkSessionContext.shared.generation, peer: "", workspace: request.workspaceID, from: request.from)
+    }
+    private var displayedPictures: HistoryAvatarIndex {
+        if picturesKey == pictureCacheKey { return pictures }
+        return HistoryAvatarCache.shared.exact(pictureCacheKey) ?? HistoryAvatarCache.shared.recent(pictureCacheKey) ?? .empty
     }
 
     @ViewBuilder
@@ -291,7 +305,7 @@ struct WorkspaceHistoryView: View {
                                     // else uses the public picture the forge
                                     // already has for that author. A miss
                                     // draws initials.
-                                    avatar: pictures.url(
+                                    avatar: displayedPictures.url(
                                         commitID: commit.id,
                                         email: commit.email,
                                         mine: commit.mine == true,

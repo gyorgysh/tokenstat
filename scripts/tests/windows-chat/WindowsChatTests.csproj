@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../apps/windows/Pages/ChatQuotaData.cs" Link="ChatQuotaData.cs" />
+    <Compile Include="../../../apps/windows/Pages/HistoryAvatarCache.cs" Link="HistoryAvatarCache.cs" />
     <Compile Include="../../../apps/windows/Pages/ChartViewport.cs" Link="ChartViewport.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatAgentSteps.cs" Link="ChatAgentSteps.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamSharedFile.cs" Link="TeamSharedFile.cs" />

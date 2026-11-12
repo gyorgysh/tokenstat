@@ -194,6 +194,7 @@ internal static class WorkspaceHistory
 /// linked computer can identify the same author here without changing Git config.
 internal static class HistoryAvatars
 {
+    private static readonly HistoryAvatarCache PublicCache = new();
     /// <summary>
     /// The forge's public profile pictures for these commits' authors, by
     /// commit id and by email. Every author gets their own picture, not only
@@ -208,6 +209,12 @@ internal static class HistoryAvatars
         var from = commits.FirstOrDefault(c => !Format.Flag(c, "unpushed")) is JsonNode pushed
             ? Format.Text(pushed, "id")
             : "";
+        var key = new HistoryAvatarCache.Key(AppServices.AccountGeneration, workspaceId, from);
+        return await PublicCache.GetAsync(key, () => FetchPublicAsync(workspaceId, from));
+    }
+
+    private static async Task<JsonNode?> FetchPublicAsync(string workspaceId, string from)
+    {
         try
         {
             Task<JsonNode> call;
