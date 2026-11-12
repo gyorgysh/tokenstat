@@ -16,7 +16,7 @@ use aes::cipher::KeyIvInit;
 #[cfg(target_os = "macos")]
 use cbc::cipher::block_padding::Pkcs7;
 #[cfg(target_os = "macos")]
-use cbc::{Decryptor, cipher::BlockDecryptMut};
+use cbc::{Decryptor, cipher::BlockModeDecrypt};
 
 const ENVELOPE_PREFIX: &str = "cursor-safe-storage:v1:";
 const SAFE_STORAGE_SERVICE: &str = "Cursor Safe Storage";
@@ -118,7 +118,7 @@ fn decrypt_v10(payload: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, ()> {
     let cipher = Aes128CbcDec::new_from_slices(key, &iv).map_err(|_| ())?;
     let mut buf = payload.to_vec();
     cipher
-        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .decrypt_padded::<Pkcs7>(&mut buf)
         .map_err(|_| ())
         .map(|plain| plain.to_vec())
 }
@@ -156,8 +156,23 @@ mod tests {
         assert_eq!(String::from_utf8(plain).unwrap(), jwt);
     }
 
+    #[test]
+    fn decrypts_an_existing_chromium_v10_payload() {
+        // Generated independently with OpenSSL's AES-128-CBC implementation.
+        let ciphertext = [
+            0x5b, 0x54, 0xf8, 0x80, 0xc9, 0x4a, 0x5f, 0x39, 0x2c, 0xdc, 0x76, 0x5d, 0xa1, 0xc4,
+            0x21, 0xfe, 0x8e, 0x6f, 0x66, 0x27, 0xeb, 0x34, 0xe3, 0x9f, 0x66, 0xb0, 0xfa, 0xdb,
+            0xd0, 0x1a, 0xab, 0x5f,
+        ];
+        let key = derive_key(b"synthetic-password");
+        assert_eq!(
+            decrypt_v10(&ciphertext, &key).unwrap(),
+            b"header.payload.signature"
+        );
+    }
+
     fn encrypt_v10(plain: &[u8], password: &[u8]) -> Vec<u8> {
-        use aes::cipher::{BlockEncryptMut, KeyIvInit};
+        use aes::cipher::{BlockModeEncrypt, KeyIvInit};
         use cbc::Encryptor;
         use cbc::cipher::block_padding::Pkcs7;
         type Aes128CbcEnc = Encryptor<aes::Aes128>;
@@ -167,7 +182,7 @@ mod tests {
         let mut buf = vec![0u8; plain.len() + 16];
         buf[..plain.len()].copy_from_slice(plain);
         let len = cipher
-            .encrypt_padded_mut::<Pkcs7>(&mut buf, plain.len())
+            .encrypt_padded::<Pkcs7>(&mut buf, plain.len())
             .unwrap()
             .len();
         let mut out = b"v10".to_vec();
