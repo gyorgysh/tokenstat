@@ -33,6 +33,7 @@ struct ToolRow: View {
     /// A single activity line, for steps opened under a Minimal or
     /// Compact chat line.
     var compact: Bool = false
+    var onToggleOutput: () -> Void = {}
     @State private var showSnippet = false
     /// Set once the person toggles the snippet by hand. Auto-expand must
     /// not overrule it: lazy rows re-run `onAppear` scrolling back, and a
@@ -177,17 +178,16 @@ struct ToolRow: View {
                     .textSelection(.enabled)
             }
             if showSnippet && !snippet.isEmpty && !running {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(Array(snippet.enumerated()), id: \.offset) { _, line in
-                        Text(Self.displaySnippet(line))
-                            .font(Theme.mono(11))
-                            .foregroundStyle(Self.snippetColor(line))
+                Group {
+                    if snippet.count > 12 || snippet.contains(where: { $0.count > 1000 }) {
+                        ScrollView(.vertical) { snippetContent }
+                            .frame(height: 260)
+                    } else {
+                        snippetContent
                     }
                 }
-                .textSelection(.enabled)
-                .padding(Theme.Space.s)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: 6))
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
         .onAppear {
@@ -205,6 +205,20 @@ struct ToolRow: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(usesCompactStyle ? Color.clear : border, lineWidth: 1)
         )
+    }
+
+    private var snippetContent: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(Array(snippet.enumerated()), id: \.offset) { _, line in
+                Text(Self.displaySnippet(line))
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Self.snippetColor(line))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .textSelection(.enabled)
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -231,6 +245,7 @@ struct ToolRow: View {
     }
 
     private func toggleSnippet() {
+        onToggleOutput()
         snippetToggled = true
         showSnippet.toggle()
     }

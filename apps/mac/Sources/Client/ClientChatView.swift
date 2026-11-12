@@ -1845,6 +1845,7 @@ struct ClientChatThread: View {
                                             beginViewportChoice()
                                             model.toggleGroup($0)
                                         },
+                                        onToggleOutput: beginViewportChoice,
                                         answerQuestion: { question, text in
                                             Task { await model.answerQuestion(question, answer: text) }
                                         },

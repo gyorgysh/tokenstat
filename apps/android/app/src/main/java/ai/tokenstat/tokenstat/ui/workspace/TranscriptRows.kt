@@ -17,6 +17,7 @@ import ai.tokenstat.tokenstat.ui.theme.cardRadius
 import ai.tokenstat.tokenstat.ui.logic.MarkdownTable
 import ai.tokenstat.tokenstat.ui.logic.MarkdownTables
 import ai.tokenstat.tokenstat.ui.logic.MarkdownTableAlignment
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.text.style.TextAlign
@@ -520,6 +521,7 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
                     .background(colors.background)
+                    .then(if ((state.snippet.size > 12 || state.snippet.any { it.length > 1000 })) Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()) else Modifier)
                     .padding(Space.s),
             ) {
                 state.snippet.forEach { line ->
@@ -611,7 +613,11 @@ private fun PlainStepDetail(item: ChatDisplayItem) {
         if (lines.isEmpty()) {
             Text(empty, style = TsType.mono(11), color = colors.textTertiary)
         }
-        lines.forEach { (text, color) -> Text(text, style = TsType.mono(11), color = color) }
+        Column(
+            modifier = if ((lines.size > 12 || lines.any { it.first.length > 1000 })) Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()) else Modifier,
+        ) {
+            lines.forEach { (text, color) -> Text(text, style = TsType.mono(11), color = color) }
+        }
     }
 }
 

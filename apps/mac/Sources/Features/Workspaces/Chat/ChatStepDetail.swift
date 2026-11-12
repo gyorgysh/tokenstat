@@ -35,11 +35,11 @@ struct ChatStepDetail: View {
                 if state.snippet.isEmpty {
                     note(state.running ? L10n.text("common.running") : L10n.text("apple.chatstepdetail.no_output"))
                 } else {
-                    VStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(state.snippet.enumerated()), id: \.offset) { _, line in
-                            Text(ToolRow.displaySnippet(line))
-                                .foregroundStyle(ToolRow.snippetColor(line))
-                        }
+                    if state.snippet.count > 12 || state.snippet.contains(where: { $0.count > 1000 }) {
+                        ScrollView(.vertical) { toolLines(state.snippet) }
+                            .frame(height: 260)
+                    } else {
+                        toolLines(state.snippet)
                     }
                 }
             case let .edit(state):
@@ -61,6 +61,16 @@ struct ChatStepDetail: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear(perform: render)
         .onChange(of: patch) { _, _ in render() }
+    }
+
+    private func toolLines(_ lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(ToolRow.displaySnippet(line))
+                    .foregroundStyle(ToolRow.snippetColor(line))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     /// The whole command or path. The line above shortens both.

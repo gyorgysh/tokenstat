@@ -37,6 +37,7 @@ struct ClientChatEventRow: View {
     var compactTools = false
     /// Opens or folds a step group, by the group's row id.
     var toggleGroup: (String) -> Void = { _ in }
+    var onToggleOutput: () -> Void = {}
     /// Answers one of the agent's questions.
     var answerQuestion: (ChatQuestion, String) -> Void = { _, _ in }
     /// This row's question is on its way to the host.
@@ -166,7 +167,8 @@ struct ClientChatEventRow: View {
                 failed: state.failed,
                 animatesRunning: animatesRunning,
                 expandsOutput: expandsOutput,
-                compact: compactTools || item.plainStep == .line
+                compact: compactTools || item.plainStep == .line,
+                onToggleOutput: onToggleOutput
             )
         case let .edit(state):
             ChatFileEditRow(state: state, animatesRunning: animatesRunning, expandsOutput: expandsOutput, compact: compactTools || item.plainStep == .line)

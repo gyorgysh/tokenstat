@@ -1002,7 +1002,7 @@ internal sealed partial class ChatPage
 
         if (expanded && lines.Count > 0 && !item.Running)
         {
-            body.Children.Add(SnippetBlock(lines, ToolSnippetLines));
+            body.Children.Add(BoundedOutput(SnippetBlock(lines, ToolSnippetLines), lines));
         }
 
         return ToolCard(body, border);
@@ -1253,10 +1253,18 @@ internal sealed partial class ChatPage
             // The output without the box a card draws around it.
             block.Background = null;
             block.Padding = new Thickness(0);
-            stack.Children.Add(block);
+            stack.Children.Add(BoundedOutput(block, lines));
         }
         return stack;
     }
+
+    private static UIElement BoundedOutput(UIElement content, List<string> lines) => lines.Count <= 12 && !lines.Exists(line => line.Length > 1000) ? content : new ScrollViewer
+    {
+        MaxHeight = 260,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        Content = content,
+    };
 
     /// <summary>
     /// One step of a run under an open Compact line: the verb and what it
