@@ -9,19 +9,24 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.17.0]
+## [1.17.0] - 2026-11-12
 
 ### Added
 
 - Messaging a long Claude chat after its cache has expired now asks first. It shows how long the chat was idle and how big it is, and offers to send your message to a new chat that starts small and can look things up in the old one.
 - Switching models in a long, recently used Claude chat now asks first, because your next message makes Claude read the whole conversation again.
-- Agents you only use through chat now stay up to date. tokenstat checks each agent's latest release once a day. When the chat's agent is behind, a dot appears on its button in the composer, and any agent that is behind gets an update button on its row in the picker. One press runs the agent's own updater, or reinstalls it when it has none, and a notice says when it is updating and which version it went from and to. Set up another agent shows every installed version and can check on demand. An update made outside tokenstat clears the mark too.
+- tokenstat checks agent releases once a day. A dot on the composer button marks when the chat's agent has an update, and the picker offers an update button for each agent that is behind. The setup screen shows installed versions and can check on demand. A notice shows the update's progress and result, and updates made outside tokenstat clear the mark too.
 - Cursor usage shows again for accounts whose usage history stopped listing it, such as accounts linked to an X subscription. tokenstat fills those gaps from Cursor's hourly totals and never counts the same usage twice.
 
 ### Improved
 
 - Codex limits are current even when you have not used Codex since a window reset. tokenstat asks Codex for them directly, and falls back to its session logs, now including the ones from Codex chats run in tokenstat.
 - A commit opened from Git history, in the inspector or in a Changes tab, now uses the same file list and diff as the Git tab. It opens on all files, lets you pick one, and can fold the commit message away.
+
+### Fixed
+
+- Claude chats can continue when Claude Code has deleted their old session. tokenstat starts a fresh session with a handover from the conversation.
+- On Windows, a message sent to a new continuation chat stays available to retry if the host refuses it.
 
 ## [1.16.0] - 2026-11-12
 

@@ -126,12 +126,31 @@ pub(crate) fn claude_session_exists(session: &str) -> Option<bool> {
 fn session_in_projects(projects: &std::path::Path, session: &str) -> Option<bool> {
     let entries = std::fs::read_dir(projects).ok()?;
     let name = format!("{session}.jsonl");
-    for entry in entries.flatten() {
-        if entry.path().join(&name).is_file() {
-            return Some(true);
+    let mut uncertain = false;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                uncertain = true;
+                continue;
+            }
+        };
+        match std::fs::metadata(entry.path()) {
+            Ok(metadata) if !metadata.is_dir() => continue,
+            Err(_) => {
+                uncertain = true;
+                continue;
+            }
+            _ => {}
+        }
+        match std::fs::metadata(entry.path().join(&name)) {
+            Ok(metadata) if metadata.is_file() => return Some(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => uncertain = true,
         }
     }
-    Some(false)
+    (!uncertain).then_some(false)
 }
 
 /// The last main-conversation request in a stored Claude stream.
@@ -238,6 +257,19 @@ mod tests {
         std::fs::write(projects.join("-Users-me-two/abc.jsonl"), "{}").unwrap();
         assert_eq!(session_in_projects(&projects, "abc"), Some(true));
         assert_eq!(claude_session_exists("../etc/passwd"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_project_does_not_prove_a_session_is_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        std::fs::create_dir(&projects).unwrap();
+        std::os::unix::fs::symlink(projects.join("missing"), projects.join("broken")).unwrap();
+        assert_eq!(session_in_projects(&projects, "abc"), None);
+        std::fs::create_dir(projects.join("good")).unwrap();
+        std::fs::write(projects.join("good/abc.jsonl"), "{}").unwrap();
+        assert_eq!(session_in_projects(&projects, "abc"), Some(true));
     }
 
     #[test]

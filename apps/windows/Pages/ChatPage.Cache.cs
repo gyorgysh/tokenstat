@@ -117,19 +117,21 @@ internal sealed partial class ChatPage
         bool Current() => OpenChatIs(chat) && generation == _openGeneration
             && accountGeneration == AppServices.AccountGeneration;
         string? id = null;
+        string? key = null;
+        QueuedChatMessage? attempted = null;
         try
         {
             var created = await CallChatAsync("chat.continueInNew", new JsonObject { ["id"] = chat });
             AppServices.NotifyConversationsChanged();
             id = Format.Text(created, "id");
             if (id.Length == 0 || !Current() || _draft.Text.Trim() != text) return;
-            var key = await OutboxKeyAsync(id);
+            key = await OutboxKeyAsync(id);
             if (!Current() || _draft.Text.Trim() != text) return;
             var item = new QueuedChatMessage(Guid.NewGuid().ToString("N"), text, [], Format.Long(created, "sendRevision"));
             ChatOutbox.Shared.Update(key, rows => rows.Add(item));
             _draft.Text = "";
             RememberDraft();
-            var attempted = ChatOutbox.Shared.Stage(key, item, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            attempted = ChatOutbox.Shared.Stage(key, item, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             var updated = await CallChatAsync("chat.send", new JsonObject
             {
                 ["id"] = id,
@@ -143,6 +145,14 @@ internal sealed partial class ChatPage
         }
         catch (Exception ex)
         {
+            // A host refusal proves the message did not start. Release its
+            // receipt hold just as the regular outbox does; transport errors
+            // remain held until delivery can be checked.
+            if (ex is HostException hostError && key is not null && attempted is not null)
+            {
+                try { ChatOutbox.Shared.Refuse(key, attempted.Id, hostError.Code); }
+                catch { /* The saved pending copy can still be reviewed. */ }
+            }
             if (Current())
             {
                 Banner(ex.Message);

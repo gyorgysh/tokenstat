@@ -1861,7 +1861,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var generation = _openGeneration;
             try
             {
-                var readiness = await AgentSignInDialog.CheckAsync(backend, CallChatAsync);
+                var readiness = await AgentSignInDialog.CheckAsync(backend, (method, parameters) => CallChatAsync(method, parameters));
                 if (chat == _openId && generation == _openGeneration) backend["readiness"] = readiness;
             }
             catch (Exception ex) { if (chat == _openId && generation == _openGeneration) Banner(ex.Message); }
@@ -1879,7 +1879,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var generation = _openGeneration;
         try
         {
-            var readiness = await AgentSignInDialog.ShowAsync(this, _workspaceId, backend, CallChatAsync);
+            var readiness = await AgentSignInDialog.ShowAsync(this, _workspaceId, backend, (method, parameters) => CallChatAsync(method, parameters));
             if (chat == _openId && generation == _openGeneration && readiness is not null) backend["readiness"] = readiness;
         }
         catch (Exception ex) { if (chat == _openId && generation == _openGeneration) Banner(ex.Message); }

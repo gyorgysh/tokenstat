@@ -10621,7 +10621,7 @@ mod tests {
         assert!(!brief.brief.contains("and the tests"));
         assert!(brief.brief.contains("Retries are in place."));
         assert!(brief.brief.len() < 4_000, "{}", brief.brief.len());
-        let history = root.path().join("chat/chat-old/history.md");
+        let history = root.path().join("chat").join("chat-old").join("history.md");
         assert!(brief.brief.contains(&history.display().to_string()));
         assert!(
             fs::read_to_string(&history)
