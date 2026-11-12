@@ -404,8 +404,8 @@ try {
     Invoke-Control (Wait-ForNativeName 'Browser beside chat' $buttonType)
     Invoke-Control (Wait-ForControl 'workbench.tool.changes')
     Wait-ForNativeName 'workbench-live-second' $textType | Out-Null
-    Invoke-Control (Wait-ForNativeName 'Full diff' $buttonType)
-    # Equal line counts must still refresh the actual text, without chat events.
+    # The one-file review shows the whole file inline, so there is no Full diff
+    # button to open. Equal line counts must still refresh the actual text, without chat events.
     [System.IO.File]::WriteAllText($reviewFile, "workbench-live-first`nworkbench-live-third`n")
     Wait-ForNativeName 'workbench-live-third' $textType | Out-Null
     if (@((Call-Host 'chat.events' @{id = $latest.id; offset = 0}).events).Count -ne 0) {
