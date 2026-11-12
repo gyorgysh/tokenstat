@@ -65,7 +65,7 @@ pub use scan::{
 pub use sources::claude_stats::Reconciliation;
 pub use store::{
     BLOCK_DURATION_MS, Bucket, DayPart, EventRow, GroupBy, Query, SplitBucket, Store, Totals,
-    UsageBlock,
+    UsageBlock, VendorHour,
 };
 pub use sync_payload::{
     ALLOWED_SYNC_KEYS, FORBIDDEN_SYNC_KEYS, SYNC_SCHEMA_VERSION, SYNC_WINDOW_MAX_DAYS,

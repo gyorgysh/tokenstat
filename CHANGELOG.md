@@ -9,6 +9,12 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.17.0]
+
+### Added
+
+- Cursor usage shows again for accounts whose usage history stopped listing it, such as accounts linked to an X subscription. tokenstat fills those gaps from Cursor's hourly totals and never counts the same usage twice.
+
 ## [1.16.0] - 2026-11-12
 
 ### Added

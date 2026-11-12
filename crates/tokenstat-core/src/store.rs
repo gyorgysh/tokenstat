@@ -20,6 +20,9 @@ use crate::model::{BillingMode, Counters, EventId, UsageEvent};
 use crate::sync_payload::SyncRollupBucket;
 use crate::watermark::Watermark;
 
+mod vendor_totals;
+pub use vendor_totals::VendorHour;
+
 const SCHEMA_VERSION: i64 = 1;
 
 /// Upsert for one row of `event`. Shared by [`Store::insert_events`] and

@@ -440,13 +440,25 @@ pub fn fetch_into(
         TokenSource::Stored => "stored",
         TokenSource::Discovered => "cursor keychain",
     };
+    // After the request list, so the hourly totals only fill what it left
+    // out. A failure here costs the totals, never the requests just stored.
+    let hourly = match crate::cursor_daily::fetch_into(store, tz, &token, &account, force) {
+        Ok(outcome) => {
+            let note = format!(", {} hourly totals added", outcome.rows);
+            (outcome.rows as usize, outcome.from_cache, note)
+        }
+        Err(error) => (0, true, format!(", hourly totals unavailable: {error}")),
+    };
     Ok(FetchReport {
         vendor: "cursor",
-        events: n,
-        from_cache,
+        events: n + hourly.0,
+        from_cache: from_cache && hourly.1,
         skipped_no_token: false,
         failed: false,
-        message: Some(format!("Cursor: {n} usage events (auth via {src})")),
+        message: Some(format!(
+            "Cursor: {n} usage events{} (auth via {src})",
+            hourly.2
+        )),
     })
 }
 
