@@ -52,6 +52,12 @@ pub fn auth_auto() -> anyhow::Result<(std::path::PathBuf, TokenSource)> {
             expiry_day(expired_ms)
         );
     }
+    #[cfg(target_os = "macos")]
+    if crate::discover::cursor_safe_storage_unreadable() {
+        anyhow::bail!(
+            "Cursor has a saved sign-in, but its Keychain item could not be read. Allow access in Account → Plan limits, then retry."
+        );
+    }
     anyhow::bail!(
         "no Cursor sign-in found. Sign in to the Cursor app or run `cursor-agent login`, \
          or pass --token with a WorkosCursorSessionToken from cursor.com cookies."
@@ -1022,28 +1028,20 @@ mod tests {
     #[test]
     #[ignore = "read-only live Cursor usage diagnostic; requires a signed-in Cursor"]
     fn cursor_live_usage_schema_diagnostic() {
-        let token = match creds::cursor_token().unwrap() {
+        // Unit-test executables cannot use the quiet Keychain helper. A
+        // caller must provide a session explicitly; never report a skipped
+        // diagnostic as a successful live check.
+        let token = match creds::cursor_token().expect("could not inspect Cursor sign-in") {
             CursorToken::Token(token, _) => token,
-            CursorToken::Lapsed(_) => {
-                eprintln!("Cursor sign-in expired");
-                return;
-            }
-            CursorToken::Missing => {
-                eprintln!("Cursor sign-in unavailable");
-                return;
-            }
+            _ => panic!(
+                "No readable Cursor session. Test executables cannot access Keychain; provide TOKENSTAT_CURSOR_SESSION securely."
+            ),
         };
-        if !looks_like_jwt(&token) {
-            eprintln!("Cursor uses the CSV session path");
-            return;
-        }
-        let raw = match download_events_json(&token) {
-            Ok(raw) => raw,
-            Err(error) => {
-                eprintln!("Cursor event fetch failed: {error}");
-                return;
-            }
-        };
+        assert!(
+            looks_like_jwt(&token),
+            "This diagnostic requires Cursor's bearer session"
+        );
+        let raw = download_events_json(&token).expect("Cursor event fetch failed");
         let root: EventsResponse = serde_json::from_str(&raw).unwrap();
         let total = root.usage_events_display.len();
         let token_rows = root
@@ -1051,9 +1049,11 @@ mod tests {
             .iter()
             .filter(|row| row.get("tokenUsage").is_some_and(|value| value.is_object()))
             .count();
-        let parsed = parse_events_json(&raw).map(|events| events.len());
+        let parsed = parse_events_json(&raw)
+            .expect("Cursor usage records could not be parsed")
+            .len();
         eprintln!(
-            "Cursor event rows: {total}; rows with token usage: {token_rows}; parsed: {parsed:?}"
+            "Cursor event rows: {total}; rows with token usage: {token_rows}; parsed: {parsed}"
         );
     }
 

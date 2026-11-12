@@ -107,12 +107,14 @@ pub fn auth(
                 Some(tokenstat_sync::creds::TokenSource::Discovered) => {
                     "discovered from app keychain"
                 }
-                None => "no token",
+                None => "no readable token",
             };
             println!("  {DIM}{}{DIM:#}  {state}", s.vendor);
         }
         println!();
-        println!("  {DIM}Cursor / Antigravity: sign in to the app, then tokenstat fetch.{DIM:#}");
+        println!(
+            "  {DIM}Cursor / Antigravity: check the app sign-in and Keychain access, then run tokenstat fetch.{DIM:#}"
+        );
         println!("  {DIM}Optional paste still works: tokenstat auth cursor --token …{DIM:#}");
         println!();
         return Ok(());
