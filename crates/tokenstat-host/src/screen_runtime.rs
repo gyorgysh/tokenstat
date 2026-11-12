@@ -331,6 +331,33 @@ struct PushParams {
     frame: String,
 }
 
+/// When a local desktop app last asked for the capture session list.
+///
+/// The Mac app captures the screen itself and asks for this list on a slow
+/// beat for as long as it runs, so a recent ask is the proof that a desktop
+/// install is here and able to share. A CLI-only host never asks. A Linux
+/// desktop app that captures the same way will count without a change here.
+static PROVIDER_SEEN: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// Several missed beats of the app's idle poll, so one slow round trip does
+/// not read as the app having quit.
+const PROVIDER_FRESH: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Whether a desktop app on this machine is attached to capture its screen.
+pub(crate) fn provider_attached() -> bool {
+    PROVIDER_SEEN
+        .lock()
+        .ok()
+        .and_then(|seen| *seen)
+        .is_some_and(|at| at.elapsed() <= PROVIDER_FRESH)
+}
+
+fn note_provider() {
+    if let Ok(mut seen) = PROVIDER_SEEN.lock() {
+        *seen = Some(std::time::Instant::now());
+    }
+}
+
 pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("screen.capture.") {
         return None;
@@ -341,6 +368,7 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
         }
         match method {
             "screen.capture.list" => {
+                note_provider();
                 let held = sessions()
                     .lock()
                     .map_err(|_| "screen capture registry poisoned")?;

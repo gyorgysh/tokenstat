@@ -384,18 +384,32 @@ object DeviceCopy {
         return formatServerDate(lastSyncAt) ?: "never"
     }
 
-    /// Whether the account's platform string names a machine with no display
-    /// layer, port of `isHeadlessPlatform`. Only the fallback: the live
-    /// `host.provisionStatus` probe answers first, and this covers a host
-    /// that cannot answer. Empty stays false, never hiding the row for a
+    /// Whether the account's platform string names a Linux host, port of
+    /// `isHeadlessPlatform`. Only a first guess: the host's own
+    /// `host.provisionStatus` answer wins once it arrives. Matched by whole
+    /// word, so "aarch64" is not Arch Linux, and a string naming macOS or
+    /// Windows is never Linux. Empty stays false, never hiding anything for a
     /// machine that never said what it runs.
     fun isHeadlessPlatform(platform: String?): Boolean {
-        val lower = (platform ?: "").lowercase()
-        if (lower.isEmpty()) return false
-        if ("linux" in lower) return true
-        return listOf("ubuntu", "debian", "fedora", "alpine", "arch", "centos", "rocky", "almalinux")
-            .any { it in lower }
+        val words = (platform ?: "").lowercase()
+            .split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter { it.isNotEmpty() }
+            .toSet()
+        if (words.isEmpty()) return false
+        if (words.any { it in DESKTOP_WORDS }) return false
+        return words.any { it in LINUX_WORDS }
     }
+
+    /// Whether View screen can open on a host, from its `host.provisionStatus`
+    /// reply. A host older than the `screen` field answers by `headless`, and
+    /// null means it said neither.
+    fun hostShowsScreen(screen: Boolean?, headless: Boolean?): Boolean? = screen ?: headless?.not()
+
+    private val DESKTOP_WORDS = setOf("macos", "darwin", "osx", "windows", "win32")
+    private val LINUX_WORDS = setOf(
+        "linux", "ubuntu", "debian", "fedora", "alpine", "arch", "archlinux",
+        "centos", "rocky", "almalinux", "rhel", "opensuse", "suse", "nixos", "gentoo", "mint",
+    )
 
     fun reach(isThisDevice: Boolean, online: Boolean?, hasKey: Boolean): String {
         if (isThisDevice) return L10n.text("android.homelogic.this_is_the_device_you_are_holding.19fe2976")

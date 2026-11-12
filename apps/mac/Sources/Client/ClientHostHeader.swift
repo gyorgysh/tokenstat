@@ -41,11 +41,14 @@ struct ClientHostHeader: View {
 
     private var isLegend: Bool { account.account?.tier?.lowercased() == "legend" }
 
-    /// Whether the host reports no display layer, so the row that opens the
-    /// screen viewer stays off rather than landing in its error state.
-    /// Probed live: the account record carries no platform to gate on, which
-    /// is only the fallback when the host cannot answer.
-    @State private var isHeadless = false
+    /// Whether the host says View screen can open there. Nil until it has
+    /// answered, and stays nil when it cannot, so the platform guess decides
+    /// only then. Once the host answers, its answer wins over the guess.
+    @State private var hostShowsScreen: Bool?
+
+    private var showsScreen: Bool {
+        hostShowsScreen ?? !isHeadlessPlatform(accountPlatform)
+    }
 
     private var accountPlatform: String? {
         (account.account?.machines ?? [])
@@ -77,22 +80,19 @@ struct ClientHostHeader: View {
             }
 
             if showsOpenWork { openWork }
-            // Gated on the account record too, not just the live probe: the
-            // probe resolves after first paint, and a Linux host would flash
-            // a View screen row that only ever lands in an error state.
-            if !(isHeadless || isHeadlessPlatform(accountPlatform)) { viewScreen }
+            // Until the host answers, the account's platform string guesses,
+            // so a Linux server does not flash a row that only ends in an
+            // error. After that the host's own answer decides.
+            if showsScreen { viewScreen }
         }
         .task(id: peerKey) {
             // Same stale-run guard as the security card: a probe for the last
-            // peer must not write a headless flag onto the new peer's header.
+            // peer must not write its answer onto the new peer's header.
             let wanted = peerKey
-            if let headless = try? await Bridge.peerHeadless(wanted) {
-                guard !Task.isCancelled, wanted == peerKey else { return }
-                isHeadless = headless
-            } else {
-                guard !Task.isCancelled, wanted == peerKey else { return }
-                isHeadless = isHeadlessPlatform(accountPlatform)
-            }
+            hostShowsScreen = nil
+            let answer = try? await Bridge.peerCanShowScreen(wanted)
+            guard !Task.isCancelled, wanted == peerKey else { return }
+            hostShowsScreen = answer
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)

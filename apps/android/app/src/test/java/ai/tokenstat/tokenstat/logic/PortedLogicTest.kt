@@ -584,6 +584,22 @@ class PortedLogicTest {
         assertEquals(false, DeviceCopy.isHeadlessPlatform("Windows 11"))
         assertEquals(false, DeviceCopy.isHeadlessPlatform(null))
         assertEquals(false, DeviceCopy.isHeadlessPlatform(""))
+        // Whole words only: "aarch64" is not Arch Linux.
+        assertEquals(false, DeviceCopy.isHeadlessPlatform("macOS 27.2.1 · aarch64"))
+        assertEquals(false, DeviceCopy.isHeadlessPlatform("Windows 10.0.26300.9974 · x86_64"))
+        assertEquals(false, DeviceCopy.isHeadlessPlatform("Linux · aarch64 · macOS"))
+        assertEquals(true, DeviceCopy.isHeadlessPlatform("Ubuntu 24.04.5 LTS · x86_64"))
+        assertEquals(true, DeviceCopy.isHeadlessPlatform("Arch Linux · aarch64"))
+        assertEquals(true, DeviceCopy.isHeadlessPlatform("arch"))
+    }
+
+    @Test
+    fun hostShowsScreenPrefersTheScreenFieldThenHeadless() {
+        assertEquals(true, DeviceCopy.hostShowsScreen(screen = true, headless = true))
+        assertEquals(false, DeviceCopy.hostShowsScreen(screen = false, headless = false))
+        assertEquals(true, DeviceCopy.hostShowsScreen(screen = null, headless = false))
+        assertEquals(false, DeviceCopy.hostShowsScreen(screen = null, headless = true))
+        assertEquals(null, DeviceCopy.hostShowsScreen(screen = null, headless = null))
     }
 
     // HostContracts — the host-update gate mirrors RemoteHostFeature at 14.

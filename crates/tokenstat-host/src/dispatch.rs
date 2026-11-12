@@ -3753,8 +3753,22 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
         return Some((|| {
             let info: tokenstat_sync::app_info::AppInfo = serde_json::from_str(params)
                 .map_err(|e| DispatchError::new("invalid_params", e.to_string()))?;
+            let changed = tokenstat_sync::app_info::current().as_ref() != Some(&info);
             tokenstat_sync::app_info::identify(info)
                 .map_err(|e| DispatchError::new("invalid_params", e))?;
+            // A phone's account token reads the account but never syncs, so
+            // the version headers on those reads are not recorded. Its record
+            // carries the app version only from a registration, and the one at
+            // sign-in can run before the app has said which version it is.
+            // Register again once per new version, so the device list shows
+            // the build somebody is on. A desktop host reports through its
+            // account reads instead and needs none of this.
+            #[cfg(not(feature = "local-host"))]
+            if changed && !cfg!(test) {
+                crate::remote::register_if_tunnel_enabled();
+            }
+            #[cfg(feature = "local-host")]
+            let _ = changed;
             Ok(json!({"accepted": true}))
         })());
     }

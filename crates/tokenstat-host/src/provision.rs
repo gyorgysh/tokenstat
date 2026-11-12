@@ -46,6 +46,13 @@ fn status() -> Result<Value, String> {
         // thing at this machine. It is what the wizard branches on, and it is
         // not a guess about whether a screen is plugged in.
         "headless": cfg!(not(any(target_os = "macos", windows))),
+        // Whether somebody could be sitting at this machine's own display,
+        // read from the session rather than from the operating system's name.
+        "desktop": desktop_session(),
+        // Whether View screen can open here: a desktop install of tokenstat,
+        // not only the CLI and its helper. Clients gate the screen viewer on
+        // this, and fall back to `headless` for a host older than the field.
+        "screen": screen_sharing(),
         "serviceScope": service_scope(),
         "runsAs": runs_as(),
         "alwaysOn": policy.get("alwaysOn").cloned().unwrap_or(Value::Null),
@@ -168,6 +175,104 @@ fn linux_service_scope(groups: &str) -> Option<&'static str> {
 ///
 /// Said out loud because a root install gives every agent root, and that is a
 /// fact to put next to the operating system version rather than to discover.
+/// Whether this machine has a graphical session for its user.
+///
+/// A Mac and a Windows PC always draw a desktop. Linux may be a server with no
+/// display at all or a workstation running Wayland or X, so it is asked: the
+/// session's own variables first, then the sockets a compositor or X server
+/// leaves behind, because a user service started by systemd usually inherits
+/// neither variable.
+fn desktop_session() -> bool {
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        true
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }))
+            });
+        let names = |dir: &std::path::Path| -> Vec<String> {
+            std::fs::read_dir(dir)
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        graphical_session(
+            std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty()),
+            std::env::var_os("DISPLAY").is_some_and(|value| !value.is_empty()),
+            &names(&runtime),
+            &names(std::path::Path::new("/tmp/.X11-unix")),
+        )
+    }
+}
+
+/// The Linux decision, kept free of the environment so it can be tested.
+#[cfg_attr(any(target_os = "macos", windows), allow(dead_code))]
+fn graphical_session(
+    wayland_env: bool,
+    display_env: bool,
+    runtime_entries: &[String],
+    x11_entries: &[String],
+) -> bool {
+    wayland_env
+        || display_env
+        || runtime_entries
+            .iter()
+            .any(|name| name.starts_with("wayland-") && !name.ends_with(".lock"))
+        || x11_entries.iter().any(|name| {
+            name.strip_prefix('X')
+                .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+        })
+}
+
+/// Whether View screen can open on this machine.
+///
+/// Only a desktop install shares a screen. A server running the CLI and its
+/// helper has nothing to show, whatever the operating system.
+///
+/// - macOS and Linux: the desktop app does the capturing, so the answer is
+///   whether it is attached right now (`screen_runtime::provider_attached`).
+///   No Linux desktop app captures yet, so Linux answers false until one
+///   does, then true with no change here.
+/// - Windows: the helper captures by itself, so the answer is whether the
+///   desktop app is installed beside it or has introduced itself.
+fn screen_sharing() -> bool {
+    #[cfg(windows)]
+    {
+        desktop_session() && windows_desktop_install()
+    }
+    #[cfg(all(not(windows), feature = "local-host"))]
+    {
+        crate::screen_runtime::provider_attached()
+    }
+    #[cfg(all(not(windows), not(feature = "local-host")))]
+    {
+        false
+    }
+}
+
+/// The Windows app lives beside this helper (`Tokenstat.exe` next to
+/// `tokenstat-hostd.exe`), in its per-user install folder, or has said hello
+/// over `app.identify` since the helper started. A CLI install has none.
+#[cfg(windows)]
+fn windows_desktop_install() -> bool {
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("Tokenstat.exe")))
+        .is_some_and(|app| app.is_file());
+    let installed = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .is_some_and(|local| local.join("Programs/tokenstat/Tokenstat.exe").is_file());
+    beside || installed || tokenstat_sync::app_info::current().is_some()
+}
+
 fn runs_as() -> Value {
     #[cfg(unix)]
     {
@@ -416,6 +521,43 @@ fn read_logs(_: u32) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn a_graphical_session_is_read_from_the_session_not_the_os_name() {
+        let none: Vec<String> = Vec::new();
+        assert!(!graphical_session(false, false, &none, &none));
+        assert!(graphical_session(true, false, &none, &none));
+        assert!(graphical_session(false, true, &none, &none));
+        assert!(graphical_session(
+            false,
+            false,
+            &["wayland-0".into()],
+            &none
+        ));
+        assert!(!graphical_session(
+            false,
+            false,
+            &["wayland-0.lock".into(), "bus".into()],
+            &none
+        ));
+        assert!(graphical_session(false, false, &none, &["X0".into()]));
+        assert!(!graphical_session(
+            false,
+            false,
+            &none,
+            &["X".into(), "Xauth".into()]
+        ));
+    }
+
+    #[cfg(all(not(windows), feature = "local-host"))]
+    #[test]
+    fn a_screen_is_offered_only_while_a_desktop_app_captures() {
+        // Before any desktop app polls, this test process is a CLI host. A
+        // parallel test may already have polled, which is the other half.
+        assert!(!screen_sharing() || crate::screen_runtime::provider_attached());
+        let _ = crate::screen_runtime::call("screen.capture.list", "{}");
+        assert!(screen_sharing());
+    }
 
     #[test]
     fn journal_scope_belongs_to_the_running_process() {

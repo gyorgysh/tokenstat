@@ -436,6 +436,11 @@ struct ProvisionStatus: Codable, Sendable, Hashable {
     }
 
     var headless: Bool
+    /// A graphical session on that machine. Absent from older hosts.
+    var desktop: Bool?
+    /// Whether View screen can open there. Absent from older hosts, which
+    /// read as "not headless" instead.
+    var screen: Bool?
     var serviceScope: String?
     var runsAs: RunsAs?
     var alwaysOn: Bool?
@@ -2042,17 +2047,26 @@ func harnessName(_ id: String) -> String {
     }
 }
 
-/// Whether an account machine's platform string describes a headless host.
+/// Whether an account machine's platform string names a Linux host.
 ///
-/// A Linux server has no display layer, so offering a screen viewer for it
-/// only ends in an error. Read from what the machine said about itself at
-/// login rather than guessed from its name.
+/// Only a first guess, used before the host itself has answered
+/// `host.provisionStatus` (its `screen` and `headless` fields are the truth)
+/// or when it cannot. Matched by whole word, so "aarch64" is not Arch Linux,
+/// and a string that names macOS or Windows is never Linux whatever else it
+/// carries. Empty stays false, never hiding anything for a machine that did
+/// not say what it runs.
 func isHeadlessPlatform(_ platform: String?) -> Bool {
-    let lower = (platform ?? "").lowercased()
-    guard !lower.isEmpty else { return false }
-    if lower.contains("linux") { return true }
-    return ["ubuntu", "debian", "fedora", "alpine", "arch", "centos", "rocky", "almalinux"]
-        .contains { lower.contains($0) }
+    let words = Set(
+        (platform ?? "").lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+    )
+    guard !words.isEmpty else { return false }
+    if !words.isDisjoint(with: ["macos", "darwin", "osx", "windows", "win32"]) { return false }
+    return !words.isDisjoint(with: [
+        "linux", "ubuntu", "debian", "fedora", "alpine", "arch", "archlinux",
+        "centos", "rocky", "almalinux", "rhel", "opensuse", "suse", "nixos", "gentoo", "mint",
+    ])
 }
 
 /// Asset name for a harness's brand mark, or nil when none is bundled.

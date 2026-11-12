@@ -46,9 +46,13 @@ internal static class SshHostPlatform
     }
     private static string? Distro(string? platform)
     {
-        var name = (platform ?? "").ToLowerInvariant();
-        foreach (var (term, asset) in new[] { ("ubuntu", "ubuntu"), ("debian", "debian"), ("fedora", "fedora"), ("alpine", "alpinelinux"), ("arch", "archlinux"), ("nixos", "nixos"), ("mint", "linuxmint"), ("gentoo", "gentoo"), ("rocky", "rockylinux"), ("alma", "almalinux"), ("centos", "centos"), ("red hat", "redhat"), ("rhel", "redhat"), ("opensuse", "opensuse"), ("suse", "suse"), ("linux", "linux") })
-            if (name.Contains(term, StringComparison.Ordinal)) return asset;
+        // Whole words only, so "aarch64" is not Arch Linux.
+        var words = new string((platform ?? "").ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray())
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return null;
+        var name = " " + string.Join(" ", words) + " ";
+        foreach (var (term, asset) in new[] { ("ubuntu", "ubuntu"), ("debian", "debian"), ("fedora", "fedora"), ("alpine", "alpinelinux"), ("arch", "archlinux"), ("archlinux", "archlinux"), ("nixos", "nixos"), ("mint", "linuxmint"), ("linuxmint", "linuxmint"), ("gentoo", "gentoo"), ("rocky", "rockylinux"), ("alma", "almalinux"), ("almalinux", "almalinux"), ("centos", "centos"), ("red hat", "redhat"), ("rhel", "redhat"), ("opensuse", "opensuse"), ("suse", "suse"), ("linux", "linux") })
+            if (name.Contains(" " + term + " ", StringComparison.Ordinal)) return asset;
         return null;
     }
     public static async Task<bool> RememberAsync(JsonObject host, JsonObject connection)

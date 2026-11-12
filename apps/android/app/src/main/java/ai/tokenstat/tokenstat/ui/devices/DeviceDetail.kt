@@ -357,18 +357,20 @@ private fun HostHeaderCard(
     onViewScreen: () -> Unit,
 ) {
     val colors = LocalTsColors.current
-    // Whether the host reports no display layer, so the row that opens the
-    // screen viewer stays off rather than landing in its error state.
-    // Probed live, with the account's platform string as the fallback when
-    // the host cannot answer. Seeded from the platform so a Linux host
-    // never flashes a row that only ever lands in an error state.
-    var isHeadless by remember(peer, platform) { mutableStateOf(DeviceCopy.isHeadlessPlatform(platform)) }
+    // Whether View screen can open there, as the host itself reports it.
+    // Until it answers, or when it cannot, the account's platform string
+    // guesses, so a Linux server never flashes a row that only ends in an
+    // error. Once the host answers, its answer wins over the guess.
+    var showsScreen by remember(peer, platform) { mutableStateOf(!DeviceCopy.isHeadlessPlatform(platform)) }
     LaunchedEffect(peer) {
-        val headless = runCatching {
-            (model.workspaceSection(peer, "host.provisionStatus", buildJsonObject {}) as? JsonObject)
-                ?.get("headless")?.jsonPrimitive?.booleanOrNull
+        val answer = runCatching {
+            val status = model.workspaceSection(peer, "host.provisionStatus", buildJsonObject {}) as? JsonObject
+            DeviceCopy.hostShowsScreen(
+                screen = status?.get("screen")?.jsonPrimitive?.booleanOrNull,
+                headless = status?.get("headless")?.jsonPrimitive?.booleanOrNull,
+            )
         }.getOrNull()
-        isHeadless = headless ?: DeviceCopy.isHeadlessPlatform(platform)
+        if (answer != null) showsScreen = answer
     }
     TsCard {
         Row(
@@ -428,7 +430,7 @@ private fun HostHeaderCard(
                 }
             }
         }
-        if (!(isHeadless || DeviceCopy.isHeadlessPlatform(platform))) {
+        if (showsScreen) {
             DeviceActionRow(
                 title = L10n.text("android.devicedetail.view_screen.56dea3b5"),
                 subtitle = if ((state.account?.string("tier") ?: "").equals("legend", ignoreCase = true)) {

@@ -3483,6 +3483,13 @@ extension Bridge {
         try await provisionStatus(peer: peer).headless
     }
 
+    /// Whether View screen can open on the paired host, as the host itself
+    /// reports it. A host older than the `screen` field answers by `headless`.
+    static func peerCanShowScreen(_ peer: String) async throws -> Bool {
+        let status = try await provisionStatus(peer: peer)
+        return status.screen ?? !status.headless
+    }
+
     static func peerProtocolVersion(_ peer: String) async throws -> Int {
         struct Spoken: Codable, Sendable { let protocolVersion: String }
         let spoken = try await onPeer(peer, "protocol", as: Spoken.self)
