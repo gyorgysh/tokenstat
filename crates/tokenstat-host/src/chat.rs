@@ -7192,6 +7192,17 @@ pub fn backends(force: bool) -> Vec<Value> {
                 backend["readiness"] = profile["readiness"].clone();
                 backend["signIn"] = profile["signIn"].clone();
                 backend["canCheckSignIn"] = profile["canCheckSignIn"].clone();
+                // The daily check's answer, so the picker can mark an agent
+                // that is behind. Only a real newer version marks it: an
+                // agent with nothing to compare (Muse) never does.
+                if let Some(row) = profile["id"]
+                    .as_str()
+                    .and_then(crate::agent_updates::cached)
+                {
+                    backend["updateAvailable"] = json!(row["updateAvailable"] == true);
+                    backend["latestVersion"] = row["latest"].clone();
+                    backend["installedVersion"] = row["version"].clone();
+                }
             }
             // Chat advertises the live list where enumeration works and the
             // curated list where it cannot (Claude's aliases, Muse's Spark

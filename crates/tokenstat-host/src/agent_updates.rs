@@ -286,6 +286,17 @@ fn row(id: &'static str, check: bool) -> Option<Value> {
             }
             Err(error) => value["error"] = json!(error),
         }
+    } else if plan.latest.is_some()
+        && let Some(latest) = cached_latest(id)
+    {
+        // The last daily or manual check, compared with what is installed
+        // now, so an update made outside tokenstat clears the mark.
+        value["updateAvailable"] = json!(
+            version
+                .as_deref()
+                .is_some_and(|installed| newer(&latest, installed))
+        );
+        value["latest"] = json!(latest);
     }
     Some(value)
 }
@@ -318,12 +329,104 @@ pub(crate) fn list(check: bool) -> Value {
         .iter()
         .map(|id| std::thread::spawn(move || row(id, check)))
         .collect();
-    Value::Array(
-        handles
-            .into_iter()
-            .filter_map(|handle| handle.join().ok().flatten())
-            .collect(),
-    )
+    let rows: Vec<Value> = handles
+        .into_iter()
+        .filter_map(|handle| handle.join().ok().flatten())
+        .collect();
+    if check {
+        remember(&rows);
+    }
+    Value::Array(rows)
+}
+
+/// What the last check found, kept so the agent picker can mark an agent
+/// that is behind without asking anyone. Rows are the same shape `list`
+/// returns: installed version, latest version, whether one is newer.
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Cache {
+    checked_at_ms: i64,
+    rows: Vec<Value>,
+}
+
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+fn cache_path() -> Option<std::path::PathBuf> {
+    Some(tokenstat_paths::data_dir()?.join("agent-updates.json"))
+}
+
+static CACHE: std::sync::Mutex<Option<Cache>> = std::sync::Mutex::new(None);
+
+fn with_cache<T>(read: impl FnOnce(&mut Cache) -> T) -> T {
+    let mut slot = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let cache = slot.get_or_insert_with(|| {
+        cache_path()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    });
+    read(cache)
+}
+
+fn save(cache: &Cache) {
+    if let Some(path) = cache_path()
+        && let Ok(bytes) = serde_json::to_vec(cache)
+    {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let temporary = path.with_extension("json.tmp");
+        if std::fs::write(&temporary, bytes).is_ok() {
+            let _ = std::fs::rename(&temporary, &path);
+        }
+    }
+}
+
+fn remember(rows: &[Value]) {
+    with_cache(|cache| {
+        cache.checked_at_ms = crate::chat::now_ms();
+        cache.rows = rows.to_vec();
+        save(cache);
+    });
+}
+
+fn cached_latest(id: &str) -> Option<String> {
+    with_cache(|cache| {
+        cache
+            .rows
+            .iter()
+            .find(|row| row["id"] == id)
+            .and_then(|row| row["latest"].as_str())
+            .map(str::to_owned)
+    })
+}
+
+/// The cached row for one agent, for the agent picker: `updateAvailable`,
+/// `latest` and `version` from the last check. Cheap: no process, no request.
+pub(crate) fn cached(id: &str) -> Option<Value> {
+    with_cache(|cache| cache.rows.iter().find(|row| row["id"] == id).cloned())
+}
+
+/// Check every installed agent once a day, so an agent that has fallen
+/// behind is marked where people already look. The check sends each
+/// vendor only the request its own installer makes. It never updates
+/// anything: that stays a button press.
+pub(crate) fn start_daily() {
+    let _ = std::thread::Builder::new()
+        .name("agent-update-check".into())
+        .spawn(|| {
+            // Let startup work settle before spawning a version probe per agent.
+            std::thread::sleep(Duration::from_secs(60));
+            loop {
+                let due = with_cache(|cache| crate::chat::now_ms() - cache.checked_at_ms >= DAY_MS);
+                if due {
+                    let _ = list(true);
+                }
+                std::thread::sleep(Duration::from_secs(60 * 60));
+            }
+        });
 }
 
 /// Quote a path for the shell the installer runner uses.
@@ -371,6 +474,19 @@ pub(crate) fn update(id: &str) -> Result<Value, String> {
         .and_then(|command| version_of(&plan, command));
     result["before"] = json!(before);
     result["after"] = json!(after);
+    if result["ok"] == true {
+        with_cache(|cache| {
+            if let Some(row) = cache.rows.iter_mut().find(|row| row["id"] == id) {
+                let behind = row["latest"]
+                    .as_str()
+                    .zip(after.as_deref())
+                    .is_some_and(|(latest, installed)| newer(latest, installed));
+                row["version"] = json!(after);
+                row["updateAvailable"] = json!(behind);
+                save(cache);
+            }
+        });
+    }
     Ok(result)
 }
 

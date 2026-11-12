@@ -760,16 +760,65 @@ struct ChatAgentField: View {
             .frame(minHeight: 44)
             #endif
             .chatControlChrome()
+            .overlay(alignment: .topTrailing) {
+                // An installed agent has a newer version. The picker this
+                // opens marks which one, with its Update button.
+                if updateWaiting {
+                    Circle().fill(Theme.accent)
+                        .frame(width: 7, height: 7)
+                        .offset(x: 2, y: -2)
+                        .accessibilityHidden(true)
+                }
+            }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .disabled(locked)
         .fixedSize(horizontal: false, vertical: true)
-        .help(L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"))
-        .accessibilityLabel(choices.summary)
+        .help(updateWaiting ? L10n.text("common.agent_updates.waiting")
+              : L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"))
+        .accessibilityLabel(updateWaiting ? choices.summary + ", " + L10n.text("common.agent_updates.waiting") : choices.summary)
     }
 
     private var choices: ChatAgentChoices { ChatAgentChoices(model: model, chat: chat) }
+
+    private var updateWaiting: Bool {
+        model.backends.contains { $0.updateAvailable && $0.installed != false }
+    }
+}
+
+/// The Update pill on an agent row in the picker, from the host's daily
+/// check. One press updates that agent with its own updater.
+struct AgentUpdatePill: View {
+    let backend: ChatBackend
+    let updating: Bool
+    let enabled: Bool
+    let onUpdate: () -> Void
+
+    /// A round icon rather than a labelled pill: rows that also show three
+    /// limit readings have no room for words, and a pill that shrinks takes
+    /// the agent's name with it.
+    var body: some View {
+        Button(updating ? L10n.text("common.agent_updates.updating") : L10n.text("common.agent_updates.update"), .download, action: onUpdate)
+            .labelStyle(.iconOnly)
+            .font(Theme.font(11, weight: .semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.accent)
+            .frame(width: 24, height: 24)
+            .background(Circle().fill(Theme.accent.opacity(0.16)))
+            .overlay {
+                if updating { ProgressView().controlSize(.mini).tint(Theme.accent) }
+            }
+            .fixedSize()
+            .disabled(!enabled || updating)
+            .help(label)
+            .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        backend.latestVersion.map { L10n.text("common.agent_updates.update_to", backend.label, $0) }
+            ?? L10n.text("common.agent_updates.update")
+    }
 }
 
 /// Agent, model and effort in one panel you can type into.
@@ -836,7 +885,16 @@ struct ChatAgentPanel: View {
                     },
                     trailing: { value in
                         guard case let .agent(id) = value else { return nil }
-                        return AnyView(AgentLimitsSummary(backend: id, peer: model.peer))
+                        return AnyView(HStack(spacing: Theme.Space.s) {
+                            if let backend = model.backend(for: id), backend.updateAvailable, backend.installed != false {
+                                AgentUpdatePill(
+                                    backend: backend,
+                                    updating: updatingAgent == backend.launcherID,
+                                    enabled: updatingAgent == nil && installing == nil && !locked
+                                ) { Task { await updateFromPicker(backend) } }
+                            }
+                            AgentLimitsSummary(backend: id, peer: model.peer)
+                        })
                     }
                 )
                 .disabled(updating || locked)
@@ -969,6 +1027,28 @@ struct ChatAgentPanel: View {
             && (row.updateAvailable == true || (checkedUpdates && !row.canCheck))
     }
 
+    /// Update from the agent's row in the picker. The result shows where the
+    /// row's pill was: gone when the update worked, a note when it did not.
+    private func updateFromPicker(_ backend: ChatBackend) async {
+        guard let id = backend.launcherID, updatingAgent == nil else { return }
+        let peer = model.peer
+        updatingAgent = id
+        setupError = nil
+        defer { updatingAgent = nil }
+        do {
+            let result = try await Bridge.agentUpdate(id: id, peer: peer)
+            guard model.peer == peer else { return }
+            if !result.ok {
+                let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                setupError = L10n.text("common.agent_updates.failed", String(tail.suffix(600)))
+            }
+            await model.reloadBackends(refreshModels: false)
+        } catch {
+            guard model.peer == peer else { return }
+            setupError = L10n.text("common.agent_updates.failed", error.localizedDescription)
+        }
+    }
+
     private func loadVersions(check: Bool) async {
         let peer = model.peer
         if check { checkingUpdates = true }
@@ -977,7 +1057,12 @@ struct ChatAgentPanel: View {
             let rows = try await Bridge.agentUpdates(check: check, peer: peer)
             guard model.peer == peer else { return }
             versions = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-            if check { checkedUpdates = true }
+            if check {
+                checkedUpdates = true
+                // The host kept this check, so the picker rows and the
+                // composer chip can mark what is behind right away.
+                await model.reloadBackends(refreshModels: false)
+            }
         } catch {
             guard model.peer == peer, check else { return }
             setupError = error.localizedDescription

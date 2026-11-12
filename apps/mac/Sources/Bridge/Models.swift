@@ -2948,6 +2948,11 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     /// never encoded: a reload of the list is file evidence again.
     var signInVerified: Bool = false
     var gateTier: String
+    /// From the host's daily version check (protocol 55): this agent has a
+    /// newer published version. Absent on older hosts and before a check.
+    var updateAvailable: Bool = false
+    var latestVersion: String? = nil
+    var installedVersion: String? = nil
 
     /// Older hosts already support these two terminal flows, but do not yet
     /// include sign-in metadata in chat.backends.
@@ -2964,10 +2969,14 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         case id, label, name, command, models, efforts, fastModeModels, fastModeLive, gateTier, modelListStatus, installed
         case launcherID = "launcherId"
         case canInstall, readiness, signIn, canCheckSignIn
+        case updateAvailable, latestVersion, installedVersion
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        updateAvailable = try c.decodeIfPresent(Bool.self, forKey: .updateAvailable) ?? false
+        latestVersion = try c.decodeIfPresent(String.self, forKey: .latestVersion)
+        installedVersion = try c.decodeIfPresent(String.self, forKey: .installedVersion)
         modelListStatus = try c.decodeIfPresent(String.self, forKey: .modelListStatus)
         installed = try c.decodeIfPresent(Bool.self, forKey: .installed)
         launcherID = try c.decodeIfPresent(String.self, forKey: .launcherID)
@@ -3004,6 +3013,9 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(readiness, forKey: .readiness)
         try c.encodeIfPresent(signIn, forKey: .signIn)
         try c.encode(canCheckSignIn, forKey: .canCheckSignIn)
+        try c.encode(updateAvailable, forKey: .updateAvailable)
+        try c.encodeIfPresent(latestVersion, forKey: .latestVersion)
+        try c.encodeIfPresent(installedVersion, forKey: .installedVersion)
     }
 }
 

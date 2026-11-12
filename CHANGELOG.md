@@ -15,7 +15,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Messaging a long Claude chat after its cache has expired now asks first. It shows how long the chat was idle and how big it is, and offers to send your message to a new chat that starts small and can look things up in the old one.
 - Switching models in a long, recently used Claude chat now asks first, because your next message makes Claude read the whole conversation again.
-- Agents you only use through chat can now be kept up to date. Set up another agent shows each installed agent's version, Check for updates asks each vendor for its latest release, and Update runs the agent's own updater, or reinstalls it when it has none.
+- Agents you only use through chat now stay up to date. tokenstat checks each agent's latest release once a day. When one is behind, a dot appears on the agent button in the composer, and that agent's row in the picker gets an update button. One press runs the agent's own updater, or reinstalls it when it has none. Set up another agent shows every installed version and can check on demand.
 - Cursor usage shows again for accounts whose usage history stopped listing it, such as accounts linked to an X subscription. tokenstat fills those gaps from Cursor's hourly totals and never counts the same usage twice.
 
 ### Improved
