@@ -166,6 +166,7 @@ internal sealed partial class ChatPage {
     private static TextBlock Muted(string text) => new() { Text = text, Opacity = .7 };
     public ChatPage(JsonNode? inspection, params string[] open) { _inspection = inspection; foreach (var key in open) _statsExpanded[key] = true; }
     public StackPanel Build() { _statsFilters.Clear(); var root = new StackPanel(); AddStats(root); return root; }
+    internal sealed record PlanStepItem(string Text, string Status);
 ''' + builders + r'''
     static IEnumerable<UIElement> Walk(object? value) {
         if (value is not UIElement item) yield break;
@@ -191,7 +192,8 @@ internal sealed partial class ChatPage {
         Toggle(root, "common.chat.activity.plan").Invoke();
         var refreshed = page.Build();
         Check(!HasText(refreshed, "1. plan-step"), "Automatic expansion overrode a manual collapse on refresh");
-        var checklist = ActivityPlanChecklist(ChatActivityData.Read(data, page._openChat)!);
+        var reported = ChatActivityData.Read(data, page._openChat)!;
+        var checklist = ActivityPlanChecklist(reported.Plan.Select(step => new PlanStepItem(step.Text, step.Status)).ToList(), reported.Live);
         Check(HasText(checklist, "plan-step") && HasText(checklist, "Scheduled"), "Transcript checklist lost its reported step or status");
         var planDialog = new ChatPage(data).ActivityCard(data, expanded: true, section: "plan");
         Check(HasText(planDialog, "1. plan-step") && !HasText(planDialog, "goal-objective") && !HasText(planDialog, "agent-task"), "The plan command expanded unrelated sections or hid the requested plan");

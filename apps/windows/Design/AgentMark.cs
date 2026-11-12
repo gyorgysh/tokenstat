@@ -64,7 +64,7 @@ internal static class AgentMark
         return box;
     }
 
-    public static UIElement Row(string id, FrameworkElement content, double size = 30)
+    public static FrameworkElement Row(string id, FrameworkElement content, double size = 30)
     {
         var row = new Grid { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
