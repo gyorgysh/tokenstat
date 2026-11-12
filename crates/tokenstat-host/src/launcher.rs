@@ -1561,6 +1561,18 @@ fn search_path() -> Vec<String> {
 
 fn conventional_paths(home: &str) -> Vec<String> {
     let login = tokenstat_pty::login_env();
+    let bun_bin = std::env::var_os("BUN_INSTALL")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            login
+                .as_ref()?
+                .vars
+                .get("BUN_INSTALL")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+        })
+        .map(|path| path.join("bin").to_string_lossy().into_owned());
     let npm_paths = npm_bin_paths_with(home, |name| {
         std::env::var(name)
             .ok()
@@ -1576,6 +1588,7 @@ fn conventional_paths(home: &str) -> Vec<String> {
             format!(r"{home}\.bun\bin"),
         ];
         paths.extend(npm_paths);
+        paths.extend(bun_bin);
         let roaming =
             std::env::var("APPDATA").unwrap_or_else(|_| format!(r"{home}\AppData\Roaming"));
         paths.extend([format!(r"{roaming}\npm"), format!(r"{home}\scoop\shims")]);
@@ -1588,6 +1601,7 @@ fn conventional_paths(home: &str) -> Vec<String> {
     {
         let mut paths = vec![format!("{home}/.local/bin")];
         paths.extend(npm_paths);
+        paths.extend(bun_bin);
         paths.extend([
             format!("{home}/.npm-global/bin"),
             format!("{home}/.bun/bin"),
