@@ -18,6 +18,10 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Agents you only use through chat can now be kept up to date. Set up another agent shows each installed agent's version, Check for updates asks each vendor for its latest release, and Update runs the agent's own updater, or reinstalls it when it has none.
 - Cursor usage shows again for accounts whose usage history stopped listing it, such as accounts linked to an X subscription. tokenstat fills those gaps from Cursor's hourly totals and never counts the same usage twice.
 
+### Improved
+
+- A commit opened from Git history, in the inspector or in a Changes tab, now uses the same file list and diff as the Git tab. It opens on all files, lets you pick one, and can fold the commit message away.
+
 ## [1.16.0] - 2026-11-12
 
 ### Added

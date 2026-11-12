@@ -192,9 +192,18 @@ struct ReviewFileHeading: View {
     }
 }
 
+/// The totals for an "All files" entry, which a nil selection stands for.
+/// A commit offers it, because it is read as one change. A working tree and a
+/// turn do not, and keep one file selected.
+struct ReviewAllFiles {
+    let added: UInt64
+    let removed: UInt64
+}
+
 struct ReviewFileBrowser<Detail: View>: View {
     let files: [ReviewFileChoice]
     @Binding var selection: String?
+    var allFiles: ReviewAllFiles? = nil
     @ViewBuilder var detail: () -> Detail
     /// The list's width is the person's to set, and is kept between launches.
     @AppStorage("reviewFileListWidth") private var listWidth: Double = 220
@@ -212,13 +221,22 @@ struct ReviewFileBrowser<Detail: View>: View {
             } else {
                 VStack(spacing: 0) {
                     Menu {
-                        ForEach(files) { file in
-                            Button(file.path) { selection = file.path }
+                        // A section, not a divider: the menu draws the break.
+                        if allFiles != nil {
+                            Section {
+                                Button(L10n.text("apple.reviewfilebrowser.all_files")) { selection = nil }
+                            }
+                        }
+                        Section {
+                            ForEach(files) { file in
+                                Button(file.path) { selection = file.path }
+                            }
                         }
                     } label: {
                         HStack {
                             Image(systemName: "doc.on.doc")
-                            Text(files.first(where: { $0.path == selection })?.name ?? L10n.text("common.files"))
+                            Text(files.first(where: { $0.path == selection })?.name
+                                 ?? (allFiles != nil ? L10n.text("apple.reviewfilebrowser.all_files") : L10n.text("common.files")))
                                 .lineLimit(1).truncationMode(.middle)
                             Spacer(minLength: 0)
                             Text("\(files.count)").foregroundStyle(.secondary)
@@ -279,6 +297,7 @@ struct ReviewFileBrowser<Detail: View>: View {
             ThemeRule()
             ScrollView {
                 LazyVStack(spacing: 2) {
+                    if let allFiles { allFilesRow(allFiles) }
                     ForEach(files) { file in
                         HStack(alignment: .center, spacing: 0) {
                             Button { selection = file.path } label: {
@@ -313,5 +332,26 @@ struct ReviewFileBrowser<Detail: View>: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.sidebar)
+    }
+
+    private func allFilesRow(_ totals: ReviewAllFiles) -> some View {
+        Button { selection = nil } label: {
+            HStack(alignment: .center, spacing: Theme.Space.s) {
+                Image(systemName: "doc.on.doc").foregroundStyle(Theme.accent)
+                Text(L10n.text("apple.reviewfilebrowser.all_files"))
+                    .font(Theme.font(12, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 0)
+                if totals.added > 0 || totals.removed > 0 {
+                    DiffStat(added: Int(clamping: totals.added), removed: Int(clamping: totals.removed),
+                             font: Theme.numeric(10))
+                }
+            }
+            .padding(Theme.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selection == nil ? [.isSelected] : [])
+        .background(selection == nil ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 6))
     }
 }
