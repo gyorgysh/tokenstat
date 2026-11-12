@@ -4490,6 +4490,28 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // names a command hardcoded in the catalog, never one supplied by the
         // client, so over a remote connection this stays "the user clicked
         // Install on a known tile" rather than "a peer runs anything".
+        // Installed agent versions, and with `check` the latest each vendor
+        // publishes. The check is the only part that leaves the machine,
+        // and a client sends it only when somebody presses the button.
+        "launcher.updates" => {
+            let check = serde_json::from_str::<Value>(params.trim())
+                .ok()
+                .and_then(|p| p["check"].as_bool())
+                .unwrap_or(false);
+            Ok(crate::agent_updates::list(check))
+        }
+        // Same rule as install: an id picks a hardcoded update path.
+        "launcher.update" => {
+            #[derive(Deserialize)]
+            struct UpdateParams {
+                id: String,
+            }
+            let p: UpdateParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Err(e.to_string()),
+            };
+            crate::agent_updates::update(&p.id)
+        }
         "launcher.install" | "launcher.reinstall" => {
             #[derive(Deserialize)]
             struct InstallParams {

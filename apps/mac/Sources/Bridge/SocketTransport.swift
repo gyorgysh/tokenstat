@@ -264,6 +264,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         "pulls.review",
         "launcher.signIn",
         "launcher.install",
+        "launcher.update",
         "launcher.reinstall",
         "workspace.lfsSetup",
         "chat.personaDraft",

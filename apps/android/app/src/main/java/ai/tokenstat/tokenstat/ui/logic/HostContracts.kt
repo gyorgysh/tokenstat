@@ -19,7 +19,7 @@ object HostContracts {
     fun supportsTeams(protocol: Long?): Boolean = protocol != null && protocol >= TEAMS_MIN_PROTOCOL
     const val CHAT_RECOVERY_MIN_PROTOCOL = 34
     fun supportsChatRecovery(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_RECOVERY_MIN_PROTOCOL
-    const val PROTOCOL_VERSION = "54"
+    const val PROTOCOL_VERSION = "55"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val CHAT_FORK_MIN_PROTOCOL = 26
@@ -28,6 +28,9 @@ object HostContracts {
     /// Version 54 adds `chat.continueInNew` and the prompt cache record.
     const val CHAT_CONTINUE_MIN_PROTOCOL = 54
     fun supportsChatContinue(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_CONTINUE_MIN_PROTOCOL
+    /// Version 55 adds `launcher.updates` and `launcher.update`.
+    const val AGENT_UPDATES_MIN_PROTOCOL = 55
+    fun supportsAgentUpdates(protocol: Long?): Boolean = protocol != null && protocol >= AGENT_UPDATES_MIN_PROTOCOL
     fun supportsPullCreation(protocol: Long?): Boolean = protocol != null && protocol >= PULL_CREATION_MIN_PROTOCOL
     fun supportsChatRemoveAll(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_REMOVE_ALL_MIN_PROTOCOL
     const val PULLS_MIN_PROTOCOL = 3

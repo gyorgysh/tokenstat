@@ -23,6 +23,7 @@ enum RemoteHostFeature: Hashable {
     case inviteCode
     case agentSignIn
     case agentReinstall
+    case agentUpdates
     case confirmedSend
     case handoff
     case workSearch
@@ -68,6 +69,7 @@ enum RemoteHostFeature: Hashable {
         case .inviteCode: L10n.text("apple.clientremotefeaturegate.adding_this_device.4bb25dcd")
         case .agentSignIn: L10n.text("apple.clientremotefeaturegate.signing_in_to_an_agent.7a8b7e31")
         case .agentReinstall: L10n.text("apple.harnessconfigview.reinstall")
+        case .agentUpdates: L10n.text("common.agent_updates.title")
         case .confirmedSend: L10n.text("apple.clientremotefeaturegate.confirming_a_sent_message.86a0a4b6")
         case .handoff: L10n.text("apple.clientremotefeaturegate.handoff.f89e2d72")
         case .workSearch: L10n.text("apple.clientremotefeaturegate.search_work.cc46cedc")
@@ -124,7 +126,8 @@ enum RemoteHostFeature: Hashable {
     /// picture for every author the forge knows.
     /// Version 37 adds explicitly requested agent reinstallation.
     /// Version 54 adds `chat.continueInNew` and the prompt cache record on
-    /// each conversation.
+    /// each conversation. Version 55 adds `launcher.updates` and
+    /// `launcher.update` for agent CLI versions and updates.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -141,6 +144,7 @@ enum RemoteHostFeature: Hashable {
         case .inviteCode: 7
         case .agentSignIn: 9
         case .agentReinstall: 37
+        case .agentUpdates: 55
         case .confirmedSend: 14
         case .handoff: 12
         case .workSearch: 12
@@ -190,6 +194,7 @@ enum RemoteHostFeature: Hashable {
         case .inviteCode: "key.horizontal.fill"
         case .agentSignIn: "person.badge.key.fill"
         case .agentReinstall: "arrow.clockwise"
+        case .agentUpdates: "arrow.down.circle"
         case .confirmedSend: "checkmark.message.fill"
         case .handoff: "arrow.left.arrow.right"
         case .workSearch: "magnifyingglass"

@@ -44,6 +44,48 @@ internal sealed class HarnessConfigState
     }
 }
 
+/// <summary>
+/// Agent versions and updates (protocol 55). Versions are read on the owning
+/// machine. The latest version is asked of the vendor only on a check, which
+/// runs when somebody presses Check for updates.
+/// </summary>
+internal static class AgentUpdates
+{
+    public const int MinimumProtocol = 55;
+
+    public static bool Supported(JsonNode? protocol) => protocol is JsonObject answer
+        && long.TryParse(answer["protocolVersion"]?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var version)
+        && version >= MinimumProtocol;
+
+    public static async Task<JsonObject?> RowAsync(string id, bool check,
+        Func<string, JsonNode?, TimeSpan?, Task<JsonNode>> call)
+    {
+        var rows = await call("launcher.updates", new JsonObject { ["check"] = check }, TimeSpan.FromMinutes(2));
+        return (rows as JsonArray ?? new JsonArray()).OfType<JsonObject>()
+            .FirstOrDefault(row => Format.Text(row, "id") == id);
+    }
+
+    /// <summary>"Version 2.1.318 · 2.1.322 available", or empty.</summary>
+    public static string Describe(JsonObject? row, bool checkedNow)
+    {
+        if (row is null) return "";
+        var parts = new List<string>();
+        var version = Format.Text(row, "version");
+        if (version.Length > 0) parts.Add(L10n.Text("common.agent_updates.version", version));
+        var latest = Format.Text(row, "latest");
+        if (Format.Flag(row, "updateAvailable") && latest.Length > 0) parts.Add(L10n.Text("common.agent_updates.available", latest));
+        else if (checkedNow && row["updateAvailable"] is not null) parts.Add(L10n.Text("common.agent_updates.up_to_date"));
+        if (checkedNow && !Format.Flag(row, "canCheck")) parts.Add(L10n.Text("common.agent_updates.unknown_latest"));
+        var error = Format.Text(row, "error");
+        if (error.Length > 0) parts.Add(L10n.Text("common.agent_updates.check_failed", error));
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>Offered once a check found a newer version, or nothing to compare.</summary>
+    public static bool Offers(JsonObject? row, bool checkedNow) => row is not null && Format.Flag(row, "canUpdate")
+        && (Format.Flag(row, "updateAvailable") || (checkedNow && !Format.Flag(row, "canCheck")));
+}
+
 /// <summary>One installer request per tool and owning machine, never retried here.</summary>
 internal static class LauncherInstaller
 {

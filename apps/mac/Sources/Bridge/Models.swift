@@ -1774,6 +1774,30 @@ struct LauncherInstallResult: Codable, Sendable {
     var output: String
 }
 
+/// One installed agent's version, from `launcher.updates`. `latest` and
+/// `updateAvailable` are present only after a check that asked the vendor.
+struct AgentUpdateRow: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String?
+    var version: String?
+    var latest: String?
+    var updateAvailable: Bool?
+    var canUpdate: Bool
+    var canCheck: Bool
+    var busy: Bool
+    var error: String?
+}
+
+/// What `launcher.update` did: the installer result plus the versions on
+/// either side, so the app can say what changed.
+struct AgentUpdateResult: Codable, Sendable {
+    var ok: Bool
+    var exitCode: Int?
+    var output: String
+    var before: String?
+    var after: String?
+}
+
 /// Allowlisted settings behind a launch tile's (i) badge.
 ///
 /// The host only ever returns these keys. The rest of the file, including

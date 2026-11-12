@@ -21,6 +21,7 @@ internal static class HarnessConfigDialog
         var fields = new StackPanel { Spacing = Theme.SpaceM };
         var notices = new StackPanel { Spacing = Theme.SpaceS };
         var installation = new StackPanel { Spacing = Theme.SpaceS };
+        var versions = new StackPanel { Spacing = Theme.SpaceS };
         var path = new TextBlock { FontFamily = Fonts.Mono, FontSize = 11, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
         var progress = new ProgressRing { Width = 20, Height = 20, IsActive = false, HorizontalAlignment = HorizontalAlignment.Left };
         var confirmPanel = new StackPanel { Spacing = Theme.SpaceS, Visibility = Visibility.Collapsed };
@@ -50,6 +51,8 @@ internal static class HarnessConfigDialog
             foreach (var control in fields.Children.OfType<StackPanel>().SelectMany(row => row.Children.OfType<Control>()))
                 control.IsEnabled = !busy;
             if (reinstall is not null) reinstall.IsEnabled = !busy;
+            foreach (var button in versions.Children.OfType<StackPanel>().SelectMany(row => row.Children.OfType<Button>()))
+                button.IsEnabled = !busy;
             progress.IsActive = busy;
             progress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -150,13 +153,71 @@ internal static class HarnessConfigDialog
             finally { confirmPanel.Visibility = Visibility.Collapsed; confirmation = null; }
         }
         var command = Format.Text(profile, "installCommand");
+        installation.Children.Add(versions);
+        async Task ConfigureVersions(JsonNode protocol)
+        {
+            if (!Format.Flag(profile, "installed") || !AgentUpdates.Supported(protocol)) return;
+            var row = await AgentUpdates.RowAsync(id, false, call);
+            if (row is null) return;
+            var checkedNow = false;
+            var line = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.7 };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+            var check = ActionIconGlyph.Button(L10n.Text("common.agent_updates.check"), ActionIcon.Refresh, (_, _) => { });
+            var update = ActionIconGlyph.Button(L10n.Text("common.agent_updates.update"), ActionIcon.Download, (_, _) => { });
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(check, "harness.updates.check");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(update, "harness.update");
+            void Show()
+            {
+                line.Text = AgentUpdates.Describe(row, checkedNow);
+                update.Visibility = AgentUpdates.Offers(row, checkedNow) ? Visibility.Visible : Visibility.Collapsed;
+                update.IsEnabled = !busy && !Format.Flag(row, "busy");
+                check.IsEnabled = !busy;
+                if (Format.Flag(row, "busy")) ToolTipService.SetToolTip(update, L10n.Text("common.agent_updates.busy"));
+            }
+            check.Click += async (_, _) =>
+            {
+                if (busy) return;
+                busy = true; notices.Children.Clear(); UpdateButtons(); Show();
+                try { row = await AgentUpdates.RowAsync(id, true, call) ?? row; checkedNow = true; }
+                catch (Exception ex) { Notice(ex.Message); }
+                finally { busy = false; UpdateButtons(); Show(); }
+            };
+            update.Click += async (_, _) =>
+            {
+                if (busy) return;
+                CaptureEdits();
+                busy = true; notices.Children.Clear(); UpdateButtons(); Show();
+                try
+                {
+                    var result = await call("launcher.update", new JsonObject { ["id"] = id }, LauncherInstaller.Patience);
+                    if (!Format.Flag(result, "ok"))
+                        throw new InvalidOperationException(L10n.Text("common.agent_updates.failed", Format.Text(result, "output").Trim()));
+                    changedInstallation = true;
+                    var after = Format.Text(result, "after");
+                    Notice(after.Length > 0 ? L10n.Text("common.agent_updates.updated", after) : L10n.Text("common.agent_updates.updated_unknown"), true);
+                    row = await AgentUpdates.RowAsync(id, false, call) ?? row;
+                    checkedNow = false;
+                    await Reload(true);
+                }
+                catch (Exception ex) { Notice(ex.Message); }
+                finally { busy = false; UpdateButtons(); Show(); }
+            };
+            buttons.Children.Add(check);
+            buttons.Children.Add(update);
+            versions.Children.Add(new TextBlock { Text = L10n.Text("common.agent_updates.title"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            versions.Children.Add(line);
+            versions.Children.Add(buttons);
+            Show();
+        }
         async Task ConfigureInstallation()
         {
-            if (!Format.Flag(profile, "installed") || command.Length == 0) return;
+            if (!Format.Flag(profile, "installed")) return;
             JsonNode protocol;
             try { protocol = await call("protocol", null, null); }
             catch { return; }
-            if (!LauncherInstaller.SupportsReinstall(protocol)) return;
+            try { await ConfigureVersions(protocol); }
+            catch (Exception ex) { Notice(ex.Message); }
+            if (command.Length == 0 || !LauncherInstaller.SupportsReinstall(protocol)) return;
             installation.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Height = 1, Fill = Theme.BorderBrush });
             installation.Children.Add(new TextBlock { Text = L10n.Text("windows.harnessconfig.installation"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
             installation.Children.Add(new TextBlock { Text = L10n.Text("windows.harnessconfig.reinstall_hint"), TextWrapping = TextWrapping.Wrap, Opacity = 0.7 });

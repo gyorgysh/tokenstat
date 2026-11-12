@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod agent_versions;
 pub mod antigravity;
 pub mod antigravity_ide;
 pub mod app_info;

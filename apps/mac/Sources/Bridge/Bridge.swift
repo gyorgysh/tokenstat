@@ -2828,6 +2828,25 @@ extension Bridge {
         )
     }
 
+    /// Installed agent versions. With `check`, the latest each vendor
+    /// publishes too, which is a request to the vendor: only on a button press.
+    static func agentUpdates(check: Bool, peer: String?) async throws -> [AgentUpdateRow] {
+        let params: [String: Any] = ["check": check]
+        if let peer {
+            return try await onPeer(peer, "launcher.updates", params, patience: Patience.long, as: [AgentUpdateRow].self)
+        }
+        return try await background("launcher.updates", params, patience: Patience.long, as: [AgentUpdateRow].self)
+    }
+
+    /// Update one agent with its own updater, or its installer when it has
+    /// none. The host picks the command from the id.
+    static func agentUpdate(id: String, peer: String?) async throws -> AgentUpdateResult {
+        if let peer {
+            return try await onPeer(peer, "launcher.update", ["id": id], patience: Patience.installer, as: AgentUpdateResult.self)
+        }
+        return try await background("launcher.update", ["id": id], patience: Patience.installer, as: AgentUpdateResult.self)
+    }
+
     /// Take a profile off this machine's launcher. The binary stays.
     static func launcherHide(id: String) async throws {
         struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }

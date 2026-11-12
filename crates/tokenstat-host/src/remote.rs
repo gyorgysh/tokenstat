@@ -3029,7 +3029,10 @@ const ANSWER_IDLE: Duration = Duration::from_secs(45);
 const QUIET_WORK_IDLE: Duration = Duration::from_secs(600);
 
 fn answer_idle(method: &str) -> Duration {
-    if matches!(method, "launcher.install" | "launcher.reinstall") {
+    if matches!(
+        method,
+        "launcher.install" | "launcher.reinstall" | "launcher.update"
+    ) {
         // Installers answer only after exit, including their captured output.
         // Allow the host's full deadline plus pipe-drain and response time.
         crate::INSTALLER_TIMEOUT + Duration::from_secs(30)
@@ -3052,6 +3055,7 @@ fn refuses_redial(method: &str) -> bool {
             | "chat.steerSend"
             | "launcher.install"
             | "launcher.reinstall"
+            | "launcher.update"
             | "workspace.lfsSetup"
             | "workspace.pullReviewed"
             | "workspace.pushReviewed"

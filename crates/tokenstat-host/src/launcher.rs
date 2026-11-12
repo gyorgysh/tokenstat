@@ -858,7 +858,7 @@ fn install_preflight(
     Ok(())
 }
 
-fn installer_process(command: &str) -> std::process::Command {
+pub(crate) fn installer_process(command: &str) -> std::process::Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -897,13 +897,29 @@ fn installer_process(command: &str) -> std::process::Command {
 }
 
 fn run_installer(id: &str, reinstall: bool) -> Result<Value, String> {
+    run_installer_command(id, reinstall, None)
+}
+
+/// Run the catalog installer, or `custom` in its place: an update runs the
+/// agent's own update command through the same environment, timeout and
+/// output capture. Both are built here from hardcoded catalog entries.
+pub(crate) fn run_installer_command(
+    id: &str,
+    reinstall: bool,
+    custom: Option<std::process::Command>,
+) -> Result<Value, String> {
     let profile = PROFILES
         .iter()
         .find(|p| p.id == id)
         .ok_or_else(|| format!("no launcher profile {id}"))?;
-    let command = profile
-        .installer()
-        .ok_or_else(|| format!("{id} has no installer for this platform"))?;
+    let installer = match custom {
+        Some(command) => command,
+        None => installer_process(
+            profile
+                .installer()
+                .ok_or_else(|| format!("{id} has no installer for this platform"))?,
+        ),
+    };
     static INSTALLING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _installing = INSTALLING
         .try_lock()
@@ -923,7 +939,7 @@ fn run_installer(id: &str, reinstall: bool) -> Result<Value, String> {
     // sees. `-NonInteractive` alongside the null stdin below, so an installer
     // that wants to ask something fails rather than hanging on a prompt no
     // one can answer.
-    let mut cmd = installer_process(command);
+    let mut cmd = installer;
     // From the home folder, never the host's own working directory. On
     // Windows hostd runs from the app's install folder, a self-contained .NET
     // app that ships facade `System.dll` and friends. Windows PowerShell's
@@ -1315,6 +1331,17 @@ pub(crate) fn is_agent_command(command: &str) -> bool {
 
 fn valid_model_id(model: &str) -> bool {
     !model.is_empty() && model.len() <= 512 && !model.chars().any(char::is_control)
+}
+
+/// The full path of an installed profile's command, as the catalog finds it.
+pub(crate) fn resolved_command(id: &str) -> Option<String> {
+    let profile = PROFILES.iter().find(|p| p.id == id)?;
+    resolve_profile(profile, &search_path(), Path::new(&user_home()))
+}
+
+/// Display name for a profile id.
+pub(crate) fn profile_name(id: &str) -> Option<&'static str> {
+    PROFILES.iter().find(|p| p.id == id).map(|p| p.name)
 }
 
 /// Where this profile's command actually is: the search path first, then the

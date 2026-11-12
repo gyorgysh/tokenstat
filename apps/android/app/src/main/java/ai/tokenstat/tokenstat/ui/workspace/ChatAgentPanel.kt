@@ -256,6 +256,14 @@ fun ChatAgentSheet(
     var showingSetup by remember { mutableStateOf(false) }
     var installing by remember { mutableStateOf<String?>(null) }
     var updating by remember { mutableStateOf(false) }
+    // Installed agent versions keyed by launcher id, and what a check or an
+    // update said. The vendor is asked only by Check for updates.
+    val supportsUpdates = HostContracts.supportsAgentUpdates(protocol)
+    var versions by remember(peer) { mutableStateOf<Map<String, JsonObject>>(emptyMap()) }
+    var checkingUpdates by remember(peer) { mutableStateOf(false) }
+    var checkedUpdates by remember(peer) { mutableStateOf(false) }
+    var updatingAgent by remember(peer) { mutableStateOf<String?>(null) }
+    var updateNotes by remember(peer) { mutableStateOf<Map<String, String>>(emptyMap()) }
     // Every agent's quota for its row: the app's own readings for this
     // device, one read of the host's for a remote one.
     val appState by model.state.collectAsStateWithLifecycle()
@@ -326,6 +334,46 @@ fun ChatAgentSheet(
         }
     }
 
+    suspend fun loadVersions(check: Boolean) {
+        if (check) checkingUpdates = true
+        try {
+            val rows = model.workspaceSection(peer, "launcher.updates", buildJsonObject { put("check", check) }) as? JsonArray
+            versions = asObjects(rows ?: JsonArray(emptyList())).associateBy { it.str("id").orEmpty() }
+            if (check) checkedUpdates = true
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (check) setupError = TunnelCopy.display(error.message ?: L10n.text("android.chatagentpanel.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatagentpanel.that_computer.2b209061") })
+        } finally {
+            if (check) checkingUpdates = false
+        }
+    }
+
+    fun updateAgent(row: JsonObject) {
+        val id = row.str("id") ?: return
+        if (updatingAgent != null) return
+        updatingAgent = id
+        updateNotes = updateNotes - id
+        scope.launch {
+            val note = runCatching {
+                model.workspaceSection(peer, "launcher.update", buildJsonObject { put("id", id) }) as? JsonObject
+            }.fold(
+                onSuccess = { result ->
+                    if (result?.bol("ok") == true) {
+                        result.str("after")?.let { L10n.text("common.agent_updates.updated", it) } ?: L10n.text("common.agent_updates.updated_unknown")
+                    } else {
+                        L10n.text("common.agent_updates.failed", result?.str("output").orEmpty().trim().takeLast(600))
+                    }
+                },
+                onFailure = { L10n.text("common.agent_updates.failed", it.message.orEmpty()) },
+            )
+            updateNotes = updateNotes + (id to note)
+            loadVersions(check = false)
+            load(refresh = false)
+            updatingAgent = null
+        }
+    }
+
     fun install(backend: JsonObject) {
         val id = backend.str("launcherId") ?: return
         if (installing != null) return
@@ -358,11 +406,24 @@ fun ChatAgentSheet(
                         .padding(Space.m),
                     verticalArrangement = Arrangement.spacedBy(Space.m),
                 ) {
-                    Text(
-                        L10n.text("android.chatagentpanel.set_up_on_0.3a4e92e0", "${hostLabel.ifBlank { L10n.text("android.chatagentpanel.this_computer.058bf37c") }}"),
-                        style = TsType.callout.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                        color = colors.textPrimary,
-                    )
+                    LaunchedEffect(peer, supportsUpdates) { if (supportsUpdates) loadVersions(check = false) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            L10n.text("android.chatagentpanel.set_up_on_0.3a4e92e0", "${hostLabel.ifBlank { L10n.text("android.chatagentpanel.this_computer.058bf37c") }}"),
+                            style = TsType.callout.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                            color = colors.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (supportsUpdates) {
+                            TsSecondaryButton(
+                                label = if (checkingUpdates) L10n.text("common.agent_updates.checking") else L10n.text("common.agent_updates.check"),
+                                icon = ActionIcon.Refresh.vector,
+                                small = true,
+                                enabled = !checkingUpdates && updatingAgent == null && installing == null && !locked,
+                                onClick = { scope.launch { loadVersions(check = true) } },
+                            )
+                        }
+                    }
                     current?.let { backend ->
                         AgentSetupCard(model, peer, hostLabel, backend, locked || updating, showWhenReady = true) { readiness, verified ->
                             onBackends(backends.map {
@@ -390,8 +451,31 @@ fun ChatAgentSheet(
                                     style = TsType.caption,
                                     color = colors.controlGlyph,
                                 )
+                                val row = backend.str("launcherId")?.let { versions[it] }
+                                if (!backendNotInstalled(backend) && row != null) {
+                                    val line = agentVersionLine(row, checkedUpdates)
+                                    if (line.isNotEmpty()) {
+                                        Text(
+                                            line,
+                                            style = TsType.caption,
+                                            color = if (row.bol("updateAvailable")) colors.accent else colors.controlGlyph,
+                                        )
+                                    }
+                                }
+                                backend.str("launcherId")?.let { updateNotes[it] }?.let { note ->
+                                    Text(note, style = TsType.caption, color = colors.controlGlyph)
+                                }
                             }
-                            if (backendNotInstalled(backend) && backend.bol("canInstall")) {
+                            val updateRow = backend.str("launcherId")?.let { versions[it] }
+                            if (supportsUpdates && !backendNotInstalled(backend) && updateRow != null && agentOffersUpdate(updateRow, checkedUpdates)) {
+                                TsSecondaryButton(
+                                    label = if (updatingAgent == updateRow.str("id")) L10n.text("common.agent_updates.updating") else L10n.text("common.agent_updates.update"),
+                                    icon = ActionIcon.Download.vector,
+                                    small = true,
+                                    enabled = updatingAgent == null && installing == null && !checkingUpdates && !locked && !updateRow.bol("busy"),
+                                    onClick = { updateAgent(updateRow) },
+                                )
+                            } else if (backendNotInstalled(backend) && backend.bol("canInstall")) {
                                 TsSecondaryButton(
                                     label = if (installing == backend.str("id")) L10n.text("android.chatagentpanel.installing.530bcc35") else L10n.text("android.chatagentpanel.install.569ca49f"),
                                     icon = ActionIcon.Download.vector,
@@ -490,3 +574,17 @@ fun ChatAgentSheet(
         }
     }
 }
+
+/// "Version 2.1.318 · 2.1.322 available", from one `launcher.updates` row.
+internal fun agentVersionLine(row: JsonObject, checked: Boolean): String = listOfNotNull(
+    row.str("version")?.let { L10n.text("common.agent_updates.version", it) },
+    row.str("latest")?.takeIf { row.bol("updateAvailable") }?.let { L10n.text("common.agent_updates.available", it) },
+    L10n.text("common.agent_updates.up_to_date").takeIf { checked && row["updateAvailable"] != null && !row.bol("updateAvailable") },
+    L10n.text("common.agent_updates.unknown_latest").takeIf { checked && !row.bol("canCheck") },
+    row.str("error")?.let { L10n.text("common.agent_updates.check_failed", it) },
+).joinToString(" · ")
+
+/// An update is offered once a check found a newer version, or nothing to
+/// compare against.
+internal fun agentOffersUpdate(row: JsonObject, checked: Boolean): Boolean =
+    row.bol("canUpdate") && (row.bol("updateAvailable") || (checked && !row.bol("canCheck")))

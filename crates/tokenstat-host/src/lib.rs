@@ -58,6 +58,8 @@ pub mod agent_models;
 #[cfg(feature = "local-host")]
 pub(crate) mod agent_readiness;
 #[cfg(feature = "local-host")]
+pub(crate) mod agent_updates;
+#[cfg(feature = "local-host")]
 pub mod automations;
 pub mod base64;
 #[cfg(feature = "local-host")]
@@ -287,4 +289,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 43 adds local sharing inspection and recovery without an account.
 /// Version 45 binds execution authority to a non-reused host-approved grant.
 /// Version 52 adds cursor-addressed pull-request list pages.
-pub const PROTOCOL_VERSION: &str = "54";
+/// Version 55 adds `launcher.updates` and `launcher.update`.
+pub const PROTOCOL_VERSION: &str = "55";

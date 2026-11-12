@@ -7124,6 +7124,17 @@ fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
     })
 }
 
+/// Whether any chat is in a turn on this launcher profile's agent. An update
+/// replaces the binary under a running turn, so it waits for none.
+pub(crate) fn agent_busy(profile_id: &str) -> bool {
+    shared()
+        .conversations
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .any(|chat| chat.running && launcher_profile_id(&chat.backend) == profile_id)
+}
+
 fn launcher_profile_id(backend: &str) -> &str {
     match backend {
         "sh" => "shell",

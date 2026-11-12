@@ -110,7 +110,7 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         | "automation.backends"
         | "automation.creationReceipt"
         | "automation.runReceipt" => false,
-        "launcher.catalog" => false,
+        "launcher.catalog" | "launcher.updates" => false,
         "harness.config.get" => false,
         "todo.list" => false,
         m if m.starts_with("workspace.") => true,
