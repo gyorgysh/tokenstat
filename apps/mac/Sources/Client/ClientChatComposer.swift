@@ -46,6 +46,7 @@ struct ClientChatComposer: View {
     @State private var dataDropTargeted = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var expanded = false
+    @State private var dictation = ChatDictation()
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -90,6 +91,8 @@ struct ClientChatComposer: View {
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: running)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: expanded)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: focused)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: dictation.isActive)
+        .modifier(ChatDictationLifetime(dictation: dictation, blocked: model.sending || model.landingDraft?.isSubmitting == true))
         .padding(model.landingDraft == nil ? 12 : 0)
         .modifier(ClientComposerSurface(landing: model.landingDraft != nil))
         .dropDestination(for: String.self) { items, _ in
@@ -115,6 +118,7 @@ struct ClientChatComposer: View {
         }
         .onChange(of: model.currentReference) { _, _ in
             importing = false; importOwner = nil; pickingPhotos = false; photoOwner = nil; photos = []
+            dictation.stop()
         }
         .onChange(of: compactHeight) { _, isCompact in
             if isCompact { expanded = false }
@@ -175,7 +179,20 @@ struct ClientChatComposer: View {
         }
     }
 
+    @ViewBuilder
     private var inputRow: some View {
+        if dictation.isActive {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                field
+                ChatDictationBar(dictation: dictation, control: 44)
+                    .transition(.opacity)
+            }
+        } else {
+            typingRow
+        }
+    }
+
+    private var typingRow: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 if !expanded {
@@ -185,12 +202,14 @@ struct ClientChatComposer: View {
                         .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
                 }
                 field
+                if !expanded { dictationControl }
                 if !expanded && canSend { sendControl.transition(controlTransition) }
             }
             if expanded {
                 HStack(spacing: Theme.Space.s) {
                     attachControl
                     ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
+                    dictationControl
                     Spacer(minLength: 0)
                     if canSend { sendControl.transition(controlTransition) }
                 }
@@ -237,6 +256,17 @@ struct ClientChatComposer: View {
         }
         .disabled(model.landingDraft != nil && model.currentReference == nil)
         .accessibilityLabel(L10n.text("apple.clientchatcomposer.attach.d406ade2"))
+    }
+
+    /// Beside the field, where the keyboard's own mic would be. Sending while
+    /// it listens stops it first, so the last words are not lost to a race.
+    @ViewBuilder
+    private var dictationControl: some View {
+        if !model.isSharedSource {
+            ChatDictationButton(dictation: dictation, draft: $draft, size: 44,
+                                disabled: model.sending || model.landingDraft?.isSubmitting == true)
+                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
+        }
     }
 
     /// Grow the writing area without leaving the conversation.
@@ -291,11 +321,13 @@ struct ClientChatComposer: View {
     }
 
     private func sendTapped() {
+        dictation.stop()
         hideKeyboard()
         onSend()
     }
 
     private func sendNowTapped() {
+        dictation.stop()
         hideKeyboard()
         onSendNow()
     }

@@ -96,6 +96,7 @@ enum ActionIcon {
     // Tools
     case send
     case attach
+    case dictate
     case fastMode
     case routing
     case persona
@@ -198,6 +199,7 @@ enum ActionIcon {
 
         case .send: return "paperplane"
         case .attach: return "paperclip"
+        case .dictate: return "mic"
         case .fastMode: return "bolt.fill"
         case .routing: return "arrow.triangle.branch"
         case .persona: return "person.text.rectangle"

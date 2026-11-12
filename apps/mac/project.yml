@@ -288,8 +288,9 @@ settings:
     # 215 is 1.11.0.
     # 229 was uploaded as 1.14.0; 230 was reserved for local 1.15.0 work.
     # 231 was uploaded as 1.15.0; 232 includes manual chat controls and Back.
-    # 234 is reserved for 1.16.0; 235 is for 1.17.0.
-    CURRENT_PROJECT_VERSION: "235"
+    # 234 is reserved for 1.16.0; 235 went up as 1.17.0.
+    # 236 is 1.17.0 again, with chat dictation.
+    CURRENT_PROJECT_VERSION: "236"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
@@ -432,6 +433,9 @@ targets:
         # will notarize.
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Use Face ID or Touch ID to unlock your SSH vault on this device."
+        # Chat dictation. Asked the first time the mic button is pressed.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "tokenstat listens while you dictate a message, and only while the mic button is on."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Your speech becomes the text of your message. Recognition runs on this device when your language supports it, otherwise Apple processes it."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         # Required, not cosmetic: an upload with no orientations declared is
         # rejected outright (error 90474), because an iPad app that does not

@@ -1,3 +1,5 @@
 /* SPDX-License-Identifier: LicenseRef-tokenstat-source-available */
 "NSFaceIDUsageDescription" = "Use Face ID or Touch ID to unlock your SSH vault on this device.";
 "NSLocalNetworkUsageDescription" = "tokenstat connects straight to your other computers when they are on the same network, which is faster than going through the internet.";
+"NSMicrophoneUsageDescription" = "tokenstat listens while you dictate a message, and only while the mic button is on.";
+"NSSpeechRecognitionUsageDescription" = "Your speech becomes the text of your message. Recognition runs on this device when your language supports it, otherwise Apple processes it.";

@@ -187,6 +187,14 @@ def main():
                 for bundle in bundles:
                     sign_libraries(bundle, fallback)
                 subprocess.run(fallback + ["--deep", str(args.app)], check=True)
+                # The hardened runtime refuses the microphone without this
+                # exception, and chat dictation needs it. It takes no profile.
+                # Signed on the app alone, after the deep pass, so the
+                # widgets keep their own entitlements.
+                with tempfile.TemporaryDirectory() as directory:
+                    runtime = Path(directory) / "runtime.plist"
+                    runtime.write_bytes(plistlib.dumps({"com.apple.security.device.audio-input": True}))
+                    subprocess.run(fallback + ["--entitlements", str(runtime), str(args.app)], check=True)
                 subprocess.run(["codesign", "--verify", "--deep", "--strict", str(args.app)], check=True)
                 for bundle in bundles:
                     verify_library_teams(bundle)

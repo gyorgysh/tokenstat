@@ -27,7 +27,7 @@ internal enum ActionIcon
     Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen,
     Delete,
     External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
-    Send, Attach, FastMode, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
+    Send, Attach, Dictate, FastMode, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
 }
 
@@ -146,6 +146,7 @@ internal static class ActionIconGlyph
         ActionIcon.Help => Sigil(FluentSymbol.Help),
         ActionIcon.Send => Sigil(FluentSymbol.Send),
         ActionIcon.Attach => Sigil(FluentSymbol.Attach),
+        ActionIcon.Dictate => Glyph(0xE720), // Microphone
         ActionIcon.FastMode => Glyph(0xE945), // LightningBolt
         ActionIcon.Persona => Glyph(0xE779), // ContactInfo
         ActionIcon.Plan => Sigil(FluentSymbol.Document),
@@ -231,6 +232,7 @@ internal static class ActionIconGlyph
         ActionIcon.Help => Microsoft.UI.Xaml.Controls.Symbol.Help,
         ActionIcon.Send => Microsoft.UI.Xaml.Controls.Symbol.Send,
         ActionIcon.Attach => Microsoft.UI.Xaml.Controls.Symbol.Attach,
+        ActionIcon.Dictate => Microsoft.UI.Xaml.Controls.Symbol.Microphone,
         ActionIcon.FastMode => (Microsoft.UI.Xaml.Controls.Symbol)0xE945,
         ActionIcon.Persona => Microsoft.UI.Xaml.Controls.Symbol.Contact,
         ActionIcon.Plan or ActionIcon.Calculate => Microsoft.UI.Xaml.Controls.Symbol.Document,

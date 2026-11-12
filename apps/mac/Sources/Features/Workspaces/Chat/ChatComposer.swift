@@ -121,6 +121,7 @@ struct ChatComposer: View {
     @State private var importing = false
     @State private var dropTargeted = false
     @State private var nativeDropTargeted = false
+    @State private var dictation = ChatDictation()
     private var anyDropTargeted: Bool { dropTargeted || nativeDropTargeted }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -139,7 +140,7 @@ struct ChatComposer: View {
                     }
             }
         }
-        .onChange(of: model.currentReference) { _, _ in importing = false; importOwner = nil }
+        .onChange(of: model.currentReference) { _, _ in importing = false; importOwner = nil; dictation.stop() }
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.item],
@@ -174,22 +175,32 @@ struct ChatComposer: View {
             }
             if !model.isSharedSource { ChatSlashMenu(model: model) }
             field
-            ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
-                HStack(spacing: Theme.Space.s) {
-                    attachControl
-                    ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
-                }
-                ChatComposerControls(model: model, chat: chat, locked: setupLocked, compact: true, condensed: true)
-                HStack(spacing: Theme.Space.s) {
-                    turnStatus
-                    ComposerLimitsBadge(backend: chat.backend, peer: model.peer, compact: true, showUsage: {
-                        model.showingUsageStats = true
-                        model.showingCommandStats = true
-                    })
-                    turnActions
+            if dictation.isActive {
+                ChatDictationBar(dictation: dictation, control: 28)
+                    .transition(.opacity)
+            } else {
+                ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
+                    HStack(spacing: Theme.Space.s) {
+                        attachControl
+                        ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
+                    }
+                    ChatComposerControls(model: model, chat: chat, locked: setupLocked, compact: true, condensed: true)
+                    HStack(spacing: Theme.Space.s) {
+                        turnStatus
+                        ComposerLimitsBadge(backend: chat.backend, peer: model.peer, compact: true, showUsage: {
+                            model.showingUsageStats = true
+                            model.showingCommandStats = true
+                        })
+                        if !model.isSharedSource {
+                            ChatDictationButton(dictation: dictation, draft: $draft, size: 28, disabled: dictationBlocked)
+                        }
+                        turnActions
+                    }
                 }
             }
         }
+        .modifier(ChatDictationLifetime(dictation: dictation, blocked: dictationBlocked))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dictation.isActive)
         #if os(macOS)
         .onExitCommand {
             if running { onStop() }
@@ -348,14 +359,14 @@ struct ChatComposer: View {
                         .keyboardShortcut(.cancelAction)
                 }
                 if showsSend {
-                    Button(sendTitle, .send, action: onSend)
+                    Button(sendTitle, .send) { dictation.stop(); onSend() }
                         .buttonStyle(AccentButtonStyle(small: true))
                         .environment(\.compactActions, true)
                         .disabled(cannotSend)
                         .help(sendHelp)
                         .contextMenu {
                             if running {
-                                Button(L10n.text("apple.chatcomposer.stop_and_send_now.8ad0a50d"), .send, action: onSendNow)
+                                Button(L10n.text("apple.chatcomposer.stop_and_send_now.8ad0a50d"), .send) { dictation.stop(); onSendNow() }
                             }
                         }
                 }
@@ -374,7 +385,7 @@ struct ChatComposer: View {
             enabled: !model.sending && model.landingDraft?.isSubmitting != true,
             acceptsAttachmentDrops: acceptsDrops,
             onSend: {
-                if model.selected?.id == chat.id, !cannotSend { onSend() }
+                if model.selected?.id == chat.id, !cannotSend { dictation.stop(); onSend() }
             },
             onCommandKey: { model.handleChatCommandKey($0) },
             onStop: {
@@ -410,6 +421,10 @@ struct ChatComposer: View {
         if sendsAsNote { return L10n.text("apple.chatcomposer.next_step.298a9207") }
         return running ? L10n.text("apple.chatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.chatcomposer.send.f6f4688f")
     }
+
+    /// The field takes no typing while a message is on its way, so it takes
+    /// no dictation either.
+    private var dictationBlocked: Bool { model.sending || model.landingDraft?.isSubmitting == true }
 
     private var setupLocked: Bool { model.isSharedSource || running || (model.landingDraft != nil && !model.landingCanSubmit) }
 

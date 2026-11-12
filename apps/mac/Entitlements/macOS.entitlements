@@ -11,6 +11,10 @@
     <array>
         <string>$(AppIdentifierPrefix)ai.tokenstat.tokenstat</string>
     </array>
+    <!-- Hardened runtime blocks the microphone unless this is present.
+         Chat dictation listens only while its mic button is on. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
     <key>com.apple.security.application-groups</key>
     <array>
         <string>group.ai.tokenstat.tokenstat</string>
