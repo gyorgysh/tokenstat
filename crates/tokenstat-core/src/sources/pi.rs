@@ -212,9 +212,17 @@ fn parse_file_for(
                 // OMP uses eight-hex IDs unique within one session only.
                 // The timestamp is copied with a forked entry and prevents
                 // unrelated sessions with the same short ID colliding.
-                EventId::derive(&[source.as_str(), id, row.timestamp.as_deref().unwrap_or("")])
+                match row
+                    .timestamp
+                    .as_deref()
+                    .filter(|timestamp| !timestamp.is_empty())
+                {
+                    Some(timestamp) => EventId::derive(&[source.as_str(), id, timestamp]),
+                    None => EventId::derive(&[source.as_str(), &path.to_string_lossy(), id]),
+                }
             }
             Some(id) if !id.is_empty() => EventId::derive(&[source.as_str(), id]),
+            _ if source == SourceId::Pi => EventId::derive(&["pi", &session, &i.to_string()]),
             _ => EventId::derive(&[source.as_str(), &path.to_string_lossy(), &i.to_string()]),
         };
 
@@ -311,6 +319,20 @@ mod tests {
         PathBuf::from(ROOT)
             .join("--Users-x-git-demo--")
             .join("2026-08-19T21-49-58-054Z_01a01c00-9fa6-70a9-901b-34f46111a70e.jsonl")
+    }
+
+    #[test]
+    fn idless_pi_events_keep_their_existing_archive_identity() {
+        let text = r#"{"type":"message","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2}}}"#;
+        let result = parse_file(
+            Path::new("/sessions/project/time_session.jsonl"),
+            Path::new("/sessions"),
+            text,
+        );
+        assert_eq!(
+            result.events[0].id,
+            EventId::derive(&["pi", "session", "0"])
+        );
     }
 
     #[test]
