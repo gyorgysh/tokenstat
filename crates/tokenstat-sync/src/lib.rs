@@ -85,6 +85,7 @@ pub struct FetchReport {
     pub events: usize,
     pub from_cache: bool,
     pub skipped_no_token: bool,
+    pub failed: bool,
     pub message: Option<String>,
 }
 
@@ -102,6 +103,7 @@ pub fn fetch_remotes(
         Ok(r) => out.push(r),
         Err(e) => out.push(FetchReport {
             vendor: "cursor",
+            failed: true,
             message: Some(format!("fetch failed: {e}")),
             ..FetchReport::default()
         }),
@@ -110,6 +112,7 @@ pub fn fetch_remotes(
         Ok(r) => out.push(r),
         Err(e) => out.push(FetchReport {
             vendor: "antigravity",
+            failed: true,
             message: Some(format!("fetch failed: {e}")),
             ..FetchReport::default()
         }),

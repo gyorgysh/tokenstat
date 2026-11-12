@@ -377,8 +377,14 @@ pub fn fetch_into(
 ) -> anyhow::Result<FetchReport> {
     let (token, source) = match creds::cursor_token()? {
         CursorToken::Token(token, source) => (token, source),
-        CursorToken::Lapsed(expired_ms) => return Ok(no_token_report(Some(expired_ms))),
-        CursorToken::Missing => return Ok(no_token_report(None)),
+        CursorToken::Lapsed(expired_ms) => return Ok(no_token_report(Some(expired_ms), false)),
+        CursorToken::Missing => {
+            #[cfg(target_os = "macos")]
+            let inaccessible = crate::discover::cursor_safe_storage_unreadable();
+            #[cfg(not(target_os = "macos"))]
+            let inaccessible = false;
+            return Ok(no_token_report(None, inaccessible));
+        }
     };
 
     let use_bearer = looks_like_jwt(&token);
@@ -433,17 +439,19 @@ pub fn fetch_into(
         events: n,
         from_cache,
         skipped_no_token: false,
-        message: Some(format!("auth via {src}")),
+        failed: false,
+        message: Some(format!("Cursor: {n} usage events (auth via {src})")),
     })
 }
 
 /// A fetch that had no token to use, and the sentence that says why.
-fn no_token_report(lapsed_at_ms: Option<i64>) -> FetchReport {
+fn no_token_report(lapsed_at_ms: Option<i64>, inaccessible: bool) -> FetchReport {
     let message = match lapsed_at_ms {
         Some(expired_ms) => format!(
             "Cursor's sign-in expired on {}. Open the Cursor app, or run `cursor-agent login`.",
             expiry_day(expired_ms)
         ),
+        None if inaccessible => "Cursor's saved sign-in is unavailable in Keychain. Allow access in Account → Plan limits, then retry the usage fetch.".into(),
         None => "no Cursor token. Sign in to the Cursor app, run `cursor-agent login`, or: \
                  tokenstat auth cursor --token <WorkosCursorSessionToken>"
             .into(),
@@ -509,7 +517,7 @@ fn download_events_json(access_token: &str) -> anyhow::Result<String> {
         }
         let n = batch.len();
         all.extend(batch);
-        if all.len() as u64 >= total || n < 200 {
+        if (total > 0 && all.len() as u64 >= total) || n < 200 {
             break;
         }
         page += 1;
@@ -526,7 +534,11 @@ fn download_events_json(access_token: &str) -> anyhow::Result<String> {
 
 #[derive(Debug, Deserialize, serde::Serialize)]
 struct EventsResponse {
-    #[serde(rename = "totalUsageEventsCount", default)]
+    #[serde(
+        rename = "totalUsageEventsCount",
+        default,
+        deserialize_with = "deserialize_count"
+    )]
     total_usage_events_count: u64,
     #[serde(rename = "usageEventsDisplay")]
     usage_events_display: Vec<serde_json::Value>,
@@ -534,27 +546,56 @@ struct EventsResponse {
 
 #[derive(Debug, Deserialize)]
 struct RemoteEvent {
-    timestamp: Option<String>,
+    timestamp: Option<serde_json::Value>,
     model: Option<String>,
     kind: Option<String>,
     #[serde(rename = "conversationId")]
     conversation_id: Option<String>,
-    #[serde(rename = "isTokenBasedCall")]
-    is_token_based: Option<bool>,
     #[serde(rename = "tokenUsage")]
     token_usage: Option<TokenUsage>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TokenUsage {
-    #[serde(rename = "inputTokens")]
+    #[serde(
+        rename = "inputTokens",
+        default,
+        deserialize_with = "deserialize_optional_count"
+    )]
     input: Option<u64>,
-    #[serde(rename = "outputTokens")]
+    #[serde(
+        rename = "outputTokens",
+        default,
+        deserialize_with = "deserialize_optional_count"
+    )]
     output: Option<u64>,
-    #[serde(rename = "cacheReadTokens")]
+    #[serde(
+        rename = "cacheReadTokens",
+        default,
+        deserialize_with = "deserialize_optional_count"
+    )]
     cache_read: Option<u64>,
-    #[serde(rename = "cacheWriteTokens")]
+    #[serde(
+        rename = "cacheWriteTokens",
+        default,
+        deserialize_with = "deserialize_optional_count"
+    )]
     cache_write: Option<u64>,
+}
+
+fn deserialize_optional_count<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.as_ref().and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+    }))
+}
+
+fn deserialize_count<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    Ok(deserialize_optional_count(deserializer)?.unwrap_or(0))
 }
 
 fn parse_events_json(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
@@ -565,17 +606,15 @@ fn parse_events_json(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
             Ok(e) => e,
             Err(_) => continue,
         };
-        if ev.is_token_based == Some(false) {
-            continue;
-        }
         let Some(tu) = ev.token_usage else {
             continue;
         };
-        let input = tu.input.unwrap_or(0);
-        let output = tu.output.unwrap_or(0);
-        let cache_read = tu.cache_read.unwrap_or(0);
-        let cache_write = tu.cache_write.unwrap_or(0);
-        if input == 0 && output == 0 && cache_read == 0 && cache_write == 0 {
+        let (input, output, cache_read, cache_write) =
+            (tu.input, tu.output, tu.cache_read, tu.cache_write);
+        if [input, output, cache_read, cache_write]
+            .into_iter()
+            .all(|value| value.unwrap_or(0) == 0)
+        {
             continue;
         }
         let model = ev
@@ -583,13 +622,20 @@ fn parse_events_json(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
             .as_deref()
             .filter(|s| !s.is_empty())
             .unwrap_or("cursor-unknown");
-        let ts_raw = ev
-            .timestamp
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Cursor usage event has no timestamp"))?;
-        let ts_ms: i64 = ts_raw
-            .parse()
-            .map_err(|_| anyhow::anyhow!("Cursor usage event has an invalid timestamp"))?;
+        let Some(ts_ms) = ev.timestamp.as_ref().and_then(|value| {
+            value.as_i64().or_else(|| {
+                value.as_str().and_then(|text| {
+                    text.parse().ok().or_else(|| {
+                        text.parse::<jiff::Timestamp>()
+                            .ok()
+                            .map(|time| time.as_millisecond())
+                    })
+                })
+            })
+        }) else {
+            continue;
+        };
+        let ts_raw = ts_ms.to_string();
         let session = ev
             .conversation_id
             .as_deref()
@@ -600,13 +646,13 @@ fn parse_events_json(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
         let id = EventId::derive(&[
             "cursor",
             "events",
-            ts_raw,
+            &ts_raw,
             model,
             &session,
-            &input.to_string(),
-            &output.to_string(),
-            &cache_read.to_string(),
-            &cache_write.to_string(),
+            &input.unwrap_or(0).to_string(),
+            &output.unwrap_or(0).to_string(),
+            &cache_read.unwrap_or(0).to_string(),
+            &cache_write.unwrap_or(0).to_string(),
         ]);
 
         events.push(UsageEvent {
@@ -617,11 +663,11 @@ fn parse_events_json(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
             session,
             project: "cursor".into(),
             counters: Counters {
-                input_fresh: Some(input),
-                cache_read: Some(cache_read),
-                cache_write_5m: Some(cache_write),
+                input_fresh: input,
+                cache_read,
+                cache_write_5m: cache_write,
                 cache_write_1h: None,
-                output: Some(output),
+                output,
             },
             extras: Extras::default(),
             billing: billing_from_kind(ev.kind.as_deref()),
@@ -973,6 +1019,44 @@ fn reuse_archived_csv_ids(
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "read-only live Cursor usage diagnostic; requires a signed-in Cursor"]
+    fn cursor_live_usage_schema_diagnostic() {
+        let token = match creds::cursor_token().unwrap() {
+            CursorToken::Token(token, _) => token,
+            CursorToken::Lapsed(_) => {
+                eprintln!("Cursor sign-in expired");
+                return;
+            }
+            CursorToken::Missing => {
+                eprintln!("Cursor sign-in unavailable");
+                return;
+            }
+        };
+        if !looks_like_jwt(&token) {
+            eprintln!("Cursor uses the CSV session path");
+            return;
+        }
+        let raw = match download_events_json(&token) {
+            Ok(raw) => raw,
+            Err(error) => {
+                eprintln!("Cursor event fetch failed: {error}");
+                return;
+            }
+        };
+        let root: EventsResponse = serde_json::from_str(&raw).unwrap();
+        let total = root.usage_events_display.len();
+        let token_rows = root
+            .usage_events_display
+            .iter()
+            .filter(|row| row.get("tokenUsage").is_some_and(|value| value.is_object()))
+            .count();
+        let parsed = parse_events_json(&raw).map(|events| events.len());
+        eprintln!(
+            "Cursor event rows: {total}; rows with token usage: {token_rows}; parsed: {parsed:?}"
+        );
+    }
+
     const HEADER: &str =
         "Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens\n";
 
@@ -1091,6 +1175,22 @@ Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Toke
         assert_eq!(ev[0].counters.cache_write_5m, Some(50));
         assert_eq!(ev[0].billing, BillingMode::Plan);
         assert_eq!(ev[0].ts.utc_ms, 1785264223155);
+    }
+
+    #[test]
+    fn cursor_accepts_string_counts_and_request_based_usage_without_losing_other_rows() {
+        let raw = r#"{"totalUsageEventsCount":"3","usageEventsDisplay":[
+            {"timestamp":1785264223155,"model":"model-a","isTokenBasedCall":false,
+             "tokenUsage":{"inputTokens":"100","outputTokens":"20","cacheReadTokens":"500"}},
+            {"timestamp":"not-a-time","tokenUsage":{"inputTokens":42}},
+            {"timestamp":"2026-07-28T00:00:00Z","model":"model-b","tokenUsage":{"inputTokens":7}}
+        ]}"#;
+        let rows = parse_events_json(raw).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].counters.input_fresh, Some(100));
+        assert_eq!(rows[0].counters.cache_read, Some(500));
+        assert_eq!(rows[0].counters.cache_write_5m, None);
+        assert_eq!(rows[1].counters.input_fresh, Some(7));
     }
 
     #[test]

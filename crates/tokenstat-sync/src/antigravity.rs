@@ -126,13 +126,17 @@ pub fn fetch_into(
     let mut events = 0usize;
     let mut from_cache = false;
     let mut skipped_no_token = false;
+    let mut failed = false;
 
     match antigravity_ide::sync_sessions(force) {
         Ok(ide) => {
             from_cache = ide.from_cache;
             parts.push(ide.message);
         }
-        Err(e) => parts.push(format!("IDE sync failed: {e}")),
+        Err(e) => {
+            failed = true;
+            parts.push(format!("IDE sync failed: {e}"));
+        }
     }
 
     // Ingest whatever JSONL is on disk (fresh or prior sync). Dedup is by event id.
@@ -160,7 +164,10 @@ pub fn fetch_into(
                 );
             }
         }
-        Err(e) => parts.push(format!("quota fetch failed: {e}")),
+        Err(e) => {
+            failed = true;
+            parts.push(format!("quota fetch failed: {e}"));
+        }
     }
 
     Ok(FetchReport {
@@ -168,6 +175,7 @@ pub fn fetch_into(
         events,
         from_cache,
         skipped_no_token,
+        failed,
         message: Some(parts.join(" · ")),
     })
 }

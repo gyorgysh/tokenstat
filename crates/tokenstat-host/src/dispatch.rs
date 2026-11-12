@@ -2080,8 +2080,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         // Local log scanning remains separate and never needs the network.
         "fetch" => with_session(s, |b| {
             let tz = b.timezone().clone();
-            let reports = tokenstat_sync::fetch_remotes(b.engine_mut()?.store_mut(), &tz, false)
-                .envelope()?;
+            let reports =
+                tokenstat_sync::fetch_remotes(b.engine_mut()?.store_mut(), &tz, true).envelope()?;
             serde_json::to_value(reports).envelope()
         }),
 

@@ -233,8 +233,12 @@ final class InsightsModel {
         do {
             let reports = try await Bridge.fetchRemotes()
             let details = reports.compactMap(\.message).joined(separator: " · ")
-            showAction(details.isEmpty ? L10n.text("apple.insightsmodel.remote_fetch_complete.2bfec637") : details)
-            startCooldown(seconds: 30 * 60, clearing: \.fetchCooldownUntil)
+            if reports.contains(where: { $0.failed == true || ($0.vendor == "cursor" && $0.skippedNoToken) }) {
+                errorMessage = details
+            } else {
+                showAction(details.isEmpty ? L10n.text("apple.insightsmodel.remote_fetch_complete.2bfec637") : details)
+                startCooldown(seconds: 30, clearing: \.fetchCooldownUntil)
+            }
             await refresh()
             NotificationCenter.default.post(name: .archiveDidChange, object: nil)
         } catch {

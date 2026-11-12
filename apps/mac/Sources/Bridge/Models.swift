@@ -994,6 +994,7 @@ struct FetchReport: Codable, Sendable, Hashable {
     var events: Int
     var fromCache: Bool
     var skippedNoToken: Bool
+    var failed: Bool?
     var message: String?
 }
 
