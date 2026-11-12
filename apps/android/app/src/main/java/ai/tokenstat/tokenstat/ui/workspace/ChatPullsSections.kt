@@ -1826,9 +1826,6 @@ fun ChatSection(
                             )
                             }
                         }
-                        if (chatActivity?.planReported == true && chatActivity.plan.isNotEmpty()) {
-                            item(key = "activity-plan") { ChatPlanChecklist(chatActivity) }
-                        }
                         if (openChat != null && (openChat["routing"] as? JsonObject)?.get("limit") is JsonObject) {
                             item(key = "routing-limit") {
                                 ChatRoutingControls(openChat, backends,

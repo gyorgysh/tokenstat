@@ -1304,9 +1304,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var end = SliceEnd(items.Count, _sliceOlder);
         var prefix = start > 0 || _hasEarlier ? 1 : 0;
         var visible = end - start;
-        var activity = _sliceOlder == 0 ? ChatActivityData.Read(CurrentInspection, _openChat) : null;
-        var planCount = activity?.PlanReported == true && activity.Plan.Length > 0 ? 1 : 0;
-        var desiredCount = prefix + visible + planCount + (busy ? 1 : 0);
+        var desiredCount = prefix + visible + (busy ? 1 : 0);
 
         if (prefix == 1)
         {
@@ -1356,22 +1354,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
         }
 
-        if (planCount > 0 && activity is not null)
-        {
-            var index = prefix + visible;
-            var key = "__activity_plan__:" + System.Text.Json.JsonSerializer.Serialize(new { activity.Plan, activity.Live });
-            var current = index < _transcript.Children.Count ? _transcript.Children[index] as FrameworkElement : null;
-            if (current?.Tag as string != key)
-            {
-                var checklist = ActivityPlanChecklist(activity); checklist.Tag = key;
-                if (index < _transcript.Children.Count) _transcript.Children.RemoveAt(index);
-                _transcript.Children.Insert(index, checklist);
-            }
-        }
-
         if (busy)
         {
-            var workingIdx = prefix + visible + planCount;
+            var workingIdx = prefix + visible;
             var mood = LiveMood(raw);
             var words = mood == PersonaMood.Working ? WorkingWords(raw) : mood.Label();
             // The words are part of the key, so thinking turning into reading
@@ -2726,6 +2711,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private List<DisplayItem> Coalesce(JsonArray events)
     {
         var items = new List<DisplayItem>();
+        string? latestPlanId = null;
+        var supersededPlanIds = new HashSet<string>();
         var tools = new ChatToolCalls();
         var questions = new Dictionary<string, int>();
         var text = new StringBuilder();
@@ -2766,6 +2753,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 FlushText();
                 FlushThinking();
                 if (!Format.Flag(row, "steer")) {
+                    latestPlanId = null;
                     tools.CloseRunning(items, failed: false, detail: "");
                     attachmentTurn = "user-" + Format.Text(row, "seq", Format.Long(row, "atMs").ToString(CultureInfo.InvariantCulture) + ":" + items.Count);
                     tools.Clear();
@@ -2846,6 +2834,26 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (ev is null) continue;
             switch (Format.Text(ev, "kind"))
             {
+                case "plan":
+                    FlushText();
+                    FlushThinking();
+                    if (ev["steps"] is JsonArray plan)
+                    {
+                        if (latestPlanId is not null) supersededPlanIds.Add(latestPlanId);
+                        latestPlanId = null;
+                        latestPlanId = "plan-" + Format.Long(row, "atMs") + "-" + items.Count;
+                        var steps = plan.OfType<JsonObject>().ToArray();
+                        if (steps.Length == 0) { latestPlanId = null; break; }
+                        var completed = steps.Count(step => Format.Text(step, "status") == "completed");
+                        var title = ActivityText("plan") + " · " + ActivityText("steps", completed.ToString("N0"), steps.Length.ToString("N0"));
+                        var initial = ev["initial"] is JsonValue value && value.TryGetValue<bool>(out var first) && first;
+                        var detail = initial
+                            ? string.Join("\n", steps.Select(step => "- " + Format.Text(step, "text")))
+                            : Format.Text(ev, "completedStep");
+                        items.Add(new DisplayItem { Id = latestPlanId,
+                            Kind = ItemKind.Assistant, Text = "**" + title + "**" + (string.IsNullOrEmpty(detail) ? "" : "\n\n" + detail) });
+                    }
+                    break;
                 case "text":
                     FlushThinking();
                     if (text.Length == 0) textId = "text-" + Format.Long(row, "atMs") + "-" + items.Count;
@@ -2989,7 +2997,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         FlushText();
         FlushThinking();
-        return items;
+        return items.Where(item => !supersededPlanIds.Contains(item.Id)).ToList();
     }
 
     // History rows are append-only until the page array is replaced. Busy

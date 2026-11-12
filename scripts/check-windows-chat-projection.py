@@ -50,6 +50,7 @@ internal sealed partial class ChatPage {
     JsonNode _openChat = new JsonObject { ["backend"] = "claude" };
     bool _running;
     int _coalesces;
+    static string ActivityText(string key, params string[] args) => L10n.Text("common.chat.activity." + key, args);
     ChatPage(JsonArray events) { _events = events; }
     List<DisplayItem> Coalesce(JsonArray events) { _coalesces++; return CoalesceCore(events); }
 ''' + projection + '\n' + busy + '\n' + method('    private static string Duration(') + r'''
@@ -61,6 +62,20 @@ internal sealed partial class ChatPage {
     static string Snapshot(List<DisplayItem> items) => JsonSerializer.Serialize(items, new JsonSerializerOptions { IncludeFields = true });
     static void Check(bool pass, string message) { if (!pass) throw new Exception(message); }
     public static void Checks() {
+        var plan = (JsonArray)JsonNode.Parse("""
+        [
+          {"kind":"agent","atMs":1,"event":{"kind":"plan","initial":true,"steps":[{"text":"Inspect","status":"inProgress"},{"text":"Build","status":"pending"}]}},
+          {"kind":"agent","atMs":2,"event":{"kind":"text","delta":"Working"}},
+          {"kind":"agent","atMs":3,"event":{"kind":"plan","initial":false,"completedStep":"Inspect","steps":[{"text":"Inspect","status":"completed"},{"text":"Build","status":"inProgress"}]}}
+        ]
+        """)!;
+        var planPage = new ChatPage(plan);
+        var firstPlan = planPage.Coalesce(new JsonArray(plan[0]!.DeepClone()));
+        Check(firstPlan.Count == 1 && firstPlan[0].Text.Contains("Build"), "Initial plan must show its steps");
+        var progress = planPage.Coalesce(plan);
+        Check(progress.Count == 2 && progress[0].Text == "Working" && progress[1].Text.Contains("Inspect") && !progress[1].Text.Contains("Build"), "Progress must replace the earlier plan while keeping intervening messages");
+        plan.Add(JsonNode.Parse("""{"kind":"agent","atMs":4,"event":{"kind":"plan","initial":false,"steps":[]}}"""));
+        Check(planPage.Coalesce(plan).Count == 1, "Clearing a plan must remove its placeholder");
         foreach (var (value, expected) in new (JsonNode?, string)[] {
             (JsonValue.Create("text 😀"), "text 😀"), (JsonValue.Create(""), ""),
             (JsonValue.Create(42), "42"), (JsonValue.Create(true), "true"),

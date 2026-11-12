@@ -15,6 +15,8 @@ extension ChatDisplayItem {
 
     static func coalesce(_ events: [ChatTimelineEvent], defaultBackend: String? = nil, running: Bool = true) -> [ChatDisplayItem] {
         var items: [ChatDisplayItem] = []
+        var latestPlanID: String?
+        var supersededPlanIDs: Set<String> = []
         // Completed history does not participate in live-tool closure or
         // fallback edit matching. Keep only the rows still running.
         var runningIndexes: Set<Int> = []
@@ -170,6 +172,7 @@ extension ChatDisplayItem {
                 // A new user turn bounds any tools left open by an interrupted
                 // older turn, including histories recorded by older hosts.
                 if event.steer != true {
+                    latestPlanID = nil
                     closeRunningTools(failed: false, at: event.atMs, detail: L10n.text("apple.chatmodel.interrupted.132d124d"))
                     editRevisions = [:]
                 }
@@ -257,6 +260,24 @@ extension ChatDisplayItem {
             }
             if let eventBackend { lastBackend = eventBackend }
             switch agent.kind {
+            case "plan":
+                flushText()
+                flushThinking()
+                guard let steps = agent.steps else { break }
+                if let latestPlanID { supersededPlanIDs.insert(latestPlanID) }
+                latestPlanID = nil
+                if !steps.isEmpty {
+                    let planID = "plan-\(stamp(event, items.count))"
+                    latestPlanID = planID
+                    let count = steps.filter { $0.status == "completed" }.count
+                    let title = L10n.text("common.chat.activity.plan") + " · "
+                        + L10n.text("common.chat.activity.steps", count.formatted(), steps.count.formatted())
+                    let detail = agent.initial == true
+                        ? steps.map { "- " + $0.text }.joined(separator: "\n")
+                        : (agent.completedStep ?? "")
+                    items.append(ChatDisplayItem(id: planID,
+                        kind: .assistant("**\(title)**" + (detail.isEmpty ? "" : "\n\n" + detail), backend: eventBackend)))
+                }
             case "text":
                 flushThinking()
                 if text.isEmpty {
@@ -532,6 +553,6 @@ extension ChatDisplayItem {
         for (index, backend) in toolBackends where items.indices.contains(index) {
             items[index].sourceBackend = backend.isEmpty ? nil : backend
         }
-        return items
+        return items.filter { !supersededPlanIDs.contains($0.id) }
     }
 }

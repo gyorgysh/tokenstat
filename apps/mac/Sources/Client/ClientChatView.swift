@@ -1872,9 +1872,6 @@ struct ClientChatThread: View {
                         }
                     }
                     if sliceOffset == 0 {
-                        if !model.isShowingCachedTranscript {
-                            ChatActivityPlanChecklist(model: model)
-                        }
                         if !model.isShowingCachedTranscript, let chat = model.selected {
                             ChatRoutingNotice(model: model, chat: chat)
                         }

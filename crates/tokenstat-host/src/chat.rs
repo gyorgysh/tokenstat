@@ -4906,10 +4906,17 @@ impl Store {
                     }
                     muse_sign_in_required |= backend == "muse"
                         && events.iter().any(crate::transcript::muse_sign_in_required);
-                    let removed = collect_agent_text(&events, &mut assistant_text);
-                    questions.shift(removed);
-                    plans.shift(removed);
-                    self.record_events(id, backend, events);
+                    self.record_stream_events(
+                        id,
+                        backend,
+                        activity_revision,
+                        launch_model,
+                        events,
+                        &mut parser,
+                        &mut assistant_text,
+                        &mut questions,
+                        &mut plans,
+                    );
                     self.record_tool_images(id, backend, activity_revision, parser.take_images());
                     if muse_sign_in_required {
                         // Muse exec waits for browser login instead of exiting.
@@ -4920,18 +4927,6 @@ impl Store {
                     // Mid-turn, so the card is in front of the person while
                     // an answer can still reach this turn.
                     self.record_questions(id, backend, questions.scan(&assistant_text));
-                    if let Some(plan) = plans.scan(&assistant_text) {
-                        parser.report_plan(&plan);
-                        if let Some(snapshot) = parser.take_inspection() {
-                            self.record_inspection(
-                                id,
-                                backend,
-                                activity_revision,
-                                launch_model,
-                                snapshot,
-                            );
-                        }
-                    }
                 }
             }
             // Check budgets on every bounded chunk, including a fast backlog
@@ -5002,10 +4997,17 @@ impl Store {
             let events = measured(parser.push_events(&chunk.bytes));
             muse_sign_in_required |=
                 backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
-            let removed = collect_agent_text(&events, &mut assistant_text);
-            questions.shift(removed);
-            plans.shift(removed);
-            self.record_events(id, backend, events);
+            self.record_stream_events(
+                id,
+                backend,
+                activity_revision,
+                launch_model,
+                events,
+                &mut parser,
+                &mut assistant_text,
+                &mut questions,
+                &mut plans,
+            );
             self.record_tool_images(id, backend, activity_revision, parser.take_images());
         }
         let events = measured(parser.finish_events());
@@ -5014,14 +5016,23 @@ impl Store {
         }
         muse_sign_in_required |=
             backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
-        let removed = collect_agent_text(&events, &mut assistant_text);
-        questions.shift(removed);
-        plans.shift(removed);
-        self.record_events(id, backend, events);
+        self.record_stream_events(
+            id,
+            backend,
+            activity_revision,
+            launch_model,
+            events,
+            &mut parser,
+            &mut assistant_text,
+            &mut questions,
+            &mut plans,
+        );
         self.record_tool_images(id, backend, activity_revision, parser.take_images());
         self.record_questions(id, backend, questions.finish(&assistant_text));
         if let Some(plan) = plans.finish(&assistant_text) {
-            parser.report_plan(&plan);
+            if let Some(event) = parser.report_plan(&plan) {
+                self.record_events(id, backend, vec![event]);
+            }
             if let Some(snapshot) = parser.take_inspection() {
                 self.record_inspection(id, backend, activity_revision, launch_model, snapshot);
             }
@@ -5144,6 +5155,97 @@ impl Store {
                     backend: backend.into(),
                 },
             );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_stream_events(
+        &self,
+        id: &str,
+        backend: &str,
+        revision: u64,
+        model: Option<&str>,
+        events: Vec<Event>,
+        parser: &mut crate::transcript::Parser,
+        text: &mut String,
+        questions: &mut crate::chat_question::Scanner,
+        plans: &mut crate::chat_plan::Scanner,
+    ) {
+        let mut timeline = Vec::new();
+        for event in events {
+            let previous_len = text.len();
+            let removed = collect_agent_text(std::slice::from_ref(&event), text);
+            questions.shift(removed);
+            plans.shift(removed);
+            let found = plans.scan_positions(text);
+            if let Event::Text { delta } = &event
+                && removed <= previous_len
+                && found.iter().all(|(_, end)| {
+                    end.checked_sub(previous_len - removed)
+                        .is_some_and(|offset| {
+                            offset <= delta.len() && delta.is_char_boundary(offset)
+                        })
+                })
+            {
+                let start = previous_len - removed;
+                let mut offset = 0;
+                for (plan, end) in found {
+                    let end = end - start;
+                    if end > offset {
+                        timeline.push(Event::Text {
+                            delta: delta[offset..end].to_string(),
+                        });
+                    }
+                    self.append_plan_event(
+                        id,
+                        backend,
+                        revision,
+                        model,
+                        parser,
+                        &mut timeline,
+                        &plan,
+                    );
+                    offset = end;
+                }
+                if offset < delta.len() {
+                    timeline.push(Event::Text {
+                        delta: delta[offset..].to_string(),
+                    });
+                }
+            } else {
+                timeline.push(event);
+                for (plan, _) in found {
+                    self.append_plan_event(
+                        id,
+                        backend,
+                        revision,
+                        model,
+                        parser,
+                        &mut timeline,
+                        &plan,
+                    );
+                }
+            }
+        }
+        self.record_events(id, backend, timeline);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_plan_event(
+        &self,
+        id: &str,
+        backend: &str,
+        revision: u64,
+        model: Option<&str>,
+        parser: &mut crate::transcript::Parser,
+        timeline: &mut Vec<Event>,
+        plan: &Value,
+    ) {
+        if let Some(event) = parser.report_plan(plan) {
+            timeline.push(event);
+        }
+        if let Some(snapshot) = parser.take_inspection() {
+            self.record_inspection(id, backend, revision, model, snapshot);
         }
     }
 
@@ -11316,6 +11418,158 @@ mod tests {
             branch: None,
         });
         store.save().unwrap();
+    }
+
+    #[test]
+    fn claude_model_and_effort_survive_switch_and_resumed_turns() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("chat");
+        let store = Store::at(path.clone());
+        conversation_for_receipts(&store, "chat-test");
+        store
+            .update(
+                "chat-test",
+                Update {
+                    model: Some("fable".into()),
+                    effort: Some("medium".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        store
+            .set_resume("chat-test", "claude", "session-1")
+            .unwrap();
+        store
+            .update(
+                "chat-test",
+                Update {
+                    model: Some("opus".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+
+        // Reopen as the next message would after a host restart. The same
+        // native session must be resumed with the newly selected settings.
+        let reopened = Store::load_at(path);
+        let chat = reopened.get("chat-test").unwrap();
+        assert_eq!(chat.model.as_deref(), Some("opus"));
+        assert_eq!(chat.effort.as_deref(), Some("medium"));
+        assert!(!chat.fast_mode);
+        let resume = chat.resume_tokens.get("claude").map(String::as_str);
+        assert_eq!(resume, Some("session-1"));
+        for prompt in ["next message", "another message"] {
+            let argv = crate::automations::chat_agent_command(
+                &chat.backend,
+                prompt,
+                chat.model.as_deref(),
+                chat.effort.as_deref(),
+                chat.budget_seconds,
+                crate::automations::ChatLaunch {
+                    resume,
+                    bypass: false,
+                    mode: &chat.mode,
+                    hook_helper: None,
+                    system_append: None,
+                    agy_customization_dir: None,
+                    cursor_plugin_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap();
+            for pair in [
+                ["--model", "opus"],
+                ["--effort", "medium"],
+                ["--resume", "session-1"],
+            ] {
+                assert!(argv.windows(2).any(|args| args == pair), "{argv:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn plan_updates_are_saved_in_order_between_other_chat_events() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let mut parser = crate::transcript::Parser::new("claude");
+        let mut text = String::new();
+        let mut questions = crate::chat_question::Scanner::default();
+        let mut plans = crate::chat_plan::Scanner::default();
+        let block = |status: &str| Event::Text {
+            delta: format!(
+                "```tokenstat-plan\n{{\"steps\":[{{\"step\":\"Inspect\",\"status\":\"{status}\"}},{{\"step\":\"Build\",\"status\":\"pending\"}}]}}\n```\n"
+            ),
+        };
+        store.record_stream_events(
+            "chat-test",
+            "claude",
+            0,
+            None,
+            vec![
+                block("in_progress"),
+                Event::Thinking {
+                    delta: "Working".into(),
+                },
+                block("completed"),
+                Event::Text {
+                    delta: "Finished".into(),
+                },
+            ],
+            &mut parser,
+            &mut text,
+            &mut questions,
+            &mut plans,
+        );
+        let reopened = Store::load_at(root.path().join("chat"));
+        let (events, _) = reopened.events("chat-test", 0).unwrap();
+        let kinds: Vec<_> = events
+            .iter()
+            .filter_map(|row| row["event"]["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["text", "plan", "thinking", "text", "plan", "text"]);
+        assert_eq!(events[1]["event"]["initial"], true);
+        assert_eq!(events[4]["event"]["initial"], false);
+        assert_eq!(events[4]["event"]["steps"][0]["status"], "completed");
+    }
+
+    #[test]
+    fn multiple_plans_inside_one_text_event_keep_their_message_order() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let mut parser = crate::transcript::Parser::new("claude");
+        let mut text = String::new();
+        let mut questions = crate::chat_question::Scanner::default();
+        let mut plans = crate::chat_plan::Scanner::default();
+        let delta = "Start\n```tokenstat-plan\n{\"steps\":[{\"step\":\"Do\",\"status\":\"pending\"}]}\n```\nBetween\n```tokenstat-plan\n{\"steps\":[{\"step\":\"Do\",\"status\":\"completed\"}]}\n```\nEnd";
+        store.record_stream_events(
+            "chat-test",
+            "claude",
+            0,
+            None,
+            vec![Event::Text {
+                delta: delta.into(),
+            }],
+            &mut parser,
+            &mut text,
+            &mut questions,
+            &mut plans,
+        );
+        let (rows, _) = store.events("chat-test", 0).unwrap();
+        let kinds: Vec<_> = rows
+            .iter()
+            .filter_map(|row| row["event"]["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["text", "plan", "text", "plan", "text"]);
+        assert!(
+            rows[2]["event"]["delta"]
+                .as_str()
+                .unwrap()
+                .contains("Between")
+        );
+        assert_eq!(rows[4]["event"]["delta"], "End");
     }
 
     #[test]

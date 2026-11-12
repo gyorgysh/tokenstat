@@ -10,8 +10,8 @@
 //! chat. They write one the same way every backend asks a question: a fenced
 //! block in the reply, language `tokenstat-plan`, holding the whole list each
 //! time.
-//! The host reads the latest complete block into the conversation's activity
-//! and the clients hide the block from the reply.
+//! The host records completed blocks as timeline updates and keeps the latest
+//! plan in the conversation's activity. Clients hide the raw blocks.
 //!
 //! OpenCode and Muse do have a todo tool the host reads, but nothing told the
 //! model to use it, and a smaller model often did the work with no plan at
@@ -37,15 +37,29 @@ impl Scanner {
     /// ready for the activity record. A later block replaces an earlier one,
     /// so only the last complete block in this stretch of text matters.
     pub fn scan(&mut self, text: &str) -> Option<Value> {
-        let mut latest = None;
+        self.scan_all(text).pop()
+    }
+
+    /// Preserve every completed update when several arrive in one read.
+    pub fn scan_all(&mut self, text: &str) -> Vec<Value> {
+        self.scan_positions(text)
+            .into_iter()
+            .map(|(plan, _)| plan)
+            .collect()
+    }
+
+    /// Include the end of each fence so text in one provider event can still
+    /// be interleaved with the plan updates it contains.
+    pub fn scan_positions(&mut self, text: &str) -> Vec<(Value, usize)> {
+        let mut plans = Vec::new();
         while let Some((body, end)) = crate::chat_question::next_block(text, &mut self.from, FENCE)
         {
             self.from = end;
             if let Some(plan) = parse(body) {
-                latest = Some(plan);
+                plans.push((plan, end));
             }
         }
-        latest
+        plans
     }
 
     /// See `chat_question::Scanner::shift`.

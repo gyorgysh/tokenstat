@@ -2212,6 +2212,38 @@ mod tests {
     }
 
     #[test]
+    fn claude_live_launch_keeps_resumed_model_and_effort() {
+        let argv = crate::automations::chat_agent_command(
+            "claude",
+            "next message",
+            Some("opus"),
+            Some("medium"),
+            0,
+            crate::automations::ChatLaunch {
+                resume: Some("session-1"),
+                bypass: false,
+                mode: "execute",
+                hook_helper: None,
+                system_append: None,
+                agy_customization_dir: None,
+                cursor_plugin_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        let (args, prompt) = claude_launch(&argv).unwrap();
+        assert_eq!(prompt, "next message");
+        for pair in [
+            ["--model", "opus"],
+            ["--effort", "medium"],
+            ["--resume", "session-1"],
+        ] {
+            assert!(args.windows(2).any(|args| args == pair), "{args:?}");
+        }
+    }
+
+    #[test]
     fn acknowledgements_belong_to_the_request_and_refused_controls_stay_failed() {
         for backend in ["codex", "claude"] {
             let root = tempfile::tempdir().unwrap();

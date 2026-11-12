@@ -272,6 +272,8 @@ fun coalesceTranscript(
     running: Boolean = true,
 ): List<ChatDisplayItem> {
     val items = mutableListOf<ChatDisplayItem>()
+    var latestPlanID: String? = null
+    val supersededPlanIDs = mutableSetOf<String>()
     // Every row a call id has started, oldest first. A call id is not
     // unique on every backend, so an End closes the oldest row still
     // running under that name rather than the newest start.
@@ -426,6 +428,7 @@ fun coalesceTranscript(
             // A new user turn bounds any tools left open by an interrupted
             // older turn, including histories recorded by older hosts.
             if (!ev.bol("steer")) {
+                latestPlanID = null
                 closeRunningTools(failed = false, at = atMsOf(ev, inner), detail = L10n.text("android.chattranscript.interrupted.132d124d"))
                 toolIndexes.clear()
                 editRevisions.clear()
@@ -521,6 +524,25 @@ fun coalesceTranscript(
         }
         if (eventBackend != null) lastBackend = eventBackend
         when ((inner.str("kind") ?: kind).lowercase()) {
+            "plan" -> {
+                flushText()
+                flushThinking()
+                val steps = (inner["steps"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: continue
+                latestPlanID?.let { supersededPlanIDs.add(it) }
+                latestPlanID = null
+                if (steps.isNotEmpty()) {
+                    val planID = "plan-${stamp(ev, items.size)}"
+                    latestPlanID = planID
+                    val completed = steps.count { it.str("status") == "completed" }
+                    val title = L10n.text("common.chat.activity.plan") + " · " +
+                        L10n.text("common.chat.activity.steps", "$completed", "${steps.size}")
+                    val detail = if (inner.safeBool("initial") == true)
+                        steps.joinToString("\n") { "- " + (it.str("text") ?: "") }
+                    else inner.str("completedStep").orEmpty()
+                    items.add(ChatDisplayItem.Assistant(planID,
+                        "**$title**" + if (detail.isEmpty()) "" else "\n\n$detail", eventBackend))
+                }
+            }
             "text", "agent" -> {
                 flushThinking()
                 if (text.isEmpty()) {
@@ -825,5 +847,5 @@ fun coalesceTranscript(
     if (!running) {
         closeRunningTools(failed = false, at = null, detail = L10n.text("android.chattranscript.ended_without_a_tool_result.da8d3680"))
     }
-    return items
+    return items.filterNot { it.id in supersededPlanIDs }
 }

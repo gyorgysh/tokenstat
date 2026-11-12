@@ -5,6 +5,21 @@ struct ChatAttachment: Hashable, Sendable { var id: String; var name: String; va
 struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision: String? }
 @main struct ChatCoalescerTests {
     @MainActor static func main() async throws {
+        let planWire = Data(#"[{"kind":"agent","seq":1,"backend":"claude","event":{"kind":"plan","initial":true,"steps":[{"text":"Inspect","status":"inProgress"},{"text":"Build","status":"pending"}]}},{"kind":"agent","seq":2,"backend":"claude","event":{"kind":"text","delta":"Working"}},{"kind":"agent","seq":3,"backend":"claude","event":{"kind":"plan","initial":false,"completedStep":"Inspect","steps":[{"text":"Inspect","status":"completed"},{"text":"Build","status":"inProgress"}]}}]"#.utf8)
+        let planEvents = try JSONDecoder().decode([ChatTimelineEvent].self, from: planWire)
+        let initialRows = ChatDisplayItem.coalesce(Array(planEvents.prefix(1)))
+        if case let .assistant(initial, _) = initialRows.first?.kind {
+            precondition(initial.contains("Inspect") && initial.contains("Build"))
+        } else { preconditionFailure("The initial plan should appear") }
+        let planRows = ChatDisplayItem.coalesce(planEvents)
+        precondition(planRows.count == 2, "The old plan must leave no space when progress arrives")
+        if case let .assistant(message, _) = planRows[0].kind, case let .assistant(progress, _) = planRows[1].kind {
+            precondition(message == "Working", "Messages between plan updates must remain")
+            precondition(progress.contains("Inspect") && !progress.contains("Build"))
+        } else { preconditionFailure("Plan updates must be separate timeline messages") }
+        let clear = try JSONDecoder().decode([ChatTimelineEvent].self, from: Data(#"[{"kind":"agent","seq":4,"event":{"kind":"plan","initial":false,"steps":[]}}]"#.utf8))
+        let cleared = ChatDisplayItem.coalesce(planEvents + clear)
+        precondition(cleared.count == 1, "Clearing a plan must remove its last placeholder")
         let steerWire: [[String: Any]] = [
             ["kind":"agent", "atMs":1, "event":["kind":"toolStart", "callId":"running", "verb":"Bash", "target":"sleep 5"]],
             ["kind":"user", "atMs":2, "text":"Also check the tests", "steer":true],

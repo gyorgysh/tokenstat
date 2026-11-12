@@ -96,6 +96,10 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
 
 
 struct ChatAgentEvent: Codable, Sendable {
+    struct PlanStep: Codable, Equatable, Sendable {
+        var text: String
+        var status: String
+    }
     var kind: String
     var delta: String?
     var verb: String?
@@ -121,11 +125,14 @@ struct ChatAgentEvent: Codable, Sendable {
     var name: String?
     var mediaType: String?
     var size: UInt64?
+    var steps: [PlanStep]?
+    var initial: Bool?
+    var completedStep: String?
 
     enum CodingKeys: String, CodingKey {
         case kind, delta, verb, target, path, added, removed, patch, status, text
         case input, output, costUsd, callId, ok, detail, cacheRead, cacheWrite, exitCode
-        case id, name, mediaType, size
+        case id, name, mediaType, size, steps, initial, completedStep
         // The spellings the archive itself holds. A host new enough writes
         // both, and one that is not writes only these. Read, never written.
         case callIdLegacy = "call_id"
@@ -163,6 +170,9 @@ struct ChatAgentEvent: Codable, Sendable {
         name = try c.decodeIfPresent(String.self, forKey: .name)
         mediaType = try c.decodeIfPresent(String.self, forKey: .mediaType)
         size = c.decodeCount(forKey: .size)
+        steps = try c.decodeIfPresent([PlanStep].self, forKey: .steps)
+        initial = try c.decodeIfPresent(Bool.self, forKey: .initial)
+        completedStep = try c.decodeIfPresent(String.self, forKey: .completedStep)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -190,6 +200,9 @@ struct ChatAgentEvent: Codable, Sendable {
         try c.encodeIfPresent(name, forKey: .name)
         try c.encodeIfPresent(mediaType, forKey: .mediaType)
         try c.encodeIfPresent(size, forKey: .size)
+        try c.encodeIfPresent(steps, forKey: .steps)
+        try c.encodeIfPresent(initial, forKey: .initial)
+        try c.encodeIfPresent(completedStep, forKey: .completedStep)
     }
 }
 

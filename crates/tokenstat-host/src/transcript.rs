@@ -45,6 +45,17 @@ pub enum Event {
     Thinking {
         delta: String,
     },
+    /// A plan at the point it was reported, rather than a pinned live panel.
+    Plan {
+        steps: Vec<Value>,
+        initial: bool,
+        #[serde(
+            rename = "completedStep",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        completed_step: Option<String>,
+    },
     ToolStart {
         call_id: String,
         verb: String,
@@ -198,6 +209,7 @@ pub struct Parser {
     reset_hint: Option<i64>,
     inspection: crate::chat_inspection::Snapshot,
     inspection_dirty: bool,
+    last_timeline_plan: Option<(Vec<String>, Vec<bool>)>,
     images: crate::chat_images::Collector,
     collect_images: bool,
 }
@@ -227,6 +239,7 @@ impl Parser {
             reset_hint: None,
             inspection: Default::default(),
             inspection_dirty: false,
+            last_timeline_plan: None,
             images: Default::default(),
             collect_images: true,
         }
@@ -241,10 +254,56 @@ impl Parser {
 
     /// Record a plan the agent wrote in its reply, so the next inspection
     /// carries it like a plan from a tool.
-    pub(crate) fn report_plan(&mut self, steps: &serde_json::Value) {
+    pub(crate) fn report_plan(&mut self, steps: &serde_json::Value) -> Option<Event> {
         let before = self.inspection.activity.clone();
         self.inspection.activity.reported_plan(steps);
         self.inspection_dirty |= self.inspection.activity != before;
+        self.plan_event()
+    }
+
+    fn plan_event(&mut self) -> Option<Event> {
+        let plan = &self.inspection.activity.plan;
+        if plan.is_empty() {
+            return self.last_timeline_plan.take().map(|_| Event::Plan {
+                steps: Vec::new(),
+                initial: false,
+                completed_step: None,
+            });
+        }
+        let names: Vec<_> = plan.iter().map(|step| step.text.clone()).collect();
+        let completed: Vec<_> = plan.iter().map(|step| step.status == "completed").collect();
+        let initial = self
+            .last_timeline_plan
+            .as_ref()
+            .is_none_or(|(old, _)| *old != names);
+        if !initial
+            && self
+                .last_timeline_plan
+                .as_ref()
+                .is_some_and(|(_, old)| *old == completed)
+        {
+            return None;
+        }
+        let completed_step = if initial {
+            None
+        } else {
+            let old = &self.last_timeline_plan.as_ref().unwrap().1;
+            completed
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(index, done)| **done && !old[*index])
+                .map(|(index, _)| names[index].clone())
+        };
+        self.last_timeline_plan = Some((names, completed));
+        Some(Event::Plan {
+            steps: plan
+                .iter()
+                .map(|step| json!({"text": step.text, "status": step.status}))
+                .collect(),
+            initial,
+            completed_step,
+        })
     }
 
     pub(crate) fn inherit_goal(&mut self, snapshot: &crate::chat_inspection::Snapshot) {
@@ -615,10 +674,13 @@ impl Parser {
                 }
             }
         }
-        let events = self.take_events(events);
+        let mut events = self.take_events(events);
         // Session ownership is applied before a goal carried by this same
         // record, so a new session can immediately report its own goal.
         self.inspection_dirty |= self.inspection.observe(&self.backend, &value);
+        if let Some(plan) = self.plan_event() {
+            events.push(plan);
+        }
         events
     }
 
