@@ -448,9 +448,12 @@ struct ChatView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            TransientToast(message: $dropNotice, severity: .warning)
-                .padding(.top, Theme.Space.m)
-                .padding(.trailing, Theme.Space.m)
+            VStack(alignment: .trailing, spacing: Theme.Space.s) {
+                TransientToast(message: $dropNotice, severity: .warning)
+                TransientToast(message: $model.agentUpdateNotice, severity: model.agentUpdateSeverity)
+            }
+            .padding(.top, Theme.Space.m)
+            .padding(.trailing, Theme.Space.m)
         }
         #if os(macOS)
         .onReceive(NotificationCenter.default.publisher(for: ChatDragSession.ended)) { _ in

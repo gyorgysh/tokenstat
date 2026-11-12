@@ -4,6 +4,7 @@ package ai.tokenstat.tokenstat.ui.workspace
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.ChatCacheRules
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -81,7 +82,7 @@ private val SECTION_AGENT = L10n.text("android.chatagentpanel.agent.11b39c93")
 private val SECTION_MODEL = L10n.text("android.chatagentpanel.model.5e2c614c")
 private val SECTION_EFFORT = L10n.text("android.chatagentpanel.effort.4387e5d3")
 
-private fun backendOf(backends: List<JsonObject>, id: String?): JsonObject? =
+internal fun backendOf(backends: List<JsonObject>, id: String?): JsonObject? =
     backends.firstOrNull { it.str("id") == id }
 
 /// `installed` is a tri-state: true, false, or absent when the catalog has no
@@ -262,7 +263,7 @@ fun ChatAgentSheet(
     var versions by remember(peer) { mutableStateOf<Map<String, JsonObject>>(emptyMap()) }
     var checkingUpdates by remember(peer) { mutableStateOf(false) }
     var checkedUpdates by remember(peer) { mutableStateOf(false) }
-    var updatingAgent by remember(peer) { mutableStateOf<String?>(null) }
+    val updatingAgent by model.updatingAgent.collectAsStateWithLifecycle()
     var updateNotes by remember(peer) { mutableStateOf<Map<String, String>>(emptyMap()) }
     // Every agent's quota for its row: the app's own readings for this
     // device, one read of the host's for a remote one.
@@ -349,28 +350,22 @@ fun ChatAgentSheet(
         }
     }
 
-    fun updateAgent(row: JsonObject) {
-        val id = row.str("id") ?: return
+    /// Runs on the view model, so it carries on and toasts in the chat after
+    /// this sheet closes. The note here is for whoever is still looking.
+    fun updateAgent(id: String, label: String) {
         if (updatingAgent != null) return
-        updatingAgent = id
         updateNotes = updateNotes - id
-        scope.launch {
-            val note = runCatching {
-                model.workspaceSection(peer, "launcher.update", buildJsonObject { put("id", id) }) as? JsonObject
-            }.fold(
-                onSuccess = { result ->
-                    if (result?.bol("ok") == true) {
-                        result.str("after")?.let { L10n.text("common.agent_updates.updated", it) } ?: L10n.text("common.agent_updates.updated_unknown")
-                    } else {
-                        L10n.text("common.agent_updates.failed", result?.str("output").orEmpty().trim().takeLast(600))
-                    }
-                },
-                onFailure = { L10n.text("common.agent_updates.failed", it.message.orEmpty()) },
-            )
+        model.updateAgent(peer, id, label) { result ->
+            val note = if (result?.bol("ok") == true) {
+                result.str("after")?.let { L10n.text("common.agent_updates.updated", it) } ?: L10n.text("common.agent_updates.updated_unknown")
+            } else {
+                L10n.text("common.agent_updates.failed", result?.str("output").orEmpty().trim().takeLast(600))
+            }
             updateNotes = updateNotes + (id to note)
-            loadVersions(check = false)
-            load(refresh = false)
-            updatingAgent = null
+            scope.launch {
+                loadVersions(check = false)
+                load(refresh = false)
+            }
         }
     }
 
@@ -473,7 +468,9 @@ fun ChatAgentSheet(
                                     icon = ActionIcon.Download.vector,
                                     small = true,
                                     enabled = updatingAgent == null && installing == null && !checkingUpdates && !locked && !updateRow.bol("busy"),
-                                    onClick = { updateAgent(updateRow) },
+                                    onClick = {
+                                        updateAgent(updateRow.str("id").orEmpty(), backend.str("label") ?: updateRow.str("id").orEmpty())
+                                    },
                                 )
                             } else if (backendNotInstalled(backend) && backend.bol("canInstall")) {
                                 TsSecondaryButton(
@@ -509,7 +506,30 @@ fun ChatAgentSheet(
                     pick = {},
                     onStepPick = ::pick,
                     accessory = { value ->
-                        (value as? ChatAgentChoice.Agent)?.let { ChatQuotaLine(chatQuotaReading(quotaReadings, it.id)) }
+                        (value as? ChatAgentChoice.Agent)?.let { agent ->
+                            // From the host's daily check: this agent has a newer
+                            // version. One press updates it.
+                            val behind = backendOf(backends, agent.id)
+                            val launcherId = behind?.str("launcherId")
+                            if (behind != null && launcherId != null && behind.bol("updateAvailable") && !backendNotInstalled(behind)) {
+                                val label = behind.str("label") ?: agent.id
+                                val description = behind.str("latestVersion")?.let { L10n.text("common.agent_updates.update_to", label, it) }
+                                    ?: L10n.text("common.agent_updates.update")
+                                Icon(
+                                    ActionIcon.Download.vector,
+                                    description,
+                                    tint = colors.accent,
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(CircleShape)
+                                        .clickable(enabled = updatingAgent == null && !locked) { updateAgent(launcherId, label) }
+                                        .padding(10.dp)
+                                        .background(colors.accent.copy(alpha = 0.16f), CircleShape)
+                                        .padding(4.dp),
+                                )
+                            }
+                            ChatQuotaLine(chatQuotaReading(quotaReadings, agent.id))
+                        }
                         // The favourite star, on model rows only.
                         val id = (value as? ChatAgentChoice.Model)?.id
                         if (!id.isNullOrEmpty() && backendId.isNotEmpty()) {

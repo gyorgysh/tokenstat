@@ -628,6 +628,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun workspaceSection(peer: String, method: String, params: JsonObject): JsonElement =
         CoreClient.remote(peer, method, params)
 
+    /// An agent update started from a chat. It runs here so it outlives the
+    /// agent sheet it was started from, and the chat shows it as a toast.
+    data class AgentUpdateNotice(val text: String, val done: Boolean, val failed: Boolean)
+    private val mutableAgentUpdate = MutableStateFlow<AgentUpdateNotice?>(null)
+    val agentUpdate = mutableAgentUpdate.asStateFlow()
+    private val mutableUpdatingAgent = MutableStateFlow<String?>(null)
+    val updatingAgent = mutableUpdatingAgent.asStateFlow()
+
+    fun dismissAgentUpdate() {
+        if (mutableAgentUpdate.value?.done == true) mutableAgentUpdate.value = null
+    }
+
+    /// Update one agent on `peer`'s host. `finished` gets the host's answer,
+    /// or null when there was none, so the caller can refresh its lists.
+    fun updateAgent(peer: String, id: String, label: String, finished: (JsonObject?) -> Unit = {}) {
+        if (mutableUpdatingAgent.value != null) return
+        mutableUpdatingAgent.value = id
+        mutableAgentUpdate.value = AgentUpdateNotice(L10n.text("common.agent_updates.toast_updating", label), done = false, failed = false)
+        viewModelScope.launch {
+            val result = runCatching {
+                workspaceSection(peer, "launcher.update", buildJsonObject { put("id", id) }) as? JsonObject
+            }.getOrNull()
+            fun text(key: String) = (result?.get(key) as? JsonPrimitive)?.contentOrNull
+            val ok = (result?.get("ok") as? JsonPrimitive)?.booleanOrNull == true
+            val before = text("before")
+            val after = text("after")
+            val message = when {
+                !ok -> L10n.text("common.agent_updates.toast_failed", label)
+                before != null && after != null && before != after ->
+                    L10n.text("common.agent_updates.toast_updated", label, before, after)
+                after != null -> L10n.text("common.agent_updates.toast_current", label, after)
+                else -> L10n.text("common.agent_updates.toast_finished", label)
+            }
+            mutableAgentUpdate.value = AgentUpdateNotice(message, done = true, failed = !ok)
+            mutableUpdatingAgent.value = null
+            finished(result)
+        }
+    }
+
     suspend fun core(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
         CoreClient.call(method, params)
 }

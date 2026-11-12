@@ -1915,6 +1915,22 @@ fun ChatSection(
                     TextButton(onClick = { fileTransferJob?.cancel(); fileProgress = null; fileRelayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) }
                 }
             }
+            // An agent update started from the picker. It runs on the view
+            // model, so it reports here after the agent sheet has closed.
+            val agentUpdate by model.agentUpdate.collectAsStateWithLifecycle()
+            LaunchedEffect(agentUpdate) {
+                val notice = agentUpdate
+                if (notice != null && notice.done && !notice.failed) {
+                    kotlinx.coroutines.delay(10_000)
+                    model.dismissAgentUpdate()
+                }
+            }
+            ai.tokenstat.tokenstat.ui.components.TransientToast(
+                message = agentUpdate?.text,
+                onDismissed = { model.dismissAgentUpdate() },
+                modifier = Modifier.align(Alignment.End).clickable { model.dismissAgentUpdate() },
+                warning = agentUpdate?.failed == true,
+            )
             if (sendError != null) {
                 // One baseline for every action: a bordered chip beside a
                 // bare text link sat at two heights, and Check delivery on

@@ -260,6 +260,40 @@ fn version_of(plan: &Plan, command: &str) -> Option<String> {
         .or_else(|| installed_version(command))
 }
 
+/// Every agent with an update plan, in the order lists show them.
+const IDS: &[&str] = &[
+    "claude_code",
+    "codex",
+    "opencode",
+    "opencode2",
+    "grok",
+    "copilot",
+    "cline",
+    "openclaw",
+    "muse",
+    "omp",
+    "pi",
+    "antigravity",
+    "cursor_agent",
+    "hermes",
+    "kilo",
+    "kimi",
+    "qwen",
+    "devin",
+];
+
+/// Identifies the installed command file: its real path and modified time.
+/// Any update, by tokenstat or not, changes one or the other.
+fn stamp(command: &str) -> Option<String> {
+    let real = std::fs::canonicalize(command).ok()?;
+    let modified = std::fs::metadata(&real).ok()?.modified().ok()?;
+    let seconds = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(format!("{}|{seconds}", real.display()))
+}
+
 /// One agent's row: its installed version and, when `check` is set, the
 /// latest one its vendor publishes.
 fn row(id: &'static str, check: bool) -> Option<Value> {
@@ -273,6 +307,7 @@ fn row(id: &'static str, check: bool) -> Option<Value> {
         "canUpdate": true,
         "canCheck": plan.latest.is_some(),
         "busy": crate::chat::agent_busy(id),
+        "stamp": stamp(&command),
     });
     if check && let Some(source) = &plan.latest {
         match agent_versions::latest(source) {
@@ -305,26 +340,6 @@ fn row(id: &'static str, check: bool) -> Option<Value> {
 /// read on this machine. The latest versions are fetched only with `check`,
 /// which a client sends when somebody presses Check for updates.
 pub(crate) fn list(check: bool) -> Value {
-    const IDS: &[&str] = &[
-        "claude_code",
-        "codex",
-        "opencode",
-        "opencode2",
-        "grok",
-        "copilot",
-        "cline",
-        "openclaw",
-        "muse",
-        "omp",
-        "pi",
-        "antigravity",
-        "cursor_agent",
-        "hermes",
-        "kilo",
-        "kimi",
-        "qwen",
-        "devin",
-    ];
     let handles: Vec<_> = IDS
         .iter()
         .map(|id| std::thread::spawn(move || row(id, check)))
@@ -406,7 +421,50 @@ fn cached_latest(id: &str) -> Option<String> {
 /// The cached row for one agent, for the agent picker: `updateAvailable`,
 /// `latest` and `version` from the last check. Cheap: no process, no request.
 pub(crate) fn cached(id: &str) -> Option<Value> {
-    with_cache(|cache| cache.rows.iter().find(|row| row["id"] == id).cloned())
+    let mut row = with_cache(|cache| cache.rows.iter().find(|row| row["id"] == id).cloned())?;
+    // Updated since the check, by tokenstat or anything else: the old answer
+    // is about a binary that is gone. Clear the mark and read the new
+    // version in the background, against the latest the check found.
+    let current = crate::launcher::resolved_command(id).and_then(|command| stamp(&command));
+    if row["stamp"].as_str().is_some() && current.as_deref() != row["stamp"].as_str() {
+        row["updateAvailable"] = json!(false);
+        refresh_one(id);
+    }
+    Some(row)
+}
+
+/// Re-read one agent's installed version and store it with the cached latest.
+/// At most one refresh per agent at a time.
+fn refresh_one(id: &str) {
+    static RUNNING: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let Some(id) = IDS.iter().copied().find(|known| *known == id) else {
+        return;
+    };
+    {
+        let mut running = RUNNING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if running.contains(&id) {
+            return;
+        }
+        running.push(id);
+    }
+    let _ = std::thread::Builder::new()
+        .name("agent-version-refresh".into())
+        .spawn(move || {
+            if let Some(fresh) = row(id, false) {
+                with_cache(|cache| {
+                    if let Some(slot) = cache.rows.iter_mut().find(|row| row["id"] == id) {
+                        *slot = fresh;
+                        save(cache);
+                    }
+                });
+            }
+            RUNNING
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|running| *running != id);
+        });
 }
 
 /// Check every installed agent once a day, so an agent that has fallen
@@ -483,6 +541,9 @@ pub(crate) fn update(id: &str) -> Result<Value, String> {
                     .is_some_and(|(latest, installed)| newer(latest, installed));
                 row["version"] = json!(after);
                 row["updateAvailable"] = json!(behind);
+                row["stamp"] = json!(
+                    crate::launcher::resolved_command(id).and_then(|command| stamp(&command))
+                );
                 save(cache);
             }
         });

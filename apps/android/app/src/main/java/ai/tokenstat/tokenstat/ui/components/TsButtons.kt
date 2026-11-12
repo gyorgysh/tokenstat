@@ -255,8 +255,11 @@ fun TransientToast(
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    /// Warning tint for something that did not work, success otherwise.
+    warning: Boolean = false,
 ) {
     val colors = LocalTsColors.current
+    val tint = if (warning) colors.warning else colors.success
     AnimatedVisibility(
         visible = message != null,
         enter = slideInHorizontally(tween(TsMotion.toastMillis)) { it } + fadeIn(tween(TsMotion.toastMillis)),
@@ -267,13 +270,13 @@ fun TransientToast(
             Modifier
                 .clip(RoundedCornerShape(50))
                 .background(colors.sidebar)
-                .border(BorderStroke(1.dp, colors.success.copy(alpha = 0.35f)), RoundedCornerShape(50))
+                .border(BorderStroke(1.dp, tint.copy(alpha = 0.35f)), RoundedCornerShape(50))
                 .padding(horizontal = Space.m, vertical = Space.s),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             message?.let {
-                Text(it, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium), color = colors.success)
+                Text(it, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium), color = tint)
             }
             if (actionLabel != null && onAction != null) {
                 Text(

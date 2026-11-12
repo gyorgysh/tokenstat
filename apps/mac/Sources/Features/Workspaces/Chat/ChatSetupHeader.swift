@@ -782,8 +782,10 @@ struct ChatAgentField: View {
 
     private var choices: ChatAgentChoices { ChatAgentChoices(model: model, chat: chat) }
 
+    /// Only the agent this chat runs on. Another agent being behind is
+    /// marked on its own row in the picker, not on this chat's button.
     private var updateWaiting: Bool {
-        model.backends.contains { $0.updateAvailable && $0.installed != false }
+        model.backend(for: chat.backend).map { $0.updateAvailable && $0.installed != false } ?? false
     }
 }
 
@@ -846,7 +848,6 @@ struct ChatAgentPanel: View {
     @State private var supportsUpdates = false
     @State private var checkingUpdates = false
     @State private var checkedUpdates = false
-    @State private var updatingAgent: String?
     @State private var updateNotes: [String: String] = [:]
 
     var body: some View {
@@ -889,9 +890,9 @@ struct ChatAgentPanel: View {
                             if let backend = model.backend(for: id), backend.updateAvailable, backend.installed != false {
                                 AgentUpdatePill(
                                     backend: backend,
-                                    updating: updatingAgent == backend.launcherID,
-                                    enabled: updatingAgent == nil && installing == nil && !locked
-                                ) { Task { await updateFromPicker(backend) } }
+                                    updating: model.updatingAgentID == backend.launcherID,
+                                    enabled: model.updatingAgentID == nil && installing == nil && !locked
+                                ) { Task { await model.updateAgent(id: backend.launcherID ?? backend.id, label: backend.label) } }
                             }
                             AgentLimitsSummary(backend: id, peer: model.peer)
                         })
@@ -940,7 +941,7 @@ struct ChatAgentPanel: View {
                             Task { await loadVersions(check: true) }
                         }
                         .font(Theme.caption)
-                        .disabled(checkingUpdates || updatingAgent != nil || installing != nil || locked)
+                        .disabled(checkingUpdates || model.updatingAgentID != nil || installing != nil || locked)
                     }
                 }
                 ForEach(model.backends.filter { $0.id != "sh" }) { backend in
@@ -963,10 +964,10 @@ struct ChatAgentPanel: View {
                         }
                         Spacer()
                         if backend.installed != false, let row, offersUpdate(row) {
-                            Button(updatingAgent == row.id ? L10n.text("common.agent_updates.updating") : L10n.text("common.agent_updates.update"), .download) {
+                            Button(model.updatingAgentID == row.id ? L10n.text("common.agent_updates.updating") : L10n.text("common.agent_updates.update"), .download) {
                                 Task { await update(row) }
                             }
-                            .disabled(updatingAgent != nil || installing != nil || checkingUpdates || locked || row.busy)
+                            .disabled(model.updatingAgentID != nil || installing != nil || checkingUpdates || locked || row.busy)
                             .help(row.busy ? L10n.text("common.agent_updates.busy") : "")
                         } else if backend.installed == false && backend.canInstall {
                             Button(installing == backend.id ? L10n.text("apple.chatsetupheader.installing.530bcc35") : L10n.text("apple.chatsetupheader.install.569ca49f"), .download) {
@@ -1027,28 +1028,6 @@ struct ChatAgentPanel: View {
             && (row.updateAvailable == true || (checkedUpdates && !row.canCheck))
     }
 
-    /// Update from the agent's row in the picker. The result shows where the
-    /// row's pill was: gone when the update worked, a note when it did not.
-    private func updateFromPicker(_ backend: ChatBackend) async {
-        guard let id = backend.launcherID, updatingAgent == nil else { return }
-        let peer = model.peer
-        updatingAgent = id
-        setupError = nil
-        defer { updatingAgent = nil }
-        do {
-            let result = try await Bridge.agentUpdate(id: id, peer: peer)
-            guard model.peer == peer else { return }
-            if !result.ok {
-                let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                setupError = L10n.text("common.agent_updates.failed", String(tail.suffix(600)))
-            }
-            await model.reloadBackends(refreshModels: false)
-        } catch {
-            guard model.peer == peer else { return }
-            setupError = L10n.text("common.agent_updates.failed", error.localizedDescription)
-        }
-    }
-
     private func loadVersions(check: Bool) async {
         let peer = model.peer
         if check { checkingUpdates = true }
@@ -1070,31 +1049,20 @@ struct ChatAgentPanel: View {
     }
 
     private func update(_ row: AgentUpdateRow) async {
-        guard updatingAgent == nil else { return }
-        let peer = model.peer
-        updatingAgent = row.id
-        setupError = nil
         updateNotes[row.id] = nil
-        defer { updatingAgent = nil }
-        do {
-            let result = try await Bridge.agentUpdate(id: row.id, peer: peer)
-            guard model.peer == peer else { return }
-            if result.ok {
-                updateNotes[row.id] = result.after.map { L10n.text("common.agent_updates.updated", $0) }
-                    ?? L10n.text("common.agent_updates.updated_unknown")
-                if var refreshed = versions[row.id] {
-                    refreshed.version = result.after ?? refreshed.version
-                    refreshed.updateAvailable = false
-                    versions[row.id] = refreshed
-                }
-            } else {
-                let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                updateNotes[row.id] = L10n.text("common.agent_updates.failed", String(tail.suffix(600)))
+        let label = model.backends.first { $0.launcherID == row.id }?.label ?? row.name ?? row.id
+        guard let result = await model.updateAgent(id: row.id, label: label) else { return }
+        if result.ok {
+            updateNotes[row.id] = result.after.map { L10n.text("common.agent_updates.updated", $0) }
+                ?? L10n.text("common.agent_updates.updated_unknown")
+            if var refreshed = versions[row.id] {
+                refreshed.version = result.after ?? refreshed.version
+                refreshed.updateAvailable = false
+                versions[row.id] = refreshed
             }
-            await model.reloadBackends()
-        } catch {
-            guard model.peer == peer else { return }
-            updateNotes[row.id] = L10n.text("common.agent_updates.failed", error.localizedDescription)
+        } else {
+            let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            updateNotes[row.id] = L10n.text("common.agent_updates.failed", String(tail.suffix(600)))
         }
     }
 

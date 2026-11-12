@@ -2260,6 +2260,49 @@ final class ChatModel {
 
     static var nowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
+    /// An agent update started from a chat, shown as a toast in the chat view
+    /// so it outlives the picker it was started from.
+    var agentUpdateNotice: String?
+    var agentUpdateSeverity: Banner.Severity = .info
+    private(set) var updatingAgentID: String?
+
+    /// Update one agent on this chat's host and say how it went. Nil when an
+    /// update is already running or the request never got an answer.
+    @discardableResult
+    func updateAgent(id: String, label: String) async -> AgentUpdateResult? {
+        guard updatingAgentID == nil else { return nil }
+        let peer = self.peer
+        updatingAgentID = id
+        agentUpdateSeverity = .info
+        agentUpdateNotice = L10n.text("common.agent_updates.toast_updating", label)
+        defer { updatingAgentID = nil }
+        do {
+            let result = try await Bridge.agentUpdate(id: id, peer: peer)
+            guard self.peer == peer else { return result }
+            if result.ok {
+                agentUpdateSeverity = .success
+                switch (result.before, result.after) {
+                case let (before?, after?) where before != after:
+                    agentUpdateNotice = L10n.text("common.agent_updates.toast_updated", label, before, after)
+                case let (_, after?):
+                    agentUpdateNotice = L10n.text("common.agent_updates.toast_current", label, after)
+                default:
+                    agentUpdateNotice = L10n.text("common.agent_updates.toast_finished", label)
+                }
+            } else {
+                agentUpdateSeverity = .warning
+                agentUpdateNotice = L10n.text("common.agent_updates.toast_failed", label)
+            }
+            await reloadBackends(refreshModels: false)
+            return result
+        } catch {
+            guard self.peer == peer else { return nil }
+            agentUpdateSeverity = .warning
+            agentUpdateNotice = L10n.text("common.agent_updates.toast_failed", label)
+            return nil
+        }
+    }
+
     /// Change the model, asking first when the conversation is cached for
     /// the current one and big enough that reading it again costs something.
     func requestModelChange(_ next: String) async {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -36,7 +37,14 @@ internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject
     val shape = RoundedCornerShape(8.dp)
     Row(modifier.clip(shape).background(colors.panel).border(1.dp, colors.border, shape)
         .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
-        .semantics { contentDescription = chatAgentSummary(backends, chat) }
+        .semantics {
+            contentDescription = chatAgentSummary(backends, chat) +
+                if (backendOf(backends, chat?.str("backend").orEmpty())?.bol("updateAvailable") == true) {
+                    ", " + L10n.text("common.agent_updates.waiting")
+                } else {
+                    ""
+                }
+        }
         .heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(Modifier.clearAndSetSemantics {}) { HarnessMark(chat?.str("backend").orEmpty(), size = 16.dp) }
@@ -45,6 +53,11 @@ internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject
             color = if (enabled) colors.textPrimary else colors.textTertiary,
             maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
         Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
+        // This chat's agent has a newer version. Its row in the picker this
+        // opens has the update button.
+        if (backendOf(backends, chat?.str("backend").orEmpty())?.bol("updateAvailable") == true) {
+            Box(Modifier.size(7.dp).clip(CircleShape).background(colors.accent).clearAndSetSemantics {})
+        }
     }
 }
 

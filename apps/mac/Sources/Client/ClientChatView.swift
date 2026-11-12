@@ -1236,8 +1236,11 @@ struct ClientChatThread: View {
             return receive(drops)
         } isTargeted: { urlDropTargeted = $0 }
         .overlay(alignment: .topTrailing) {
-            TransientToast(message: $dropNotice, severity: .warning)
-                .padding(Theme.Space.m)
+            VStack(alignment: .trailing, spacing: Theme.Space.s) {
+                TransientToast(message: $dropNotice, severity: .warning)
+                TransientToast(message: Bindable(model).agentUpdateNotice, severity: model.agentUpdateSeverity)
+            }
+            .padding(Theme.Space.m)
         }
         .overlay(alignment: .top) {
             if refreshing || connectivity.status == .offline {

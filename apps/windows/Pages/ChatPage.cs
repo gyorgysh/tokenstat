@@ -407,11 +407,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     /// desktop Mac routes every chat read and write. Params are copied, never
     /// mutated, so a retry cannot forward an already rewritten id.
     /// </summary>
-    private Task<JsonNode> CallChatAsync(string method, JsonNode? parameters = null)
+    private Task<JsonNode> CallChatAsync(string method, JsonNode? parameters = null, TimeSpan? patience = null)
     {
         if (!RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out var inner))
         {
-            return AppServices.Host.CallAsync(method, parameters);
+            return AppServices.Host.CallAsync(method, parameters, patience);
         }
         var forwarded = parameters is null
             ? new JsonObject()
@@ -420,7 +420,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             forwarded["workspaceId"] = inner;
         }
-        return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
+        return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded, patience);
     }
 
     private async Task<string> FolderNameAsync()
@@ -2057,7 +2057,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Update: TryUpdateAsync,
         Repaint: PaintConversation,
         Suppressed: () => _suppress,
-        SignIn: OpenAgentSignInAsync), locked);
+        SignIn: OpenAgentSignInAsync,
+        UpdateAgent: UpdateAgentAsync), locked);
 
     private void RebuildAttachStrip()
     {

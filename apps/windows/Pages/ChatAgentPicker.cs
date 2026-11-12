@@ -21,7 +21,9 @@ internal sealed record ChatAgentPickerSource(
     Func<JsonObject, Task<bool>> Update,
     Action Repaint,
     Func<bool>? Suppressed = null,
-    Func<JsonNode, Task>? SignIn = null);
+    Func<JsonNode, Task>? SignIn = null,
+    /// <summary>Update this agent with its own updater (protocol 55).</summary>
+    Func<JsonNode, Task>? UpdateAgent = null);
 
 /// <summary>
 /// The composer's agent field, as on the Mac: the harness mark, the model
@@ -119,6 +121,21 @@ internal static class ChatAgentPicker
                 VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(effortText, 2);
             field.Children.Add(effortText);
+        }
+        // This chat's agent has a newer version, from the host's daily check.
+        // Its row in the panel this opens has the update button.
+        var behind = Format.Flag(backend, "updateAvailable") && Installed(backend);
+        if (behind)
+        {
+            field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
+            {
+                Width = 7, Height = 7, Fill = Theme.AccentBrush,
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            AutomationProperties.SetAccessibilityView(dot, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+            Grid.SetColumn(dot, 3);
+            field.Children.Add(dot);
         }
 
         // Agent, then model, then effort, one question at a time. Picking a
@@ -377,6 +394,34 @@ internal static class ChatAgentPicker
                 };
                 var value = item.Value;
                 pick.Click += async (_, _) => await Choose(value);
+                var rowBackend = step == ChatAgentSteps.Agent ? Backend(value) : null;
+                if (rowBackend is not null && source.UpdateAgent is { } updateAgent
+                    && Format.Flag(rowBackend, "updateAvailable") && Installed(rowBackend))
+                {
+                    // Beside the row rather than inside it, so pressing it
+                    // updates the agent instead of choosing it.
+                    var latest = Format.Text(rowBackend, "latestVersion");
+                    var tip = latest.Length > 0
+                        ? L10n.Text("common.agent_updates.update_to", Format.Text(rowBackend, "label", value), latest)
+                        : L10n.Text("common.agent_updates.update");
+                    var update = ActionIconGlyph.Button(L10n.Text("common.agent_updates.update"), ActionIcon.Download, (_, _) => { });
+                    update.VerticalAlignment = VerticalAlignment.Center;
+                    ToolTipService.SetToolTip(update, tip);
+                    AutomationProperties.SetName(update, tip);
+                    update.Click += async (_, _) =>
+                    {
+                        update.IsEnabled = false;
+                        flyout.Hide();
+                        await updateAgent(rowBackend);
+                    };
+                    var withUpdate = new Grid { ColumnSpacing = Theme.SpaceXs };
+                    withUpdate.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    withUpdate.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    withUpdate.Children.Add(pick);
+                    Grid.SetColumn(update, 1); withUpdate.Children.Add(update);
+                    choices.Children.Add(withUpdate);
+                    continue;
+                }
                 choices.Children.Add(pick);
             }
         }
