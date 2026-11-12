@@ -9,6 +9,23 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.16.0]
+
+### Added
+
+- See Oh My Pi token usage and launch or install it from a terminal session.
+
+### Improved
+
+- Plans appear in the conversation when they start and make progress. Earlier plan placeholders disappear, leaving room for messages between updates.
+- Long command output opens in a scrollable panel instead of filling the chat.
+- Repository history keeps commit avatars cached when you reopen the inspector.
+
+### Fixed
+
+- Codex limits include recently resumed sessions and show when a reading is stale, including after a plan change.
+- Cursor usage can be refreshed after a failed fetch and accepts more recent usage records.
+
 ## [1.15.1] - 2026-11-11
 
 ### Improved
