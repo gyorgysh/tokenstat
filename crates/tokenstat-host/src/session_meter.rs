@@ -43,8 +43,8 @@ use std::time::{Duration, Instant, SystemTime};
 use tokenstat_core::model::{BillingMode, Counters, EventId, SourceId};
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
-    antigravity_cli, claude_code, codex, devin, dsh, grok, hermes, kilo, kimi, muse, opencode, pi,
-    qwen,
+    antigravity_cli, claude_code, codex, devin, dsh, grok, hermes, kilo, kimi, muse, omp, opencode,
+    pi, qwen,
 };
 use tokenstat_core::{Catalog, UsageEvent};
 
@@ -102,6 +102,7 @@ pub(crate) fn reading(
         "kilo" => kilo_events(cwd, spawn)?,
         "hermes" => hermes_events(cwd, spawn)?,
         "pi" => pi_events(cwd, spawn)?,
+        "omp" => omp_events(cwd, spawn)?,
         "dsh" => dsh_events(cwd, spawn)?,
         "muse" => {
             let (events, parent_id) = muse_events(cwd, spawn)?;
@@ -667,6 +668,7 @@ pub(crate) fn can_meter(command: &str) -> bool {
         "kilo" => kilo::discover(&home).is_some(),
         "hermes" => hermes::discover(&home).is_some(),
         "pi" => pi::discover(&home).is_some(),
+        "omp" => !omp::discover(&home).is_empty(),
         "dsh" => dsh::discover(&home).is_some(),
         "muse" => muse::discover(&home).is_some(),
         "devin" => devin::discover(&home).is_some(),
@@ -693,6 +695,7 @@ pub(crate) fn harness_name(command: &str) -> Option<&'static str> {
         "kilo" | "kilocode" => Some("kilo"),
         "hermes" => Some("hermes"),
         "pi" => Some("pi"),
+        "omp" => Some("omp"),
         "dsh" => Some("dsh"),
         "muse" => Some("muse"),
         "devin" => Some("devin"),
@@ -1041,6 +1044,60 @@ fn pi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let root_for_parse = root.clone();
     cached_events(&path, |contents| {
         pi::parse_file(&path, &root_for_parse, contents).events
+    })
+}
+
+/// Match Oh My Pi's main transcript across its profile roots.
+fn omp_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = tokenstat_paths::home_dir()?;
+    let roots = omp::discover(&home);
+    let path = resolve_logs("omp", cwd, spawn, || {
+        // OMP has used home-relative, absolute and hashed bucket names.
+        // Read each main transcript's session header instead of guessing a
+        // bucket name; do not claim subagent files as separate terminals.
+        let files: Vec<_> = roots
+            .iter()
+            .flat_map(|root| {
+                std::fs::read_dir(root)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Result::ok)
+                    .flat_map(|entry| std::fs::read_dir(entry.path()).into_iter().flatten())
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        Some(
+            newest_first(files)
+                .into_iter()
+                .filter_map(|path| {
+                    let head = read_head(&path)?;
+                    let matches = head
+                        .lines()
+                        .find_map(|line| {
+                            let row: serde_json::Value = serde_json::from_str(line).ok()?;
+                            (row.get("type")?.as_str()? == "session")
+                                .then(|| row.get("cwd")?.as_str().map(str::to_owned))
+                                .flatten()
+                        })
+                        .is_some_and(|dir| {
+                            dir == cwd
+                                || std::fs::canonicalize(&dir)
+                                    .ok()
+                                    .zip(std::fs::canonicalize(cwd).ok())
+                                    .is_some_and(|(a, b)| a == b)
+                        });
+                    matches.then(|| (file_born_ms(&path, Some(&head)), path))
+                })
+                .take(SCAN_LIMIT)
+                .collect(),
+        )
+    })?;
+    let root = roots.iter().find(|root| path.starts_with(root))?;
+    cached_events(&path, |contents| {
+        pi::parse_omp_file(&path, root, contents).events
     })
 }
 

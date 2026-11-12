@@ -10,7 +10,7 @@ namespace Tokenstat.Design;
 /// <summary>The same template brand artwork as the Mac launcher, tinted by our theme.</summary>
 internal static class AgentMark
 {
-    private static readonly string[] Known = ["claude_code", "codex", "grok", "opencode", "cline", "openclaw", "muse", "devin", "pi", "dsh", "zed", "copilot", "antigravity", "cursor", "gemini", "hermes", "kilo", "kimi", "qwen"];
+    private static readonly string[] Known = ["claude_code", "codex", "grok", "opencode", "cline", "openclaw", "muse", "devin", "pi", "omp", "dsh", "zed", "copilot", "antigravity", "cursor", "gemini", "hermes", "kilo", "kimi", "qwen"];
     public static string Canonical(string value)
     {
         var id = value.Replace('\\', '/').Split('/').Last().ToLowerInvariant().Replace('-', '_').Replace(' ', '_');

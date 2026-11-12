@@ -223,6 +223,19 @@ const PROFILES: &[Profile] = &[
         open_url: None,
     },
     Profile {
+        id: "omp",
+        name: "Oh My Pi",
+        command: "omp",
+        args: &[],
+        bypass_args: &["--auto-approve"],
+        harness_id: Some("omp"),
+        symbol: None,
+        install_command: Some("curl -fsSL https://omp.sh/install | sh"),
+        install_command_windows: Some("irm https://omp.sh/install.ps1 | iex"),
+        install_dirs: &[],
+        open_url: None,
+    },
+    Profile {
         id: "pi",
         name: "Pi",
         command: "pi",
@@ -1560,6 +1573,7 @@ fn conventional_paths(home: &str) -> Vec<String> {
         let mut paths = vec![
             format!(r"{local}\Programs\OpenAI\Codex\bin"),
             format!(r"{home}\.local\bin"),
+            format!(r"{home}\.bun\bin"),
         ];
         paths.extend(npm_paths);
         let roaming =
@@ -1576,6 +1590,7 @@ fn conventional_paths(home: &str) -> Vec<String> {
         paths.extend(npm_paths);
         paths.extend([
             format!("{home}/.npm-global/bin"),
+            format!("{home}/.bun/bin"),
             format!("{home}/.volta/bin"),
             format!("{home}/.opencode/bin"),
             format!("{home}/.grok/bin"),
@@ -2410,6 +2425,25 @@ mod tests {
         let found = resolve_profile(kilo, &path, &home).expect("kilo must resolve");
         assert!(found.ends_with("preferred/kilo"), "{found}");
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn oh_my_pi_launcher_has_official_installers_and_bun_path() {
+        let omp = PROFILES.iter().find(|p| p.id == "omp").unwrap();
+        assert_eq!(omp.command, "omp");
+        assert_eq!(omp.harness_id, Some("omp"));
+        assert_eq!(omp.bypass_args, &["--auto-approve"]);
+        assert!(omp.install_command.unwrap().contains("omp.sh/install"));
+        assert!(
+            omp.install_command_windows
+                .unwrap()
+                .contains("omp.sh/install.ps1")
+        );
+        assert!(
+            super::conventional_paths("/example")
+                .iter()
+                .any(|p| p.contains(".bun"))
+        );
     }
 
     #[test]

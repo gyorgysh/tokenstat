@@ -1947,6 +1947,7 @@ func harnessID(forCommand command: String) -> String? {
     case "openclaw": return "openclaw"
     case "muse": return "muse"
     case "pi": return "pi"
+    case "omp": return "omp"
     case "zed": return "zed"
     case "agy": return "antigravity"
     case "agent", "cursor": return "cursor"
@@ -2001,6 +2002,7 @@ func harnessName(_ id: String) -> String {
     case "muse": return "Muse"
     case "devin": return L10n.text("apple.models.devin_cli.29247d05")
     case "pi": return "Pi"
+    case "omp": return "Oh My Pi"
     case "dsh": return L10n.text("apple.models.deepseek_harness.e562a9c5")
     case "zed": return "Zed"
     case "copilot": return L10n.text("apple.models.copilot_cli.c73e38d4")
@@ -2043,7 +2045,7 @@ func harnessBrandAsset(_ id: String) -> String? {
     }
     let known: Set<String> = [
         "claude_code", "codex", "grok", "opencode",
-        "cline", "openclaw", "muse", "devin", "pi", "dsh", "zed", "copilot",
+        "cline", "openclaw", "muse", "devin", "pi", "omp", "dsh", "zed", "copilot",
         "antigravity", "cursor", "gemini", "hermes", "kilo", "kimi", "qwen",
     ]
     return known.contains(assetId) ? "brand_\(assetId)" : nil

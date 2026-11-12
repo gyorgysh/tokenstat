@@ -1856,6 +1856,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             "muse" => "Muse",
             "devin" => L10n.Text("windows.accountpage.devin_cli.29247d05"),
             "pi" => "Pi",
+            "omp" => "Oh My Pi",
             "dsh" => L10n.Text("windows.accountpage.deepseek_harness.e562a9c5"),
             "zed" => "Zed",
             "copilot" => L10n.Text("windows.accountpage.copilot_cli.c73e38d4"),

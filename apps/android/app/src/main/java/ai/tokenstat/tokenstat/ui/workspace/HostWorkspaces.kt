@@ -233,6 +233,7 @@ fun harnessIdForCommand(command: String): String? = when (command.replace('\\', 
     "openclaw" -> "openclaw"
     "muse" -> "muse"
     "pi" -> "pi"
+    "omp" -> "omp"
     "zed" -> "zed"
     "agy" -> "antigravity"
     "agent", "cursor" -> "cursor"

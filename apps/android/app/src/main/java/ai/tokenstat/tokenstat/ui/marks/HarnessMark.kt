@@ -72,6 +72,7 @@ fun HarnessMark(id: String, size: Dp = 26.dp) {
         "openclaw" -> R.drawable.brand_openclaw
         "opencode" -> R.drawable.brand_opencode
         "pi" -> R.drawable.brand_pi
+        "omp" -> R.drawable.brand_omp
         "qwen" -> R.drawable.brand_qwen
         "zed" -> R.drawable.brand_zed
         else -> 0

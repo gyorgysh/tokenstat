@@ -106,6 +106,7 @@ fun harnessName(id: String): String {
         "muse" -> "Muse"
         "devin" -> L10n.text("android.tslogic.devin_cli.29247d05")
         "pi" -> "Pi"
+        "omp" -> "Oh My Pi"
         "dsh" -> L10n.text("android.tslogic.deepseek_harness.e562a9c5")
         "zed" -> "Zed"
         "copilot" -> L10n.text("android.tslogic.copilot_cli.c73e38d4")

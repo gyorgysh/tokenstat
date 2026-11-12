@@ -140,6 +140,12 @@ struct LaunchProfile: Identifiable, Sendable {
             installCommand: "curl -fsSL https://dev.meta.ai/install.sh | bash"
         ),
         LaunchProfile(
+            id: "omp", name: "Oh My Pi", command: "omp", args: [],
+            bypassArgs: ["--auto-approve"], harnessID: "omp", symbol: nil,
+            installDirs: [".bun/bin", ".local/bin"],
+            installCommand: "curl -fsSL https://omp.sh/install | sh"
+        ),
+        LaunchProfile(
             id: "pi", name: "Pi", command: "pi", args: [],
             bypassArgs: [], harnessID: "pi", symbol: nil,
             installCommand: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent"

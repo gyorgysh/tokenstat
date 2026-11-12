@@ -2084,6 +2084,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             "muse" => "Muse",
             "devin" => L10n.Text("windows.homepage.devin_cli.29247d05"),
             "pi" => "Pi",
+            "omp" => "Oh My Pi",
             "dsh" => L10n.Text("windows.homepage.deepseek_harness.e562a9c5"),
             "zed" => "Zed",
             "copilot" => L10n.Text("windows.homepage.copilot_cli.c73e38d4"),

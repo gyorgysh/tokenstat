@@ -21,6 +21,7 @@ pub mod hermes;
 pub mod kilo;
 pub mod kimi;
 pub mod muse;
+pub mod omp;
 pub mod openclaw;
 pub mod opencode;
 pub mod pi;

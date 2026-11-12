@@ -83,6 +83,8 @@ struct Row {
     /// Only on the session header.
     cwd: Option<String>,
     message: Option<Message>,
+    model: Option<String>,
+    usage: Option<Usage>,
 }
 
 #[derive(Deserialize)]
@@ -116,6 +118,20 @@ struct Cost {
 /// may never see the header line, which is why the folder name stays as the
 /// fallback for the project.
 pub fn parse_file(path: &Path, sessions_root: &Path, contents: &str) -> ParseOutput {
+    parse_file_for(path, sessions_root, contents, SourceId::Pi)
+}
+
+/// Read an Oh My Pi transcript, including its independent model-usage rows.
+pub fn parse_omp_file(path: &Path, sessions_root: &Path, contents: &str) -> ParseOutput {
+    parse_file_for(path, sessions_root, contents, SourceId::Omp)
+}
+
+fn parse_file_for(
+    path: &Path,
+    sessions_root: &Path,
+    contents: &str,
+    source: SourceId,
+) -> ParseOutput {
     let mut out = ParseOutput::default();
     let session = session_id(path);
     let mut project = folder_label(path, sessions_root);
@@ -150,11 +166,23 @@ pub fn parse_file(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
             }
             continue;
         }
-        let Some(message) = row.message else { continue };
-        if message.role.as_deref() == Some("user") {
-            continue;
-        }
-        let Some(usage) = message.usage else { continue };
+        let (model, usage) =
+            if source == SourceId::Omp && row.kind.as_deref() == Some("model_usage") {
+                (row.model, row.usage)
+            } else {
+                let Some(message) = row.message else { continue };
+                if source == SourceId::Omp {
+                    // Task results can contain aggregate subagent usage, which is
+                    // already counted from the subagent transcript itself.
+                    if message.role.as_deref() != Some("assistant") {
+                        continue;
+                    }
+                } else if message.role.as_deref() == Some("user") {
+                    continue;
+                }
+                (message.model, message.usage)
+            };
+        let Some(usage) = usage else { continue };
 
         // A missing bucket is unknown, not zero: writing it down as a zero
         // would defeat `has_unknown` and present a partial sum as complete.
@@ -180,16 +208,21 @@ pub fn parse_file(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
         // Without one, the file offset would be the only identity, and a file
         // rewritten from the start would count every turn again.
         let id = match row.id.as_deref() {
-            Some(id) if !id.is_empty() => EventId::derive(&["pi", id]),
-            _ => EventId::derive(&["pi", &session, &i.to_string()]),
+            Some(id) if !id.is_empty() && source == SourceId::Omp => {
+                // OMP uses eight-hex IDs unique within one session only.
+                // The timestamp is copied with a forked entry and prevents
+                // unrelated sessions with the same short ID colliding.
+                EventId::derive(&[source.as_str(), id, row.timestamp.as_deref().unwrap_or("")])
+            }
+            Some(id) if !id.is_empty() => EventId::derive(&[source.as_str(), id]),
+            _ => EventId::derive(&[source.as_str(), &path.to_string_lossy(), &i.to_string()]),
         };
 
         out.events.push(UsageEvent {
             id,
-            source: SourceId::Pi,
+            source,
             ts,
-            model: message
-                .model
+            model: model
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| "unknown".to_string()),
             session: session.clone(),
@@ -278,6 +311,36 @@ mod tests {
         PathBuf::from(ROOT)
             .join("--Users-x-git-demo--")
             .join("2026-08-19T21-49-58-054Z_01a01c00-9fa6-70a9-901b-34f46111a70e.jsonl")
+    }
+
+    #[test]
+    fn omp_counts_assistant_and_model_usage_without_task_summaries() {
+        let transcript = r#"{"type":"session","cwd":"/work/demo"}
+{"type":"message","id":"a","timestamp":"2026-01-01T00:00:00Z","message":{"role":"assistant","model":"one","usage":{"input":100,"output":10,"cacheRead":4,"cacheWrite":2}}}
+{"type":"model_usage","id":"b","timestamp":"2026-01-01T00:00:01Z","model":"two","usage":{"input":30,"output":3,"cacheRead":0,"cacheWrite":0}}
+{"type":"message","id":"c","message":{"role":"toolResult","model":"one","usage":{"input":999,"output":999}}}
+"#;
+        let result = parse_omp_file(
+            Path::new("/sessions/project/abc.jsonl"),
+            Path::new("/sessions"),
+            transcript,
+        );
+        assert_eq!(result.events.len(), 2);
+        assert_eq!(result.events[0].source, SourceId::Omp);
+        assert_eq!(result.events[0].project, "demo");
+        assert_eq!(result.events[0].counters.input_fresh, Some(100));
+        assert_eq!(result.events[1].model, "two");
+        assert_eq!(result.events[1].counters.output, Some(3));
+        assert_eq!(
+            result.events[0].id,
+            parse_omp_file(
+                Path::new("/sessions/project/abc.jsonl"),
+                Path::new("/sessions"),
+                transcript
+            )
+            .events[0]
+                .id
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@ use crate::error::{CoreError, Warning};
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
     antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, devin,
-    dsh, grok, hermes, kilo, kimi, muse, openclaw, opencode, pi, qwen, zed,
+    dsh, grok, hermes, kilo, kimi, muse, omp, openclaw, opencode, pi, qwen, zed,
 };
 use crate::store::Store;
 use crate::watermark;
@@ -497,6 +497,21 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             .map(|path| {
                 read_document_shard(path, &marks, |p, text| {
                     pi::parse_file(p, &sessions, text).into()
+                })
+            })
+            .collect();
+        absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
+    }
+
+    // Oh My Pi has separate roots for profiles and XDG installations.
+    for sessions in omp::discover(&home) {
+        let files = pi::shards(&sessions);
+        report.files_found += files.len() as u64;
+        let parsed: Vec<_> = files
+            .par_iter()
+            .map(|path| {
+                read_document_shard(path, &marks, |p, text| {
+                    pi::parse_omp_file(p, &sessions, text).into()
                 })
             })
             .collect();

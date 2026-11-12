@@ -35,6 +35,8 @@ pub enum SourceId {
     /// Pi's CLI agent. JSONL sessions, one file per session under the folder
     /// it was run in.
     Pi,
+    /// Oh My Pi session and subagent usage.
+    Omp,
     /// Hermes Agent. One SQLite state file, with usage already rolled up per
     /// session and model.
     Hermes,
@@ -72,6 +74,7 @@ impl SourceId {
             SourceId::Zed => "zed",
             SourceId::Copilot => "copilot",
             SourceId::Pi => "pi",
+            SourceId::Omp => "omp",
             SourceId::Hermes => "hermes",
             SourceId::Kilo => "kilo",
             SourceId::Dsh => "dsh",
@@ -97,6 +100,7 @@ impl SourceId {
             SourceId::Zed => "Zed",
             SourceId::Copilot => "Copilot CLI",
             SourceId::Pi => "Pi",
+            SourceId::Omp => "Oh My Pi",
             SourceId::Hermes => "Hermes Agent",
             SourceId::Kilo => "Kilo Code",
             SourceId::Dsh => "DeepSeek Harness",
@@ -150,6 +154,7 @@ impl SourceId {
             "zed" => Some(Self::Zed),
             "copilot" => Some(Self::Copilot),
             "pi" => Some(Self::Pi),
+            "omp" => Some(Self::Omp),
             "hermes" => Some(Self::Hermes),
             "kilo" => Some(Self::Kilo),
             "dsh" => Some(Self::Dsh),
