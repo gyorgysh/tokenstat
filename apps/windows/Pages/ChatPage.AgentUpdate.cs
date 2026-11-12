@@ -16,18 +16,20 @@ internal sealed partial class ChatPage
 
     private void AgentToast(string text, BannerSeverity severity)
     {
-        if (_agentToast is not null) _root.Children.Remove(_agentToast);
+        // Bottom right, just above the composer, where the app's other
+        // notices sit, rather than over the conversation's title.
+        if (_agentToast?.Parent is Microsoft.UI.Xaml.Controls.Panel previous) previous.Children.Remove(_agentToast);
         var toast = Chrome.Toast(text, severity, onDismiss: () => _agentToast = null);
         toast.HorizontalAlignment = HorizontalAlignment.Right;
         _agentToast = toast;
-        _root.Children.Insert(Math.Min(1, _root.Children.Count), toast);
+        _composerContext.Children.Insert(0, toast);
         if (severity != BannerSeverity.Success) return;
         // A success leaves on its own, like the Mac's. A failure stays until read.
         var shown = toast;
         _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ => DispatcherQueue.TryEnqueue(() =>
         {
             if (_agentToast != shown) return;
-            _root.Children.Remove(shown);
+            (shown.Parent as Microsoft.UI.Xaml.Controls.Panel)?.Children.Remove(shown);
             _agentToast = null;
         }));
     }

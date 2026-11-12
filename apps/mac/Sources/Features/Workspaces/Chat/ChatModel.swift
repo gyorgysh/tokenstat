@@ -2260,11 +2260,15 @@ final class ChatModel {
 
     static var nowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    /// An agent update started from a chat, shown as a toast in the chat view
-    /// so it outlives the picker it was started from.
-    var agentUpdateNotice: String?
-    var agentUpdateSeverity: Banner.Severity = .info
     private(set) var updatingAgentID: String?
+    private var agentUpdateNotice: String? {
+        get { AgentUpdateNotice.shared.message }
+        set { AgentUpdateNotice.shared.message = newValue }
+    }
+    private var agentUpdateSeverity: Banner.Severity {
+        get { AgentUpdateNotice.shared.severity }
+        set { AgentUpdateNotice.shared.severity = newValue }
+    }
 
     /// Update one agent on this chat's host and say how it went. Nil when an
     /// update is already running or the request never got an answer.
@@ -5090,4 +5094,14 @@ enum ChatGateCopy {
             return L10n.text("apple.chatmodel.checking_this_backend_s_permission_support.13f013cf")
         }
     }
+}
+
+/// The notice for an agent update, wherever in the app it was started. One
+/// for the whole app because every chat surface has its own `ChatModel`,
+/// and the notice belongs at the window's bottom right with the others.
+@MainActor @Observable
+final class AgentUpdateNotice {
+    static let shared = AgentUpdateNotice()
+    var message: String?
+    var severity: Banner.Severity = .info
 }

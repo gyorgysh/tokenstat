@@ -644,9 +644,15 @@ struct RootView: View {
             .allowsHitTesting(false)
         }
         .overlay(alignment: .bottomTrailing) {
-            UsageKeychainNotice {
-                UserDefaults.standard.set("planLimits", forKey: "account.settingsPane")
-                navigate(to: .global(.account))
+            // Window-level notices share the bottom right, newest above.
+            VStack(alignment: .trailing, spacing: 0) {
+                TransientToast(message: Bindable(AgentUpdateNotice.shared).message,
+                               severity: AgentUpdateNotice.shared.severity)
+                    .padding(Theme.Space.m)
+                UsageKeychainNotice {
+                    UserDefaults.standard.set("planLimits", forKey: "account.settingsPane")
+                    navigate(to: .global(.account))
+                }
             }
         }
         .onChange(of: isLiveResizing) { _, resizing in

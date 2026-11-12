@@ -1238,7 +1238,8 @@ struct ClientChatThread: View {
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: Theme.Space.s) {
                 TransientToast(message: $dropNotice, severity: .warning)
-                TransientToast(message: Bindable(model).agentUpdateNotice, severity: model.agentUpdateSeverity)
+                TransientToast(message: Bindable(AgentUpdateNotice.shared).message,
+                               severity: AgentUpdateNotice.shared.severity)
             }
             .padding(Theme.Space.m)
         }
