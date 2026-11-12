@@ -49,6 +49,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -237,6 +238,7 @@ fun ChatSection(
     var startedNewChatSend by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     var didOpenConversation by remember(workspace, openConversationOnAppear, conversationNonce) { mutableStateOf(false) }
     var events by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var recordedTurn by remember(projectOwner, openId) { mutableStateOf<Pair<ChatDisplayItem.Changes, String?>?>(null) }
     val history = remember(projectOwner, openId) { ChatHistoryWindow() }
     var usage by remember(projectOwner, openId) { mutableStateOf<ChatUsageTotals?>(null) }
     var hasEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
@@ -1817,7 +1819,7 @@ fun ChatSection(
                                 defaultAgentName = openChat?.str("backend")?.let { harnessName(it) } ?: L10n.text("android.chatpullssections.agent.11b39c93"),
                                 expandsOutput = detail == ChatDetail.Detailed,
                                 canAnswerQuestions = !offline && HostContracts.supportsChatQuestions(protocol),
-                                onReviewChanges = if (offline) null else ({ onOpenSection("Changes") }),
+                                onReviewChanges = { changes, path -> recordedTurn = changes to path },
                                 toolImages = imageRows.toolImages[item.id].orEmpty(),
                                 live = smoothStreaming && openChat?.bol("running") == true && item.id == liveTextId,
                                 onToggleGroup = { id ->
@@ -2187,6 +2189,9 @@ fun ChatSection(
             }
         }
     }
+    recordedTurn?.let { (changes, focus) ->
+        RecordedTurnReviewDialog(changes, focus) { recordedTurn = null }
+    }
     if (showingStats) {
         chats.firstOrNull { it.str("id") == openId }?.let { chat -> ChatStatsDialog(model, peer, chat, chatInspection, activitySection, usageOnly = showingUsage, fallbackUsage = usage) { showingStats = false } }
     }
@@ -2242,6 +2247,84 @@ fun ChatSection(
 
 /// The three fact cards the iOS list leads with: Conversations, Running,
 /// Agents. Figure first in accent, caption below, mark trailing.
+private data class RecordedPatchLine(val text: String, val kind: Int = 0)
+
+/// Pages the recorded text without building a view for every line at once.
+private fun recordedPatchLines(file: ChangedFile, limit: Int): List<RecordedPatchLine> = sequence {
+    if (file.patches.isEmpty()) yield(RecordedPatchLine(L10n.text("android.workbench.patch_unavailable"), 2))
+    file.patches.forEachIndexed { index, patch ->
+        if (file.patches.size > 1) yield(RecordedPatchLine(L10n.text("android.workbench.edit_number", index + 1), 2))
+        if (patch.isEmpty()) yield(RecordedPatchLine(L10n.text("android.workbench.patch_unavailable"), 2))
+        else patch.lineSequence().forEach { line ->
+            val kind = when {
+                line.startsWith("+") && !line.startsWith("+++") -> 1
+                line.startsWith("-") && !line.startsWith("---") -> -1
+                else -> 0
+            }
+            if (line.isEmpty()) yield(RecordedPatchLine(" ", kind))
+            var start = 0
+            while (start < line.length) {
+                var end = (start + 256).coerceAtMost(line.length)
+                if (end < line.length && Character.isHighSurrogate(line[end - 1]) && Character.isLowSurrogate(line[end])) end--
+                yield(RecordedPatchLine(line.substring(start, end), kind))
+                start = end
+            }
+        }
+    }
+}.take(limit + 1).toList()
+
+@Composable
+private fun RecordedTurnReviewDialog(changes: ChatDisplayItem.Changes, focus: String?, onDismiss: () -> Unit) {
+    var selected by remember(changes.id) { mutableStateOf(focus) }
+    var open by remember { mutableStateOf(false) }
+    val file = changes.files.firstOrNull { it.path == selected } ?: changes.files.firstOrNull()
+    var limit by remember(file?.path) { mutableIntStateOf(2000) }
+    val lines = remember(file, limit) { file?.let { recordedPatchLines(it, limit) }.orEmpty() }
+    val colors = LocalTsColors.current
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(Space.s),
+            shape = RoundedCornerShape(cardRadiusDp), color = colors.background) {
+            Column(Modifier.fillMaxSize().padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(L10n.text("android.workbench.turn_changes"), modifier = Modifier.weight(1f),
+                        style = TsType.title3, color = colors.textPrimary)
+                    TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
+                }
+                ReviewFileBrowser(changes.files.map { it.path }, file?.path, { selected = it }, Modifier.weight(1f).fillMaxWidth()) { compact ->
+                    Column(Modifier.fillMaxSize().padding(start = if (compact) 0.dp else Space.s),
+                        verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        if (compact) Box {
+                            TextButton(onClick = { open = true }, enabled = file != null) {
+                                Text(file?.fileName ?: L10n.text("common.files"), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                                changes.files.forEach { item ->
+                                    DropdownMenuItem(text = { Text(item.path, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                                        onClick = { selected = item.path; open = false })
+                                }
+                            }
+                        }
+                        if (file != null) Text(file.path, style = TsType.mono(11), color = colors.textSecondary,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(L10n.text("android.workbench.recorded_edits"), style = TsType.caption, color = colors.textSecondary)
+                        SelectionContainer {
+                            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                                items(lines.take(limit)) { line ->
+                                    val color = when (line.kind) { 1 -> colors.diffAdded; -1 -> colors.diffRemoved; 2 -> colors.textTertiary; else -> colors.textPrimary }
+                                    Text(line.text, style = TsType.mono(11), color = color)
+                                }
+                                if (lines.size > limit) item {
+                                    TextButton(onClick = { limit += 2000 }) { Text(L10n.text("android.workbench.show_more")) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ChatStatPanels(chats: List<JsonObject>) {
     val colors = LocalTsColors.current

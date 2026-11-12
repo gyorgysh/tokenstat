@@ -44,9 +44,8 @@ struct ClientChatEventRow: View {
     var answeringQuestion = false
     /// False for a saved copy, which cannot send anything.
     var canAnswerQuestions = true
-    /// Opens the folder's changes beside the chat, at one file or all of
-    /// them. Nil where there is no live folder to open.
-    var reviewChanges: ((String?) -> Void)? = nil
+    /// Opens the recorded edits for this turn at one file or the first.
+    var reviewChanges: ((ChatTurnChanges, String?) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -179,7 +178,9 @@ struct ClientChatEventRow: View {
                 answerQuestion(question, text)
             }
         case let .changes(changes):
-            ChatTurnChangesCard(changes: changes, review: reviewChanges)
+            ChatTurnChangesCard(changes: changes, review: reviewChanges.map { callback in
+                { path in callback(changes, path) }
+            })
         case let .attachment(attachment) where attachment.mediaType?.hasPrefix("image/") == true:
             EmptyView()
         case let .attachment(attachment):
@@ -197,6 +198,8 @@ struct ClientChatEventRow: View {
             ClientChatHandoffRow(agent: agentLabel(to), brief: brief)
         case let .approval(approval):
             ClientChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
+        case let .plan(steps):
+            ChatPlanCard(steps: steps, live: animatesRunning)
         case let .usage(input, output, cost):
             HStack(spacing: Theme.Space.s) {
                 Text(L10n.text("apple.clientchatrows.0_in_1_out.f48051a0", "\(input.formatted())", "\(output.formatted())"))

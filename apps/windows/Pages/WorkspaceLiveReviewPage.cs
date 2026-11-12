@@ -12,8 +12,9 @@ namespace Tokenstat.Pages;
 internal sealed class WorkspaceLiveReviewPage : Page
 {
     private readonly string _workspaceId;
-    private readonly ScrollViewer _viewer = new() { Padding = new Thickness(Theme.SpaceM),
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+    private readonly ContentControl _viewer = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        VerticalContentAlignment = VerticalAlignment.Stretch };
+    private string? _displayedPath;
     private readonly ContentControl _error = new();
     private readonly TextBlock _title = new() { TextWrapping = TextWrapping.Wrap,
         VerticalAlignment = VerticalAlignment.Center };
@@ -74,7 +75,7 @@ internal sealed class WorkspaceLiveReviewPage : Page
         })) { _poll.Stop(); _lifetime.Cancel(); }
     }
 
-    internal void Review(string? path) { _path = path; _title.Text = path ?? L10n.Text("windows.workbench.working_tree"); Refresh(); }
+    internal void Review(string? path) { _path = path; Refresh(); }
     internal void Refresh()
     {
         if (!IsLoaded) return;
@@ -95,14 +96,15 @@ internal sealed class WorkspaceLiveReviewPage : Page
                 bool Current() => IsLoaded && lifetime == _lifetime && !lifetime.IsCancellationRequested && path == _path;
                 try
                 {
-                    var (snapshot, signature) = await SnapshotAsync(path, lifetime.Token);
+                    var (snapshot, signature, selected) = await SnapshotAsync(path, lifetime.Token);
                     if (!Current()) continue;
                     if (snapshot is not null)
                     {
-                        var offset = _viewer.VerticalOffset;
+                        var offset = _displayedPath == selected && _viewer.Content is WorkspaceReviewBrowser previous
+                            ? previous.VerticalOffset : 0;
                         _viewer.Content = snapshot;
-                        _viewer.UpdateLayout();
-                        _viewer.ChangeView(null, offset, null, true);
+                        if (snapshot is WorkspaceReviewBrowser browser) browser.RestoreOffset(offset);
+                        _displayedPath = selected;
                         _snapshotSignature = signature;
                     }
                     _error.Content = null;
@@ -117,64 +119,48 @@ internal sealed class WorkspaceLiveReviewPage : Page
         finally { _loading = false; }
     }
 
-    private async Task<(UIElement? Snapshot, string Signature)> SnapshotAsync(string? path, CancellationToken token)
+    private async Task<(UIElement? Snapshot, string Signature, string? Selected)> SnapshotAsync(string? path, CancellationToken token)
     {
         var status = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId, "workspace.status",
             new JsonObject { ["id"] = _workspaceId }).WaitAsync(TimeSpan.FromSeconds(30), token);
         var files = (status["git"]?["files"] as JsonArray ?? status["files"] as JsonArray ?? new JsonArray())
-            .Where(file => path is null || Format.Text(file, "path") == path).ToArray();
-        using var slots = new SemaphoreSlim(4);
-        var loads = new List<Task<(JsonNode? File, JsonNode? Diff, string? Error)>>();
-        foreach (var file in files.Take(WorkspaceDiff.ReviewMaxFiles))
+            .Select(file => Format.Text(file, "path")).Where(name => !string.IsNullOrEmpty(name)).ToArray();
+        var selected = path is not null && files.Contains(path) ? path : files.FirstOrDefault();
+        if (selected is null)
         {
-            async Task<(JsonNode?, JsonNode?, string?)> Load()
-            {
-                await slots.WaitAsync(token);
-                try
-                {
-                    var name = Format.Text(file, "path");
-                    var diff = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId, "workspace.diff",
-                        new JsonObject { ["id"] = _workspaceId, ["path"] = name }).WaitAsync(TimeSpan.FromSeconds(30), token);
-                    token.ThrowIfCancellationRequested();
-                    return (file, diff, null);
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception error)
-                {
-                    return (file, null, FriendlyError.Display(error.Message));
-                }
-                finally { slots.Release(); }
-            }
-            loads.Add(Load());
+            var emptySignature = "empty";
+            if (emptySignature == _snapshotSignature) return (null, emptySignature, null);
+            return (new TextBlock { Text = L10n.Text("windows.workspacediff.no_changes_to_review.1f08cad6"),
+                Margin = new Thickness(Theme.SpaceM), TextWrapping = TextWrapping.Wrap }, emptySignature, null);
         }
-        var results = await Task.WhenAll(loads);
-        var signature = path + "\n" + string.Join("\n", files.Select(file => file?.ToJsonString()))
-            + "\n" + string.Join("\n", results.Select(result => result.Diff?.ToJsonString() ?? result.Error));
-        if (signature == _snapshotSignature) return (null, signature);
-        var stack = new StackPanel { Spacing = Theme.SpaceM };
-        if (files.Length == 0)
-            stack.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacediff.no_changes_to_review.1f08cad6"), TextWrapping = TextWrapping.Wrap });
-        foreach (var result in results)
+        JsonNode? diff = null;
+        string? error = null;
+        try
         {
-            if (result.Diff is { } diff)
-                stack.Children.Add(path is not null ? WorkspaceDiff.FullFile(diff)
-                    : WorkspaceDiff.FileCard(this, (Format.Text(result.File, "path"), Format.Text(result.File, "kind"),
-                        Format.Long(result.File, "added"), Format.Long(result.File, "removed")), diff, workingTree: true));
-            else
-            {
-                var failed = new StackPanel { Spacing = Theme.SpaceS };
-                failed.Children.Add(Chrome.Banner(result.Error ?? L10n.Text("windows.workspacediff.no_diff_was_returned.b30e0096"), Theme.Danger, Symbol.Important));
-                failed.Children.Add(Buttons.Secondary(L10n.Text("common.retry"), ActionIcon.Refresh, (_, _) => Refresh(), small: true));
-                stack.Children.Add(failed);
-            }
+            diff = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId, "workspace.diff",
+                new JsonObject { ["id"] = _workspaceId, ["path"] = selected }).WaitAsync(TimeSpan.FromSeconds(30), token);
+            token.ThrowIfCancellationRequested();
         }
-        if (files.Length > WorkspaceDiff.ReviewMaxFiles)
+        catch (OperationCanceledException) { throw; }
+        catch (Exception failure) { error = FriendlyError.Display(failure.Message); }
+        var signature = selected + "\n" + string.Join("\n", files) + "\n" + (diff?.ToJsonString() ?? error);
+        if (signature == _snapshotSignature) return (null, signature, selected);
+        UIElement detail;
+        if (diff is not null)
         {
-            var left = files.Length - WorkspaceDiff.ReviewMaxFiles;
-            stack.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacediff.0_more_1_changed_open_2_from_changes_for_t.f976e9a1",
-                $"{left}", left == 1 ? L10n.Text("windows.workspacediff.file.3b9c358f") : L10n.Text("windows.workspacediff.files.3d7db37d"),
-                left == 1 ? L10n.Text("windows.workspacediff.it.2ad8a704") : L10n.Text("windows.workspacediff.them.c9a8dc33")), TextWrapping = TextWrapping.Wrap });
+            var document = new StackPanel { Spacing = Theme.SpaceS, Padding = new Thickness(Theme.SpaceM) };
+            document.Children.Add(new TextBlock { Text = selected, FontFamily = Fonts.Mono, FontSize = 12,
+                IsTextSelectionEnabled = true, TextTrimming = TextTrimming.CharacterEllipsis });
+            document.Children.Add(WorkspaceDiff.FullFile(diff));
+            detail = document;
         }
-        return (stack, signature);
+        else
+        {
+            var failed = new StackPanel { Spacing = Theme.SpaceS, Padding = new Thickness(Theme.SpaceM) };
+            failed.Children.Add(Chrome.Banner(error ?? L10n.Text("windows.workspacediff.no_diff_was_returned.b30e0096"), Theme.Danger, Symbol.Important));
+            failed.Children.Add(Buttons.Secondary(L10n.Text("common.retry"), ActionIcon.Refresh, (_, _) => Refresh(), small: true));
+            detail = failed;
+        }
+        return (new WorkspaceReviewBrowser(files, selected, detail, Review), signature, selected);
     }
 }

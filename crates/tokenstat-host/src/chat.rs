@@ -11529,8 +11529,7 @@ mod tests {
             .filter_map(|row| row["event"]["kind"].as_str())
             .collect();
         assert_eq!(kinds, ["text", "plan", "thinking", "text", "plan", "text"]);
-        assert_eq!(events[1]["event"]["initial"], true);
-        assert_eq!(events[4]["event"]["initial"], false);
+        assert_eq!(events[1]["event"]["steps"][0]["status"], "inProgress");
         assert_eq!(events[4]["event"]["steps"][0]["status"], "completed");
     }
 

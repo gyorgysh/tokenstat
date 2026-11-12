@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-#if os(macOS)
 import SwiftUI
+#if os(macOS)
 
 /// A value copy keeps the chosen turn independent of later transcript paging.
 struct ChatTurnReview: Identifiable {
@@ -67,7 +67,10 @@ struct ChatChangesWorkbenchView: View {
                 RecordedTurnReviewView(review: review)
             } else if managing {
                 WorkspaceChangesView(model: model, folder: folder, automations: automations,
-                    onReview: { managing = false })
+                    onReview: { path in
+                        model.focusWorkingTree(in: folder.id, path: path)
+                        managing = false
+                    })
             } else {
                 WorkingTreeReviewView(folder: folder, model: model, isActive: isActive)
             }
@@ -103,44 +106,47 @@ struct ChatChangesWorkbenchView: View {
 /// Recorded patches are independent of Git and remain readable after a commit.
 struct RecordedTurnReviewView: View {
     let review: ChatTurnReview
+    @State private var selectedPath: String?
+
+    private var selectedFile: ChatTurnChanges.File? {
+        let path = ChangePathMatch.reviewSelection(selectedPath, focus: review.focus, paths: review.changes.files.map(\.path))
+        return review.changes.files.first { $0.path == path }
+    }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text(review.conversation).font(Theme.callout.weight(.medium))
-                Text(L10n.text("apple.workbench.recorded_edits"))
-                    .font(Theme.caption).foregroundStyle(.secondary)
-                ForEach(review.files) { file in
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        HStack {
-                            Text(file.path).font(Theme.mono(12)).textSelection(.enabled)
-                            Spacer(minLength: 0)
-                            DiffStat(added: Int(file.added), removed: Int(file.removed), font: Theme.numeric(12))
-                        }
-                        if file.patches.isEmpty {
-                            missingPatch
-                        } else {
-                            ForEach(Array(file.patches.enumerated()), id: \.offset) { index, patch in
-                                if file.patches.count > 1 {
-                                    Text(L10n.text("apple.workbench.edit_number", "\(index + 1)"))
-                                        .font(Theme.caption).foregroundStyle(.secondary)
-                                }
-                                if patch.isEmpty { missingPatch }
-                                else {
-                                    ScrollView(.horizontal) {
-                                        RecordedPatchView(patch: patch)
+        ReviewFileBrowser(
+            files: review.changes.files.map { ReviewFileChoice(path: $0.path, added: $0.added, removed: $0.removed) },
+            selection: Binding(get: { selectedFile?.path }, set: { selectedPath = $0 })
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                if let file = selectedFile {
+                    ReviewFileHeading(path: file.path)
+                    ScrollView([.vertical, .horizontal]) {
+                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                            Text(review.conversation).font(Theme.callout.weight(.medium))
+                            Text(L10n.text("apple.workbench.recorded_edits"))
+                                .font(Theme.caption).foregroundStyle(.secondary)
+                            if file.patches.isEmpty {
+                                missingPatch
+                            } else {
+                                ForEach(Array(file.patches.enumerated()), id: \.offset) { index, patch in
+                                    if file.patches.count > 1 {
+                                        Text(L10n.text("apple.workbench.edit_number", "\(index + 1)"))
+                                            .font(Theme.caption).foregroundStyle(.secondary)
                                     }
+                                    if patch.isEmpty { missingPatch }
+                                    else { RecordedPatchView(patch: patch) }
                                 }
                             }
                         }
+                        .padding(Theme.Space.m)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .id(file.path)
                 }
             }
-            .padding(Theme.Space.m)
         }
-        .id(review.id)
+        .onChange(of: review.id, initial: true) { _, _ in selectedPath = review.focus }
     }
 
     private var missingPatch: some View {
@@ -149,8 +155,10 @@ struct RecordedTurnReviewView: View {
     }
 }
 
+#endif
+
 /// A resize or a streaming chat update must not recolor every recorded patch.
-private struct RecordedPatchView: View {
+struct RecordedPatchView: View {
     let patch: String
     @State private var rendered: AttributedString?
 
@@ -167,4 +175,3 @@ private struct RecordedPatchView: View {
             }
     }
 }
-#endif

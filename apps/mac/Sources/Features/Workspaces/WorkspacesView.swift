@@ -253,8 +253,7 @@ struct WorkspaceChangesView: View {
     /// Opens the Auto commit job on Automations after it starts.
     var onOpenAutomation: ((String, String?) -> Void)? = nil
     #endif
-    @State private var expandedDiffs: Set<String> = []
-    var onReview: (() -> Void)? = nil
+    var onReview: ((String?) -> Void)? = nil
 
     var body: some View {
         changesSurface
@@ -295,7 +294,7 @@ struct WorkspaceChangesView: View {
                 )
             } else if let git = folder.git, git.isRepo, !git.files.isEmpty {
                 // Only show the scroll list when there is real content.
-                ScrollViewReader { proxy in
+                ScrollViewReader { _ in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                             content(folder)
@@ -303,12 +302,12 @@ struct WorkspaceChangesView: View {
                         .padding(Theme.Space.m)
                     }
                     .onChange(of: model.changeFocus, initial: true) { _, focus in
-                        reveal(focus, in: folder, git: git, proxy: proxy)
+                        reveal(focus, in: folder, git: git)
                     }
                     .onChange(of: git.files.map(\.path)) { _, _ in
                         // The chat can name a just-edited file before the
                         // working-tree refresh has added it to this list.
-                        reveal(model.changeFocus, in: folder, git: git, proxy: proxy)
+                        reveal(model.changeFocus, in: folder, git: git)
                     }
                 }
             } else {
@@ -346,8 +345,7 @@ struct WorkspaceChangesView: View {
                     summary(git)
                     Spacer(minLength: Theme.Space.s)
                     Button(L10n.text("apple.workspacesview.review_all.d05163fa"), .preview) {
-                        if let onReview { onReview() }
-                        else { model.reviewWorkingTree(in: folder.id) }
+                        showReview(nil, in: folder)
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .fixedSize()
@@ -417,20 +415,6 @@ struct WorkspaceChangesView: View {
 
     private func diffControls(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Menu {
-            Button(L10n.text("apple.workspacesview.expand_all.a3e586be"), .more) {
-                expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
-            }
-            .buttonStyle(.borderless)
-            Button(L10n.text("apple.workspacesview.collapse_all.25f7b372"), .collapse) {
-                expandedDiffs.subtract(git.files.map { diffKey($0, in: folder) })
-            }
-            .buttonStyle(.borderless)
-            } label: {
-                Label(L10n.text("apple.workspacesview.inline_previews.b3aaf348"), systemImage: "ellipsis.circle")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
             #if os(macOS)
             ThemeRule()
             selectAll(git, in: folder)
@@ -449,67 +433,30 @@ struct WorkspaceChangesView: View {
                 Spacer()
             }.padding(.top, Theme.Space.s)
             ForEach(files) { file in
-                let key = diffKey(file, in: folder)
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    ChangeRow(
-                        file: file,
-                        isStaged: model.isStaged(file.path, in: folder.id),
-                        isOpen: model.isFront(.file(file.path), in: folder.id),
-                        isExpanded: expandedDiffs.contains(key),
-                        onToggle: { model.toggleStaged(file.path, in: folder.id) },
-                        onToggleDiff: {
-                            if expandedDiffs.contains(key) { expandedDiffs.remove(key) }
-                            else { expandedDiffs.insert(key) }
-                        },
-                        onOpen: { Task { await model.openFile(file.path, in: folder.id) } }
-                    )
-                    if expandedDiffs.contains(key) {
-                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            if let error = model.diffError(for: file.path, in: folder.id) {
-                                Text(error).font(Theme.callout).foregroundStyle(Theme.danger)
-                                Button(L10n.text("common.retry"), .refresh) {
-                                    Task { await model.loadDiff(file.path, in: folder.id) }
-                                }.buttonStyle(SecondaryButtonStyle(small: true))
-                            } else if let diff = model.diff(for: file.path, in: folder.id) {
-                                InlineDiffView(diff: diff) {
-                                    if let onReview { onReview() }
-                                    else { model.reviewWorkingTree(in: folder.id) }
-                                }
-                            } else {
-                                ProgressView().controlSize(.small)
-                            }
-                        }
-                        .padding(.leading, Theme.Space.l)
-                        .onAppear { model.retainDiffPreview(file.path, in: folder.id) }
-                        .task(id: "\(key)|\(model.diffRefreshRevisions[folder.id] ?? 0)") {
-                            await model.loadPreviewDiff(file.path, in: folder.id)
-                        }
-                        .onDisappear { model.releaseDiffPreview(file.path, in: folder.id) }
-                    }
-                }
-                .id(key)
+                ChangeRow(
+                    file: file,
+                    isStaged: model.isStaged(file.path, in: folder.id),
+                    isOpen: false,
+                    onToggle: { model.toggleStaged(file.path, in: folder.id) },
+                    onOpen: { showReview(file.path, in: folder) }
+                )
             }
         }
     }
 
-    private func diffKey(_ file: FileChange, in folder: WorkspaceFolder) -> String {
-        "\(folder.id):\(file.path)"
+    private func showReview(_ path: String?, in folder: WorkspaceFolder) {
+        if let onReview { onReview(path) }
+        else { model.reviewWorkingTree(in: folder.id, focusing: path) }
     }
 
-    /// Open and show the file a chat asked for. An agent names files by
-    /// absolute path and git by path inside the repository, so the match is
-    /// on the end of the path.
-    private func reveal(_ focus: WorkspacesModel.ChangeFocus?, in folder: WorkspaceFolder, git: GitStatus, proxy: ScrollViewProxy) {
-        guard let focus, focus.folderID == folder.id else { return }
-        guard let path = ChangePathMatch.path(focus.path, in: git.files.map(\.path)),
-              let file = git.files.first(where: { $0.path == path }) else { return }
+    /// Agent paths may be absolute while Git paths are repository-relative.
+    private func reveal(_ focus: WorkspacesModel.ChangeFocus?, in folder: WorkspaceFolder, git: GitStatus) {
+        guard let focus, focus.folderID == folder.id,
+              let path = ChangePathMatch.path(focus.path, in: git.files.map(\.path)) else { return }
         model.consumeChangeFocus(focus)
-        let key = diffKey(file, in: folder)
-        expandedDiffs.insert(key)
-        withAnimation(.easeOut(duration: 0.2)) {
-            proxy.scrollTo(key, anchor: .top)
-        }
+        showReview(path, in: folder)
     }
+
 }
 
 #if os(macOS)
@@ -864,9 +811,7 @@ private struct ChangeRow: View {
     var file: FileChange
     var isStaged: Bool
     var isOpen: Bool
-    var isExpanded: Bool
     var onToggle: () -> Void
-    var onToggleDiff: () -> Void
     var onOpen: () -> Void
 
     var body: some View {
@@ -894,13 +839,6 @@ private struct ChangeRow: View {
             }
             .buttonStyle(.plain)
             .help(L10n.text("apple.workspacesview.open_the_diff.55d1e169"))
-            Button(action: onToggleDiff) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(Theme.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(isExpanded ? L10n.text("apple.workspacesview.collapse_diff.b5d061d1") : L10n.text("apple.workspacesview.expand_diff.ad6cc669"))
             Spacer(minLength: Theme.Space.xs)
             if let added = file.added, added > 0 {
                 Text("+\(added)").font(Theme.numeric(11)).foregroundStyle(Theme.success)

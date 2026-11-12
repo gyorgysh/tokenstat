@@ -45,16 +45,10 @@ pub enum Event {
     Thinking {
         delta: String,
     },
-    /// A plan at the point it was reported, rather than a pinned live panel.
+    /// A plan at the point it was reported. Clients draw the checklist at
+    /// the latest one, so a report is only sent when the plan changed.
     Plan {
         steps: Vec<Value>,
-        initial: bool,
-        #[serde(
-            rename = "completedStep",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
-        completed_step: Option<String>,
     },
     ToolStart {
         call_id: String,
@@ -261,48 +255,28 @@ impl Parser {
         self.plan_event()
     }
 
+    /// A new plan, a changed step list or a step completing or reopening
+    /// is worth a timeline update. A step merely starting is not.
     fn plan_event(&mut self) -> Option<Event> {
         let plan = &self.inspection.activity.plan;
         if plan.is_empty() {
-            return self.last_timeline_plan.take().map(|_| Event::Plan {
-                steps: Vec::new(),
-                initial: false,
-                completed_step: None,
-            });
+            return self
+                .last_timeline_plan
+                .take()
+                .map(|_| Event::Plan { steps: Vec::new() });
         }
         let names: Vec<_> = plan.iter().map(|step| step.text.clone()).collect();
         let completed: Vec<_> = plan.iter().map(|step| step.status == "completed").collect();
-        let initial = self
-            .last_timeline_plan
-            .as_ref()
-            .is_none_or(|(old, _)| *old != names);
-        if !initial
-            && self
-                .last_timeline_plan
-                .as_ref()
-                .is_some_and(|(_, old)| *old == completed)
-        {
+        let current = (names, completed);
+        if self.last_timeline_plan.as_ref() == Some(&current) {
             return None;
         }
-        let completed_step = if initial {
-            None
-        } else {
-            let old = &self.last_timeline_plan.as_ref().unwrap().1;
-            completed
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|(index, done)| **done && !old[*index])
-                .map(|(index, _)| names[index].clone())
-        };
-        self.last_timeline_plan = Some((names, completed));
+        self.last_timeline_plan = Some(current);
         Some(Event::Plan {
             steps: plan
                 .iter()
                 .map(|step| json!({"text": step.text, "status": step.status}))
                 .collect(),
-            initial,
-            completed_step,
         })
     }
 

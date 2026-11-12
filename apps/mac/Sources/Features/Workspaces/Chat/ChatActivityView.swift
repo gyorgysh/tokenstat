@@ -272,30 +272,21 @@ private struct ChatActivitySummary: View {
     }
 }
 
-struct ChatActivityPlanChecklist: View {
-    @Bindable var model: ChatModel
-
-    var body: some View {
-        if let activity = model.currentActivityRead?.inspection?.activity,
-           activity.planReported, !activity.plan.isEmpty {
-            ChatPlanChecklist(activity: activity, live: model.activityIsLive)
-        }
-    }
-}
-
-struct ChatPlanChecklist: View {
-    let activity: ChatInspection.Activity
+/// The checklist as a timeline row, from the steps one plan report carried.
+struct ChatPlanCard: View {
+    let steps: [ChatPlanStep]
     let live: Bool
 
     var body: some View {
+        let done = steps.filter { $0.status == "completed" }.count
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack {
                 Text(L10n.text("common.chat.activity.plan")).font(Theme.callout.weight(.medium))
                 Spacer(minLength: 8)
-                Text(L10n.text("common.chat.activity.steps", activity.completedSteps.formatted(), activity.plan.count.formatted()))
+                Text(L10n.text("common.chat.activity.steps", done.formatted(), steps.count.formatted()))
                     .font(Theme.caption).foregroundStyle(.secondary).monospacedDigit()
             }
-            ChatPlanSteps(steps: activity.plan, live: live)
+            ChatPlanSteps(steps: steps.map { ($0.text, $0.status) }, live: live)
             if !live {
                 Text(L10n.text("common.chat.activity.report_only")).font(Theme.caption).foregroundStyle(.secondary)
             }
@@ -308,7 +299,7 @@ struct ChatPlanChecklist: View {
 }
 
 private struct ChatPlanSteps: View {
-    let steps: [ChatInspection.Activity.Step]
+    let steps: [(text: String, status: String)]
     let live: Bool
 
     var body: some View {
@@ -363,7 +354,7 @@ private struct ChatActivityDetails: View {
                         Text(L10n.text("common.chat.activity.steps", activity.completedSteps.formatted(), activity.plan.count.formatted()))
                             .font(Theme.caption).foregroundStyle(.secondary)
                         ChatActivityProgress(fraction: Double(activity.completedSteps) / Double(activity.plan.count))
-                        ChatPlanSteps(steps: activity.plan, live: live)
+                        ChatPlanSteps(steps: activity.plan.map { ($0.text, $0.status) }, live: live)
                         if let value = activity.planSource { source(value) }
                     }
                 }

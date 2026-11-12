@@ -56,25 +56,27 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
     }
 }
 
-@Composable internal fun ChatPlanChecklist(data: ChatActivityData) {
+/** The checklist as a transcript row, from the steps one plan report carried. */
+@Composable internal fun ChatPlanCard(steps: List<ChatPlanStep>, live: Boolean) {
     Surface(shape = RoundedCornerShape(10.dp), color = LocalTsColors.current.panel) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(activityText("plan"), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                ActivityNote(activityText("steps", "${data.completedSteps}", "${data.plan.size}"))
+                ActivityNote(activityText("steps", "${steps.count { it.status == "completed" }}", "${steps.size}"))
             }
-            ActivityPlanSteps(data)
-            if (!data.live) ActivityNote(activityText("report_only"))
+            ActivityPlanSteps(steps.map { ChatActivityStep(it.text, it.status) }, live)
         }
     }
 }
 
-@Composable private fun ActivityPlanSteps(data: ChatActivityData) {
-    data.plan.forEach { step ->
+@Composable private fun ActivityPlanSteps(data: ChatActivityData) = ActivityPlanSteps(data.plan, data.live)
+
+@Composable private fun ActivityPlanSteps(plan: List<ChatActivityStep>, live: Boolean) {
+    plan.forEach { step ->
         Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(if (step.status == "completed") ActionIcon.Done.vector else if (step.status == "inProgress") ActionIcon.Run.vector else ActionIcon.Scheduled.vector,
-                activityStatus(step.status, data.live), Modifier.size(16.dp),
-                tint = if (data.live && step.status == "inProgress") LocalTsColors.current.accent else LocalTsColors.current.textSecondary)
+                activityStatus(step.status, live), Modifier.size(16.dp),
+                tint = if (live && step.status == "inProgress") LocalTsColors.current.accent else LocalTsColors.current.textSecondary)
             Text(step.text, style = MaterialTheme.typography.bodySmall,
                 color = if (step.status == "completed") LocalTsColors.current.textSecondary else LocalTsColors.current.textPrimary)
         }

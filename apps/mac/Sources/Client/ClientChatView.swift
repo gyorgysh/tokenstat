@@ -795,6 +795,7 @@ struct ClientChatThread: View {
     @State private var pendingFileOpen: PendingFileOpen?
     /// The folder's changes, opened from a turn's card or the changes pill.
     @State private var reviewingChanges = false
+    @State private var recordedTurnReview: ClientRecordedTurnReview?
     /// The folder's live git state, for the changes pill and the chip.
     @State private var folderGit: GitStatus?
     @State private var branchPull: BranchPull?
@@ -1388,6 +1389,16 @@ struct ClientChatThread: View {
                 }
             }
         }
+        .sheet(item: $recordedTurnReview) { review in
+            NavigationStack {
+                ClientRecordedTurnReviewView(review: review)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(L10n.text("common.done")) { recordedTurnReview = nil }
+                        }
+                    }
+            }
+        }
         // Asked again when a turn ends, since the agent may have changed
         // files or opened the pull request.
         .task(id: "\(model.busy)|\(isActive)|\(model.folderID ?? "")") {
@@ -1431,6 +1442,7 @@ struct ClientChatThread: View {
         .onChange(of: model.currentReference) { _, _ in
             pendingFileOpen = nil
             previewFile = nil
+            recordedTurnReview = nil
             rememberChat(chatID)
         }
         .onAppear {
@@ -1851,7 +1863,9 @@ struct ClientChatThread: View {
                                         },
                                         answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
                                         canAnswerQuestions: !model.isSharedSource && model.savedCopy == nil && !model.isShowingCachedTranscript,
-                                        reviewChanges: folder != nil && model.savedCopy == nil ? { _ in reviewingChanges = true } : nil
+                                        reviewChanges: { changes, path in
+                                            recordedTurnReview = ClientRecordedTurnReview(changes: changes, focus: path)
+                                        }
                                     )
                                     .equatable()
                                 }

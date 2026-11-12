@@ -298,7 +298,16 @@ struct ChatDisplayItem: Identifiable, Equatable, Sendable {
         /// The files a finished turn edited. Added by the fold, after the
         /// turn's last row, at every detail level.
         case changes(ChatTurnChanges)
+        /// The agent's plan as last reported. A newer report replaces the
+        /// older row, so the checklist sits where the latest update arrived.
+        case plan([ChatPlanStep])
     }
+}
+
+/// One line of a reported plan: its words and where it stands.
+struct ChatPlanStep: Equatable, Sendable {
+    var text: String
+    var status: String
 }
 
 /// What one turn changed, file by file, from its edit rows.

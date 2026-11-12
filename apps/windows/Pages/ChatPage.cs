@@ -1277,6 +1277,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Approval => $"{item.Id}|{item.Pending}|{item.Approval?.ToJsonString()}",
         ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}|{_modelPreviews.Contains(ImageOwner() + "/" + item.Id)}",
         ItemKind.Gallery => $"{item.Id}|{string.Join(";", item.Images?.Select(image => image.Id + ":" + image.Name + ":" + image.Size) ?? [])}",
+        ItemKind.Plan => $"{item.Id}|{_running}|{string.Join(";", item.Plan?.Select(step => step.Text + ":" + step.Status) ?? [])}",
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}|{item.CostUnknown}",
         ItemKind.Failed => $"{item.Id}|{item.Text}",
         ItemKind.Changes => $"{item.Id}|{string.Join(",", item.Changes?.Select(file => $"{file.Path}:{file.Added}:{file.Removed}") ?? Enumerable.Empty<string>())}|{_expandedCards.GetValueOrDefault(item.Id)}",
@@ -1412,6 +1413,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Group when item.Group is { } group => StepGroupRow(item.Id, group),
         ItemKind.Question when item.Question is { } question => QuestionCard(question),
         ItemKind.Changes when item.Changes is { } files => ChangesCard(item.Id, files),
+        ItemKind.Plan when item.Plan is { } steps => ActivityPlanChecklist(steps, live: _running),
         _ => new Border(),
         };
         if (!string.IsNullOrEmpty(item.GroupId)) view = GroupStepInset(view);
@@ -2844,14 +2846,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         latestPlanId = "plan-" + Format.Long(row, "atMs") + "-" + items.Count;
                         var steps = plan.OfType<JsonObject>().ToArray();
                         if (steps.Length == 0) { latestPlanId = null; break; }
-                        var completed = steps.Count(step => Format.Text(step, "status") == "completed");
-                        var title = ActivityText("plan") + " · " + ActivityText("steps", completed.ToString("N0"), steps.Length.ToString("N0"));
-                        var initial = ev["initial"] is JsonValue value && value.TryGetValue<bool>(out var first) && first;
-                        var detail = initial
-                            ? string.Join("\n", steps.Select(step => "- " + Format.Text(step, "text")))
-                            : Format.Text(ev, "completedStep");
-                        items.Add(new DisplayItem { Id = latestPlanId,
-                            Kind = ItemKind.Assistant, Text = "**" + title + "**" + (string.IsNullOrEmpty(detail) ? "" : "\n\n" + detail) });
+                        items.Add(new DisplayItem { Id = latestPlanId, Kind = ItemKind.Plan,
+                            Plan = steps.Select(step => new PlanStepItem(Format.Text(step, "text"), Format.Text(step, "status"))).ToList() });
                     }
                     break;
                 case "text":

@@ -2084,7 +2084,8 @@ struct RootView: View {
                 account: account.account, onClose: { hideWorkbench() },
                 chat: chat, workspace: folder, showsChatOverview: showingChatOverview,
                 onOpenAutomation: { id, runID in openAutomation(jobID: id, runID: runID) },
-                onReviewWorkingTree: {
+                onReviewWorkingTree: { path in
+                    workspaces.focusWorkingTree(in: folder.id, path: path)
                     desktopTurnReviews[folder.id] = nil
                     desktopCommitReviews[folder.id] = nil
                     openWorkbench(.changes, in: folder.id)

@@ -71,9 +71,9 @@ internal sealed partial class ChatPage {
         """)!;
         var planPage = new ChatPage(plan);
         var firstPlan = planPage.Coalesce(new JsonArray(plan[0]!.DeepClone()));
-        Check(firstPlan.Count == 1 && firstPlan[0].Text.Contains("Build"), "Initial plan must show its steps");
+        Check(firstPlan.Count == 1 && firstPlan[0].Kind == ChatPage.ItemKind.Plan && firstPlan[0].Plan!.Count == 2, "Initial plan must show its steps");
         var progress = planPage.Coalesce(plan);
-        Check(progress.Count == 2 && progress[0].Text == "Working" && progress[1].Text.Contains("Inspect") && !progress[1].Text.Contains("Build"), "Progress must replace the earlier plan while keeping intervening messages");
+        Check(progress.Count == 2 && progress[0].Text == "Working" && progress[1].Kind == ChatPage.ItemKind.Plan && progress[1].Plan![0].Status == "completed" && progress[1].Plan![1].Status == "inProgress", "The latest checklist must move last and keep intervening messages");
         plan.Add(JsonNode.Parse("""{"kind":"agent","atMs":4,"event":{"kind":"plan","initial":false,"steps":[]}}"""));
         Check(planPage.Coalesce(plan).Count == 1, "Clearing a plan must remove its placeholder");
         foreach (var (value, expected) in new (JsonNode?, string)[] {

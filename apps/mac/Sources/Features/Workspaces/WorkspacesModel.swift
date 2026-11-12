@@ -205,8 +205,8 @@ final class WorkspacesModel {
     /// Kept when the browser temporarily occupies the inspector pane.
     var chatInspectorShowsSettings = true
 
-    /// A file the Changes tab should open its diff for and scroll to, asked
-    /// for from a chat's list of what a turn changed. The generation makes a
+    /// A file the Git tab should open in review, asked for from a chat's
+    /// list of what a turn changed. The generation makes a
     /// second press on the same file count.
     struct ChangeFocus: Equatable {
         let folderID: String
@@ -224,7 +224,7 @@ final class WorkspacesModel {
     }
 
     /// The Changes list took the request. Clearing it keeps a later return
-    /// to that list from expanding and scrolling to the same file again.
+    /// to that list from reopening the same file again.
     func consumeChangeFocus(_ focus: ChangeFocus) {
         if changeFocus == focus { changeFocus = nil }
     }
@@ -240,7 +240,8 @@ final class WorkspacesModel {
         switch tab {
         case .changes:
             let count = selected?.changeCount ?? 0
-            return count > 0 ? L10n.text("apple.workspacesmodel.changes_0.eb1957f0", "\(count)") : L10n.text("apple.workspacesmodel.changes.bbd4b6a8")
+            let name = L10n.text("apple.rootview.git.b949c922")
+            return count > 0 ? "\(name) (\(count))" : name
         case .files:
             return L10n.text("common.files")
         case .history:

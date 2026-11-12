@@ -144,9 +144,12 @@ fun withTurnChanges(
     val changes = HashMap<Int, ChatDisplayItem.Changes>()
     var turn = 0
     var id = ""
-    val files = LinkedHashMap<String, ChangedFile>()
+    data class Accumulator(var added: Long = 0, var removed: Long = 0, val patches: MutableList<String> = mutableListOf())
+    val files = LinkedHashMap<String, Accumulator>()
     fun close() {
-        if (files.isNotEmpty()) changes[turn] = ChatDisplayItem.Changes(id, files.values.toList())
+        if (files.isNotEmpty()) changes[turn] = ChatDisplayItem.Changes(id, files.map { (path, value) ->
+            ChangedFile(path, value.added, value.removed, value.patches.toList())
+        })
         files.clear()
     }
     for (item in raw) {
@@ -158,12 +161,10 @@ fun withTurnChanges(
             item is ChatDisplayItem.Edit && !item.state.failed && !item.state.running -> {
                 if (files.isEmpty()) id = "changes:${item.id}"
                 val path = item.state.path
-                val prior = files[path]
-                files[path] = if (prior == null) {
-                    ChangedFile(path, item.state.added, item.state.removed)
-                } else {
-                    prior.copy(added = prior.added + item.state.added, removed = prior.removed + item.state.removed)
-                }
+                val file = files.getOrPut(path) { Accumulator() }
+                file.added += item.state.added
+                file.removed += item.state.removed
+                file.patches.add(item.state.patch)
             }
         }
     }

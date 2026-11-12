@@ -140,27 +140,27 @@ internal sealed partial class ChatPage
         }
         finally { _commandDialogOpening = false; }
     }
-    private static FrameworkElement ActivityPlanChecklist(ChatActivityData data)
+    private static FrameworkElement ActivityPlanChecklist(IReadOnlyList<PlanStepItem> plan, bool live)
     {
         var body = new StackPanel { Spacing = 7 };
         body.Children.Add(new TextBlock { Text = ActivityText("plan"), FontSize = 12, FontWeight = FontWeights.SemiBold });
-        body.Children.Add(Muted(ActivityText("steps", data.CompletedSteps.ToString("N0"), data.Plan.Length.ToString("N0"))));
-        foreach (var step in data.Plan)
+        body.Children.Add(Muted(ActivityText("steps", plan.Count(step => step.Status == "completed").ToString("N0"), plan.Count.ToString("N0"))));
+        foreach (var step in plan)
         {
             var row = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 3, 0, 3) };
             row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             var icon = (step.Status == "completed" ? ActionIcon.Done : step.Status == "inProgress" ? ActionIcon.Run : ActionIcon.Scheduled).Icon();
             icon.Width = 16; icon.Height = 16;
-            icon.Foreground = data.Live && step.Status == "inProgress" ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText);
+            icon.Foreground = live && step.Status == "inProgress" ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText);
             icon.Opacity = step.Status == "inProgress" ? 1 : .65;
-            AutomationProperties.SetName(icon, ActivityStatus(step.Status, data.Live));
+            AutomationProperties.SetName(icon, ActivityStatus(step.Status, live));
             row.Children.Add(icon);
             var text = new TextBlock { Text = step.Text, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
                 Opacity = step.Status == "completed" ? .65 : 1 };
             Grid.SetColumn(text, 1); row.Children.Add(text); body.Children.Add(row);
         }
-        if (!data.Live) body.Children.Add(Muted(ActivityText("report_only")));
+        if (!live) body.Children.Add(Muted(ActivityText("report_only")));
         return new Border { Child = body, Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
             BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(12) };
     }

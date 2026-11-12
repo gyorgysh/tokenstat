@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -146,10 +149,6 @@ fun ChangesSection(
             files = files,
             modifier = modifier,
             onBack = { showingReviewAll = false },
-            onOpenFile = { path ->
-                showingReviewAll = false
-                diffPath = path
-            },
         )
         return
     }
@@ -415,9 +414,12 @@ fun FileDiffPage(
     path: String,
     modifier: Modifier = Modifier,
     onEdit: (() -> Unit)? = null,
+    reviewFiles: List<String> = emptyList(),
+    onReviewFile: ((String) -> Unit)? = null,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    var showFileMenu by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(onBack = onBack)
     var diff by remember(peer, workspace, path) { mutableStateOf<JsonObject?>(null) }
     var error by remember(peer, workspace, path) { mutableStateOf<String?>(null) }
@@ -433,13 +435,28 @@ fun FileDiffPage(
         loading = false
     }
     LaunchedEffect(peer, workspace, path) { load() }
-    DiffDocumentView(diffs = listOfNotNull(diff), modifier = modifier, fileHeaders = false) {
+    ReviewFileBrowser(reviewFiles, path, { onReviewFile?.invoke(it) }, modifier) { compact ->
+    DiffDocumentView(diffs = listOfNotNull(diff), modifier = Modifier.fillMaxSize(), fileHeaders = false) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack, modifier = Modifier.weight(1f)) {
                 Text(L10n.text("android.workspacechanges.changes.47127cfb"), modifier = Modifier.fillMaxWidth())
             }
             if (onEdit != null && diff != null && diff!!.bol("binary") != true) {
                 TsAccentButton(label = L10n.text("common.edit"), small = true, onClick = onEdit)
+            }
+        }
+        if (compact && reviewFiles.isNotEmpty() && onReviewFile != null) {
+            Box {
+                TextButton(onClick = { showFileMenu = true }) {
+                    Text("${reviewFiles.indexOf(path) + 1} / ${reviewFiles.size}  ·  ${path.substringAfterLast('/')}  ▾",
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                DropdownMenu(expanded = showFileMenu, onDismissRequest = { showFileMenu = false }) {
+                    reviewFiles.forEach { candidate ->
+                        DropdownMenuItem(text = { Text(candidate, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                            onClick = { showFileMenu = false; onReviewFile(candidate) })
+                    }
+                }
             }
         }
         Text(path, style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
@@ -455,6 +472,7 @@ fun FileDiffPage(
         } else if (diff == null && error == null) {
             Text(L10n.text("android.workspacechanges.that_file_is_not_in_this_folder_any_more.da5bd527"), color = LocalTsColors.current.textSecondary)
         }
+    }
     }
 }
 

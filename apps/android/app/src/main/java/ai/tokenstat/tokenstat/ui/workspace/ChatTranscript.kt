@@ -19,6 +19,8 @@ import kotlinx.serialization.json.longOrNull
 /// flat transcript of separate fragment bubbles. `coalesceTranscript` folds
 /// events into what the person reads: one assistant panel per prose run, one
 /// tool row per call, one edit card per file.
+data class ChatPlanStep(val text: String, val status: String)
+
 sealed interface ChatDisplayItem {
     val id: String
 
@@ -63,6 +65,10 @@ sealed interface ChatDisplayItem {
     /// A question the agent asked, with the answer once there is one.
     data class Question(override val id: String, val question: ChatQuestion) : ChatDisplayItem
 
+    /// The plan as last reported. A newer report replaces the older row, so
+    /// the checklist sits where the latest update arrived.
+    data class Plan(override val id: String, val steps: List<ChatPlanStep>) : ChatDisplayItem
+
     /// One of an open group's steps, drawn below its header. Keeps the
     /// step's own id, so the list keys it the same as when it is unfolded.
     data class GroupStep(
@@ -82,7 +88,7 @@ sealed interface ChatDisplayItem {
 }
 
 /// One file a turn changed. Counts are summed over the turn's edits to it.
-data class ChangedFile(val path: String, val added: Long, val removed: Long) {
+data class ChangedFile(val path: String, val added: Long, val removed: Long, val patches: List<String> = emptyList()) {
     val fileName: String get() = path.substringAfterLast('/').ifEmpty { path }
 }
 
@@ -533,14 +539,8 @@ fun coalesceTranscript(
                 if (steps.isNotEmpty()) {
                     val planID = "plan-${stamp(ev, items.size)}"
                     latestPlanID = planID
-                    val completed = steps.count { it.str("status") == "completed" }
-                    val title = L10n.text("common.chat.activity.plan") + " · " +
-                        L10n.text("common.chat.activity.steps", "$completed", "${steps.size}")
-                    val detail = if (inner.safeBool("initial") == true)
-                        steps.joinToString("\n") { "- " + (it.str("text") ?: "") }
-                    else inner.str("completedStep").orEmpty()
-                    items.add(ChatDisplayItem.Assistant(planID,
-                        "**$title**" + if (detail.isEmpty()) "" else "\n\n$detail", eventBackend))
+                    items.add(ChatDisplayItem.Plan(planID,
+                        steps.map { ChatPlanStep(it.str("text").orEmpty(), it.str("status").orEmpty()) }))
                 }
             }
             "text", "agent" -> {

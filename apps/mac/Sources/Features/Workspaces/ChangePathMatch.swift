@@ -11,4 +11,11 @@ enum ChangePathMatch {
             return wanted == normalized || wanted.hasSuffix("/" + normalized)
         }
     }
+    /// Preserve a valid selection; otherwise resolve a requested path or use
+    /// the first file. Review navigation never changes the commit selection.
+    static func reviewSelection(_ selected: String?, focus: String?, paths: [String]) -> String? {
+        if let selected, paths.contains(selected) { return selected }
+        if let focus, let matched = path(focus, in: paths) { return matched }
+        return paths.first
+    }
 }

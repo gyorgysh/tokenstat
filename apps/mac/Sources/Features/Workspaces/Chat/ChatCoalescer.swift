@@ -269,14 +269,7 @@ extension ChatDisplayItem {
                 if !steps.isEmpty {
                     let planID = "plan-\(stamp(event, items.count))"
                     latestPlanID = planID
-                    let count = steps.filter { $0.status == "completed" }.count
-                    let title = L10n.text("common.chat.activity.plan") + " · "
-                        + L10n.text("common.chat.activity.steps", count.formatted(), steps.count.formatted())
-                    let detail = agent.initial == true
-                        ? steps.map { "- " + $0.text }.joined(separator: "\n")
-                        : (agent.completedStep ?? "")
-                    items.append(ChatDisplayItem(id: planID,
-                        kind: .assistant("**\(title)**" + (detail.isEmpty ? "" : "\n\n" + detail), backend: eventBackend)))
+                    items.append(ChatDisplayItem(id: planID, kind: .plan(steps.map { ChatPlanStep(text: $0.text, status: $0.status) })))
                 }
             case "text":
                 flushThinking()

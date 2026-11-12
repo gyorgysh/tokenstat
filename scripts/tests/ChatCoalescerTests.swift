@@ -8,15 +8,15 @@ struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision:
         let planWire = Data(#"[{"kind":"agent","seq":1,"backend":"claude","event":{"kind":"plan","initial":true,"steps":[{"text":"Inspect","status":"inProgress"},{"text":"Build","status":"pending"}]}},{"kind":"agent","seq":2,"backend":"claude","event":{"kind":"text","delta":"Working"}},{"kind":"agent","seq":3,"backend":"claude","event":{"kind":"plan","initial":false,"completedStep":"Inspect","steps":[{"text":"Inspect","status":"completed"},{"text":"Build","status":"inProgress"}]}}]"#.utf8)
         let planEvents = try JSONDecoder().decode([ChatTimelineEvent].self, from: planWire)
         let initialRows = ChatDisplayItem.coalesce(Array(planEvents.prefix(1)))
-        if case let .assistant(initial, _) = initialRows.first?.kind {
-            precondition(initial.contains("Inspect") && initial.contains("Build"))
-        } else { preconditionFailure("The initial plan should appear") }
+        if case let .plan(initial) = initialRows.first?.kind {
+            precondition(initial.map(\.text) == ["Inspect", "Build"])
+        } else { preconditionFailure("The initial plan should appear as a checklist") }
         let planRows = ChatDisplayItem.coalesce(planEvents)
         precondition(planRows.count == 2, "The old plan must leave no space when progress arrives")
-        if case let .assistant(message, _) = planRows[0].kind, case let .assistant(progress, _) = planRows[1].kind {
+        if case let .assistant(message, _) = planRows[0].kind, case let .plan(progress) = planRows[1].kind {
             precondition(message == "Working", "Messages between plan updates must remain")
-            precondition(progress.contains("Inspect") && !progress.contains("Build"))
-        } else { preconditionFailure("Plan updates must be separate timeline messages") }
+            precondition(progress.map(\.status) == ["completed", "inProgress"], "The checklist keeps every step and its state")
+        } else { preconditionFailure("The latest plan must sit last, after the message it followed") }
         let clear = try JSONDecoder().decode([ChatTimelineEvent].self, from: Data(#"[{"kind":"agent","seq":4,"event":{"kind":"plan","initial":false,"steps":[]}}]"#.utf8))
         let cleared = ChatDisplayItem.coalesce(planEvents + clear)
         precondition(cleared.count == 1, "Clearing a plan must remove its last placeholder")

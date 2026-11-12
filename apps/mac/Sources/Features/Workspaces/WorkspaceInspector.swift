@@ -101,7 +101,7 @@ struct WorkspaceInspector: View {
     #if os(macOS)
     /// After Auto commit starts, open that job on the Automations screen.
     var onOpenAutomation: ((String, String?) -> Void)? = nil
-    var onReviewWorkingTree: (() -> Void)? = nil
+    var onReviewWorkingTree: ((String?) -> Void)? = nil
     #endif
     var onReviewCommit: ((String) -> Void)? = nil
 
@@ -128,7 +128,7 @@ struct WorkspaceInspector: View {
                         inspectorTab(L10n.text("apple.workspaceinspector.chat.460b3a7d"), selected: showingChatSettings) { showingChatSettings = true }
                     }
                     ForEach(InspectorTab.allCases) { item in
-                        inspectorTab(L10n.enumLabel(item), selected: !showingChatSettings && tab.wrappedValue == item) {
+                        inspectorTab(item == .changes ? L10n.text("apple.rootview.git.b949c922") : L10n.enumLabel(item), selected: !showingChatSettings && tab.wrappedValue == item) {
                             tab.wrappedValue = item
                         }
                     }

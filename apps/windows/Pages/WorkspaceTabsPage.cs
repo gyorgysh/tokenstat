@@ -46,7 +46,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         var inspectorTabs = _inspectorTabs;
         foreach (var (label, title) in new[] {
             ("Files", L10n.Text("common.files")),
-            ("Changes", L10n.Text("windows.workspacetabspage.changes.bbd4b6a8")),
+            ("Changes", "Git"),
             ("History", L10n.Text("common.history")),
             ("Details", L10n.Text("windows.workspacetabspage.details.45989de4")),
         })

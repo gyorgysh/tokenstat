@@ -1524,7 +1524,7 @@ mod tests {
         assert!(parser.take_inspection().is_none());
         assert!(matches!(
             parser.push_events(&record.as_bytes()[split..]).as_slice(),
-            [crate::transcript::Event::Plan { initial: true, .. }]
+            [crate::transcript::Event::Plan { .. }]
         ));
         let snapshot = parser.take_inspection().unwrap();
         assert_eq!(snapshot.activity.plan[0].text, "Inspect 🦀");
@@ -1532,7 +1532,7 @@ mod tests {
     }
 
     #[test]
-    fn native_plan_timeline_reports_initial_and_completion_changes_once() {
+    fn native_plan_timeline_reports_only_real_changes() {
         let mut parser = crate::transcript::Parser::new("codex");
         let record = |a: &str, b: &str| {
             format!(
@@ -1555,24 +1555,18 @@ mod tests {
         let updates: Vec<_> = events
             .iter()
             .filter_map(|event| match event {
-                crate::transcript::Event::Plan {
-                    steps,
-                    initial,
-                    completed_step,
-                } => Some((steps, initial, completed_step)),
+                crate::transcript::Event::Plan { steps } => Some(steps),
                 _ => None,
             })
             .collect();
+        // A step starting moves nothing. A step completing does.
         assert_eq!(updates.len(), 3);
-        assert!(*updates[0].1);
-        assert!(!*updates[1].1 && !*updates[2].1);
-        assert_eq!(updates[2].0[1]["status"], "completed");
-        assert_eq!(updates[1].2.as_deref(), Some("Inspect"));
-        assert_eq!(updates[2].2.as_deref(), Some("Build"));
+        assert_eq!(updates[1][0]["status"], "completed");
+        assert_eq!(updates[2][1]["status"], "completed");
         let cleared = parser
             .push_events(b"{\"type\":\"tokenstat.activity\",\"kind\":\"plan\",\"plan\":[]}\n");
         assert!(
-            matches!(cleared.as_slice(), [crate::transcript::Event::Plan { steps, .. }] if steps.is_empty())
+            matches!(cleared.as_slice(), [crate::transcript::Event::Plan { steps }] if steps.is_empty())
         );
         assert!(
             parser
@@ -1586,17 +1580,10 @@ mod tests {
         let mut parser = crate::transcript::Parser::new("codex");
         let plan = |a: &str, b: &str| json!([{ "text":"First", "status":a }, { "text":"Second", "status":b }]);
         assert!(parser.report_plan(&plan("pending", "pending")).is_some());
-        assert!(matches!(parser.report_plan(&plan("pending", "completed")),
-            Some(crate::transcript::Event::Plan { completed_step: Some(step), .. }) if step == "Second"));
-        assert!(matches!(parser.report_plan(&plan("completed", "pending")),
-            Some(crate::transcript::Event::Plan { completed_step: Some(step), .. }) if step == "First"));
-        assert!(matches!(
-            parser.report_plan(&plan("pending", "pending")),
-            Some(crate::transcript::Event::Plan {
-                completed_step: None,
-                ..
-            })
-        ));
+        assert!(parser.report_plan(&plan("inProgress", "pending")).is_none());
+        assert!(parser.report_plan(&plan("pending", "completed")).is_some());
+        assert!(parser.report_plan(&plan("completed", "pending")).is_some());
+        assert!(parser.report_plan(&plan("pending", "pending")).is_some());
     }
 
     #[test]

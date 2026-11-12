@@ -53,7 +53,6 @@ import ai.tokenstat.tokenstat.ui.logic.CommitDraft
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.OperationState
 import ai.tokenstat.tokenstat.ui.logic.PushLabel
-import ai.tokenstat.tokenstat.ui.logic.ReviewClip
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
@@ -790,108 +789,15 @@ fun ReviewAllPage(
     files: List<JsonObject>,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onOpenFile: (String) -> Unit,
 ) {
-    val shown = files.take(ReviewClip.MAX_FILES)
-    val leftover = (files.size - shown.size).coerceAtLeast(0)
-    var diffs by remember { mutableStateOf<Map<String, JsonObject>>(emptyMap()) }
-    var failures by remember { mutableStateOf(0) }
-    var loaded by remember { mutableStateOf(false) }
-    LaunchedEffect(files) {
-        val fresh = mutableMapOf<String, JsonObject>()
-        var missed = 0
-        for (file in shown) {
-            val path = file.str("path") ?: continue
-            runCatching {
-                model.workspaceSection(peer, "workspace.diff", buildJsonObject {
-                    put("id", workspace); put("path", path)
-                }) as? JsonObject
-            }.onSuccess { if (it != null) fresh[path] = it else missed += 1 }
-                .onFailure { missed += 1 }
-        }
-        diffs = fresh
-        failures = missed
-        loaded = true
-    }
-    Column(
-        modifier.verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
-        verticalArrangement = Arrangement.spacedBy(Space.m),
-    ) {
-            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-                Text(L10n.text("android.workspacecommit.changes.47127cfb"), modifier = Modifier.fillMaxWidth())
-            }
-            Text(L10n.text("android.workspacecommit.review_all.d05163fa"), style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
-            if (!loaded) {
-                Text(L10n.text("android.workspacecommit.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
-            } else {
-                if (failures > 0) {
-                    Text(
-                        ReviewClip.failureLine(failures),
-                        style = TextStyle(fontSize = 12.sp),
-                        color = LocalTsColors.current.textSecondary,
-                    )
-                }
-                shown.forEach { file ->
-                    val path = file.str("path") ?: return@forEach
-                    val name = path.substringAfterLast('/')
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(cardRadiusDp))
-                            .background(LocalTsColors.current.panel)
-                            .padding(Space.m),
-                        verticalArrangement = Arrangement.spacedBy(Space.s),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                name.ifBlank { path },
-                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                                color = LocalTsColors.current.textPrimary,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            (file.str("kind") ?: "").takeIf { it.isNotBlank() }?.let {
-                                Text(it, style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.accent)
-                            }
-                        }
-                        val diff = diffs[path]
-                        if (diff != null) {
-                            if (diff.bol("binary")) {
-                                Text(
-                                    L10n.text("android.workspacecommit.a_binary_file_there_is_nothing_to_show_lin.d8a6c19c"),
-                                    style = TextStyle(fontSize = 12.sp),
-                                    color = LocalTsColors.current.textSecondary,
-                                )
-                            } else {
-                                val total = asObjects(diff["hunks"]).sumOf { asObjects(it["lines"]).size }
-                                HunkDiffView(diff, maxLines = ReviewClip.LINES_PER_FILE)
-                                if (total > ReviewClip.LINES_PER_FILE) {
-                                    Text(
-                                        ReviewClip.leftoverLine(total, ReviewClip.LINES_PER_FILE),
-                                        style = TextStyle(fontSize = 12.sp),
-                                        color = LocalTsColors.current.textSecondary,
-                                    )
-                                }
-                            }
-                        } else {
-                            Text(L10n.text("android.workspacecommit.still_loading.fa2e3194"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textTertiary)
-                        }
-                        Text(
-                            L10n.text("android.workspacecommit.full_diff.79eeb065"),
-                            style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                            color = LocalTsColors.current.accent,
-                            modifier = Modifier.clickable { onOpenFile(path) },
-                        )
-                    }
-                }
-                if (leftover > 0) {
-                    Text(
-                        ReviewClip.leftoverFilesLine(leftover),
-                        style = TextStyle(fontSize = 12.sp),
-                        color = LocalTsColors.current.textSecondary,
-                    )
-                }
-            }
+    val paths = files.mapNotNull { it.str("path") }
+    var selected by remember(peer, workspace) { mutableStateOf<String?>(null) }
+    val path = selected?.takeIf { it in paths } ?: paths.firstOrNull()
+    if (path == null) {
+        TextButton(onClick = onBack) { Text(L10n.text("android.workspacecommit.changes.47127cfb")) }
+    } else {
+        FileDiffPage(model = model, peer = peer, workspace = workspace, hostLabel = hostLabel,
+            path = path, modifier = modifier, reviewFiles = paths,
+            onReviewFile = { selected = it }, onBack = onBack)
     }
 }

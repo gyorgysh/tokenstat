@@ -55,6 +55,7 @@ struct ClientWorkspaceToolsView: View {
             SegmentedTabs(
                 options: Surface.allCases,
                 selection: $surface,
+                title: { $0 == .changes ? L10n.text("apple.rootview.git.b949c922") : L10n.enumLabel($0) },
                 comfortable: false
             )
             .padding(.horizontal, Theme.Space.m)

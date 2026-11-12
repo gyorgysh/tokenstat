@@ -9,7 +9,7 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.16.0]
+## [1.16.0] - 2026-11-12
 
 ### Added
 
@@ -17,9 +17,11 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Improved
 
-- Plans appear in the conversation when they start and make progress. Earlier plan placeholders disappear, leaving room for messages between updates.
+- Plans show as a checklist in the chat. Each update moves the checklist to where it happened, so it stays near the latest messages and old copies do not pile up.
 - Long command output opens in a scrollable panel instead of filling the chat.
 - Repository history keeps commit avatars cached when you reopen the inspector.
+- The inspector's repository tab is now called Git. It reviews one file at a time, with a file list beside the diff on wide screens that you can drag to resize, and a file picker in narrow panes.
+- Review on a turn's changes card opens the edits that turn made. Later edits and commits do not change them, and a file edited more than once shows each edit.
 
 ### Fixed
 

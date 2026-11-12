@@ -78,6 +78,31 @@ class ChatTranscriptDetailTest {
     }
 
     @Test
+    fun recordedTurnReviewKeepsEditOrderAndSnapshots() {
+        fun patch(id: String, text: String) = ChatDisplayItem.Edit(id,
+            ChatEditState("src/a.kt", 1, 1, text, 1, false, false, 0, null))
+        val first = listOf(user("u1"), patch("e1", "-old\n+new"), patch("e2", "-new\n+later"), say("a1"))
+        val snapshot = fold(first, ChatDetail.Standard).filterIsInstance<ChatDisplayItem.Changes>().single()
+        assertEquals(listOf("-old\n+new", "-new\n+later"), snapshot.files.single().patches)
+        val later = fold(first + user("u2") + patch("e3", "+third"), ChatDetail.Standard)
+            .filterIsInstance<ChatDisplayItem.Changes>()
+        assertEquals(2, later.size)
+        assertEquals(snapshot.files.single().patches, later[0].files.single().patches)
+        assertEquals(listOf("+third"), later[1].files.single().patches)
+    }
+
+    @Test
+    fun manyEditsDoNotLoseRecordedPatches() {
+        val rows = listOf(user("u")) + (0 until 8000).map { index ->
+            ChatDisplayItem.Edit("e$index", ChatEditState("a", 1, 0, "+$index", 1, false, false, 0, null))
+        }
+        val file = fold(rows, ChatDetail.Standard).filterIsInstance<ChatDisplayItem.Changes>().single().files.single()
+        assertEquals(8000, file.patches.size)
+        assertEquals("+0", file.patches.first())
+        assertEquals("+7999", file.patches.last())
+    }
+
+    @Test
     fun detailedIsTheIdentity() {
         val rows = listOf(user("u1"), think("k1"), tool("t1", "Read"), tool("t2", "Read"), say("a1"), usage("x1", 0.1))
         assertEquals(rows, fold(rows, ChatDetail.Detailed))

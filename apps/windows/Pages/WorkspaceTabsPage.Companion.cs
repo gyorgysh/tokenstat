@@ -218,54 +218,78 @@ internal sealed partial class WorkspaceTabsPage
     }
     private void ShowTurnReview(IReadOnlyList<ChangedFile> files, string? path)
     {
-        var stack = new StackPanel { Spacing = Theme.SpaceM, Padding = new Thickness(Theme.SpaceM) };
-        stack.Children.Add(Buttons.Secondary(L10n.Text("windows.workbench.working_tree"), ActionIcon.Compare,
+        var root = new Grid();
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var header = new StackPanel { Spacing = Theme.SpaceS, Padding = new Thickness(Theme.SpaceM) };
+        header.Children.Add(Buttons.Secondary(L10n.Text("windows.workbench.working_tree"), ActionIcon.Compare,
             (_, _) => ShowChangesInspector(), small: true));
-        stack.Children.Add(new TextBlock { Text = L10n.Text("windows.workbench.turn_changes"), FontSize = 18 });
+        header.Children.Add(new TextBlock { Text = L10n.Text("windows.workbench.turn_changes"), FontSize = 18 });
         if (ActivePage is ChatPage chat)
-            stack.Children.Add(new TextBlock { Text = chat.ReviewTitle, TextWrapping = TextWrapping.Wrap });
-        stack.Children.Add(new TextBlock { Text = L10n.Text("windows.workbench.recorded_edits"),
+            header.Children.Add(new TextBlock { Text = chat.ReviewTitle, TextWrapping = TextWrapping.Wrap });
+        header.Children.Add(new TextBlock { Text = L10n.Text("windows.workbench.recorded_edits"),
             TextWrapping = TextWrapping.Wrap, Opacity = .7 });
-        foreach (var file in files.OrderByDescending(file => file.Path == path))
+        root.Children.Add(header);
+        var paths = files.Select(file => file.Path).ToArray();
+        var selected = path is not null && paths.Contains(path) ? path : paths.FirstOrDefault();
+        if (selected is not null)
         {
-            var content = new StackPanel { Spacing = Theme.SpaceS };
-            content.Children.Add(new TextBlock { Text = file.Path, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap });
-            var totals = new TextBlock { FontFamily = Fonts.Mono, FontSize = 12 };
-            totals.Inlines.Add(new Run { Text = $"+{file.Added} ", Foreground = Theme.Brush(static () => Theme.DiffAdded) });
-            totals.Inlines.Add(new Run { Text = $"−{file.Removed}", Foreground = Theme.Brush(static () => Theme.DiffRemoved) });
-            content.Children.Add(totals);
-            var patches = file.Patches.Count == 0 ? new[] { "" } : file.Patches;
-            var edit = 0;
-            foreach (var patch in patches)
+            var current = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            UIElement FileDetail(ChangedFile file)
             {
-                if (patches.Count > 1)
-                    content.Children.Add(new TextBlock { Text = L10n.Text("windows.workbench.edit_number", $"{++edit}"), FontSize = 11, Opacity = .7 });
-                var block = new TextBlock { FontFamily = Fonts.Mono, FontSize = 12,
-                    IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
-                if (string.IsNullOrEmpty(patch)) block.Text = L10n.Text("windows.workbench.patch_unavailable");
-                else
+                var content = new StackPanel { Spacing = Theme.SpaceS };
+                content.Children.Add(new TextBlock { Text = file.Path, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap });
+                var totals = new TextBlock { FontFamily = Fonts.Mono, FontSize = 12 };
+                totals.Inlines.Add(new Run { Text = $"+{file.Added} ", Foreground = Theme.Brush(static () => Theme.DiffAdded) });
+                totals.Inlines.Add(new Run { Text = $"−{file.Removed}", Foreground = Theme.Brush(static () => Theme.DiffRemoved) });
+                content.Children.Add(totals);
+                var patches = file.Patches.Count == 0 ? new[] { "" } : file.Patches;
+                var edit = 0;
+                foreach (var patch in patches)
                 {
-                    var lines = patch.Split('\n');
-                    for (var index = 0; index < lines.Length; index++)
+                    if (patches.Count > 1)
+                        content.Children.Add(new TextBlock { Text = L10n.Text("windows.workbench.edit_number", $"{++edit}"), FontSize = 11, Opacity = .7 });
+                    var block = new TextBlock { FontFamily = Fonts.Mono, FontSize = 12,
+                        IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
+                    if (string.IsNullOrEmpty(patch)) block.Text = L10n.Text("windows.workbench.patch_unavailable");
+                    else
                     {
-                        var line = lines[index];
-                        var brush = line.StartsWith('+') && !line.StartsWith("+++") ? Theme.Brush(static () => Theme.DiffAdded)
-                            : line.StartsWith('-') && !line.StartsWith("---") ? Theme.Brush(static () => Theme.DiffRemoved) : Theme.Brush(static () => Theme.DefaultText);
-                        foreach (var chunk in DiffTextChunks.Split(line + (index + 1 < lines.Length ? "\n" : "")))
-                            block.Inlines.Add(new Run { Text = chunk, Foreground = brush });
+                        var lines = patch.Split('\n');
+                        for (var index = 0; index < lines.Length; index++)
+                        {
+                            var line = lines[index];
+                            var brush = line.StartsWith('+') && !line.StartsWith("+++") ? Theme.Brush(static () => Theme.DiffAdded)
+                                : line.StartsWith('-') && !line.StartsWith("---") ? Theme.Brush(static () => Theme.DiffRemoved) : Theme.Brush(static () => Theme.DefaultText);
+                            foreach (var chunk in DiffTextChunks.Split(line + (index + 1 < lines.Length ? "\n" : "")))
+                                block.Inlines.Add(new Run { Text = chunk, Foreground = brush });
+                        }
                     }
+                    content.Children.Add(block);
                 }
-                content.Children.Add(block);
+                return content;
             }
-            stack.Children.Add(Chrome.Card(file.FileName, content));
+            void Select(string selectedPath)
+            {
+                var file = files.FirstOrDefault(item => item.Path == selectedPath);
+                if (file is not null) current.Content = FileDetail(file);
+            }
+            Select(selected);
+            var browser = new WorkspaceReviewBrowser(paths, selected, current, Select);
+            Grid.SetRow(browser, 1); root.Children.Add(browser);
         }
-        _companionReview = new ScrollViewer { Content = stack };
+        _companionReview = root;
         ShowCompanion(DesktopWorkbenchTool.Changes);
     }
 
     internal bool ShowWorkingTreeReview(string? path = null)
     {
-        if (ActivePage is not ChatPage) return false;
+        if (ActivePage is not ChatPage)
+        {
+            var review = new WorkspaceLiveReviewPage(WorkspaceId, () => ShowChangesInspector()) { Tag = this };
+            review.Review(path);
+            OpenReview(L10n.Text("windows.workbench.working_tree"), review);
+            return true;
+        }
         _companionReview = null;
         _showsLiveReview = true;
         _liveReview ??= new WorkspaceLiveReviewPage(WorkspaceId, () => ShowChangesInspector()) { Tag = this };

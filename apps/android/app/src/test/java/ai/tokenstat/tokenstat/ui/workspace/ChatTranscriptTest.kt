@@ -14,20 +14,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatTranscriptTest {
-    @Test fun planUpdatesAppearAsSeparateShortMessages() {
+    @Test fun planChecklistMovesToTheLatestUpdate() {
         val events = Json.parseToJsonElement("""[
           {"kind":"agent","seq":1,"event":{"kind":"plan","initial":true,"steps":[{"text":"Inspect","status":"inProgress"},{"text":"Build","status":"pending"}]}},
           {"kind":"agent","seq":2,"event":{"kind":"text","delta":"Working"}},
           {"kind":"agent","seq":3,"event":{"kind":"plan","initial":false,"completedStep":"Inspect","steps":[{"text":"Inspect","status":"completed"},{"text":"Build","status":"inProgress"}]}}
         ]""").jsonArray.map { it.jsonObject }
-        val initial = (coalesceTranscript(events.take(1)).single() as ChatDisplayItem.Assistant).text
-        assertTrue(initial.contains("Inspect") && initial.contains("Build"))
+        val initial = coalesceTranscript(events.take(1)).single() as ChatDisplayItem.Plan
+        assertEquals(listOf("Inspect", "Build"), initial.steps.map { it.text })
         val rows = coalesceTranscript(events)
         assertEquals(2, rows.size)
         assertEquals("Working", (rows[0] as ChatDisplayItem.Assistant).text)
-        val progress = (rows[1] as ChatDisplayItem.Assistant).text
-        assertTrue(progress.contains("Inspect"))
-        assertFalse(progress.contains("Build"))
+        val latest = rows[1] as ChatDisplayItem.Plan
+        assertEquals(listOf("completed", "inProgress"), latest.steps.map { it.status })
         val clear = Json.parseToJsonElement("""{"kind":"agent","seq":4,"event":{"kind":"plan","initial":false,"steps":[]}}""").jsonObject
         assertEquals(1, coalesceTranscript(events + clear).size)
     }

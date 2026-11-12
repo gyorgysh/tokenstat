@@ -1480,7 +1480,7 @@ private struct ChatPaneOpening: View {
 private extension ChatDisplayItem {
     var prefersWideReadingRoom: Bool {
         switch kind {
-        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage, .changes:
+        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage, .changes, .plan:
             true
         case .user, .assistant, .thinking, .failed:
             false
@@ -1493,7 +1493,7 @@ private extension ChatDisplayItem {
             .trailing
         case .assistant, .thinking, .failed:
             .leading
-        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage, .changes:
+        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage, .changes, .plan:
             .center
         }
     }

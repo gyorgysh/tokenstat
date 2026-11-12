@@ -21,7 +21,11 @@ internal sealed partial class ChatPage
         Question,
         /// <summary>The files a finished turn edited, added by the fold.</summary>
         Changes,
+        /// <summary>The plan as last reported. A newer report replaces the older row.</summary>
+        Plan,
     }
+
+    internal sealed record PlanStepItem(string Text, string Status);
 
     internal struct DisplayItem
     {
@@ -66,6 +70,8 @@ internal sealed partial class ChatPage
         public ChatQuestionItem? Question;
         /// <summary>The files, on a <see cref="ItemKind.Changes"/> row.</summary>
         public IReadOnlyList<ChangedFile>? Changes;
+        /// <summary>The checklist, on a <see cref="ItemKind.Plan"/> row.</summary>
+        public IReadOnlyList<PlanStepItem>? Plan;
 
         public DisplayItem()
         {

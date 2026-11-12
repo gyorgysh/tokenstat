@@ -465,10 +465,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 wanted == file.Path.Replace('\\', '/') || wanted.EndsWith("/" + file.Path.Replace('\\', '/'), StringComparison.Ordinal));
             if (!string.IsNullOrEmpty(file.Path))
             {
-                var diff = await LoadOneDiffAsync(file.Path);
-                _root.Children.Add(Chrome.Card(file.Path, WorkspaceDiff.PreviewFile(this, file.Path, diff)));
-                // Consume only a file that was found and loaded. Git status can
-                // lag the chat's edit; a queued reload must pin this card again.
+                // Open the file in the review browser when a chat workbench
+                // is present. Keep the inline fallback for other workspace
+                // surfaces that do not own a side review.
+                if (WorkspaceTabsPage.Find(this)?.ShowWorkingTreeReview(file.Path) != true)
+                {
+                    var diff = await LoadOneDiffAsync(file.Path);
+                    _root.Children.Add(Chrome.Card(file.Path, WorkspaceDiff.PreviewFile(this, file.Path, diff)));
+                }
                 if (!_reloadRequested && _reviewPath == reviewPath) _reviewPath = null;
             }
         }
@@ -592,9 +596,13 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 });
             }
-            ToolTipService.SetToolTip(label, path);
-            Grid.SetColumn(label, 1);
-            line.Children.Add(label);
+            var open = new Button { Content = label, HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(0),
+                Background = null, BorderThickness = new Thickness(0) };
+            ToolTipService.SetToolTip(open, path);
+            open.Click += async (_, _) => await ShowDiffAsync(filePath);
+            Grid.SetColumn(open, 1);
+            line.Children.Add(open);
             var actions = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -618,10 +626,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     ["id"] = _id,
                     ["paths"] = paths,
                 });
-            }));
-            actions.Children.Add(Buttons.ToolbarIcon(ActionIcon.Compare, L10n.Text("windows.workspacepage.diff.7ecf4628"), async (_, _) =>
-            {
-                await ShowDiffAsync(filePath);
             }));
             Grid.SetColumn(actions, 2);
             line.Children.Add(actions);

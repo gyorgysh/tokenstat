@@ -21,60 +21,88 @@ struct WorkingTreeReviewView: View {
         model.workingTreeReviewFocus.flatMap { $0.folderID == folder.id ? $0 : nil }
     }
 
-    private var displayedDiffs: [FileDiff] {
-        guard let focus, let path = ChangePathMatch.path(focus.path, in: diffs.map(\.path)),
-              let index = diffs.firstIndex(where: { $0.path == path }) else { return diffs }
-        var ordered = diffs
-        ordered.insert(ordered.remove(at: index), at: 0)
-        return ordered
+    @State private var selectedPath: String?
+
+    private var selectedFile: FileChange? {
+        let path = ChangePathMatch.reviewSelection(selectedPath, focus: focus?.path, paths: files.map(\.path))
+        return files.first { $0.path == path }
     }
 
     /// Identity of the work to review: the folder and the change set. A save,
     /// an agent edit, or a commit changes it and reloads the diffs.
     private struct ReviewKey: Equatable {
         let folderID: String
-        let files: [FileChange]
+        let file: FileChange?
         let revision: UInt64
     }
 
     private var reviewKey: ReviewKey {
-        ReviewKey(folderID: folder.id, files: files, revision: model.diffRefreshRevisions[folder.id] ?? 0)
+        ReviewKey(folderID: folder.id, file: selectedFile, revision: model.diffRefreshRevisions[folder.id] ?? 0)
+    }
+
+    private var selectedDiff: FileDiff? {
+        guard let path = selectedFile?.path else { return nil }
+        return diffs.first { $0.path == path }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            if let error, diffs.isEmpty {
-                ErrorBanner(message: error) { Task { await load() } }
-                InspectorEmptyState(
-                    systemImage: "exclamationmark.circle",
-                    title: L10n.text("apple.workingtreereviewview.could_not_load_changes.07be1deb"),
-                    subtitle: error,
-                    tint: Theme.danger
-                )
-            } else if loading, diffs.isEmpty {
-                ProgressView(L10n.text("apple.workingtreereviewview.reading_working_tree.7e8e886f"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if diffs.isEmpty {
+            if files.isEmpty {
                 InspectorEmptyState(
                     systemImage: "checkmark.seal",
                     title: L10n.text("apple.workingtreereviewview.no_changes_to_review.e964b314"),
                     subtitle: L10n.text("apple.workingtreereviewview.the_working_tree_is_clean.84230b1f")
                 )
             } else {
-                DiffDocumentView(diffs: displayedDiffs) {
-                    if let error {
-                        ErrorBanner(message: error) { Task { await load() } }
+                ReviewFileBrowser(
+                    files: files.map { ReviewFileChoice(path: $0.path, added: $0.added, removed: $0.removed) },
+                    selection: Binding(get: { selectedFile?.path }, set: { path in
+                        if selectedFile?.path != path { loading = true; error = nil }
+                        selectedPath = path
+                    })
+                ) {
+                    VStack(spacing: 0) {
+                        if let error {
+                            ErrorBanner(message: error) { Task { await load() } }
+                        }
+                        if let file = selectedFile {
+                            ReviewFileHeading(path: file.path)
+                            if let diff = selectedDiff {
+                                DiffDocumentView(diffs: [diff], fileHeaders: false) { EmptyView() }
+                                    .id("\(file.path):\(focus?.generation ?? 0)")
+                            } else if loading {
+                                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                InspectorEmptyState(systemImage: "exclamationmark.circle",
+                                    title: L10n.text("apple.workingtreereviewview.could_not_load_changes.07be1deb"),
+                                    subtitle: file.path, tint: Theme.danger)
+                            }
+                        }
                     }
                 }
-                // A repeated press on the same file returns to its first
-                // hunk, while an ordinary file refresh keeps the tab mounted.
-                .id(focus?.generation)
+                .onChange(of: focus?.generation, initial: true) { _, _ in
+                    if let focus, let path = ChangePathMatch.path(focus.path, in: files.map(\.path)) {
+                        if selectedFile?.path != path { loading = true; error = nil }
+                        selectedPath = path
+                    }
+                }
+                .onChange(of: files.map(\.path)) { _, paths in
+                    if let selectedPath, !paths.contains(selectedPath) {
+                        loading = true
+                        error = nil
+                        self.selectedPath = ChangePathMatch.reviewSelection(nil, focus: focus?.path, paths: paths)
+                    }
+                }
             }
         }
         .background(Theme.background)
         .task(id: isActive ? reviewKey : nil) {
             if isActive { await load() }
+        }
+        .task(id: isActive ? selectedDiff?.renderRevision : nil) {
+            guard isActive, let diff = selectedDiff else { return }
+            await WorkViewedChange.save(owner: WorkViewedChange.owner(folderID: folder.id), diff: diff)
         }
     }
 
@@ -119,47 +147,171 @@ struct WorkingTreeReviewView: View {
         let generation = loadGeneration
         loading = true
         error = nil
-        let paths = files.map(\.path)
-        let folderID = folder.id
-        // Keep these reads alive if an inspector preview disappears while
-        // the review is loading. The review owns its snapshots afterwards.
-        for path in paths { model.retainDiffPreview(path, in: folderID) }
-        defer { for path in paths { model.releaseDiffPreview(path, in: folderID) } }
-        let failures = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
-            var next = 0
-            var failures = 0
-            // Bound parallel work: a large review should neither pay one RTT
-            // per file nor flood the bridge with hundreds of requests.
-            for _ in 0..<min(4, paths.count) {
-                let path = paths[next]
-                next += 1
-                group.addTask { await model.loadDiff(path, in: folderID) }
-            }
-            for await loaded in group {
-                if !loaded { failures += 1 }
-                if !Task.isCancelled, next < paths.count {
-                    let path = paths[next]
-                    next += 1
-                    group.addTask { await model.loadDiff(path, in: folderID) }
-                }
-            }
-            return failures
+        guard let path = selectedFile?.path else {
+            diffs = []
+            loading = false
+            return
         }
+        let folderID = folder.id
+        model.retainDiffPreview(path, in: folderID)
+        defer { model.releaseDiffPreview(path, in: folderID) }
+        let loaded = await model.loadDiff(path, in: folderID)
         guard !Task.isCancelled, generation == loadGeneration else { return }
-        let refreshed = paths.compactMap { model.diff(for: $0, in: folderID) }
-        // The model's bounded preview cache can evict files after this
-        // review releases its reads. Re-decoding those files gives them new
-        // render identities even when their content is unchanged. Keep the
-        // review's own snapshots in that case, including their row identities.
+        let refreshed = model.diff(for: path, in: folderID).map { [$0] } ?? []
+        // Keep the row identity when a refresh found the same content.
         if diffs != refreshed { diffs = refreshed }
-        if failures > 0 {
-            error = L10n.text("apple.workingtreereviewview.could_not_refresh_0_file_s_available_chang.89fdefb0", "\(failures)")
+        if !loaded {
+            error = L10n.text("apple.workingtreereviewview.could_not_refresh_0_file_s_available_chang.89fdefb0", "1")
         }
         loading = false
-        let owner = WorkViewedChange.owner(folderID: folderID)
-        for diff in diffs {
-            guard !Task.isCancelled, generation == loadGeneration else { return }
-            await WorkViewedChange.save(owner: owner, diff: diff)
+    }
+}
+
+/// The same file navigator for current Git changes and recorded turn edits.
+struct ReviewFileChoice: Identifiable {
+    let path: String
+    let added: UInt64?
+    let removed: UInt64?
+    var id: String { path }
+    var name: String { (path as NSString).lastPathComponent }
+    var directory: String { (path as NSString).deletingLastPathComponent }
+}
+
+struct ReviewFileHeading: View {
+    let path: String
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: "doc.text").foregroundStyle(Theme.accent)
+            Text(path).font(Theme.mono(11)).lineLimit(1).truncationMode(.middle)
+                .textSelection(.enabled).help(path)
+            Spacer(minLength: 0)
         }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel)
+    }
+}
+
+struct ReviewFileBrowser<Detail: View>: View {
+    let files: [ReviewFileChoice]
+    @Binding var selection: String?
+    @ViewBuilder var detail: () -> Detail
+    /// The list's width is the person's to set, and is kept between launches.
+    @AppStorage("reviewFileListWidth") private var listWidth: Double = 220
+    @State private var dragStart: Double?
+    @State private var cursorPushed = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            if geometry.size.width >= 560 {
+                HStack(spacing: 0) {
+                    fileList.frame(width: clamped(listWidth, in: geometry.size.width))
+                    divider(in: geometry.size.width)
+                    detail().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    Menu {
+                        ForEach(files) { file in
+                            Button(file.path) { selection = file.path }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.on.doc")
+                            Text(files.first(where: { $0.path == selection })?.name ?? L10n.text("common.files"))
+                                .lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 0)
+                            Text("\(files.count)").foregroundStyle(.secondary)
+                            Image(systemName: "chevron.up.chevron.down").font(Theme.caption)
+                        }
+                        .padding(Theme.Space.s).contentShape(.rect)
+                    }
+                    .menuStyle(.borderlessButton)
+                    ThemeRule()
+                    detail().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+
+    private func clamped(_ width: Double, in total: CGFloat) -> CGFloat {
+        CGFloat(min(max(width, 160), max(160, min(420, Double(total) * 0.5))))
+    }
+
+    /// A one point rule with a wider grab area, so the list can be resized.
+    private func divider(in total: CGFloat) -> some View {
+        Rectangle().fill(Theme.border).frame(width: 1)
+            .overlay {
+                Color.clear.frame(width: 9).contentShape(.rect)
+                    #if os(macOS)
+                    .onHover { inside in
+                        if inside, !cursorPushed { NSCursor.resizeLeftRight.push(); cursorPushed = true }
+                        if !inside { popCursor() }
+                    }
+                    // A layout change or a closed tab never reports the
+                    // pointer leaving, so the cursor would stay a resize arrow.
+                    .onDisappear { popCursor() }
+                    #endif
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { value in
+                            let start = dragStart ?? listWidth
+                            dragStart = start
+                            listWidth = Double(clamped(start + value.translation.width, in: total))
+                        }
+                        .onEnded { _ in dragStart = nil })
+            }
+    }
+
+    private func popCursor() {
+        #if os(macOS)
+        if cursorPushed { NSCursor.pop(); cursorPushed = false }
+        #endif
+    }
+
+    private var fileList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(L10n.text("common.files")).font(Theme.caption.weight(.semibold))
+                Spacer()
+                Text("\(files.count)").font(Theme.caption).foregroundStyle(.secondary)
+            }
+            .padding(Theme.Space.s)
+            ThemeRule()
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(files) { file in
+                        HStack(alignment: .center, spacing: 0) {
+                            Button { selection = file.path } label: {
+                                HStack(alignment: .top, spacing: Theme.Space.s) {
+                                    Image(systemName: "doc.text").foregroundStyle(Theme.accent)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(file.name.isEmpty ? file.path : file.name)
+                                            .font(Theme.font(12, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                                        if !file.directory.isEmpty && file.directory != "." {
+                                            Text(file.directory).font(Theme.caption2).foregroundStyle(.secondary)
+                                                .lineLimit(1).truncationMode(.middle)
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                    if let added = file.added, let removed = file.removed, added > 0 || removed > 0 {
+                                        DiffStat(added: Int(clamping: added), removed: Int(clamping: removed), font: Theme.numeric(10))
+                                    }
+                                }
+                                .padding(Theme.Space.s)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .help(file.path)
+                            .accessibilityAddTraits(selection == file.path ? [.isSelected] : [])
+                        }
+                        .background(selection == file.path ? Theme.accentSoft : .clear,
+                                    in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }.padding(Theme.Space.xs)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Theme.sidebar)
     }
 }

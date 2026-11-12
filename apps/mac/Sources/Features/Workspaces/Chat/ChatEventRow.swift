@@ -225,6 +225,8 @@ struct ChatEventRow: View {
             ChatQuestionCard(question: question, canAnswer: canAnswerQuestions, isSending: answeringQuestion) { text in
                 answerQuestion(question, text)
             }
+        case let .plan(steps):
+            ChatPlanCard(steps: steps, live: animatesRunning)
         case let .changes(changes):
             ChatTurnChangesCard(changes: changes, review: reviewTurnChanges.map { callback in
                 { path in callback(changes, path) }

@@ -117,8 +117,8 @@ internal fun TranscriptItemRow(
     /// Opens or folds a step group, by the group's row id.
     onToggleGroup: (String) -> Unit = {},
     canAnswerQuestions: Boolean = true,
-    /// Opens the folder's changes. Null where there is no folder to open.
-    onReviewChanges: (() -> Unit)? = null,
+    /// Opens the recorded turn's edits at the requested file.
+    onReviewChanges: ((ChatDisplayItem.Changes, String?) -> Unit)? = null,
     toolImages: List<ChatDisplayItem.Attachment> = emptyList(),
     live: Boolean = false,
 ) {
@@ -141,6 +141,7 @@ internal fun TranscriptItemRow(
                 StepGroupRow(group = item.group, onClick = { onToggleGroup(item.id) })
             }
         is ChatDisplayItem.Changes -> TurnChangesCard(item, onReviewChanges)
+        is ChatDisplayItem.Plan -> ChatPlanCard(item.steps, live = live)
         is ChatDisplayItem.GroupStep -> {
             // Inset under its open header, with a rule down the left so the
             // steps read as belonging to the line above them.
@@ -1444,7 +1445,7 @@ private fun PlainStepLine(group: ChatStepGroup, onClick: () -> Unit) {
 /// ChatTurnChangesCard.swift: the first four files, the rest one tap away,
 /// and Review opens the folder's changes.
 @Composable
-private fun TurnChangesCard(changes: ChatDisplayItem.Changes, onReview: (() -> Unit)?) {
+private fun TurnChangesCard(changes: ChatDisplayItem.Changes, onReview: ((ChatDisplayItem.Changes, String?) -> Unit)?) {
     val colors = LocalTsColors.current
     var showingAll by remember(changes.id) { mutableStateOf(false) }
     val shown = if (showingAll) changes.files else changes.files.take(4)
@@ -1471,7 +1472,7 @@ private fun TurnChangesCard(changes: ChatDisplayItem.Changes, onReview: (() -> U
                     label = L10n.text("android.chatchanges.review"),
                     icon = ActionIcon.Preview.vector,
                     small = true,
-                    onClick = onReview,
+                    onClick = { onReview(changes, null) },
                 )
             }
         }
@@ -1481,7 +1482,7 @@ private fun TurnChangesCard(changes: ChatDisplayItem.Changes, onReview: (() -> U
                     .fillMaxWidth()
                     .heightIn(min = 36.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .clickable(enabled = onReview != null) { onReview?.invoke() }
+                    .clickable(enabled = onReview != null) { onReview?.invoke(changes, file.path) }
                     .padding(vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
