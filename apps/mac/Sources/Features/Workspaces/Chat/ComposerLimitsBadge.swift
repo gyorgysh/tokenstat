@@ -131,6 +131,24 @@ struct ComposerLimitsBadge: View {
     private func summary(
         for rows: [(display: String, window: UsageWindow)]
     ) -> some View {
+        ComposerLimitsLine(rows: rows)
+    }
+
+    private func summaryText(for rows: [(display: String, window: UsageWindow)]) -> String {
+        rows.map { L10n.text("apple.composerlimitsbadge.0_1_percent.f674c60d", "\($0.display)", "\($0.window.percent.formatted(.number.precision(.fractionLength(0))))") }
+            .joined(separator: ", ")
+    }
+
+
+}
+
+/// One seated line: "5h 26% · 7d 87%". Each figure wears its own window's
+/// severity, so the one about to stop the work carries the warning rather
+/// than the whole line.
+struct ComposerLimitsLine: View {
+    let rows: [(display: String, window: UsageWindow)]
+
+    var body: some View {
         HStack(spacing: 4) {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                 if index > 0 {
@@ -150,13 +168,35 @@ struct ComposerLimitsBadge: View {
         .lineLimit(1)
         .truncationMode(.tail)
     }
+}
 
-    private func summaryText(for rows: [(display: String, window: UsageWindow)]) -> String {
-        rows.map { L10n.text("apple.composerlimitsbadge.0_1_percent.f674c60d", "\($0.display)", "\($0.window.percent.formatted(.number.precision(.fractionLength(0))))") }
-            .joined(separator: ", ")
+/// The composer's quota line for one agent, read-only, beside its row in the
+/// agent picker. Same readings and the same choice of windows as the badge,
+/// so the picker never shows a number the composer would not.
+struct AgentLimitsSummary: View {
+    let backend: String
+    var peer: String?
+
+    var body: some View {
+        let readings = ChatPlanLimits.store(peer: peer)
+        if let provider = ComposerLimits.pick(
+            backend: backend, canonical: harnessCanonicalID, providers: readings.visible,
+            source: \.source, hasWindows: \.hasWindows
+        ) {
+            let rows = harnessCanonicalID(provider.source) == "codex"
+                ? ComposerLimits.codexHeadlineRows(windows: provider.windows, label: \.label, scope: \.scope)
+                : ComposerLimits.badgeRows(windows: provider.windows, label: \.label, scope: \.scope)
+            if !rows.isEmpty {
+                ComposerLimitsLine(rows: rows)
+                    .opacity(provider.isStale ? 0.6 : 1)
+                    .fixedSize()
+                    .accessibilityLabel(rows.map {
+                        L10n.text("apple.composerlimitsbadge.0_1_percent.f674c60d", "\($0.display)",
+                                  "\($0.window.percent.formatted(.number.precision(.fractionLength(0))))")
+                    }.joined(separator: ", "))
+            }
+        }
     }
-
-
 }
 
 /// The full windows behind the badge: bars, reset times, and the reading's

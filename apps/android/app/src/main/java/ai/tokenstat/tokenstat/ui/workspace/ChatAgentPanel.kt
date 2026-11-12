@@ -47,6 +47,8 @@ import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -252,6 +254,16 @@ fun ChatAgentSheet(
     var showingSetup by remember { mutableStateOf(false) }
     var installing by remember { mutableStateOf<String?>(null) }
     var updating by remember { mutableStateOf(false) }
+    // Every agent's quota for its row: the app's own readings for this
+    // device, one read of the host's for a remote one.
+    val appState by model.state.collectAsStateWithLifecycle()
+    var remoteQuota by remember(peer) { mutableStateOf<JsonArray?>(null) }
+    LaunchedEffect(peer) {
+        if (peer.isNotBlank()) runCatching {
+            model.workspaceSection(peer, "usage.limits", buildJsonObject { put("force", false) }) as? JsonArray
+        }.onSuccess { remoteQuota = it }
+    }
+    val quotaReadings = if (peer.isBlank()) appState.limits else remoteQuota ?: JsonArray(emptyList())
 
     suspend fun load(refresh: Boolean) {
         runCatching {
@@ -394,6 +406,7 @@ fun ChatAgentSheet(
                     pick = {},
                     onStepPick = ::pick,
                     accessory = { value ->
+                        (value as? ChatAgentChoice.Agent)?.let { ChatQuotaLine(chatQuotaReading(quotaReadings, it.id)) }
                         // The favourite star, on model rows only.
                         val id = (value as? ChatAgentChoice.Model)?.id
                         if (!id.isNullOrEmpty() && backendId.isNotEmpty()) {

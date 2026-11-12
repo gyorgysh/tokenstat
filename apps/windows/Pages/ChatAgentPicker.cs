@@ -50,6 +50,36 @@ internal static class ChatAgentPicker
     /// The agent, then a model or an effort only when one was chosen.
     /// The panel this opens is where the defaults are named.
     /// </summary>
+    /// <summary>The last limits reading, shared by every open picker.</summary>
+    private static JsonArray? s_limits;
+    private static DateTimeOffset s_limitsAt;
+
+    /// <summary>"5h 87% · 7d 60%" on the right of an agent row, each figure in its own severity.</summary>
+    private static FrameworkElement? QuotaLine(string backend)
+    {
+        if (s_limits is null || ChatQuotaData.Read(s_limits, backend) is not { } provider) return null;
+        var rows = ChatQuotaData.Headline(provider);
+        if (rows.Count == 0) return null;
+        var stale = provider["stale"] is JsonValue flag && flag.TryGetValue<bool>(out var old) && old;
+        var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (i > 0) line.Children.Add(new TextBlock { Text = "·", FontSize = 11, Opacity = 0.4 });
+            line.Children.Add(new TextBlock { Text = rows[i].Tag, FontSize = 11, Opacity = 0.7 });
+            var percent = rows[i].Percent;
+            line.Children.Add(new TextBlock
+            {
+                Text = percent.ToString("0", CultureInfo.CurrentCulture) + "%", FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = stale ? Theme.Brush(static () => Theme.Secondary)
+                    : percent >= 90 ? Theme.Brush(static () => Theme.Danger)
+                    : percent >= 70 ? Theme.Brush(static () => Theme.Warning) : Theme.AccentBrush,
+            });
+        }
+        AutomationProperties.SetName(line, string.Join(", ", rows.Select(r => $"{r.Tag} {r.Percent:0}%")));
+        return line;
+    }
+
     internal static string Summary(JsonNode? backend, string backendId, string model, string effort)
     {
         var parts = new List<string> { Format.Text(backend, "label", backendId) };
@@ -327,9 +357,19 @@ internal static class ChatAgentPicker
                     rows.Children.Add(new TextBlock { Text = note, FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
                     label = rows;
                 }
+                FrameworkElement content = step == ChatAgentSteps.Agent ? AgentMark.Row(item.Value, label) : label;
+                if (step == ChatAgentSteps.Agent && QuotaLine(item.Value) is { } quota)
+                {
+                    var withQuota = new Grid { ColumnSpacing = Theme.SpaceS };
+                    withQuota.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    withQuota.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    withQuota.Children.Add(content);
+                    Grid.SetColumn(quota, 1); withQuota.Children.Add(quota);
+                    content = withQuota;
+                }
                 var pick = new Button
                 {
-                    Content = step == ChatAgentSteps.Agent ? AgentMark.Row(item.Value, label) : label,
+                    Content = content,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     Background = item.Value == current ? Theme.AccentSoftBrush : Theme.PanelBrush,
@@ -387,7 +427,21 @@ internal static class ChatAgentPicker
             changed = false;
             search.Text = "";
             Render();
+            if (DateTimeOffset.UtcNow - s_limitsAt >= TimeSpan.FromSeconds(30)) _ = LoadLimitsAsync();
         };
+        async Task LoadLimitsAsync()
+        {
+            s_limitsAt = DateTimeOffset.UtcNow;
+            try
+            {
+                if (await AppServices.Host.CallAsync("usage.limits", new JsonObject { ["force"] = false }) is JsonArray readings)
+                {
+                    s_limits = readings;
+                    if (flyoutOpen && step == ChatAgentSteps.Agent) Render();
+                }
+            }
+            catch { /* The rows simply carry no quota. */ }
+        }
         flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
         flyout.Closed += (_, _) =>
         {

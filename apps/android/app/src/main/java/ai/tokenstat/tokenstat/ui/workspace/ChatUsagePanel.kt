@@ -13,6 +13,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import kotlinx.serialization.json.JsonArray
+import ai.tokenstat.tokenstat.ui.logic.harnessCanonicalID
+import ai.tokenstat.tokenstat.ui.components.TsType
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -160,7 +166,7 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
 
 }
 
-@Composable private fun quotaColor(window: JsonObject, percent: Double): Color {
+@Composable internal fun quotaColor(window: JsonObject, percent: Double): Color {
     val colors = LocalTsColors.current
     return when (LimitLogic.severityOf(window.str("severity"), percent)) {
         LimitLogic.Severity.NORMAL -> colors.accent
@@ -227,6 +233,34 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
             Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = colors.textPrimary)
+        }
+    }
+}
+
+/** The windows an agent row shows: 5h and 7d, Codex's general ones first. */
+internal fun chatQuotaHeadline(reading: JsonObject): List<Pair<String, JsonObject>> {
+    val windows = (reading["windows"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
+    val general = if (harnessCanonicalID(reading.str("source").orEmpty()) == "codex")
+        windows.filter { it.str("scope").equals("general", ignoreCase = true) } else emptyList()
+    val pool = general.ifEmpty { windows.filter { it.str("scope").isNullOrEmpty() }.ifEmpty { windows } }
+    return listOf("5h", "7d").mapNotNull { tag ->
+        pool.firstOrNull { chatQuotaTag(it.str("label").orEmpty()) == tag }?.let { tag to it }
+    }
+}
+
+/** "5h 87% · 7d 60%" beside an agent in the picker, each figure in its own severity. */
+@Composable internal fun ChatQuotaLine(reading: JsonObject?) {
+    val rows = reading?.let(::chatQuotaHeadline).orEmpty().ifEmpty { return }
+    val colors = LocalTsColors.current
+    val stale = reading?.bol("stale") == true
+    Row(Modifier.padding(end = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        rows.forEachIndexed { index, (tag, window) ->
+            val percent = chatQuotaPercent(window) ?: return@forEachIndexed
+            if (index > 0) Text("·", style = TsType.caption, color = colors.textTertiary)
+            Text(tag, style = TsType.caption, color = colors.textSecondary)
+            Text("${NumberFormat.getIntegerInstance().format(percent)}%", style = TsType.caption,
+                fontWeight = FontWeight.SemiBold, color = if (stale) colors.textSecondary else quotaColor(window, percent))
         }
     }
 }

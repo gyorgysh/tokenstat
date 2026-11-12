@@ -825,6 +825,10 @@ struct ChatAgentPanel: View {
                     icon: { value in
                         guard case let .agent(id) = value else { return nil }
                         return AnyView(HarnessMark(id: id, size: 26))
+                    },
+                    trailing: { value in
+                        guard case let .agent(id) = value else { return nil }
+                        return AnyView(AgentLimitsSummary(backend: id, peer: model.peer))
                     }
                 )
                 .disabled(updating || locked)

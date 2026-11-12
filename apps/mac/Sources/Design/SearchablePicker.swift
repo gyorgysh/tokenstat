@@ -336,6 +336,8 @@ struct PickerOptionList<Value: Hashable>: View {
     /// Leading icon per row, for an agent's brand mark. Nil for a row with
     /// none, so model and effort rows keep their alignment.
     var icon: ((Value) -> AnyView?)?
+    /// Right-aligned detail per row inside its button, for an agent's quota.
+    var trailing: ((Value) -> AnyView?)?
 
     @State private var query = ""
     @State private var refreshing = false
@@ -532,7 +534,7 @@ struct PickerOptionList<Value: Hashable>: View {
                     isSelected: selected,
                     monospaced: choice.monospaced ?? monospaced,
                     leading: icon?(choice.value),
-                    trailing: { EmptyView() }
+                    trailing: { if let view = trailing?(choice.value) { view } }
                 )
             }
             .buttonStyle(PickerRowButtonStyle(isSelected: selected))

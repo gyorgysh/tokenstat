@@ -22,11 +22,13 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Repository history keeps commit avatars cached when you reopen the inspector.
 - The inspector's repository tab is now called Git. It reviews one file at a time, with a file list beside the diff on wide screens that you can drag to resize, and a file picker in narrow panes.
 - Review on a turn's changes card opens the edits that turn made. Later edits and commits do not change them, and a file edited more than once shows each edit.
+- The agent picker shows each agent's 5-hour and weekly limits beside its name.
+- Starred servers stay in the Mac sidebar, so you can connect to one in a click.
 
 ### Fixed
 
 - Codex limits include recently resumed sessions and show when a reading is stale, including after a plan change.
-- Cursor usage can be refreshed after a failed fetch and accepts more recent usage records.
+- Cursor usage can be refreshed after a failed fetch, accepts more recent usage records, and keeps arriving now that Cursor encrypts its saved sign-in.
 
 ## [1.15.1] - 2026-11-11
 

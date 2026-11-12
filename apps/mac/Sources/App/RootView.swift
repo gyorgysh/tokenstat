@@ -2310,15 +2310,32 @@ struct RootView: View {
     // MARK: - Sidebar
 
     #if os(macOS)
-    /// Servers with at least one session this app is holding.
+    /// Servers with a session this app is holding, plus the starred ones.
     ///
-    /// Only hosts with something live: a sidebar that lists forty servers
-    /// under Hosts and forty again under it is a sidebar nobody scrolls.
+    /// Not the whole library: a sidebar that lists forty servers under Hosts
+    /// and forty again under it is a sidebar nobody scrolls. A star is the
+    /// person saying which few they want one click away.
     private var sshLiveHosts: [SSHHost] {
         let ids = Set(sshSessions.sessions.compactMap(\.hostID))
         return ssh.hosts
-            .filter { ids.contains($0.id) }
+            .filter { ids.contains($0.id) || $0.favorite }
             .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+    }
+
+    /// A starred server with nothing open: one click asks to connect.
+    @ViewBuilder
+    private func sshFavoriteHostRow(_ host: SSHHost) -> some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 18, height: 24)
+            SidebarRow(label: host.label, symbol: "star.fill", symbolSize: 11, trailing: nil, isSelected: false) {
+                ssh.connectRequest = host
+            }
+            .help(L10n.text("common.connect"))
+        }
+        .contextMenu {
+            Button(L10n.text("common.connect"), .connect) { ssh.connectRequest = host }
+            Button(L10n.text("common.open"), .next) { navigate(to: .sshTerminals(host: host.id)) }
+        }
     }
 
     /// A server with sessions, and its sessions under it when it is expanded.
@@ -3126,8 +3143,8 @@ struct RootView: View {
         }
     }
 
-    /// Servers with a shell open, and the shells. Only live ones: the whole
-    /// library is one click away on the rail.
+    /// Servers with a shell open, and the shells, plus starred servers ready
+    /// to connect. The whole library is one click away on the rail.
     @ViewBuilder
     private var liveServersSection: some View {
         let hosts = sshLiveHosts
@@ -3140,7 +3157,11 @@ struct RootView: View {
             }
             if expandedSidebarSections.contains("servers") {
                 ForEach(hosts) { host in
-                    sshLiveHostRow(host)
+                    if sshSessions.sessions(for: host.id).isEmpty {
+                        sshFavoriteHostRow(host)
+                    } else {
+                        sshLiveHostRow(host)
+                    }
                 }
             }
         }
