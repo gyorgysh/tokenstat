@@ -42,6 +42,7 @@ pub fn start(session: Arc<Mutex<Session>>) {
                 last_maintenance = Some(std::time::Instant::now());
             }
             post_limits();
+            fetch_remote_usage(&maintenance_session);
             std::thread::sleep(UNLINKED_CHECK_INTERVAL);
         }
     });
@@ -195,6 +196,49 @@ fn run_once(session: &Mutex<Session>) {
             eprintln!("sync: deferred: {reason}");
         }
         Err(error) => eprintln!("sync: scheduled run failed: {error}"),
+    }
+}
+
+/// Cursor and Antigravity usage, on the same 30 minute cache and power gate
+/// as the scheduled CLI scan. The host is the process that already holds the
+/// person's Keychain grant for Cursor's saved sign-in, so Home shows today's
+/// Cursor usage even when the CLI timer cannot read that item.
+fn fetch_remote_usage(session: &Mutex<Session>) {
+    if !tokenstat_sync::scheduled_network_allowed() {
+        return;
+    }
+    let snapshot = session.lock().ok().and_then(|guard| {
+        guard
+            .engine()
+            .ok()
+            .map(|engine| (engine.db_path().to_path_buf(), engine.timezone().clone()))
+    });
+    let Some((db_path, tz)) = snapshot else {
+        return;
+    };
+    let mut store = match tokenstat_core::Store::open(&db_path) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("fetch: archive unavailable, retrying next minute: {error}");
+            return;
+        }
+    };
+    match tokenstat_sync::fetch_remotes(&mut store, &tz, false) {
+        Ok(reports) => {
+            for report in reports
+                .iter()
+                .filter(|r| r.failed || (r.events > 0 && !r.from_cache))
+            {
+                eprintln!(
+                    "fetch: {} events={} failed={} {}",
+                    report.vendor,
+                    report.events,
+                    report.failed,
+                    report.message.as_deref().unwrap_or("")
+                );
+            }
+        }
+        Err(error) => eprintln!("fetch: remote usage failed, retrying next minute: {error}"),
     }
 }
 
