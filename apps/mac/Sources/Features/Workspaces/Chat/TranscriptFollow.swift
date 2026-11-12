@@ -455,6 +455,22 @@ final class TranscriptFollowState {
     /// believing it is how the conversation was revealed in its middle.
     @ObservationIgnored private(set) var steadyFrames = 0
 
+    /// A replacement native scroll view has not reported its geometry yet.
+    /// Do not let the old view's position suppress the first correction in
+    /// the new one, even when the old view had reached the end.
+    func resetViewport() {
+        repinDelivery.cancel()
+        atEnd = false
+        steadyFrames = 0
+        lastContentHeight = 0
+        lastOffset = 0
+        lastDistanceFromBottom = 0
+        programmaticUntil = .distantPast
+        undrivenDrift = 0
+        farMovedFrames = 0
+        retreatingFrames = 0
+    }
+
     func note(_ metrics: TranscriptMetrics) {
         // A hidden pane still receives geometry as the parent ZStack
         // re-lays out. Acting on it is what redrew markdown behind opacity

@@ -50,8 +50,9 @@ final class ClientChatSession {
         viewers.insert(viewer)
     }
     func disappear(_ viewer: UUID) {
-        viewers.remove(viewer)
+        let removed = viewers.remove(viewer) != nil
         model.saveDraftNow()
+        if removed && viewers.isEmpty { model.cancelFileTransferForDeparture() }
     }
 
     func deactivate() {

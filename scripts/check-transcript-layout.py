@@ -192,6 +192,19 @@ hidden.sliceHidesNewest = true
 hidden.note(metrics(0, 400))
 assert(!hidden.pinned && hidden.showJump, "a slice that hid the newest rows is not the end")
 
+let replaced = TranscriptFollowState()
+replaced.note(metrics(600))
+assert(replaced.atEnd && replaced.pinned)
+replaced.freeze()
+replaced.active = true
+replaced.resetViewport()
+assert(!replaced.atEnd && replaced.pinned, "a new scroll view cannot inherit the old view's at-end measurement")
+replaced.settle(true)
+assert(!replaced.atEnd && !replaced.arrived, "opening must keep correcting until the new viewport reports its own geometry")
+replaced.note(metrics(600))
+assert(replaced.atEnd, "the replacement's own geometry can confirm arrival")
+replaced.settle(false)
+
 assert(TranscriptSlice.range(count: 10, olderOffset: 0) == 0..<10, "short lists are the whole list")
 assert(TranscriptSlice.range(count: 200, olderOffset: 0) == 50..<200, "glued to the end is a suffix")
 assert(TranscriptSlice.range(count: 200, olderOffset: 50) == 0..<150, "full slide reaches the start")

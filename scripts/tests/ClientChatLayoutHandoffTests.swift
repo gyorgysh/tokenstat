@@ -18,6 +18,7 @@ final class ChatModel {
     var pendingQueue: [String] = []
     var loads = 0
     var saves = 0
+    var transferDepartures = 0
     var onLoad: (() async -> Void)?
     var onSelect: (() async -> Void)?
     var selected: ChatConversation?
@@ -33,6 +34,7 @@ final class ChatModel {
     private var workspace: String?
     func isReady(for workspaceID: String) -> Bool { workspace == workspaceID }
     func saveDraftNow() { saves += 1 }
+    func cancelFileTransferForDeparture() { transferDepartures += 1 }
     func acceptRenamedConversation(_ chat: ChatConversation) {
         if selected?.id == chat.id { selected = chat }
     }
@@ -115,7 +117,8 @@ struct ClientChatLayoutHandoffTests {
         let logicalID = handoff.reader!.id
         // Teardown before root capture still leaves the logical lease pinned.
         session.disappear(originalOwner)
-        precondition(!session.canDiscard)
+        precondition(!session.canDiscard && session.model.transferDepartures == 0,
+            "a layout handoff retains an in-flight transfer")
         _ = store.session(peer: "mac", workspace: "intermediate")
         precondition(store.session(peer: "mac", workspace: "p", conversation: "b") === session)
         let first = handoff.begin(route: route)!
@@ -163,10 +166,12 @@ struct ClientChatLayoutHandoffTests {
         let afterCover = handoff.begin(route: route)!
         precondition(handoff.isCurrent(afterCover, scope: scope) && afterCover.reader.key == bKey)
         handoff.navigate()
-        precondition(handoff.reader == nil && handoff.pending == nil, "real Back retires the logical reader")
+        precondition(handoff.reader == nil && handoff.pending == nil && session.model.transferDepartures == 1,
+            "real Back retires the logical reader and cancels its transfer")
         precondition(handoff.begin(route: route) == nil, "Back then fold must not reopen the closed chat")
         session.disappear(nextOwner)
-        precondition(session.canDiscard)
+        precondition(session.canDiscard && session.model.transferDepartures >= 1,
+            "leaving the logical reader cancels its transfer")
 
         // Folder fallback retains conversation:nil even with no metadata.
         let folder = ClientChatSession()

@@ -13,10 +13,25 @@ private struct Fixture: Decodable {
     let root, workspaceId, conversationId, hostKey: String
 }
 
+private final class ReadRefusal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var refusals = 0
+    func refuse(_ method: String) -> Error? {
+        guard ["chat.eventPage", "chat.events", "remote.call"].contains(method) else { return nil }
+        lock.lock(); refusals += 1; lock.unlock()
+        return BridgeError.core(code: "fixture_offline", message: "Fixture read refused")
+    }
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return refusals
+    }
+}
+
 @MainActor @Observable private final class HistorySession {
     let reader = ClientChatSession()
     var model: ChatModel { reader.model }
     var showing = true
+    var retainedPane = false
     var overview = false
     var phase = "Encrypted history QA"
     var imageFixtures: [ChatAttachment] = []
@@ -35,7 +50,7 @@ private struct Fixture: Decodable {
     let fixture: Fixture
     let role: String
     let output: URL
-    let desktopWidth: CGFloat
+    var desktopWidth: CGFloat
 
     init() {
         let environment = ProcessInfo.processInfo.environment
@@ -58,13 +73,16 @@ private struct Fixture: Decodable {
         if loaded && showing && model.selected?.id == fixture.conversationId && model.events.isEmpty {
             blankSamples += 1
         }
-        let state: [String: Any] = ["role": role, "loaded": loaded, "showing": showing,
+        var state: [String: Any] = ["role": role, "loaded": loaded, "showing": showing,
             "events": model.events.count, "lastSeq": model.events.last?.seq ?? 0,
             "uniqueSeq": Set(model.events.compactMap(\.seq)).count,
             "selected": model.selected?.id ?? "", "blankSamples": blankSamples,
             "running": model.selected?.running ?? false,
             "smoothStreaming": UserDefaults.standard.bool(forKey: "chat.smoothStreaming"),
             "error": model.error ?? "", "failures": errors, "command": command]
+        #if os(macOS) && DEBUG
+        state["viewportResets"] = TranscriptProbe.shared.viewportResets
+        #endif
         guard let bytes = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]),
               bytes != previousState else { return }
         previousState = bytes
@@ -198,6 +216,7 @@ private struct Fixture: Decodable {
         UserDefaults.standard.set(true, forKey: "chat.smoothStreaming")
         BridgeObserver.report = { [weak self] method, _, error in
             guard let error else { return }
+            if case BridgeError.core(code: "fixture_offline", message: _) = error { return }
             let message = error.localizedDescription
             Task { @MainActor in
                 guard let self, self.errors.count < 100 else { return }
@@ -317,7 +336,22 @@ private struct Fixture: Decodable {
             switch request["action"] as? String {
             case "hide": showing = false
             case "show": showing = true
+            case "retain-pane": retainedPane = true
+            case "narrow-pane": desktopWidth = 520
+            case "wide-pane": desktopWidth = 960
             case "earlier": await model.loadEarlier()
+            case "reopen-refused":
+                let previous = model.events.map(\.id)
+                guard !previous.isEmpty else { throw CocoaError(.coderValueNotFound) }
+                let refusal = ReadRefusal()
+                BridgeObserver.precheck = { method in refusal.refuse(method) }
+                await model.reopenAtLatest()
+                BridgeObserver.precheck = nil
+                guard refusal.count > 0, model.events.map(\.id) == previous else {
+                    throw NSError(domain: "HistoryQA", code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "A refused reopen discarded the existing page"])
+                }
+                model.error = nil
             case "fold-steps":
                 ChatDetailPreference.shared.level = .minimal
                 model.setAllGroups(open: false)
@@ -347,6 +381,7 @@ private struct Fixture: Decodable {
             case "extra-large-text": layoutType = .xxxLarge
             case "largest-text": layoutType = .accessibility5
             case "normal-text": layoutType = .large
+            case "automation-compact": layoutPage = "automation-compact"
             case "smooth-off": UserDefaults.standard.set(false, forKey: "chat.smoothStreaming")
             case "smooth-on": UserDefaults.standard.set(true, forKey: "chat.smoothStreaming")
             case "conversation": layoutPage = nil
@@ -406,7 +441,28 @@ private struct Fixture: Decodable {
                     phoneConversation
                 }
                 #else
-                if session.showing, let _ = session.model.selected {
+                if session.layoutPage == "automation-compact" {
+                    ScrollView {
+                        TranscriptView(
+                            text: "Read Sources/ChatModel.swift\n\nGrep transcript Sources\n\nBash swift test\n| 10 tests passed\n\nEdit Sources/ChatView.swift\n- old line\n+ new line\n\nChanges ready for review.",
+                            empty: "", compactTools: true
+                        )
+                        .padding(Theme.Space.m)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else if session.retainedPane, session.model.selected != nil {
+                    ZStack {
+                        Text("History overview")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .zIndex(session.showing ? 0 : 1)
+                        ChatView(model: session.model, workspaceID: session.fixture.workspaceId,
+                            showingOverview: $session.overview, isActive: session.showing, loadsWorkspace: false)
+                            .retainedPane(isActive: session.showing)
+                            .opacity(session.showing ? 1 : 0)
+                            .allowsHitTesting(session.showing)
+                            .zIndex(session.showing ? 2 : 0)
+                    }
+                } else if session.showing, session.model.selected != nil {
                     ChatView(model: session.model, workspaceID: session.fixture.workspaceId,
                         showingOverview: $session.overview, loadsWorkspace: false)
                 } else { Text("History overview").frame(maxWidth: .infinity, maxHeight: .infinity) }

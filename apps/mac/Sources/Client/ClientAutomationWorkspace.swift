@@ -452,7 +452,8 @@ struct ClientAutomationWorkspace: View {
                 StatusPill(status: run.status, text: run.endedLabel)
                 TranscriptView(
                     text: session.transcriptText,
-                    empty: run.isRunning ? L10n.text("apple.clientautomationworkspace.waiting_for_output.f05fefe2") : L10n.text("apple.clientautomationworkspace.no_readable_output.cd218ba3")
+                    empty: run.isRunning ? L10n.text("apple.clientautomationworkspace.waiting_for_output.f05fefe2") : L10n.text("apple.clientautomationworkspace.no_readable_output.cd218ba3"),
+                    compactTools: true
                 )
             }
             if let job = session.selectedJob {

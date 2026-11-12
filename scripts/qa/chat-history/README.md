@@ -35,6 +35,10 @@ on this computer; an active private network interface is required. Relay and
 fallback are disabled. The simulator is never erased; it is shut down afterward
 only if this script booted it.
 
+If Launch Services cannot start the isolated Mac app, `--direct-launch` runs
+its executable with the same private environment. A direct launch may not open
+a window in every desktop session; the visual checks still require one.
+
 Each run retains its result, model states, screenshots and OCR results under
 `target/chat-performance/history-encrypted-run-*`. CPU OCR checks visible text;
 model assertions alone cannot pass the visual checks. A passing run covers
@@ -42,6 +46,15 @@ paging, interrupted reads, reconnection, a provider record split inside UTF-8,
 navigation and completion. A large reply must keep its final marker visible
 while following, including after reconnection. OCR matching ignores whitespace
 noise but still requires the marker's characters in the captured image.
+Each reader also refuses a latest-page read and verifies that the previously
+loaded conversation remains visible, then resumes normal reads.
+
+`--desktop-only --retained-stress` keeps the Mac chat mounted as the app does,
+repeatedly hides it, changes its width, streams text, and checks the latest
+message after bringing it forward. Captures use AppKit's bitmap rendering;
+they do not establish that the window compositor repainted without input.
+`--desktop-only --automation-compact` renders a synthetic automation transcript
+with the shared compact tool rows for visual inspection.
 `cleanup.json` separately records whether the owned apps and simulator closed.
 These checks do not establish WAN or relay UI behavior.
 

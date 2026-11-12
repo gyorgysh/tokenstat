@@ -144,6 +144,7 @@ final class AutoCommitSession {
 
     func start() async {
         guard canStart, let backend = selectedBackend else { return }
+        let chosenModel = draft.model.isEmpty ? nil : draft.model
         working = true
         errorMessage = nil
         defer { working = false }
@@ -152,7 +153,7 @@ final class AutoCommitSession {
             in: workspaceID,
             workspaceName: folderName,
             backend: backend.id,
-            model: draft.model.isEmpty ? nil : draft.model,
+            model: chosenModel,
             existing: job
         )
         let savedJob: Automation
@@ -170,7 +171,25 @@ final class AutoCommitSession {
             } catch {
                 await refresh()
                 if let existing = job, !isRunning {
-                    await launch(existing)
+                    // A concurrent create or a lost answer may reveal a job
+                    // with older instructions or a different agent. Save the
+                    // current request before running it, just as for a job
+                    // that was visible when Start was pressed.
+                    let recovered = AutoCommitJob.job(
+                        in: workspaceID,
+                        workspaceName: folderName,
+                        backend: prepared.backend,
+                        model: prepared.model,
+                        existing: existing
+                    )
+                    do {
+                        let saved = try await saveExisting(recovered)
+                        job = saved
+                        await launch(saved)
+                    } catch {
+                        errorMessage = display(error)
+                        await refresh()
+                    }
                     return
                 }
                 if isRunning { return }

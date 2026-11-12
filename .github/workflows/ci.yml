@@ -221,6 +221,10 @@ jobs:
           python3 scripts/check-vault-scope.py
           python3 scripts/check-ssh-workbench.py
           python3 scripts/tests/chat-model-review.py
+          python3 scripts/tests/chat-delivery-cancellation.py
+          python3 scripts/tests/chat-text-send-transfer.py
+          python3 scripts/tests/chat-reopen-retention.py
+          python3 scripts/tests/chat-rotated-draft-receipt.py
           python3 scripts/tests/chat-recovery-cache.py
           python3 scripts/tests/screen-viewer-lifecycle.py
           python3 scripts/tests/terminal-final-output.py

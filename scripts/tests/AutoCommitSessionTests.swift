@@ -97,6 +97,9 @@ actor FixtureAutoCommit: AutoCommitService {
     var lastRunOperation: String?
     var createFailure = false
     var createFailureAfter = false
+    var createFailureReplacement: Automation?
+    var holdCreate = false
+    var heldCreate: CheckedContinuation<Void, Never>?
     var runFailure = false
     var editFailure = false
     var runReceipts: [String: AutomationRunOutcome] = [:]
@@ -107,6 +110,13 @@ actor FixtureAutoCommit: AutoCommitService {
     func supportsReceipts() async -> Bool { receipts }
     func create(_ job: Automation) async throws -> Automation {
         creates += 1
+        if holdCreate {
+            await withCheckedContinuation { heldCreate = $0 }
+        }
+        if let replacement = createFailureReplacement {
+            storedJobs = [replacement]
+            throw FixtureError.disconnected
+        }
         if createFailure { throw FixtureError.disconnected }
         var created = job
         created.id = created.id.isEmpty ? "auto-1" : created.id
@@ -157,6 +167,11 @@ actor FixtureAutoCommit: AutoCommitService {
         storedRuns.append(run)
     }
 
+    func replaceOnCreateFailure(_ job: Automation) { createFailureReplacement = job }
+    func holdNextCreate() { holdCreate = true }
+    func createIsHeld() -> Bool { heldCreate != nil }
+    func releaseCreate() { heldCreate?.resume(); heldCreate = nil; holdCreate = false }
+
     private func store(_ job: Automation, revision: UInt64) async throws -> Automation {
         var saved = job
         saved.revision = revision
@@ -196,6 +211,10 @@ actor FixtureAutoCommit: AutoCommitService {
         ]).contains(where: { $0.id == "sh" }), "shell is not a commit agent")
         check(AutoCommitJob.prompt(workspaceName: "Website").contains("Website"), "prompt names the folder")
         check(AutoCommitJob.prompt(workspaceName: "Website").contains("Do not push"), "prompt forbids push")
+        let prompt = AutoCommitJob.prompt(workspaceName: "Website")
+        check(prompt.contains("AGENTS.md") && prompt.contains("CLAUDE.md"), "prompt asks for repository instructions")
+        check(prompt.contains(".gitignore") && prompt.contains("do not force-add"), "prompt respects ignore rules")
+        check(prompt.contains("Prefer one cohesive commit"), "prompt prefers fewer commits")
 
         let service = FixtureAutoCommit()
         func session(_ name: String) -> AutoCommitSession {
@@ -291,6 +310,54 @@ actor FixtureAutoCommit: AutoCommitService {
         check(await lost.creates == 1, "a lost create still reached the host")
         check(lostSession.job?.id == "auto-1", "refresh recovers the created job")
         check(await lost.runsStarted == 1, "recovered create still runs once")
+        check(lostSession.job?.prompt == AutoCommitJob.prompt(workspaceName: "Website"),
+              "a recovered create runs the current instructions")
+
+        let raced = FixtureAutoCommit()
+        let racedSession = AutoCommitSession(
+            peer: "computer", workspaceID: "project", folderName: "Website",
+            hostName: "Development computer", scope: scope, hostIdentity: "raced",
+            service: raced, draftDirectory: root.appendingPathComponent("raced")
+        )
+        await racedSession.load()
+        await raced.replaceOnCreateFailure(Automation(
+            id: "raced-job", name: "Auto commit", backend: "claude", workspaceID: "project",
+            prompt: "obsolete instructions", schedule: AutomationSchedule(kind: .once), budgetSeconds: 900,
+            enabled: true, revision: 4
+        ))
+        await raced.holdNextCreate()
+        let racedStart = Task { await racedSession.start() }
+        for _ in 0..<10_000 {
+            if await raced.createIsHeld() { break }
+            await Task.yield()
+        }
+        check(await raced.createIsHeld(), "create reaches the held request")
+        racedSession.setModel("gpt-5.4")
+        await raced.releaseCreate()
+        await racedStart.value
+        let racedEdits = await raced.edits
+        let racedRuns = await raced.runsStarted
+        check(racedEdits == 1 && racedRuns == 1, "a concurrently found job is saved before it runs")
+        check(racedSession.job?.backend == "codex" && racedSession.job?.model == "haiku"
+              && racedSession.job?.prompt == AutoCommitJob.prompt(workspaceName: "Website"),
+              "a recovered job uses the original agent, model and repository instructions")
+
+        let refused = FixtureAutoCommit()
+        let refusedSession = AutoCommitSession(
+            peer: "computer", workspaceID: "project", folderName: "Website",
+            hostName: "Development computer", scope: scope, hostIdentity: "refused",
+            service: refused, draftDirectory: root.appendingPathComponent("refused")
+        )
+        await refusedSession.load()
+        await refused.replaceOnCreateFailure(Automation(
+            id: "refused-job", name: "Auto commit", backend: "claude", workspaceID: "project",
+            prompt: "obsolete instructions", schedule: AutomationSchedule(kind: .once), budgetSeconds: 900,
+            enabled: true, revision: 4
+        ))
+        await refused.set(editFailure: true)
+        await refusedSession.start()
+        check(await refused.runsStarted == 0 && refusedSession.errorMessage != nil,
+              "a failed recovery edit never runs stale instructions")
 
         let pending = FixtureAutoCommit()
         let pendingSession = AutoCommitSession(

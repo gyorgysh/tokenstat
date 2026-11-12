@@ -15,12 +15,20 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     var expectedRevision: UInt64? = nil
     var whenConnected = false
     var sourceDraftText: String? = nil
+    /// Original composer identity when an edited pending message receives a
+    /// new delivery id. Keep the link durable for receipt recovery.
+    var sourceDraftMessageID: String? = nil
     /// Held until the person explicitly continues with this same agent.
     /// Optional so existing outbox records remain readable.
     var signInBackend: String? = nil
 
     var needsReceipt: Bool { delivery == .sending || delivery == .deliveryUnknown }
     var canEdit: Bool { !needsReceipt }
+
+    func belongsToDraft(_ messageID: String?) -> Bool {
+        guard let messageID else { return false }
+        return id == messageID || sourceDraftMessageID == messageID
+    }
 
     func hasSameWriting(as other: ChatQueuedMessage) -> Bool {
         id == other.id && text == other.text && attachments == other.attachments

@@ -2,6 +2,11 @@
 import SwiftUI
 
 extension ChatModel {
+    func cancelFileTransferForDeparture() {
+        fileTransferCancelled = true
+        answerFileRelay(false)
+    }
+
     func confirmFileRelay(name: String, size: UInt64?, remaining: UInt64? = nil) async -> Bool {
         guard !Task.isCancelled, fileRelayAnswer == nil else { return false }
         let generation = selectionGeneration
@@ -44,10 +49,14 @@ extension ChatModel {
 
 struct ChatFileTransferControls: ViewModifier {
     @Bindable var model: ChatModel
+    /// A retained mobile session owns disappearance across layout handoffs.
+    var cancelOnDisappear = true
     func body(content: Content) -> some View {
         content.modifier(ChatFileRelayConsent(model: model))
         .onChange(of: model.selectionGeneration) { _, _ in model.fileTransferCancelled = true; model.answerFileRelay(false) }
-        .onDisappear { model.fileTransferCancelled = true; model.answerFileRelay(false) }
+        .onDisappear {
+            if cancelOnDisappear { model.cancelFileTransferForDeparture() }
+        }
     }
 }
 

@@ -18,6 +18,7 @@ final class ChatModel {
     var pendingQueue: [String] = []
     var loads = 0
     var saves = 0
+    var transferDepartures = 0
     var onLoad: (() async -> Void)?
     var onSelect: (() async -> Void)?
     var selected: ChatConversation?
@@ -33,6 +34,7 @@ final class ChatModel {
     private var workspace: String?
     func isReady(for workspaceID: String) -> Bool { workspace == workspaceID }
     func saveDraftNow() { saves += 1 }
+    func cancelFileTransferForDeparture() { transferDepartures += 1 }
     func acceptRenamedConversation(_ chat: ChatConversation) {
         if selected?.id == chat.id { selected = chat }
     }
@@ -268,7 +270,9 @@ struct ClientChatSessionTests {
         precondition(bounded.session(peer: "m", workspace: "visible") === visible,
             "an on-screen idle reader remains owned")
         visible.disappear(owner)
-        precondition(visible.model.saves == 1 && visible.canDiscard)
+        precondition(visible.model.saves == 1 && visible.canDiscard && visible.model.transferDepartures == 1)
+        visible.disappear(owner)
+        precondition(visible.model.transferDepartures == 1, "a stale disappearance cannot cancel another transfer")
         _ = bounded.session(peer: "m", workspace: "last")
         precondition(bounded.session(peer: "m", workspace: "visible") !== visible,
             "inactive clean readers are evicted")

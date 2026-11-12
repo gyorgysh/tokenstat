@@ -21,6 +21,7 @@ members = '\n'.join(member(signature) for signature in [
     '    var nativeSteerAcceptsAttachments:', '    var sendsAsNote:',
     '    private var steerBackend:', '    private var steerAutonomy:',
     '    enum BusyNoteStart', '    func beginBusyNote(',
+    '    private func queuedDeliveries(', '    private func deliveryID(',
     '    static func newChatDefaults(', '    private struct LaunchChoice:',
     '    enum SignInHold', '    func holdForSignIn(',
     '    func finishBusyNote(', '    func consumeChatCommand(', '    func sendInitialDraft(',
@@ -32,6 +33,19 @@ activity_section = member('enum ChatActivitySection:', activity)
 stub = '''import Foundation
 enum L10n { static func text(_ key: String) -> String { key } }
 struct ChatAttachment: Equatable { let id: String }
+struct ChatQueuedMessage: Equatable {
+    enum Delivery { case waiting, sending, deliveryUnknown, failed, needsReview, ready }
+    var id: String
+    var text: String
+    var attachments: [ChatAttachment]
+    var delivery: Delivery = .waiting
+    var sourceDraftMessageID: String? = nil
+    var needsReceipt: Bool { delivery == .sending || delivery == .deliveryUnknown }
+    func belongsToDraft(_ messageID: String?) -> Bool {
+        guard let messageID else { return false }
+        return id == messageID || sourceDraftMessageID == messageID
+    }
+}
 struct ChatBackend {
     var id: String
     var installed: Bool? = true
@@ -76,6 +90,7 @@ enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
     var sending = false
     var draft = "Add the highlighted detail"
     var draftMessageID: String? = "message"
+    var queued: [ChatQueuedMessage] = []
     var contextRevision: UInt64? = 3
     var selectionGeneration: UInt64 = 4
     var currentReference: WorkReference? = WorkReference(scope: .local(installationID: "test"),

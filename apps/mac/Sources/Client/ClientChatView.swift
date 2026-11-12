@@ -1537,7 +1537,7 @@ struct ClientChatThread: View {
         // is about to erase is a popup, not information: the strip says
         // reconnecting, the foreground refresh retries, and anything still
         // broken once back online raises its own error then.
-        .modifier(ChatFileTransferControls(model: model))
+        .modifier(ChatFileTransferControls(model: model, cancelOnDisappear: session == nil))
         .modifier(ChatCacheWarningAlert(model: model, isActive: isActive))
         .alert(L10n.text("apple.clientchatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil && connectivity.status != .offline },

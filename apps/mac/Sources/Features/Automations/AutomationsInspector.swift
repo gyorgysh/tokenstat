@@ -166,7 +166,8 @@ struct AutomationsInspector: View {
                 ScrollView {
                     TranscriptView(
                         text: model.transcriptText,
-                        empty: run.isRunning ? L10n.text("apple.automationsinspector.waiting_for_output.f05fefe2") : L10n.text("apple.automationsinspector.no_readable_output.0ff4d5c1")
+                        empty: run.isRunning ? L10n.text("apple.automationsinspector.waiting_for_output.f05fefe2") : L10n.text("apple.automationsinspector.no_readable_output.0ff4d5c1"),
+                        compactTools: true
                     )
                     .padding(Theme.Space.m)
                     Color.clear

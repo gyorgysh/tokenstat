@@ -37,6 +37,9 @@ final class TranscriptProbe {
     private var recordedOpens: [[String: Any]] = []
     private var recordingStarted: TimeInterval = 0
     private var resizeCount = 0
+    private(set) var viewportResets = 0
+
+    func noteViewportReset() { viewportResets += 1 }
 
     /// Opt-in, bounded diagnostics. No conversation identifiers or text leave
     /// the model. Run-loop work is responsiveness evidence, not rendered FPS.

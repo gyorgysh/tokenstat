@@ -5,8 +5,7 @@ import SwiftUI
 /// A tool call on a transcript: verb, target, optional snippet, and how it ended.
 ///
 /// Shared by automations and chat so a Read in either place is the same row.
-/// Chat adds running and failure; automations leave those at their defaults
-/// and keep the inspector looking as it did.
+/// Chat adds running and failure; automation transcripts use compact rows.
 struct ToolRow: View {
     /// The same figure the phone's edit row draws. This row and that one sit
     /// in one transcript, and they were two sizes apart.

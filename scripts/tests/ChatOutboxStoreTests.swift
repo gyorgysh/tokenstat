@@ -39,6 +39,16 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         let legacy = Data(#"{"id":"legacy","text":"keep me","attachments":[],"delivery":"failed","attemptedAt":42,"whenConnected":false}"#.utf8)
         let decoded = try JSONDecoder().decode(ChatQueuedMessage.self, from: legacy)
         assert(decoded.signInBackend == nil, "Existing outboxes must decode without the new hold marker")
+        assert(decoded.sourceDraftMessageID == nil && decoded.belongsToDraft("legacy"))
+        var rotated = ChatQueuedMessage(id: "new-delivery", text: "Edited words", attachments: [])
+        rotated.sourceDraftMessageID = "original-draft"
+        rotated.delivery = .deliveryUnknown
+        try first.update(ref("rotated")) { $0.append(rotated) }
+        let recoveredRotation = try reopened.items(for: ref("rotated"))[0]
+        assert(recoveredRotation.needsReceipt && recoveredRotation.belongsToDraft("original-draft"),
+               "The original draft must remain linked after relaunch")
+        assert(recoveredRotation.belongsToDraft("new-delivery") && !recoveredRotation.belongsToDraft(nil)
+               && !recoveredRotation.belongsToDraft("different-draft"))
         var signIn = ChatQueuedMessage(id: "signin", text: "Original message", attachments: [.init(id: "local-file", name: "photo.png")])
         signIn.signInBackend = "claude"
         try first.update(ref("sign-in-host")) { $0.append(signIn) }

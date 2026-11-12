@@ -75,7 +75,12 @@ final class ClientChatLayoutHandoff {
         pending = nil
         let previous = reader
         reader = nil
-        if let previous { previous.session.disappear(previous.id) }
+        if let previous {
+            // The folder list can keep a session viewer after its thread is
+            // closed. Navigation retires the logical chat even in that case.
+            previous.session.model.cancelFileTransferForDeparture()
+            previous.session.disappear(previous.id)
+        }
     }
 
     /// Latest, a row jump, or disclosure supersedes restoration while

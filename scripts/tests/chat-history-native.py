@@ -48,6 +48,22 @@ def stop_owned_desktop(pid, executable, marker, sig):
             os.kill(pid, sig)
 
 
+def sole_owned_desktop(pid, executable, marker):
+    if not owns_desktop_process(pid, executable, marker):
+        return False
+    try:
+        lines = subprocess.run(["ps", "-axo", "pid=,comm="], capture_output=True,
+            text=True, timeout=5, check=True).stdout.splitlines()
+        matches = []
+        for line in lines:
+            fields = line.strip().split(maxsplit=1)
+            if len(fields) == 2 and Path(fields[1]).resolve() == executable.resolve():
+                matches.append(int(fields[0]))
+        return matches == [pid]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
 def read_json(path):
     try:
         return json.loads(path.read_text())
@@ -362,10 +378,22 @@ print(json.dumps({'events':len(result['result']['events'])}))
                     "HOME", "ZDOTDIR", "HISTFILE", "PATH"]:
             if key in desktop_environment:
                 launch += ["--env", key + "=" + desktop_environment[key]]
-        desktop = subprocess.Popen(launch + [str(app), "--args", desktop_marker], stdout=log, stderr=log)
+        if args.direct_launch:
+            desktop = subprocess.Popen([str(desktop_executable), desktop_marker,
+                "-ApplePersistenceIgnoreState", "YES"], env=desktop_environment,
+                stdout=log, stderr=log)
+        else:
+            desktop = subprocess.Popen(launch + [str(app), "--args", desktop_marker], stdout=log, stderr=log)
         process = await wait(lambda: read_json(run_root / "desktop/process.json"))
         desktop_pid = process["pid"]
         assert isinstance(desktop_pid, int) and desktop_pid > 1
+        if args.direct_launch:
+            # A direct SwiftUI launch can start without a window after a prior
+            # window was closed. Ask Launch Services to reopen only when the
+            # sole matching executable is the fixture-owned process.
+            await asyncio.sleep(2)
+            if not state("desktop") and sole_owned_desktop(desktop_pid, desktop_executable, desktop_marker):
+                await command("open", "-a", str(app))
         if not args.desktop_only:
             inventory = json.loads(await command("xcrun", "simctl", "list", "devices", "available", "--json"))
             device = next(device for devices in inventory["devices"].values()
@@ -403,6 +431,9 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 return
         else:
             await visible("network-start")
+        for role in roles:
+            await native(role, "reopen-refused", "network-start")
+        prove("A refused latest-page read preserves the visible conversation")
         if args.desktop_width != 760:
             capture = read_json(run_root / "desktop/snapshot-progress.json")
             widths = [scroll["viewportWidth"] for scroll in capture["scrolls"]]
@@ -528,6 +559,61 @@ print(json.dumps({'events':len(result['result']['events'])}))
             prove("Turn completion publishes the final partial line to every native reader")
             atomic_json(run_root / "result.json", {"ok":True, "proofs":proofs,
                 "states":{role:state(role) for role in roles}})
+            return
+        if args.automation_compact:
+            assert args.desktop_only, "Automation compact QA currently exercises the Mac view"
+            await native("desktop", "automation-compact", "Changes ready for review.")
+            prove("The automation transcript renders compact tool lines and readable output")
+            atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs,
+                "states": {role: state(role) for role in roles}})
+            return
+        if args.retained_stress:
+            assert args.desktop_only, "Retained-pane QA currently exercises the Mac view"
+            await native("desktop", "retain-pane", "network-start")
+            initial_resets = state("desktop")["viewportResets"]
+            widths = []
+            markers = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
+                       "golf", "hotel", "india", "juliet", "kilo", "lima"]
+            for index, name in enumerate(markers):
+                await native("desktop", "hide")
+                await native("desktop", "narrow-pane" if index % 2 == 0 else "wide-pane")
+                marker = f"retainedmarker{name}"
+                emit({"type": "text", "data": "\n\n" + marker})
+                await native("desktop", "show", marker)
+                capture = read_json(run_root / "desktop/snapshot-progress.json") or {}
+                scrolls = capture.get("scrolls", [])
+                target = 520 if index % 2 == 0 else 960
+                assert scrolls, capture
+                width = min((scroll["viewportWidth"] for scroll in scrolls), key=lambda value: abs(value - target))
+                assert abs(width - target) <= 20, (target, scrolls)
+                widths.append(width)
+            emit({"type": "end", "stopReason": "end_turn"})
+            await wait(lambda: state("desktop") and not state("desktop")["running"])
+            await visible("retainedmarkerlima")
+            assert state("desktop")["blankSamples"] == 0
+            assert state("desktop")["viewportResets"] >= initial_resets + len(markers), state("desktop")
+            assert max(widths) - min(widths) >= 200, widths
+            prove("The retained Mac pane renders streaming history after repeated hidden resizes and reactivation")
+            atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs, "widths": widths,
+                "states": {role: state(role) for role in roles}})
+            return
+        if args.activity_stress:
+            for index in range(100):
+                call = f"qa-activity-{index}"
+                label = f"inspect-file-{index}.swift"
+                emit({"type": "tool_call", "id": call, "toolName": "Bash", "rawInput": {"command": label}})
+                emit({"type": "tool_call_update", "id": call, "status": "completed", "rawOutput": label})
+            emit({"type": "text", "data": "\n\nactivitytailvisible"})
+            await visible("activitytailvisible")
+            for role in roles:
+                await native(role, "hide")
+                await native(role, "show", "activitytailvisible")
+            emit({"type": "end", "stopReason": "end_turn"})
+            await wait(lambda: all(state(role) and not state(role)["running"] for role in roles))
+            await visible("activitytailvisible")
+            assert all(state(role)["blankSamples"] == 0 for role in roles)
+            prove("A tool-heavy running chat keeps its latest message visible through navigation and completion")
+            atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs, "states": {role: state(role) for role in roles}})
             return
         if args.search_only:
             for call, label in [("qa-search-first", "quartz-search-target"), ("qa-search-second", "amber-second-step")]:
@@ -725,9 +811,13 @@ if __name__ == "__main__":
     parser.add_argument("--inline-edges", action="store_true", help="Check unbroken quotes and table cells at the largest text size")
     parser.add_argument("--layout", action="store_true", help="Inspect new chat and grouped lists using the shipping phone views")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
+    parser.add_argument("--activity-stress", action="store_true", help="Check visibility through a tool-heavy running turn and navigation")
+    parser.add_argument("--retained-stress", action="store_true", help="Exercise the retained Mac pane across hidden resizes and streaming")
+    parser.add_argument("--automation-compact", action="store_true", help="Render the compact automation transcript on Mac")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--probe-only", action="store_true", help="Verify the producer and encrypted FFI setup before opening apps")
     parser.add_argument("--desktop-only", action="store_true", help="Verify the Mac view before the combined phone run")
+    parser.add_argument("--direct-launch", action="store_true", help="Launch the owned Mac executable directly when Launch Services is unavailable")
     parser.add_argument("--desktop-width", type=int, default=760, metavar="POINTS",
                         help="Set the native Mac transcript width (320–1600 points)")
     parser.add_argument("--desktop-local", action="store_true", help="Use the producer's local socket on Mac, with the iPhone still encrypted")

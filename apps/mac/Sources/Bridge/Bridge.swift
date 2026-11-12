@@ -568,6 +568,9 @@ enum Bridge {
     /// without a thought. A send that timed out has to be reconciled before
     /// anybody claims it failed.
     static func isDeliveryUnknown(_ error: Error) -> Bool {
+        // Cancellation can arrive after a mutation has reached the host. A
+        // cancelled waiter is not evidence that the host rejected the send.
+        if error is CancellationError { return true }
         if isTimeout(error) { return true }
         guard let bridge = error as? BridgeError else { return false }
         switch bridge {

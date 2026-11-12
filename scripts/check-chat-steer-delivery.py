@@ -113,6 +113,7 @@ enum WorkCacheAccess {
     var selectionGeneration: UInt64 = 1
     var contextRevision: UInt64? = 7
     var sending = false, sendingNow = false
+    var deliveringFromComposer: String? = nil
     var deliveringSteer: Int? = nil, clearingSteer: Int? = nil
     var error: String? = nil
     var polls = 0, stops = 0
@@ -235,6 +236,20 @@ MEMBERS
             assert(Bridge.sends.count == 1 && held.stops == 0,
                    "Uncertain delivery, rejected content and changed context cannot trigger a resend")
         }
+        Bridge.reset(running: false, code: "delivery_unknown")
+        let rotated = try Model(directory: directory.appendingPathComponent("rotated"))
+        rotated.deliveringFromComposer = "message"
+        rotated.queued = try rotated.outbox.update(rotated.queuedReference!) { rows in
+            rows[0].delivery = .waiting
+            rows[0].attemptedAt = Date(timeIntervalSince1970: 42)
+            rows[0].sourceDraftText = rows[0].text
+        }
+        _ = await rotated.send()
+        let rotatedRow = try rotated.rows().first!
+        assert(rotatedRow.id != "message" && rotatedRow.needsReceipt
+               && rotatedRow.belongsToDraft("message") && rotated.deliveringFromComposer == rotatedRow.id,
+               "An edited send retains its composer identity and receipt hold after rotation")
+        assert(Bridge.sends.last?.id == rotatedRow.id, "The host and outbox use the same rotated delivery id")
         Bridge.reset(running: false)
         let moved = try Model(directory: directory.appendingPathComponent("moved"))
         Bridge.beforeReply = {

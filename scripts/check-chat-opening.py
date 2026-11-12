@@ -206,8 +206,8 @@ METHODS
         model.contextRevision = 7
         let idleJump = Task { await model.reopenAtLatest() }
         await until { Bridge.replies.count == 9 }
-        precondition(model.generation == 4 && model.events.isEmpty && model.contextRevision == 7,
-                     "An idle jump replaces the window while keeping the same chat sendable")
+        precondition(model.generation == 4 && model.events.first?.seq == 5 && model.contextRevision == 7,
+                     "An idle jump keeps the current window and send context until replacement")
         Bridge.finish(8, seq: 6)
         await idleJump.value
         precondition(model.liveWindowLoaded && model.events.first?.seq == 6 && model.contextRevision == 7)

@@ -14,6 +14,8 @@ struct TranscriptView: View {
     var text: String
     /// Shown when `text` is empty (waiting, or nothing readable).
     var empty: String
+    /// Automation runs use the same compact activity lines as chat.
+    var compactTools = false
 
     var body: some View {
         let blocks = Self.parse(text.isEmpty ? empty : text)
@@ -27,7 +29,7 @@ struct TranscriptView: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case .tool(let verb, let arg, let snippet, let time):
-                    ToolRow(verb: verb, arg: arg, snippet: snippet, time: time)
+                    ToolRow(verb: verb, arg: arg, snippet: snippet, time: time, compact: compactTools)
                 }
             }
         }

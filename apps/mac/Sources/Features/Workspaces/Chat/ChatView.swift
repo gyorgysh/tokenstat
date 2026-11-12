@@ -824,6 +824,11 @@ struct ChatView: View {
                 window.fetching = false
                 window.followingEnd = true
                 lastSilentPinAt = .distantPast
+                DiagnosticsLog.note("chat viewport remount previousEnd=\(follow.atEnd) rows=\(rows.count)")
+                follow.resetViewport()
+                #if DEBUG
+                TranscriptProbe.shared.noteViewportReset()
+                #endif
                 #endif
                 follow.suppressed = !model.approvals.isEmpty
                 if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
@@ -850,7 +855,15 @@ struct ChatView: View {
                 showNewest()
                 pinToLatest(proxy, animated: false)
                 defer {
-                    if settleTaskID == ticket { follow.settle(false) }
+                    if settleTaskID == ticket {
+                        #if os(macOS)
+                        // These are geometry and counts only. They let a
+                        // diagnostic log distinguish an empty model from a
+                        // viewport that never reached its content.
+                        DiagnosticsLog.note("chat viewport settle end=\(follow.atEnd) rows=\(model.transcriptItems.count) cancelled=\(Task.isCancelled)")
+                        #endif
+                        follow.settle(false)
+                    }
                 }
                 // Fetch time does not spend the layout-settling budget. Slow
                 // hosts used to exhaust every correction before rows arrived.

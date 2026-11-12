@@ -683,12 +683,13 @@ final class ChatModel {
     func holdDraftForSending(_ text: String) -> Bool {
         guard !isSharedSource, !selectedBackendMissing, savedCopy == nil, let selected, !sending, stagingAttachments == 0, heldSubmission == nil else { return false }
         saveDraftNow()
-        if let pending = queued.first(where: { $0.id == draftMessageID && $0.needsReceipt }) {
+        let draftID = draftMessageID
+        if let pending = queued.first(where: { $0.belongsToDraft(draftID) && $0.needsReceipt }) {
             unconfirmedSend = .init(conversationID: selected.id, messageID: pending.id, checking: false)
             error = L10n.text("apple.chatmodel.check_delivery_before_sending_this_draft_a.7ce8d3db")
             return false
         }
-        if let previous = queued.first(where: { $0.id == draftMessageID }),
+        if let previous = queued.first(where: { $0.belongsToDraft(draftID) }),
            previous.text != text || previous.attachments != attachments {
             guard let reference = draftReference, previous.canEdit else { return false }
             do {
@@ -707,7 +708,8 @@ final class ChatModel {
             conversationID: selected.id, peer: peer, scope: continuityScope,
             reference: draftReference, generation: selectionGeneration,
             text: text, draftText: draft, attachments: attachments,
-            messageID: draftMessageID, expectedRevision: contextRevision
+            messageID: deliveryID(forDraft: draftMessageID, text: text, attachments: attachments) ?? draftMessageID,
+            expectedRevision: contextRevision
         )
         // Reserve the send before the caller starts its Task or capability
         // discovery suspends, so a second click cannot replace this snapshot.
@@ -736,6 +738,31 @@ final class ChatModel {
     private var draftMessageID: String? {
         guard let draftReference else { return nil }
         return ChatDraftStore.shared.draft(for: draftReference)?.messageID
+    }
+
+    /// The queued rows that carry this draft's delivery.
+    ///
+    /// A send after an attempt takes a new delivery id and keeps the
+    /// composer's original id in `sourceDraftMessageID`, so comparing ids
+    /// alone misses the row it became.
+    private func queuedDeliveries(forDraft messageID: String?) -> [ChatQueuedMessage] {
+        guard let messageID else { return [] }
+        return queued.filter { $0.belongsToDraft(messageID) }
+    }
+
+    /// The delivery id this writing should travel under.
+    ///
+    /// Reuse the row that already holds the same words so a retry cannot
+    /// queue the message twice. A different writing is a new message and
+    /// must not borrow that row's identity.
+    private func deliveryID(forDraft messageID: String?, text: String,
+                            attachments: [ChatAttachment]) -> String? {
+        guard let messageID else { return nil }
+        let related = queuedDeliveries(forDraft: messageID)
+        if let same = related.first(where: { $0.text == text && $0.attachments == attachments }) {
+            return same.id
+        }
+        return related.isEmpty ? messageID : nil
     }
 
     // MARK: - Sends that are not confirmed
@@ -914,8 +941,8 @@ final class ChatModel {
                 restoreSubmission(submission)
                 if submission.owns(reference: currentReference, conversationID: selected?.id,
                                    peer: peer, scope: WorkSessionContext.shared.scope),
-                   queued.contains(where: { $0.id == messageID && $0.needsReceipt }) {
-                    unconfirmedSend = .init(conversationID: submission.conversationID, messageID: messageID, checking: false)
+                   let pending = queued.first(where: { $0.belongsToDraft(messageID) && $0.needsReceipt }) {
+                    unconfirmedSend = .init(conversationID: submission.conversationID, messageID: pending.id, checking: false)
                 }
             }
         } catch {
@@ -929,7 +956,7 @@ final class ChatModel {
     private func clearSubmittedDraft(_ item: ChatQueuedMessage, reference: WorkReference) {
         let text = item.sourceDraftText ?? item.text
         let stored = ChatDraftStore.shared.draft(for: reference)
-        let ownsDraft = stored?.messageID == item.id
+        let ownsDraft = item.belongsToDraft(stored?.messageID)
         if let stored, ownsDraft, stored.text == text, stored.attachments == item.attachments {
             ChatDraftStore.shared.clear(stored)
         }
@@ -2054,14 +2081,10 @@ final class ChatModel {
         advanceSelection("explicit-latest")
         discardSteerReservations()
         let generation = selectionGeneration
-        let revision = selected.sendRevision
-        events = []
-        outgoing = []
-        outgoingWatermark = [:]
-        forgetWindow()
-        // forgetWindow drops the revision with the page. Sends during the
-        // reload still belong to this conversation, so keep the one just read.
-        contextRevision = revision
+        // Keep the current page and its cursors until a replacement has
+        // actually arrived. A failed or cancelled read must not turn an
+        // otherwise usable conversation into an empty transcript. Advancing
+        // the selection already fences reads started for the old window.
         openingConversation = true
         defer {
             if selectionGeneration == generation { openingConversation = false }
@@ -2666,14 +2689,26 @@ final class ChatModel {
     @discardableResult
     func enqueue(_ text: String, atFront: Bool = false, whenConnected: Bool = false, awaitingSignIn: Bool = false) -> ChatQueuedMessage? {
         guard !isSharedSource, stagingAttachments == 0, (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
-        var item = ChatQueuedMessage(id: draftMessageID ?? UUID().uuidString, text: text, attachments: attachments)
+        let draftID = draftMessageID
+        if queuedDeliveries(forDraft: draftID).contains(where: \.needsReceipt) {
+            error = L10n.text("apple.chatmodel.check_delivery_in_pending_messages_before.af602276")
+            return nil
+        }
+        var item = ChatQueuedMessage(
+            id: deliveryID(forDraft: draftID, text: text, attachments: attachments) ?? UUID().uuidString,
+            text: text, attachments: attachments
+        )
         item.whenConnected = whenConnected
         item.signInBackend = awaitingSignIn ? selected?.backend : nil
         item.expectedRevision = contextRevision
         do {
             queued = try ChatOutboxStore.shared.update(reference) { items in
-                if let existing = items.first(where: { $0.id == item.id }) {
-                    guard existing.text == item.text, existing.attachments == item.attachments else { throw ChatOutboxStore.Failure.conflict }
+                if let index = items.firstIndex(where: { $0.id == item.id }) {
+                    guard items[index].text == item.text, items[index].attachments == item.attachments else {
+                        throw ChatOutboxStore.Failure.conflict
+                    }
+                    if item.whenConnected { items[index].whenConnected = true }
+                    if let backend = item.signInBackend { items[index].signInBackend = backend }
                     return
                 }
                 guard items.count < ChatOutboxStore.capacity else { throw ChatOutboxStore.Failure.full }
@@ -2935,7 +2970,10 @@ final class ChatModel {
             // here, at the send, never while the field is being typed into.
             let rotatesDelivery = item.attemptedAt != nil && item.delivery == .waiting
             var deliveryItem = item
-            if rotatesDelivery { deliveryItem.id = UUID().uuidString }
+            if rotatesDelivery {
+                deliveryItem.sourceDraftMessageID = item.sourceDraftMessageID ?? item.id
+                deliveryItem.id = UUID().uuidString
+            }
             let firstAttemptAt = rotatesDelivery
                 ? Date()
                 : (item.firstAttemptAt ?? item.attemptedAt ?? Date())
@@ -2946,10 +2984,12 @@ final class ChatModel {
                     throw ChatOutboxStore.Failure.conflict
                 }
                 items[index].id = deliveryItem.id
+                items[index].sourceDraftMessageID = deliveryItem.sourceDraftMessageID
                 items[index].delivery = .sending
                 items[index].firstAttemptAt = firstAttemptAt
                 items[index].attemptedAt = Date()
             })
+            if deliveringFromComposer == item.id { deliveringFromComposer = deliveryItem.id }
             let staged = stageOutgoing(item.text, steer: steerCurrent)
             var accepted = false
             do {
@@ -3031,13 +3071,23 @@ final class ChatModel {
             if current() {
                 self.error = candidate.needsReceipt
                     ? L10n.text("apple.chatmodel.delivery_could_not_be_checked_the_original.b9f28e27")
-                    : L10n.text("apple.chatmodel.this_message_stays_pending.eada83a6") + error.localizedDescription
+                    : error is CancellationError
+                        ? L10n.text("apple.chatmodel.send_interrupted")
+                        : L10n.text("apple.chatmodel.this_message_stays_pending.eada83a6") + error.localizedDescription
             }
             return false
         }
     }
 
     private func resolveDraftAttachments(_ files: [ChatAttachment], reference: WorkReference, peer: String?) async throws -> [ChatAttachment] {
+        // A text-only send has no transfer to own or cancel. In particular,
+        // it must not fail because another file is being downloaded.
+        if files.isEmpty {
+            try Task.checkCancellation()
+            guard reference.itemID != nil, currentReference == reference,
+                  WorkCacheAccess.canSave(reference), savedCopy == nil else { throw CancellationError() }
+            return []
+        }
         guard let conversationID = reference.itemID else { throw CancellationError() }
         guard !fileTransferInFlight else { throw BridgeError.core(code: "file_transfer_busy", message: L10n.text("common.chat_files_busy")) }
         fileTransferInFlight = true
@@ -3580,11 +3630,16 @@ final class ChatModel {
         guard let selected, let reference = currentReference,
               reference.scope == WorkSessionContext.shared.scope else { return .queue }
         saveDraftNow()
+        let draftID = draftMessageID
+        // An uncertain send owns these words. The queue path reports that
+        // hold rather than reserving a second delivery of them.
+        guard !queuedDeliveries(forDraft: draftID).contains(where: \.needsReceipt) else { return .queue }
         busyNoteSubmission = ChatDraftSubmission(
             conversationID: selected.id, peer: peer, scope: reference.scope,
             reference: reference, generation: selectionGeneration,
             text: trimmed, draftText: draft, attachments: attachments,
-            messageID: draftMessageID, expectedRevision: contextRevision
+            messageID: deliveryID(forDraft: draftID, text: trimmed, attachments: attachments) ?? UUID().uuidString,
+            expectedRevision: contextRevision
         )
         let token = noteSendStarted()
         busyNoteToken = token

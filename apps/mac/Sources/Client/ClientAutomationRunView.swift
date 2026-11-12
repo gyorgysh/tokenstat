@@ -40,7 +40,8 @@ struct ClientAutomationRunView: View {
                         .cardSurface()
                     TranscriptView(
                         text: session.transcriptText,
-                        empty: run.isRunning ? L10n.text("apple.clientautomationrunview.waiting_for_output.f05fefe2") : L10n.text("apple.clientautomationrunview.no_readable_output.cd218ba3")
+                        empty: run.isRunning ? L10n.text("apple.clientautomationrunview.waiting_for_output.f05fefe2") : L10n.text("apple.clientautomationrunview.no_readable_output.cd218ba3"),
+                        compactTools: true
                     )
                     .padding(Theme.Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
