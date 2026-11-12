@@ -92,6 +92,8 @@ pub mod chat_turn;
 #[cfg(feature = "local-host")]
 pub mod claude_usage;
 pub mod cloud_import;
+#[cfg(feature = "local-host")]
+pub(crate) mod codex_usage;
 pub mod dispatch;
 pub mod dto;
 pub mod error;

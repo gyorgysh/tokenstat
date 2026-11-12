@@ -302,11 +302,74 @@ const CODEX_MODEL_SCOPE: &str = "current model";
 /// so the current picture is the last one it wrote. No request, no token, and
 /// nothing to authenticate: this is a file Codex already put on the disk.
 pub fn codex_limits() -> ProviderLimits {
+    codex_limits_with_homes(&[])
+}
+
+/// The same, also reading Codex homes the caller knows about. The host runs
+/// Codex for chats in a private home per chat, and someone who only uses
+/// Codex there has no other logs.
+pub fn codex_limits_with_homes(extra: &[PathBuf]) -> ProviderLimits {
     limits_from_native(
         &codex_sqlite_db_candidates(),
-        &recent_rollouts(RECENT_ROLLOUTS),
+        &recent_rollouts(RECENT_ROLLOUTS, extra),
         now_ms(),
     )
+}
+
+/// The answer to Codex's own `account/rateLimits/read` request, read as a
+/// current reading. Codex names fields in camelCase there and in snake_case
+/// in its logs; both go through the same block reader. None when the answer
+/// carries no window, as for an API-key login.
+pub fn codex_limits_from_answer(answer: &serde_json::Value, now: i64) -> Option<ProviderLimits> {
+    fn snake(key: &str) -> String {
+        match key {
+            "windowDurationMins" => "window_minutes".into(),
+            _ => {
+                let mut out = String::new();
+                for c in key.chars() {
+                    if c.is_ascii_uppercase() {
+                        out.push('_');
+                        out.push(c.to_ascii_lowercase());
+                    } else {
+                        out.push(c);
+                    }
+                }
+                out
+            }
+        }
+    }
+    fn convert(block: &serde_json::Value) -> Option<RateLimits> {
+        let map = block.as_object()?;
+        let mut out = serde_json::Map::new();
+        for (key, value) in map {
+            let value = match value.as_object() {
+                Some(inner) => serde_json::Value::Object(
+                    inner.iter().map(|(k, v)| (snake(k), v.clone())).collect(),
+                ),
+                None => value.clone(),
+            };
+            out.insert(snake(key), value);
+        }
+        Some(RateLimits(out))
+    }
+    let mut blocks: Vec<&serde_json::Value> = answer
+        .get("rateLimitsByLimitId")
+        .and_then(serde_json::Value::as_object)
+        .map(|by_id| by_id.values().collect())
+        .unwrap_or_default();
+    if blocks.is_empty()
+        && let Some(single) = answer.get("rateLimits")
+    {
+        blocks.push(single);
+    }
+    let mut scan = CodexLimitScan::default();
+    for block in blocks {
+        if let Some(limits) = convert(block) {
+            scan.absorb_block(&limits, now);
+        }
+    }
+    let (windows, observed_at_ms, plan) = scan.finish(now)?;
+    Some(codex_reading(windows, observed_at_ms, plan, now))
 }
 
 fn limits_from_native(databases: &[PathBuf], files: &[PathBuf], now_ms: i64) -> ProviderLimits {
@@ -499,7 +562,11 @@ impl CodexLimitScan {
             .as_deref()
             .and_then(parse_iso_ms)
             .unwrap_or(0);
+        self.absorb_block(&limits, observed_at_ms);
+    }
 
+    /// One block, from a log line or from Codex's own answer.
+    fn absorb_block(&mut self, limits: &RateLimits, observed_at_ms: i64) {
         let plan = limits.plan_type();
         if !plan.is_empty() {
             self.plans.insert(observed_at_ms, plan.to_owned());
@@ -829,9 +896,9 @@ fn codex_homes() -> Vec<PathBuf> {
 /// A resumed session can be written years after its date directory was made.
 /// Inspect all date directories and retain only the most recently modified
 /// files, across all configured homes.
-fn recent_rollouts(want: usize) -> Vec<PathBuf> {
+fn recent_rollouts(want: usize, extra: &[PathBuf]) -> Vec<PathBuf> {
     let mut found: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
-    for home in codex_homes() {
+    for home in codex_homes().into_iter().chain(extra.iter().cloned()) {
         collect_rollouts(&home.join("sessions"), 3, want, &mut found);
     }
     found.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
@@ -886,6 +953,33 @@ fn collect_rollouts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_own_answer_reads_like_its_log() {
+        let now = 1_794_500_000_000;
+        let answer = serde_json::json!({
+            "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 6, "windowDurationMins": 300,
+                "resetsAt": 1_794_508_614_i64}, "planType": "plus"},
+            "rateLimitsByLimitId": {"codex": {"limitId": "codex", "limitName": null,
+                "primary": {"usedPercent": 6, "windowDurationMins": 300, "resetsAt": 1_794_508_614_i64},
+                "secondary": {"usedPercent": 68, "windowDurationMins": 10080, "resetsAt": 1_794_890_485_i64},
+                "credits": {"hasCredits": false, "unlimited": false, "balance": "0"},
+                "planType": "plus"}}
+        });
+        let reading = codex_limits_from_answer(&answer, now).unwrap();
+        assert!(!reading.stale);
+        assert_eq!(reading.plan.as_deref(), Some("plus"));
+        assert_eq!(reading.observed_at_ms, now);
+        let labels: Vec<_> = reading
+            .windows
+            .iter()
+            .map(|w| (w.label.as_str(), w.percent))
+            .collect();
+        assert_eq!(labels, vec![("5-hour", 6.0), ("weekly", 68.0)]);
+        assert_eq!(reading.windows[0].resets_at_ms, Some(1_794_508_614_000));
+        // An API-key login answers without a window.
+        assert!(codex_limits_from_answer(&serde_json::json!({"rateLimits": null}), now).is_none());
+    }
 
     #[test]
     fn recent_rollouts_include_resumed_old_sessions_and_other_homes() {

@@ -20,6 +20,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Improved
 
+- Codex limits are current even when you have not used Codex since a window reset. tokenstat asks Codex for them directly, and falls back to its session logs, now including the ones from Codex chats run in tokenstat.
 - A commit opened from Git history, in the inspector or in a Changes tab, now uses the same file list and diff as the Git tab. It opens on all files, lets you pick one, and can fold the commit message away.
 
 ## [1.16.0] - 2026-11-12

@@ -13,6 +13,10 @@
 //! it wrote. A turn's summed usage cannot stand in for that, because a turn of
 //! many tool calls adds up the same context many times.
 
+// The record is part of every conversation. Reading a stream into it only
+// happens where turns run, which is the local host.
+#![cfg_attr(not(feature = "local-host"), allow(dead_code))]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

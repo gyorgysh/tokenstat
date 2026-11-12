@@ -4725,7 +4725,7 @@ fn fetch_usage_limits(_force: bool) -> Value {
                 .then(|| scope.spawn(tokenstat_sync::antigravity_ide::limits));
             let mut out = Vec::new();
             if !skipped("codex") {
-                out.push(tokenstat_core::limits::codex_limits());
+                out.push(crate::codex_usage::read(_force));
             }
             let take = |handle: Option<
                 std::thread::ScopedJoinHandle<'_, tokenstat_core::limits::ProviderLimits>,
