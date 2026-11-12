@@ -137,6 +137,14 @@ internal sealed class SshPage : Page, IToolbarItems
     /// Reuse the one SSH page so Hosts/Keys/session switches do not tear
     /// WebView2 out of the tree. A new SshPage per section was the crash.
     /// </summary>
+    /// <summary>Connect to a host from outside the page, such as a starred server in the sidebar.</summary>
+    internal async Task ConnectHostAsync(JsonNode host)
+    {
+        await OpenAsync(SSHSection.Hosts);
+        if (IsLoaded) await ConnectAsync(host);
+        else _connectHost = host.DeepClone();
+    }
+
     public async Task OpenAsync(SSHSection section, string? sessionId = null)
     {
         _pendingSessionId = sessionId;

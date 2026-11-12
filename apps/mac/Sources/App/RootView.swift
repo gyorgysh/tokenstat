@@ -2327,7 +2327,8 @@ struct RootView: View {
     private func sshFavoriteHostRow(_ host: SSHHost) -> some View {
         HStack(spacing: 0) {
             Color.clear.frame(width: 18, height: 24)
-            SidebarRow(label: host.label, symbol: "star.fill", symbolSize: 11, trailing: nil, isSelected: false) {
+            SidebarRow(label: host.label, symbol: "star.fill", symbolSize: 11, trailing: nil, isSelected: false,
+                       folderMetrics: true) {
                 ssh.connectRequest = host
             }
             .help(L10n.text("common.connect"))
@@ -2369,7 +2370,8 @@ struct RootView: View {
                 // inside it. Expanded, one of the session rows is the lit one,
                 // and two accent bars in one group is the bug the workspace
                 // rows already avoid.
-                isSelected: isCurrent && !isExpanded
+                isSelected: isCurrent && !isExpanded,
+                folderMetrics: true
             ) { navigate(to: .sshTerminals(host: host.id)) }
         }
         .contextMenu {
@@ -4881,6 +4883,9 @@ private struct SidebarRow: View {
     /// How many steps in from the group's own rows this one sits. Nested SSH
     /// folders use it; everything else is flat and leaves it at zero.
     var indent: Int = 0
+    /// Sits beside repository rows, so it takes their inset and height and
+    /// the two lists start their marks in one column.
+    var folderMetrics = false
     var action: () -> Void
 
     @State private var isHovering = false
@@ -4888,7 +4893,8 @@ private struct SidebarRow: View {
     var body: some View {
         Button(action: action) {
             SidebarRowLabel(label: label, symbol: symbol, symbolSize: symbolSize, trailing: trailing,
-                            isSelected: isSelected, indent: indent, isHovering: isHovering)
+                            isSelected: isSelected, indent: indent, isHovering: isHovering,
+                            folderMetrics: folderMetrics)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -4905,6 +4911,7 @@ private struct SidebarRowLabel: View {
     var isSelected: Bool
     var indent: Int = 0
     var isHovering: Bool
+    var folderMetrics = false
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -4928,8 +4935,9 @@ private struct SidebarRowLabel: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, 7)
+        .padding(.horizontal, folderMetrics ? Theme.Space.s : Theme.Space.m)
+        .padding(.vertical, folderMetrics ? 0 : 7)
+        .frame(height: folderMetrics ? DisplayFit.dp(Theme.Control.sidebarRow) : nil)
         .background(background)
         .contentShape(.rect)
     }

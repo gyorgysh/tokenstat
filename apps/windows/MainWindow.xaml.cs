@@ -1759,6 +1759,14 @@ public sealed partial class MainWindow : Window
             SetContent(Ssh(SSHSection.Hosts, tag["sshterm:".Length..]), preserveSelection: true);
             return;
         }
+        // A starred server with no shell open: one click asks to connect.
+        if (tag.StartsWith("sshfav:", StringComparison.Ordinal))
+        {
+            var page = Ssh(SSHSection.Hosts);
+            SetContent(page, preserveSelection: true);
+            if (_starredHosts.TryGetValue(tag["sshfav:".Length..], out var host)) _ = page.ConnectHostAsync(host);
+            return;
+        }
         if (tag.StartsWith("global:", StringComparison.Ordinal))
         {
             if (Enum.TryParse<GlobalSection>(tag["global:".Length..], out var section))
@@ -1828,6 +1836,8 @@ public sealed partial class MainWindow : Window
     // global navigation leaves Notes, as project workbenches already do.
     private NotesPage? _globalNotesPage;
     private SshPage? _sshPage;
+    /// <summary>Starred servers shown in the sidebar, by id, for the click that connects.</summary>
+    private Dictionary<string, JsonNode> _starredHosts = new();
     private SshPage Ssh(SSHSection section, string? sessionId = null)
     {
         if (_sshPage is null)
@@ -2258,6 +2268,25 @@ public sealed partial class MainWindow : Window
                 var sshGroup = FindNavItem("ssh:" + SSHSection.Hosts);
                 if (sshGroup is not null && sshSessions is not null)
                 {
+                    // Starred servers stay listed with nothing open, as on the
+                    // Mac. A server with a live shell shows its sessions instead.
+                    var liveHosts = sshSessions.Where(item => Format.Flag(item, "alive"))
+                        .Select(item => Format.Text(item, "hostId")).ToHashSet();
+                    var starred = (Format.Items(await AppServices.Host.CallAsync("ssh.host.list")) ?? new JsonArray())
+                        .Where(host => Format.Flag(host, "favorite") && !liveHosts.Contains(Format.Text(host, "id")))
+                        .OrderBy(host => Format.Text(host, "label"), StringComparer.CurrentCultureIgnoreCase).ToList();
+                    _starredHosts = starred.Where(host => host is not null)
+                        .ToDictionary(host => Format.Text(host, "id"), host => host!.DeepClone());
+                    var starredRows = starred.Select(host =>
+                    {
+                        var row = new NavigationViewItem
+                        {
+                            Tag = "sshfav:" + Format.Text(host, "id"), Content = Format.Text(host, "label"),
+                            Icon = new FontIcon { Glyph = "\uE735" },
+                        };
+                        ToolTipService.SetToolTip(row, L10n.Text("common.connect"));
+                        return row;
+                    }).ToList();
                     var wanted = sshSessions.Where(item => Format.Flag(item, "alive")).Select(item => new NavigationViewItem
                     {
                         Tag = "sshterm:" + Format.Text(item, "id"), Content = SshHostPlatform.SessionRow(item),
@@ -2278,9 +2307,11 @@ public sealed partial class MainWindow : Window
                     RestoreSidebarLayout(() =>
                     {
                         NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:", owner: _nav);
-                        if (sshGroup.Visibility == Visibility.Collapsed && wanted.Count > 0)
+                        NavigationRows.Reconcile(sshGroup.MenuItems, starredRows, "sshfav:", owner: _nav);
+                        var shown = wanted.Count + starredRows.Count;
+                        if (sshGroup.Visibility == Visibility.Collapsed && shown > 0)
                             sshGroup.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ssh:" + SSHSection.Hosts, true);
-                        sshGroup.Visibility = wanted.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+                        sshGroup.Visibility = shown > 0 ? Visibility.Visible : Visibility.Collapsed;
                     });
                 }
             }
