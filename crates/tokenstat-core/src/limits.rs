@@ -328,18 +328,35 @@ fn limits_from_native(databases: &[PathBuf], files: &[PathBuf], now_ms: i64) -> 
     }
 
     match scan.finish(now_ms) {
-        Some((windows, observed_at_ms, plan)) => ProviderLimits {
-            source: "codex".to_string(),
-            plan,
-            windows,
-            observed_at_ms,
-            note: None,
-            stale: false,
-        },
+        Some((windows, observed_at_ms, plan)) => {
+            codex_reading(windows, observed_at_ms, plan, now_ms)
+        }
         None => ProviderLimits::unavailable(
             "codex",
             "Codex has not written a limit into its recent session logs yet.",
         ),
+    }
+}
+
+fn codex_reading(
+    windows: Vec<UsageWindow>,
+    observed_at_ms: i64,
+    plan: Option<String>,
+    now: i64,
+) -> ProviderLimits {
+    // Local logs are evidence of what Codex reported, not a fresh network
+    // request. Never make a week-old reading look current just because it
+    // could still be opened successfully.
+    const STALE_AFTER_MS: i64 = 3 * 60 * 60 * 1000;
+    let stale = observed_at_ms <= 0
+        || now.saturating_sub(observed_at_ms) > STALE_AFTER_MS
+        || windows
+            .iter()
+            .any(|window| window.resets_at_ms.is_some_and(|reset| reset <= now));
+    ProviderLimits {
+        source: "codex".into(), plan, windows, observed_at_ms,
+        note: stale.then(|| "Codex has not reported a recent limit for every window. Run a Codex turn and refresh.".into()),
+        stale,
     }
 }
 
@@ -354,14 +371,7 @@ pub fn codex_limits_for_home(home: &Path) -> Option<ProviderLimits> {
         absorb_rollout(&mut scan, &file);
     }
     let (windows, observed_at_ms, plan) = scan.finish(now_ms())?;
-    Some(ProviderLimits {
-        source: "codex".into(),
-        plan,
-        windows,
-        observed_at_ms,
-        note: None,
-        stale: false,
-    })
+    Some(codex_reading(windows, observed_at_ms, plan, now_ms()))
 }
 
 /// How many recent session files to look through. Enough to get past a run of
@@ -402,14 +412,7 @@ fn limits_in(file: &Path, now_ms: i64) -> Option<ProviderLimits> {
     let mut scan = CodexLimitScan::default();
     absorb_rollout(&mut scan, file);
     scan.finish(now_ms)
-        .map(|(windows, observed_at_ms, plan)| ProviderLimits {
-            source: "codex".to_string(),
-            plan,
-            windows,
-            observed_at_ms,
-            note: None,
-            stale: false,
-        })
+        .map(|(windows, observed_at_ms, plan)| codex_reading(windows, observed_at_ms, plan, now_ms))
 }
 
 fn absorb_sqlite(scan: &mut CodexLimitScan, db_path: &Path) -> Option<()> {
@@ -471,10 +474,9 @@ type CodexWindowKey = (String, String, u64, String);
 #[derive(Default)]
 struct CodexLimitScan {
     windows: std::collections::HashMap<CodexWindowKey, (i64, UsageWindow)>,
-    plan: Option<(i64, String)>,
-    /// When the current plan name was first adopted. Prior-era windows are
-    /// refused even if an older block is absorbed after a newer one.
-    era_at_ms: Option<i64>,
+    /// Plan observations are ordered only after all files have been read:
+    /// resumed sessions and SQLite rows need not arrive chronologically.
+    plans: std::collections::BTreeMap<i64, String>,
 }
 
 impl CodexLimitScan {
@@ -500,38 +502,7 @@ impl CodexLimitScan {
 
         let plan = limits.plan_type();
         if !plan.is_empty() {
-            let newer = self
-                .plan
-                .as_ref()
-                .is_none_or(|(at, _)| observed_at_ms >= *at);
-            if newer {
-                if self
-                    .plan
-                    .as_ref()
-                    .is_some_and(|(_, previous)| previous != plan)
-                {
-                    // Plans change the window set. Keep only readings from
-                    // this era onward so a Pro weekly cannot outrank Plus.
-                    self.era_at_ms = Some(observed_at_ms);
-                    self.windows.retain(|_, (at, _)| *at >= observed_at_ms);
-                }
-                self.plan = Some((observed_at_ms, plan.to_string()));
-            } else if self
-                .plan
-                .as_ref()
-                .is_some_and(|(_, current)| current != plan)
-            {
-                // Newer plan already won. An older block from another plan
-                // must not rebuild that era's windows after the fact.
-                return;
-            }
-        }
-
-        // An older block walked after a newer plan change still carries the
-        // previous era's windows. Refuse them here so out-of-order absorbs
-        // cannot rebuild the Pro weekly beside Plus.
-        if self.era_at_ms.is_some_and(|era| observed_at_ms < era) {
-            return;
+            self.plans.insert(observed_at_ms, plan.to_owned());
         }
 
         let limit_id = limits.limit_id();
@@ -589,6 +560,20 @@ impl CodexLimitScan {
     /// Every limit still in force, general allowance before model allowances.
     fn finish(self, now_ms: i64) -> Option<(Vec<UsageWindow>, i64, Option<String>)> {
         let mut readings: Vec<(i64, UsageWindow)> = self.windows.into_values().collect();
+        let latest_plan = self.plans.last_key_value().map(|(_, plan)| plan.clone());
+        if let Some(current) = latest_plan.as_ref()
+            && let Some((&previous_at, _)) =
+                self.plans.iter().rev().find(|(_, plan)| *plan != current)
+            && let Some((&era_at, _)) = self
+                .plans
+                .range((
+                    std::ops::Bound::Excluded(previous_at),
+                    std::ops::Bound::Unbounded,
+                ))
+                .find(|(_, plan)| *plan == current)
+        {
+            readings.retain(|(at, _)| *at >= era_at);
+        }
         // Newest first, so the duplicate check below keeps the fresher of two
         // readings of the same limit.
         readings.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(&b.1.label)));
@@ -598,14 +583,10 @@ impl CodexLimitScan {
         let newest_at = readings.first().map(|(at, _)| *at);
 
         let mut kept: Vec<(i64, UsageWindow)> = Vec::new();
-        for (at, mut window) in readings {
-            // Already rolled over, so the old percentage is history, not
-            // quota. Codex stops reporting a limit while no turn uses it, so
-            // the window it last wrote is still the account's window, just
-            // fresh: nothing used, and no reset until the next turn starts
-            // the clock. Show it as 0% used, as Codex itself does. A window
-            // from an older block, or one belonging to a named model, has no
-            // such claim and is dropped.
+        for (at, window) in readings {
+            // A reset timestamp alone does not prove the current usage: the
+            // account can have been used from another device. Keep the last
+            // observed general reading as stale instead of inventing zero.
             if window.resets_at_ms.is_some_and(|ms| ms <= now_ms) {
                 let current_block = Some(at) == newest_at;
                 let general = matches!(
@@ -618,9 +599,6 @@ impl CodexLimitScan {
                 if !current_block || !general || seen {
                     continue;
                 }
-                window.percent = 0.0;
-                window.resets_at_ms = None;
-                window.severity = LimitSeverity::from_percent(0.0);
                 kept.push((at, window));
                 continue;
             }
@@ -705,7 +683,9 @@ impl CodexLimitScan {
             }
         }
 
-        let observed_at_ms = kept.iter().map(|(at, _)| *at).max().unwrap_or(0);
+        // One provider timestamp covers every window. Use the oldest one so
+        // a newly updated 5-hour window cannot make a frozen week look fresh.
+        let observed_at_ms = kept.iter().map(|(at, _)| *at).min().unwrap_or(0);
         let mut windows: Vec<UsageWindow> = kept.into_iter().map(|(_, w)| w).collect();
         // General usage is the first thing to read. Within each group the
         // shorter window leads, the way people read it: 5-hour, then weekly.
@@ -724,7 +704,7 @@ impl CodexLimitScan {
                 w.resets_at_ms.unwrap_or(i64::MAX),
             )
         });
-        Some((windows, observed_at_ms, self.plan.map(|(_, plan)| plan)))
+        Some((windows, observed_at_ms, latest_plan))
     }
 }
 
@@ -846,9 +826,9 @@ fn codex_homes() -> Vec<PathBuf> {
 /// The most recently written rollout files across every Codex home, newest
 /// first.
 ///
-/// Walks the `sessions/YYYY/MM/DD` tree newest-named first and stops once it
-/// has enough, so a machine with years of sessions is not listed end to end to
-/// answer a question about this week.
+/// A resumed session can be written years after its date directory was made.
+/// Inspect all date directories and retain only the most recently modified
+/// files, across all configured homes.
 fn recent_rollouts(want: usize) -> Vec<PathBuf> {
     let mut found: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
     for home in codex_homes() {
@@ -867,7 +847,7 @@ fn collect_rollouts(
     want: usize,
     out: &mut Vec<(std::time::SystemTime, PathBuf)>,
 ) {
-    if out.len() >= want {
+    if want == 0 {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -886,29 +866,82 @@ fn collect_rollouts(
             }
             if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
                 out.push((modified, path));
+                out.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+                out.truncate(want);
             }
         }
         return;
     }
 
-    let mut children: Vec<PathBuf> = entries
+    let children: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .collect();
-    // Names are zero padded dates, so descending by name is descending by date.
-    children.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     for child in children {
         collect_rollouts(&child, depth - 1, want, out);
-        if out.len() >= want {
-            return;
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_rollouts_include_resumed_old_sessions_and_other_homes() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first/sessions");
+        let second = root.path().join("second/sessions");
+        let old = first.join("2024/01/01");
+        let recent = first.join("2026/11/11");
+        let other = second.join("2026/01/01");
+        for dir in [&old, &recent, &other] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let write = |path: &Path, seconds: u64| {
+            std::fs::write(path, "{}\n").unwrap();
+            let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+            file.set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds)),
+            )
+            .unwrap();
+        };
+        for index in 0..30 {
+            write(&recent.join(format!("rollout-{index}.jsonl")), 100 + index);
+        }
+        let resumed = old.join("rollout-resumed.jsonl");
+        let other_active = other.join("rollout-other.jsonl");
+        write(&resumed, 1000);
+        write(&other_active, 1100);
+        let mut found = Vec::new();
+        collect_rollouts(&first, 3, 25, &mut found);
+        collect_rollouts(&second, 3, 25, &mut found);
+        assert_eq!(found.len(), 25);
+        assert!(found.iter().any(|(_, path)| path == &resumed));
+        assert!(found.iter().any(|(_, path)| path == &other_active));
+        assert!(
+            !found
+                .iter()
+                .any(|(_, path)| path == &recent.join("rollout-0.jsonl"))
+        );
+    }
+
+    #[test]
+    fn a_fresh_five_hour_reading_does_not_make_an_old_weekly_reading_fresh() {
+        let mut scan = CodexLimitScan::default();
+        scan.absorb(r#"{"timestamp":"2026-09-10T00:00:00Z","payload":{"rate_limits":{"limit_id":"codex","secondary":{"used_percent":80,"window_minutes":10080,"resets_at":1791000000}}}}"#);
+        scan.absorb(r#"{"timestamp":"2026-09-11T00:00:00Z","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":20,"window_minutes":300,"resets_at":1791000000}}}}"#);
+        let now = parse_iso_ms("2026-09-11T00:01:00Z").unwrap();
+        let (windows, observed, plan) = scan.finish(now).unwrap();
+        let reading = codex_reading(windows, observed, plan, now);
+        assert_eq!(reading.windows.len(), 2);
+        assert_eq!(
+            reading.observed_at_ms,
+            parse_iso_ms("2026-09-10T00:00:00Z").unwrap()
+        );
+        assert!(reading.stale);
+    }
 
     #[test]
     fn newer_cli_limits_override_old_sqlite_without_losing_other_windows() {
@@ -1254,7 +1287,30 @@ mod tests {
     }
 
     #[test]
-    fn a_window_that_already_rolled_over_reads_as_unused() {
+    fn plan_change_excludes_older_unlabeled_windows_in_any_file_order() {
+        let old_plan = r#"{"timestamp":"2026-09-10T10:00:00Z","payload":{"rate_limits":{"limit_id":"codex","plan_type":"pro","primary":{"used_percent":90,"window_minutes":10080,"resets_at":1791000000}}}}"#;
+        let old_unnamed = r#"{"timestamp":"2026-09-10T11:00:00Z","payload":{"rate_limits":{"limit_id":"codex","secondary":{"used_percent":80,"window_minutes":10080,"resets_at":1791000000}}}}"#;
+        let new_plan = r#"{"timestamp":"2026-09-11T10:00:00Z","payload":{"rate_limits":{"limit_id":"codex","plan_type":"plus","primary":{"used_percent":20,"window_minutes":300,"resets_at":1791000000}}}}"#;
+        for blocks in [
+            [new_plan, old_unnamed, old_plan],
+            [old_plan, old_unnamed, new_plan],
+        ] {
+            let mut scan = CodexLimitScan::default();
+            for block in blocks {
+                scan.absorb(block);
+            }
+            let (windows, _, plan) = scan
+                .finish(parse_iso_ms("2026-09-11T10:01:00Z").unwrap())
+                .unwrap();
+            assert_eq!(plan.as_deref(), Some("plus"));
+            assert_eq!(windows.len(), 1);
+            assert_eq!(windows[0].label, "5-hour");
+            assert_eq!(windows[0].percent, 20.0);
+        }
+    }
+
+    #[test]
+    fn a_window_that_already_rolled_over_is_historical_not_invented_zero() {
         let dir = std::env::temp_dir().join(format!("tokenstat-codex-past-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1277,12 +1333,12 @@ mod tests {
         assert_eq!(
             shown,
             vec![
-                // Rolled over with no turn since: a fresh window, nothing used,
-                // and no clock until the next turn starts one.
-                ("5-hour".to_string(), 0.0, None),
+                ("5-hour".to_string(), 100.0, Some(1_789_093_407_000)),
                 ("weekly".to_string(), 45.0, Some(1_789_680_207_000)),
             ]
         );
+        assert!(found.stale);
+        assert!(found.note.as_deref().unwrap().contains("refresh"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
