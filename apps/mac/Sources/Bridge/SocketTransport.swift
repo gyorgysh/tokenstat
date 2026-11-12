@@ -253,6 +253,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         "ssh.session.open",
         "chat.create",
         "chat.fork",
+        "chat.continueInNew",
         "automation.create",
         "workflow.create",
         "workflow.continue",

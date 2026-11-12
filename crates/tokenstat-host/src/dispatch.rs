@@ -2249,6 +2249,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     if matches!(
         method,
         "chat.fork"
+            | "chat.continueInNew"
             | "chat.update"
             | "chat.remove"
             | "chat.send"
@@ -2294,6 +2295,10 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         "chat.fork" => {
             serde_json::to_value(store.fork(&p.id.ok_or("chat.fork needs id")?)?).envelope()
         }
+        "chat.continueInNew" => serde_json::to_value(
+            store.continue_in_new(&p.id.ok_or("chat.continueInNew needs id")?)?,
+        )
+        .envelope(),
         "chat.update" => serde_json::to_value(
             store.update(&p.id.clone().ok_or("chat.update needs id")?, p.changes())?,
         )

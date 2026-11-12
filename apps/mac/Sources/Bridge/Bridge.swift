@@ -1306,6 +1306,17 @@ extension Bridge {
         return try await chatInvoke(peer: peer, "chat.fork", ["id": id], as: ChatConversation.self)
     }
 
+    /// Start a new chat that carries this one's setup and points its first
+    /// turn at the earlier history, without loading it.
+    static func continueChatInNew(id: String, peer: String? = nil) async throws -> ChatConversation {
+        guard await RemoteHostFeature.chatContinue.isSupported(peer: peer) else {
+            throw NSError(domain: "Chat", code: 54, userInfo: [
+                NSLocalizedDescriptionKey: L10n.text("apple.bridge.update_the_project_s_computer_to_continue_in_new_chat")
+            ])
+        }
+        return try await chatInvoke(peer: peer, "chat.continueInNew", ["id": id], as: ChatConversation.self)
+    }
+
     static func updateChat(
         id: String,
         title: String? = nil,

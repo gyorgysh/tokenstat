@@ -1534,6 +1534,7 @@ struct ClientChatThread: View {
         // reconnecting, the foreground refresh retries, and anything still
         // broken once back online raises its own error then.
         .modifier(ChatFileTransferControls(model: model))
+        .modifier(ChatCacheWarningAlert(model: model, isActive: isActive))
         .alert(L10n.text("apple.clientchatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil && connectivity.status != .offline },
             set: { if !$0 { model.error = nil } }
@@ -2720,7 +2721,7 @@ struct ClientChatThread: View {
         }
     }
 
-    private func submit(from chat: ChatConversation, sendNow: Bool = false) {
+    private func submit(from chat: ChatConversation, sendNow: Bool = false, cacheConfirmed: Bool = false) {
         guard isActive, model.selected?.id == chat.id, model.unconfirmedSend == nil else { return }
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
@@ -2771,6 +2772,13 @@ struct ClientChatThread: View {
                 return
             }
         }
+        if !cacheConfirmed,
+           !ChatPromptCacheRule.isSuppressed(ChatPromptCacheRule.idleSuppressedKey),
+           let idle = ChatPromptCacheRule.idle(chat, nowMs: ChatModel.nowMs),
+           let cache = ChatPromptCacheRule.cache(chat) {
+            askBeforeColdSend(chat, text: text, idleMs: idle, tokens: cache.tokens)
+            return
+        }
         // The composer empties, the stored copy does not: it is dropped when
         // the host has the words and put back when it refuses them.
         guard model.holdDraftForSending(text) else { return }
@@ -2778,6 +2786,51 @@ struct ClientChatThread: View {
         resumeLatest()
         followPulse += 1
         Task { await model.sendFromComposer() }
+    }
+
+    private func askBeforeColdSend(_ chat: ChatConversation, text: String, idleMs: Int64, tokens: UInt64) {
+        let peer = model.peer
+        // Files are uploaded into this chat, so a message carrying them
+        // cannot move to another one.
+        let movable = model.attachments.isEmpty && model.savedCopy == nil
+        Task { @MainActor () -> Void in
+            let canStart = movable ? await RemoteHostFeature.chatContinue.isSupported(peer: peer) : false
+            guard isActive, model.selected?.id == chat.id,
+                  model.draft.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+            presentColdSendWarning(chat, text: text, idleMs: idleMs, tokens: tokens, canStart: canStart)
+        }
+    }
+
+    private func presentColdSendWarning(_ chat: ChatConversation, text: String, idleMs: Int64,
+                                        tokens: UInt64, canStart: Bool) {
+        var startNew: (@MainActor () -> Void)?
+        if canStart {
+            startNew = { continueInNewChat(text, from: chat) }
+        }
+        let proceed: @MainActor () -> Void = {
+            guard model.selected?.id == chat.id, let current = model.selected else { return }
+            submit(from: current, cacheConfirmed: true)
+        }
+        model.cacheWarning = ChatCacheWarning(kind: .idle(idleMs: idleMs, startNew: startNew),
+                                              tokens: tokens, proceed: proceed)
+    }
+
+    /// Move this message into a new chat that continues this one, and send it
+    /// there. The words go back where they were if the new chat cannot be made.
+    private func continueInNewChat(_ text: String, from chat: ChatConversation) {
+        guard model.selected?.id == chat.id,
+              model.draft.trimmingCharacters(in: .whitespacesAndNewlines) == text,
+              model.attachments.isEmpty, let reference = model.currentReference else { return }
+        let words = model.draft
+        model.saveDraftNow()
+        let original = ChatDraftStore.shared.draft(for: reference)
+        Task { @MainActor () -> Void in
+            guard let created = await model.continueInNew(chat, expectedDraft: words) else { return }
+            model.draft = words
+            model.saveDraftNow()
+            if !model.draftSaveFailed, let original { ChatDraftStore.shared.clear(original) }
+            submit(from: created, cacheConfirmed: true)
+        }
     }
 
     private var dropExperienceVisible: Bool {

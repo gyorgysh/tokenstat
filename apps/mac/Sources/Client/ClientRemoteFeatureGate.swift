@@ -40,6 +40,7 @@ enum RemoteHostFeature: Hashable {
     case workflowEditing
     case steer
     case chatFork
+    case chatContinue
     case chatRemoveAll
     case liveActivities
     case terminalLiveActivities
@@ -83,6 +84,7 @@ enum RemoteHostFeature: Hashable {
         case .automationReceipts: L10n.text("apple.clientremotefeaturegate.saving_automations.1673f244")
         case .workflowEditing: L10n.text("apple.clientremotefeaturegate.saving_workflows.9ca663b4")
         case .chatFork: L10n.text("apple.clientremotefeaturegate.forking_chats.1181b97c")
+        case .chatContinue: L10n.text("apple.clientremotefeaturegate.continuing_in_a_new_chat")
         case .chatRemoveAll: L10n.text("apple.clientremotefeaturegate.deleting_all_chats.978c2f5e")
         case .steer: L10n.text("apple.clientremotefeaturegate.notes_on_the_next_step.a272bf5a")
         case .liveActivities, .terminalLiveActivities, .workOverview: "Live Activities"
@@ -121,6 +123,8 @@ enum RemoteHostFeature: Hashable {
     /// Version 33 adds `pulls.commitAvatars`, so history can show a public
     /// picture for every author the forge knows.
     /// Version 37 adds explicitly requested agent reinstallation.
+    /// Version 54 adds `chat.continueInNew` and the prompt cache record on
+    /// each conversation.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -155,6 +159,7 @@ enum RemoteHostFeature: Hashable {
         case .automationReceipts: 21
         case .workflowEditing: 22
         case .chatFork: 26
+        case .chatContinue: 54
         case .chatRemoveAll: 26
         case .steer: 25
         case .liveActivities: 31
@@ -201,6 +206,7 @@ enum RemoteHostFeature: Hashable {
         case .automationReceipts: "bolt.fill"
         case .workflowEditing: "square.and.arrow.down"
         case .chatFork: "doc.on.doc"
+        case .chatContinue: "arrow.turn.down.right"
         case .chatRemoveAll: "trash"
         case .steer: "text.bubble"
         case .liveActivities, .terminalLiveActivities, .workOverview: "waveform"

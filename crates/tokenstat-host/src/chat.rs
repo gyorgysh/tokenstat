@@ -197,6 +197,16 @@ pub struct Conversation {
     /// repository, a detached HEAD, or a chat from before this was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// What the last turn left in the provider's prompt cache, so a client
+    /// can warn before a message that has to read the whole conversation
+    /// again: after a long pause, or on a different model. None for a
+    /// backend that does not report it, and for a chat from before this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache: Option<crate::chat_cache::PromptCache>,
+    /// The conversation this one was started to continue. Its first turn is
+    /// told where that history is, without being handed all of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continued_from: Option<String>,
 }
 
 /// The only conversation metadata needed by a host-wide recent-chat list.
@@ -2463,6 +2473,8 @@ impl Store {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         };
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
@@ -2529,6 +2541,8 @@ impl Store {
         fork.allowed_tools.clear();
         fork.allowed_shell_prefixes.clear();
         fork.running = false;
+        // A fork starts a new agent session, so nothing of it is cached yet.
+        fork.prompt_cache = None;
         let destination = safe_join(&self.root, &fork.id)?;
         fs::create_dir(&destination).map_err(|error| error.to_string())?;
         let result = (|| {
@@ -3637,6 +3651,13 @@ impl Store {
                 .map(str::to_owned);
             Ok(previous.is_none())
         })?;
+        // A chat started to continue another one has nothing of its own yet.
+        // Its first turn is told where the earlier history is instead.
+        if previous.is_none()
+            && let Some(source) = chat.continued_from.as_deref()
+        {
+            return self.continuation(source);
+        }
         // A resume token proves only that this backend remembers the point at
         // which it last ran. If another backend has spoken since then, that
         // old session is precisely the one that needs a handover. It is current
@@ -3705,6 +3726,123 @@ impl Store {
             announce: previous.is_some_and(|name| name != chat.backend),
             brief,
         }))
+    }
+
+    /// What the first turn of a continuing chat is told about the chat it
+    /// continues: where the full history is, and the exchange it ended on.
+    ///
+    /// Not the history itself. Carrying it over is exactly the cost the
+    /// person avoided by starting fresh, so the agent reads it only when the
+    /// person refers to something it does not have. None when the earlier
+    /// chat is gone.
+    fn continuation(&self, source_id: &str) -> Result<Option<Handover>, String> {
+        let Ok(source) = self.get(source_id) else {
+            return Ok(None);
+        };
+        let folder = crate::workspaces::folder(&source.workspace_id)
+            .map(|workspace| workspace.path.display().to_string())
+            .unwrap_or_default();
+        let path = safe_join(&self.root, &source.id)?.join("history.md");
+        fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
+            .map_err(|error| error.to_string())?;
+        replace_chat_file_with(&path, |file| {
+            let mut export =
+                crate::chat_brain::HistoryWriter::new(std::io::BufWriter::new(&mut *file), &folder)
+                    .map_err(|error| error.to_string())?;
+            self.visit_events(&source.id, |event| {
+                export.push(&event).map_err(|error| error.to_string())?;
+                Ok(true)
+            })?;
+            let (writer, length) = export.finish().map_err(|error| error.to_string())?;
+            drop(writer);
+            file.set_len(length).map_err(|error| error.to_string())
+        })?;
+        let (asked, reply) = self.last_exchange(&source.id)?;
+        let mut brief = format!(
+            "This chat continues an earlier conversation in this folder, \"{}\". \
+             It was not loaded here, to keep this conversation small.\n\
+             Full history: {}. Do not read it up front. Search it only when the person \
+             refers to something this conversation does not have.\n",
+            source.title,
+            path.display()
+        );
+        if let Some(asked) = asked {
+            brief.push_str(&format!(
+                "\nThe earlier conversation ended with the person asking:\n{}\n",
+                head_chars(&asked, CONTINUATION_ASKED_CHARS)
+            ));
+        }
+        if !reply.trim().is_empty() {
+            brief.push_str(&format!(
+                "\nThe last reply there ended with:\n{}\n",
+                tail_chars(reply.trim(), CONTINUATION_REPLY_CHARS)
+            ));
+        }
+        Ok(Some(Handover {
+            announce: false,
+            brief,
+        }))
+    }
+
+    /// The person's last message and the agent text after it. The reply is
+    /// collected from the end and stops growing once it is long enough to
+    /// cut, so a very long last turn costs no more than a short one.
+    fn last_exchange(&self, id: &str) -> Result<(Option<String>, String), String> {
+        let mut asked = None;
+        let mut pieces = Vec::new();
+        let mut collected = 0;
+        self.visit_events_backwards(id, |event| {
+            match event["kind"].as_str() {
+                Some("user") if event["steer"] != true => {
+                    asked = event["text"].as_str().map(str::to_owned);
+                    return Ok(false);
+                }
+                Some("agent") if event["event"]["kind"] == "text" => {
+                    if collected <= CONTINUATION_REPLY_CHARS * 4
+                        && let Some(delta) = event["event"]["delta"].as_str()
+                    {
+                        collected += delta.len();
+                        pieces.push(delta.to_owned());
+                    }
+                }
+                _ => {}
+            }
+            Ok(true)
+        })?;
+        pieces.reverse();
+        Ok((asked, pieces.concat()))
+    }
+
+    /// Start a new chat that continues this one without carrying its history.
+    ///
+    /// Same folder, agent, model and settings. Its first turn is pointed at
+    /// the earlier history (see [`Self::continuation`]) instead of resuming
+    /// the old session, which would read the whole conversation again.
+    pub fn continue_in_new(&self, id: &str) -> Result<Conversation, String> {
+        let source = self.get(id)?;
+        let created = self.create(Create {
+            workspace_id: source.workspace_id.clone(),
+            title: None,
+            backend: source.backend.clone(),
+            model: source.model.clone(),
+            effort: source.effort.clone(),
+            fast_mode: source.fast_mode,
+            mode: Some(source.mode.clone()),
+            autonomy: Some(source.autonomy.clone()),
+            budget_seconds: Some(source.budget_seconds),
+            // The persona is copied below as it stands on the source, brief
+            // included, so a persona edited or removed since does not change
+            // or refuse the continuation.
+            persona_id: Some(String::new()),
+        })?;
+        self.edit_conversation(&created.id, |chat| {
+            chat.persona_id = source.persona_id.clone();
+            chat.system_prompt = source.system_prompt.clone();
+            // Approval grants belong to the original conversation, just as
+            // they do when forking it. A new chat must ask again.
+            chat.continued_from = Some(source.id.clone());
+            Ok(chat.clone())
+        })
     }
 
     /// Keep the handover on disk beside the timeline it was folded from.
@@ -5038,6 +5176,9 @@ impl Store {
             }
         }
         self.record_response_attachments(id, backend, &assistant_text, response_output_dir);
+        if let Some(reading) = parser.take_context() {
+            let _ = self.record_prompt_cache(id, backend, launch_model, reading);
+        }
         let exit = manager.info(pty).ok().and_then(|info| info.exit_code);
         let stopped = self
             .killed
@@ -5652,6 +5793,27 @@ impl Store {
             chat.last_message_at_ms = Some(at_ms);
             chat.last_message_author = Some(author.into());
             chat.updated_at_ms = chat.updated_at_ms.max(at_ms);
+            Ok(())
+        })
+    }
+    /// Remember what this turn left in the prompt cache. It does not move
+    /// `updated_at_ms`: a finished turn already did, and this is bookkeeping.
+    fn record_prompt_cache(
+        &self,
+        id: &str,
+        backend: &str,
+        selection: Option<&str>,
+        reading: crate::chat_cache::Reading,
+    ) -> Result<(), String> {
+        self.edit_conversation(id, |chat| {
+            chat.prompt_cache = Some(crate::chat_cache::PromptCache {
+                backend: backend.into(),
+                tokens: reading.tokens,
+                model: reading.model,
+                selection: selection.map(str::to_owned),
+                at_ms: reading.at_ms,
+                ttl_ms: reading.ttl_ms,
+            });
             Ok(())
         })
     }
@@ -7456,6 +7618,28 @@ fn blocked_ancestor(path: &Path) -> bool {
     false
 }
 
+const CONTINUATION_ASKED_CHARS: usize = 1_000;
+const CONTINUATION_REPLY_CHARS: usize = 1_500;
+
+fn head_chars(text: &str, cap: usize) -> String {
+    match text.char_indices().nth(cap) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
+fn tail_chars(text: &str, cap: usize) -> String {
+    let count = text.chars().count();
+    if count <= cap {
+        return text.to_owned();
+    }
+    let start = text
+        .char_indices()
+        .nth(count - cap)
+        .map_or(0, |(index, _)| index);
+    format!("…{}", &text[start..])
+}
+
 struct ChatTemporary(PathBuf);
 impl Drop for ChatTemporary {
     fn drop(&mut self) {
@@ -8462,6 +8646,8 @@ mod tests {
             last_message_author: None,
             running: true,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         store.save().unwrap();
         store.record_events(
@@ -10217,6 +10403,108 @@ mod tests {
     }
 
     #[test]
+    fn a_continuing_chat_points_at_the_earlier_history_once() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-old");
+        conversation_for_receipts(&store, "chat-new");
+        store
+            .edit_conversation("chat-new", |chat| {
+                chat.continued_from = Some("chat-old".into());
+                Ok(())
+            })
+            .unwrap();
+        for (text, steer) in [("Fix the uploader retries", false), ("and the tests", true)] {
+            store
+                .append(
+                    "chat-old",
+                    &StoredEvent::User {
+                        steer,
+                        text: text.into(),
+                        at_ms: 1,
+                    },
+                )
+                .unwrap();
+        }
+        let long_reply = format!("{}Retries are in place.", "x".repeat(5_000));
+        store.record_events(
+            "chat-old",
+            "claude",
+            vec![Event::Text { delta: long_reply }],
+        );
+        let brief = store
+            .handover(&store.get("chat-new").unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(!brief.announce);
+        assert!(brief.brief.contains("Do not read it up front"));
+        assert!(brief.brief.contains("Fix the uploader retries"));
+        assert!(!brief.brief.contains("and the tests"));
+        assert!(brief.brief.contains("Retries are in place."));
+        assert!(brief.brief.len() < 4_000, "{}", brief.brief.len());
+        let history = root.path().join("chat/chat-old/history.md");
+        assert!(brief.brief.contains(&history.display().to_string()));
+        assert!(
+            fs::read_to_string(&history)
+                .unwrap()
+                .contains("Retries are in place.")
+        );
+
+        // Once the new chat has a session of its own it is not told again.
+        store
+            .set_resume("chat-new", "claude", "session-new")
+            .unwrap();
+        store.record_events(
+            "chat-new",
+            "claude",
+            vec![Event::Text {
+                delta: "On it".into(),
+            }],
+        );
+        assert!(
+            store
+                .handover(&store.get("chat-new").unwrap())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_finished_claude_turn_records_its_prompt_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let mut parser = crate::transcript::Parser::new("claude");
+        let line = |input: u64, hour: u64| {
+            format!(
+                "{}\n",
+                json!({"type":"assistant","parent_tool_use_id":null,"message":{
+                    "model":"claude-sonnet-5-5","content":[],
+                    "usage":{"input_tokens":input,"cache_read_input_tokens":1000,
+                        "cache_creation_input_tokens":hour,
+                        "cache_creation":{"ephemeral_1h_input_tokens":hour}}}})
+            )
+        };
+        parser.push_events(line(5, 200).as_bytes());
+        parser.push_events(line(7, 0).as_bytes());
+        let reading = parser.take_context().unwrap();
+        assert!(parser.take_context().is_none());
+        store
+            .record_prompt_cache("chat-test", "claude", Some("sonnet"), reading)
+            .unwrap();
+        let cache = store.get("chat-test").unwrap().prompt_cache.unwrap();
+        assert_eq!(cache.tokens, 1007);
+        assert_eq!(cache.ttl_ms, 60 * 60 * 1000);
+        assert_eq!(cache.model.as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(cache.selection.as_deref(), Some("sonnet"));
+        let wire = serde_json::to_value(store.get("chat-test").unwrap()).unwrap();
+        assert_eq!(wire["promptCache"]["tokens"], 1007);
+        assert_eq!(wire["promptCache"]["ttlMs"], 3_600_000);
+        let fork = store.fork("chat-test").unwrap();
+        assert!(fork.prompt_cache.is_none());
+    }
+
+    #[test]
     fn native_session_refs_survive_replacement_handoff_and_fork_without_recent_leaks() {
         const OLD: &str = "11111111-1111-4111-8111-111111111111";
         const NEW: &str = "22222222-2222-4222-8222-222222222222";
@@ -11046,6 +11334,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         };
         store.conversations.lock().unwrap().extend([
             sample("chat-a1", "workspace-a"),
@@ -11227,6 +11517,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         };
         store.conversations.lock().unwrap().push(chat);
         store.save().unwrap();
@@ -11354,6 +11646,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         store.save().unwrap();
         let attachment = store
@@ -11416,6 +11710,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         store.save().unwrap();
     }
@@ -14909,6 +15205,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -15031,6 +15329,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -15178,6 +15478,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -15287,6 +15589,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         store.save().unwrap();
         let source = root.path().join("answer.txt");
@@ -15424,6 +15728,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         store.save().unwrap();
         store.record_events(
@@ -15481,6 +15787,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         {
             let mut chats = store.conversations.lock().unwrap();
@@ -15565,6 +15873,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         store.save().unwrap();
         let turn_token = store.register_turn_token("chat-test", "claude").unwrap();
@@ -15919,6 +16229,8 @@ mod tests {
             last_message_author: None,
             running: false,
             branch: None,
+            prompt_cache: None,
+            continued_from: None,
         });
         let other = store
             .save_persona(Persona {

@@ -970,7 +970,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 models,
                 Format.Text(chat, "model"),
                 running,
-                async value => await UpdateAsync(new JsonObject { ["model"] = value })));
+                async value => await ChangeModelAsync(value)));
             picker.Children.Add(ActionIconGlyph.Button(
                 L10n.Text("common.refresh"),
                 ActionIcon.Refresh,
@@ -2248,6 +2248,22 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
         var text = _draft.Text.Trim();
         if (text.Length == 0 && _attachments.Count == 0) return;
+        // A long pause emptied the prompt cache: this message would make the
+        // agent read the whole conversation again. Files are uploaded into
+        // this chat, so a message carrying them cannot move to a new one.
+        if (!liveInput && !sendNext && !Busy() && text != "/compact")
+        {
+            switch (await AskBeforeColdSendAsync(movable: _attachments.Count == 0))
+            {
+                case ColdSendChoice.Cancel:
+                    return;
+                case ColdSendChoice.StartNew:
+                    if (!Current() || _draft.Text.Trim() != text || _attachments.Count != 0) return;
+                    await ContinueInNewChatAsync(chat, text);
+                    return;
+            }
+            if (!Current() || _draft.Text.Trim() != text) return;
+        }
         _queueing = true; RebuildAttachStrip();
         try
         {

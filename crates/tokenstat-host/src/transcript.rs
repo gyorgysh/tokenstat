@@ -198,6 +198,10 @@ pub struct Parser {
     /// wait forever for terminal input. Keep its URL/code out of chat.
     muse_auth: MuseAuthState,
     limit: Option<crate::provider_limit::Limit>,
+    /// The latest main-conversation request's context, for the prompt
+    /// cache record. Kept to the end of the turn, so the conversation is
+    /// written once per turn rather than once per request.
+    context: Option<crate::chat_cache::Reading>,
     /// The last reset a provider announced for a refused window, applied to
     /// a later refusal that does not repeat it.
     reset_hint: Option<i64>,
@@ -230,6 +234,7 @@ impl Parser {
             muse_calls: HashMap::new(),
             muse_auth: MuseAuthState::Startup,
             limit: None,
+            context: None,
             reset_hint: None,
             inspection: Default::default(),
             inspection_dirty: false,
@@ -298,6 +303,10 @@ impl Parser {
 
     pub(crate) fn take_limit(&mut self) -> Option<crate::provider_limit::Limit> {
         self.limit.take()
+    }
+
+    pub(crate) fn take_context(&mut self) -> Option<crate::chat_cache::Reading> {
+        self.context.take()
     }
 
     // Decode only complete records, so a pipe read splitting an emoji or
@@ -575,6 +584,11 @@ impl Parser {
         let claude_assistant = (self.backend == "claude" && value["type"] == "assistant")
             .then(|| claude_assistant_text(&value))
             .flatten();
+        if self.backend == "claude"
+            && let Some(reading) = crate::chat_cache::claude_reading(&value, self.context.as_ref())
+        {
+            self.context = Some(reading);
+        }
         let mut events = if let Some(events) = self.streams.observe(&self.backend, &mut value) {
             events
         } else if self.backend == "muse" {

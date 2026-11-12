@@ -2731,6 +2731,11 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     /// older than protocol 30.
     var branch: String?
     var pull: BranchPull?
+    /// What the last turn left in the provider's prompt cache. Absent for an
+    /// agent that does not report it and on a host older than protocol 54.
+    var promptCache: ChatPromptCache? = nil
+    /// The chat this one was started to continue, if any.
+    var continuedFrom: String? = nil
 
     /// A saved page has no live setup or permissions. These inert values are
     /// replaced by the host's record before the reader can return to live work.
@@ -2758,7 +2763,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
         case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, runRevision, runStartedAtMs, pendingSteer, nativeSteer, nativeSteerAttachments
-        case branch, pull, routing
+        case branch, pull, routing, promptCache, continuedFrom
     }
 
     init(from decoder: Decoder) throws {
@@ -2795,6 +2800,9 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         // Decoration: a pull request shape this client cannot read must not
         // cost it the conversation.
         pull = try? c.decodeIfPresent(BranchPull.self, forKey: .pull)
+        // Advice, never a reason to lose the conversation.
+        promptCache = try? c.decodeIfPresent(ChatPromptCache.self, forKey: .promptCache)
+        continuedFrom = try c.decodeIfPresent(String.self, forKey: .continuedFrom)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2829,7 +2837,22 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(nativeSteerAttachments, forKey: .nativeSteerAttachments)
         try c.encodeIfPresent(branch, forKey: .branch)
         try c.encodeIfPresent(pull, forKey: .pull)
+        try c.encodeIfPresent(promptCache, forKey: .promptCache)
+        try c.encodeIfPresent(continuedFrom, forKey: .continuedFrom)
     }
+}
+
+/// The last request a conversation sent, as the host recorded it.
+struct ChatPromptCache: Codable, Sendable, Hashable {
+    var backend: String
+    /// Everything that request put in front of the model.
+    var tokens: UInt64
+    /// The model the provider says answered.
+    var model: String?
+    /// The conversation's model setting when the turn started.
+    var selection: String?
+    var atMs: Int64
+    var ttlMs: Int64
 }
 
 /// Answer from `chat.steerDeliver`.

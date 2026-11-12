@@ -171,6 +171,7 @@ import ai.tokenstat.tokenstat.ui.components.TsSearchField
 import ai.tokenstat.tokenstat.ui.components.TsSimplePickerSheet
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
+import ai.tokenstat.tokenstat.ui.logic.ChatCacheRules
 import ai.tokenstat.tokenstat.ui.logic.ChatCommandRules
 import ai.tokenstat.tokenstat.ui.logic.ChatDelivery
 import ai.tokenstat.tokenstat.ui.logic.ChatSeat
@@ -392,6 +393,16 @@ fun ChatSection(
         fileRelayPrompt = name to size; fileRelayAnswer = answer
         return try { answer.await() } finally { fileRelayPrompt = null; fileRelayAnswer = null }
     }
+    var cacheQuestion by remember(projectOwner) { mutableStateOf<ChatCacheQuestion?>(null) }
+    var cacheAnswer by remember(projectOwner) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<ChatCacheAnswer>?>(null) }
+    suspend fun askCache(question: ChatCacheQuestion): ChatCacheAnswer {
+        if (cacheAnswer != null) return ChatCacheAnswer.CANCEL
+        val answer = kotlinx.coroutines.CompletableDeferred<ChatCacheAnswer>()
+        cacheQuestion = question; cacheAnswer = answer
+        return try { answer.await() } finally { cacheQuestion = null; cacheAnswer = null }
+    }
+    DisposableEffect(projectOwner) { onDispose { cacheAnswer?.complete(ChatCacheAnswer.CANCEL) } }
+    cacheQuestion?.let { question -> ChatCacheDialog(question, context) { cacheAnswer?.complete(it) } }
     DisposableEffect(projectOwner) { onDispose { fileRelayAnswer?.complete(false); fileTransferJob?.cancel() } }
     fileRelayPrompt?.let { (name, size) ->
         ChatFileRelayDialog(name, size, fileRelayRemaining, client.account,
@@ -1184,6 +1195,39 @@ fun ChatSection(
         val sent = sentDraft.snapshot
         val clean = text.trim()
         if (clean.isEmpty() && staged.isEmpty()) return
+        // A long pause emptied the prompt cache: this message would make the
+        // agent read the whole conversation again. Ask first. Files are
+        // uploaded into this chat, so a message carrying them cannot move.
+        val idle = ChatCacheRules.idle(chat, System.currentTimeMillis())
+        if (idle != null && !liveInput && chat?.bol("running") != true && clean != "/compact" &&
+            !ChatCacheSuppression.idle(context)) {
+            val movable = staged.isEmpty() && HostContracts.supportsChatContinue(protocol)
+            when (askCache(ChatCacheQuestion.Idle(idle, ChatCacheRules.tokens(chat), movable))) {
+                ChatCacheAnswer.CANCEL -> return
+                ChatCacheAnswer.PROCEED -> if (openId != id || !ownsProject()) return
+                ChatCacheAnswer.START_NEW -> {
+                    if (openId != id || !ownsProject()) return
+                    runCatching {
+                        val created = model.workspaceSection(peer, "chat.continueInNew", buildJsonObject { put("id", id) }) as? JsonObject
+                        val newId = created?.str("id") ?: error(L10n.text("android.chatpullssections.the_new_chat_could_not_be_started"))
+                        check(ownsProject() && openId == id)
+                        val item = QueuedMessage(id = java.util.UUID.randomUUID().toString(), text = clean,
+                            expectedRevision = created.long("sendRevision"), whenConnected = true)
+                        check(writeQueue(newId) { it.add(item) })
+                        newId
+                    }.onSuccess { newId ->
+                        if (!ownsProject()) return
+                        model.chatComposers.clearIfUnchanged(sentOwner, sentDraft)
+                        loadChats()
+                        if (openId == id) openId = newId
+                    }.onFailure { failure ->
+                        if (failure is CancellationException) throw failure
+                        if (ownsProject() && openId == id) sendError = failure.message
+                    }
+                    return
+                }
+            }
+        }
         // Sending is engaging: follow is the default, so a new turn resumes
         // it even from a scrollback.
         pinToLatest()

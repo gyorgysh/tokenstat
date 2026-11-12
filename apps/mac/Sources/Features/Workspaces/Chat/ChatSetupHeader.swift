@@ -204,7 +204,7 @@ struct ChatSetupHeader: View {
     private var modelBinding: Binding<String> {
         Binding(
             get: { chat.model ?? "" },
-            set: { next in performSetupChange(model: model, chat: chat) { await model.update(model: next) } }
+            set: { next in performSetupChange(model: model, chat: chat) { await model.requestModelChange(next) } }
         )
     }
 
@@ -678,7 +678,7 @@ struct ChatAgentChoices {
                 await model.update(backend: id)
             }
         case let .model(id):
-            await model.update(model: id)
+            await model.requestModelChange(id)
         case let .effort(id):
             await model.update(effort: id)
         }

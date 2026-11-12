@@ -2254,6 +2254,52 @@ final class ChatModel {
         }
     }
 
+    /// A question about reading the whole conversation again, waiting for
+    /// the chat view to ask it. See `ChatPromptCacheRule`.
+    var cacheWarning: ChatCacheWarning?
+
+    static var nowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
+
+    /// Change the model, asking first when the conversation is cached for
+    /// the current one and big enough that reading it again costs something.
+    func requestModelChange(_ next: String) async {
+        guard landingDraft == nil, let selected,
+              !ChatPromptCacheRule.isSuppressed(ChatPromptCacheRule.modelSuppressedKey),
+              ChatPromptCacheRule.switching(selected, to: next, nowMs: Self.nowMs),
+              let cache = ChatPromptCacheRule.cache(selected) else {
+            await update(model: next)
+            return
+        }
+        let id = selected.id
+        cacheWarning = ChatCacheWarning(
+            kind: .modelSwitch(from: cache.model ?? cache.selection, to: next),
+            tokens: cache.tokens
+        ) { [weak self] in
+            guard let self, self.selected?.id == id, self.selected?.running == false else { return }
+            Task { await self.update(model: next) }
+        }
+    }
+
+    /// Start a chat that continues `conversation`, put it in the sidebar and
+    /// open it. Nil when it could not be made, or the folder or account
+    /// changed while it was being made.
+    func continueInNew(_ conversation: ChatConversation, expectedDraft: String) async -> ChatConversation? {
+        guard let folderID else { return nil }
+        let scope = WorkSessionContext.shared.scope
+        do {
+            let created = try await Bridge.continueChatInNew(id: conversation.id, peer: peer)
+            guard scope == WorkSessionContext.shared.scope, self.folderID == folderID,
+                  selected?.id == conversation.id, draft == expectedDraft,
+                  attachments.isEmpty else { return nil }
+            publishSidebarConversation(created, in: folderID)
+            await select(created)
+            return selected?.id == created.id ? created : nil
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
+    }
+
     func update(
         title: String? = nil,
         backend: String? = nil,

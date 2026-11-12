@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
+import ai.tokenstat.tokenstat.ui.logic.ChatCacheRules
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -280,11 +282,28 @@ fun ChatAgentSheet(
     val current = backends.firstOrNull { it.str("id") == chat?.str("backend") }
     val choices = remember(backends, chat, pinned) { chatAgentChoices(backends, chat, pinned) }
 
+    var cacheQuestion by remember(chatId) { mutableStateOf<ChatCacheQuestion?>(null) }
+    var cacheAnswer by remember(chatId) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<ChatCacheAnswer>?>(null) }
+    DisposableEffect(chatId) { onDispose { cacheAnswer?.complete(ChatCacheAnswer.CANCEL) } }
+    cacheQuestion?.let { question -> ChatCacheDialog(question, context) { cacheAnswer?.complete(it) } }
+
+    /// The conversation is cached for the current model and big enough that
+    /// reading it again on another one costs something. Ask first.
+    suspend fun confirmModelSwitch(next: String): Boolean {
+        if (ChatCacheSuppression.model(context) || !ChatCacheRules.switching(chat, next, System.currentTimeMillis())) return true
+        if (cacheAnswer != null) return false
+        val answer = kotlinx.coroutines.CompletableDeferred<ChatCacheAnswer>()
+        cacheQuestion = ChatCacheQuestion.ModelSwitch(ChatCacheRules.cachedModel(chat), next, ChatCacheRules.tokens(chat))
+        cacheAnswer = answer
+        return try { answer.await() == ChatCacheAnswer.PROCEED } finally { cacheQuestion = null; cacheAnswer = null }
+    }
+
     suspend fun pick(choice: ChatAgentChoice): List<String>? {
         if (updating || locked) return null
         if (choice is ChatAgentChoice.Agent && backendNotInstalled(backendOf(backends, choice.id))) return null
         val (field, value) = chatAgentField(choice)
         if (chatAgentIsSelected(choice, chat)) return chatAgentSections(choices)
+        if (choice is ChatAgentChoice.Model && !confirmModelSwitch(choice.id)) return null
         updating = true
         try {
             val updated = model.workspaceSection(peer, "chat.update", buildJsonObject {
