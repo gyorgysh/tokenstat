@@ -699,6 +699,10 @@ pub fn shared() -> Arc<Store> {
     Arc::clone(STORE.get_or_init(|| {
         let store = Arc::new(Store::load());
         router::start(&store);
+        let backfill = Arc::clone(&store);
+        let _ = std::thread::Builder::new()
+            .name("chat-cache-backfill".into())
+            .spawn(move || backfill.backfill_prompt_caches());
         store
     }))
 }
@@ -4226,6 +4230,7 @@ impl Store {
         let response_output_dir = self.prepare_response_output_dir(id)?;
         self.recover_codex_session(&mut chat);
         self.recover_opencode_session(&mut chat, &workspace.path);
+        self.recover_claude_session(&mut chat);
         let resume_token = chat
             .resume_tokens
             .get(&chat.backend)
@@ -5312,6 +5317,14 @@ impl Store {
         questions: &mut crate::chat_question::Scanner,
         plans: &mut crate::chat_plan::Scanner,
     ) {
+        if backend == "claude"
+            && events.iter().any(|event| {
+                matches!(event, Event::Failed { text }
+                    if text.contains(crate::chat_cache::CLAUDE_MISSING_SESSION))
+            })
+        {
+            self.forget_missing_claude_session(id);
+        }
         let mut timeline = Vec::new();
         for event in events {
             let previous_len = text.len();
@@ -5878,6 +5891,118 @@ impl Store {
     fn recover_codex_session(&self, chat: &mut Conversation) {
         if self.codex_session_missing(chat) {
             self.invalidate_native_session(chat);
+        }
+    }
+
+    /// Claude Code deletes old session transcripts on its own schedule, and
+    /// `--resume` of one it no longer has fails the turn. Start a fresh
+    /// session with the handover instead. Team runs keep their own Claude
+    /// home, so only private chats are checked here.
+    fn recover_claude_session(&self, chat: &mut Conversation) {
+        self.recover_claude_session_using(chat, crate::chat_cache::claude_session_exists);
+    }
+
+    fn recover_claude_session_using(
+        &self,
+        chat: &mut Conversation,
+        lookup: impl FnOnce(&str) -> Option<bool>,
+    ) {
+        if chat.backend != "claude" || chat.team_share.is_some() {
+            return;
+        }
+        let token = chat.resume_tokens.get("claude").or_else(|| {
+            chat.resume_tokens
+                .is_empty()
+                .then_some(chat.resume_token.as_ref())
+                .flatten()
+        });
+        if let Some(token) = token
+            && lookup(token) == Some(false)
+        {
+            self.invalidate_native_session(chat);
+            chat.prompt_cache = None;
+        }
+    }
+
+    /// A turn that failed because Claude no longer had its session. Forget
+    /// that session now, so Try again starts a fresh one with the handover
+    /// rather than failing the same way.
+    fn forget_missing_claude_session(&self, id: &str) {
+        let Ok(mut chat) = self.get(id) else {
+            return;
+        };
+        if chat.backend != "claude" {
+            return;
+        }
+        self.invalidate_native_session(&mut chat);
+        let _ = self.edit_conversation(id, |stored| {
+            stored.resume_tokens.remove("claude");
+            if stored.resume_tokens.is_empty() {
+                stored.resume_token = None;
+            }
+            stored.standing_sent.remove("claude");
+            stored.prompt_cache = None;
+            Ok(())
+        });
+    }
+
+    /// Chats whose last turn predates the prompt cache record get one from
+    /// their newest stored Claude stream, so the idle question covers them
+    /// too. Only recent ones: Claude Code drops old sessions, and a chat
+    /// without its session starts a new one instead of reading everything.
+    fn backfill_prompt_caches(&self) {
+        const RECENT: std::time::Duration = std::time::Duration::from_secs(45 * 24 * 60 * 60);
+        const TAIL: u64 = 1024 * 1024;
+        let candidates: Vec<(String, Option<String>)> = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|chat| {
+                chat.backend == "claude"
+                    && chat.prompt_cache.is_none()
+                    && chat.team_share.is_none()
+                    && !chat.running
+            })
+            .map(|chat| (chat.id.clone(), chat.resume_tokens.get("claude").cloned()))
+            .collect();
+        for (id, session) in candidates {
+            if session
+                .as_deref()
+                .and_then(crate::chat_cache::claude_session_exists)
+                == Some(false)
+            {
+                continue;
+            }
+            let raw = self.root.join(safe_file_name(&id)).join("raw");
+            let Some((path, modified)) = newest_raw_stream(&raw) else {
+                continue;
+            };
+            if modified.elapsed().map_or(true, |age| age > RECENT) {
+                continue;
+            }
+            let Some(bytes) = read_tail(&path, TAIL) else {
+                continue;
+            };
+            let Some(reading) = crate::chat_cache::reading_from_stream(&bytes) else {
+                continue;
+            };
+            let at_ms = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_millis() as i64);
+            let _ = self.edit_conversation(&id, |chat| {
+                if chat.backend == "claude" && chat.prompt_cache.is_none() && !chat.running {
+                    chat.prompt_cache = Some(crate::chat_cache::PromptCache {
+                        backend: "claude".into(),
+                        tokens: reading.tokens,
+                        model: reading.model.clone(),
+                        selection: chat.model.clone(),
+                        at_ms,
+                        ttl_ms: reading.ttl_ms,
+                    });
+                }
+                Ok(())
+            });
         }
     }
 
@@ -7616,6 +7741,38 @@ fn blocked_ancestor(path: &Path) -> bool {
         current = ancestor.parent();
     }
     false
+}
+
+/// The newest turn's raw stream in a chat's `raw` folder. Files are named
+/// by the turn's start time, so the largest name is the latest turn.
+fn newest_raw_stream(raw: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
+    fs::read_dir(raw)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let started: i64 = name.strip_suffix(".ndjson")?.parse().ok()?;
+            let metadata = entry.metadata().ok().filter(|meta| meta.is_file())?;
+            Some((started, entry.path(), metadata.modified().ok()?))
+        })
+        .max_by_key(|(started, _, _)| *started)
+        .map(|(_, path, modified)| (path, modified))
+}
+
+/// At most `limit` bytes from the end of a file, starting at a line.
+fn read_tail(path: &Path, limit: u64) -> Option<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    let start = length.saturating_sub(limit);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    if start > 0 {
+        let first = bytes.iter().position(|byte| *byte == b'\n')?;
+        bytes.drain(..=first);
+    }
+    Some(bytes)
 }
 
 const CONTINUATION_ASKED_CHARS: usize = 1_000;
@@ -10467,6 +10624,98 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_claude_session_claude_code_deleted_is_handed_over_not_resumed() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        store.set_resume("chat-test", "claude", "gone").unwrap();
+        let mut kept = store.get("chat-test").unwrap();
+        store.recover_claude_session_using(&mut kept, |_| None);
+        assert_eq!(
+            kept.resume_tokens.get("claude").map(String::as_str),
+            Some("gone")
+        );
+        store.recover_claude_session_using(&mut kept, |_| Some(true));
+        assert!(kept.resume_tokens.contains_key("claude"));
+        store.recover_claude_session_using(&mut kept, |token| {
+            assert_eq!(token, "gone");
+            Some(false)
+        });
+        assert!(kept.resume_tokens.is_empty() && kept.resume_token.is_none());
+
+        // The failure itself also forgets it, so Try again starts fresh.
+        store
+            .append(
+                "chat-test",
+                &StoredEvent::User {
+                    steer: false,
+                    text: "Fix the uploader".into(),
+                    at_ms: 1,
+                },
+            )
+            .unwrap();
+        store.record_events(
+            "chat-test",
+            "claude",
+            vec![Event::Text {
+                delta: "earlier".into(),
+            }],
+        );
+        let mut parser = crate::transcript::Parser::new("claude");
+        let (mut text, mut questions, mut plans) = (
+            String::new(),
+            crate::chat_question::Scanner::default(),
+            crate::chat_plan::Scanner::default(),
+        );
+        store.record_stream_events(
+            "chat-test",
+            "claude",
+            0,
+            None,
+            vec![Event::Failed {
+                text: "No conversation found with session ID: gone".into(),
+            }],
+            &mut parser,
+            &mut text,
+            &mut questions,
+            &mut plans,
+        );
+        let after = store.get("chat-test").unwrap();
+        assert!(
+            after.resume_tokens.is_empty() && after.resume_token.is_none(),
+            "{:?} {:?}",
+            after.resume_tokens,
+            after.resume_token
+        );
+        assert!(store.handover(&after).unwrap().is_some());
+    }
+
+    #[test]
+    fn an_older_claude_chat_gets_its_cache_record_from_the_stored_stream() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let raw = root.path().join("chat/chat-test/raw");
+        fs::create_dir_all(&raw).unwrap();
+        let line = |input: u64| {
+            json!({"type":"assistant","parent_tool_use_id":null,"message":{"model":"claude-opus-5-5",
+                "usage":{"input_tokens":input,"cache_read_input_tokens":90000,
+                    "cache_creation_input_tokens":10,"cache_creation":{"ephemeral_1h_input_tokens":10}}}})
+        };
+        fs::write(raw.join("100.ndjson"), format!("{}\n", line(1))).unwrap();
+        fs::write(
+            raw.join("200.ndjson"),
+            format!("{}\n{}\n", line(2), line(3)),
+        )
+        .unwrap();
+        store.backfill_prompt_caches();
+        let cache = store.get("chat-test").unwrap().prompt_cache.unwrap();
+        assert_eq!(cache.tokens, 90013);
+        assert_eq!(cache.ttl_ms, 3_600_000);
+        assert!(cache.at_ms > 0);
     }
 
     #[test]

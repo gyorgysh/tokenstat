@@ -93,6 +93,66 @@ pub(crate) fn claude_reading(value: &Value, previous: Option<&Reading>) -> Optio
     })
 }
 
+/// The text Claude Code prints when `--resume` names a session it no longer
+/// keeps. It deletes old session transcripts on its own schedule.
+pub(crate) const CLAUDE_MISSING_SESSION: &str = "No conversation found with session ID";
+
+/// Whether Claude Code still keeps this session's transcript.
+///
+/// None when it cannot tell: an unusual session id, or no projects folder
+/// to look in. A caller only drops a session on a definite no, so a guess
+/// never throws away a conversation the agent still has.
+pub(crate) fn claude_session_exists(session: &str) -> Option<bool> {
+    if session.is_empty()
+        || !session
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| tokenstat_paths::home_dir().map(|home| home.join(".claude")))?;
+    session_in_projects(&base.join("projects"), session)
+}
+
+/// Claude Code files a session under a folder named after the working
+/// directory. Looking in every project folder avoids re-deriving that name.
+fn session_in_projects(projects: &std::path::Path, session: &str) -> Option<bool> {
+    let entries = std::fs::read_dir(projects).ok()?;
+    let name = format!("{session}.jsonl");
+    for entry in entries.flatten() {
+        if entry.path().join(&name).is_file() {
+            return Some(true);
+        }
+    }
+    Some(false)
+}
+
+/// The last main-conversation request in a stored Claude stream.
+///
+/// Used for chats whose turns predate the cache record. Reads forward so a
+/// request that wrote no cache inherits the lifetime seen before it.
+pub(crate) fn reading_from_stream(bytes: &[u8]) -> Option<Reading> {
+    let mut reading = None;
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if !line
+            .windows(b"\"assistant\"".len())
+            .any(|chunk| chunk == b"\"assistant\"")
+        {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if let Some(next) = claude_reading(&value, reading.as_ref()) {
+            reading = Some(next);
+        }
+    }
+    reading
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +209,31 @@ mod tests {
         .unwrap();
         assert_eq!(reading.ttl_ms, FIVE_MINUTES_MS);
         assert!(reading.at_ms > 0);
+    }
+
+    #[test]
+    fn a_stored_stream_gives_its_last_request_and_the_lifetime_before_it() {
+        let first = assistant(json!({"input_tokens":1,"cache_read_input_tokens":100,
+            "cache_creation_input_tokens":5,"cache_creation":{"ephemeral_1h_input_tokens":5}}));
+        let last = assistant(json!({"input_tokens":2,"cache_read_input_tokens":300}));
+        let stream = format!("{first}\nnot json\n{{\"type\":\"result\"}}\n{last}\n");
+        let reading = reading_from_stream(stream.as_bytes()).unwrap();
+        assert_eq!(reading.tokens, 302);
+        assert_eq!(reading.ttl_ms, ONE_HOUR_MS);
+        assert!(reading_from_stream(b"{\"type\":\"result\"}\n").is_none());
+    }
+
+    #[test]
+    fn a_session_is_found_in_any_project_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        assert_eq!(session_in_projects(&projects, "abc"), None);
+        std::fs::create_dir_all(projects.join("-Users-me-one")).unwrap();
+        std::fs::create_dir_all(projects.join("-Users-me-two")).unwrap();
+        assert_eq!(session_in_projects(&projects, "abc"), Some(false));
+        std::fs::write(projects.join("-Users-me-two/abc.jsonl"), "{}").unwrap();
+        assert_eq!(session_in_projects(&projects, "abc"), Some(true));
+        assert_eq!(claude_session_exists("../etc/passwd"), None);
     }
 
     #[test]
