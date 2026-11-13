@@ -13,10 +13,14 @@
 //! The host records completed blocks as timeline updates and keeps the latest
 //! plan in the conversation's activity. Clients hide the raw blocks.
 //!
+//! Cursor has a todo tool the host reads, but a headless Cursor turn did a
+//! multi-step task without ever calling it, so it writes the block too, like
+//! Antigravity and any agent added later.
+//!
 //! OpenCode, Muse and Grok do have a todo tool the host reads, but nothing
 //! told the model to use it, and a smaller model often did the work with no
 //! plan at all. They get a rule pointing at their own tool instead of the
-//! block. Cursor keeps its todos without being asked.
+//! block.
 
 use serde_json::{Value, json};
 
@@ -100,11 +104,16 @@ fn parse(body: &str) -> Option<Value> {
     Some(Value::Array(steps))
 }
 
-/// How this backend should keep a visible plan: the fenced block, a pointer
-/// to its own todo tool, or nothing when it keeps one without being asked.
+/// How this backend should keep a visible plan: the fenced block, or a
+/// pointer to its own todo tool. Every one ends in the same plan card.
 pub fn rule(backend: &str) -> Option<String> {
     match backend {
-        "codex" | "claude" => Some(format!(
+        "opencode" | "opencode2" => Some(native_rule("todowrite")),
+        "muse" => Some(native_rule("write_todos")),
+        "grok" => Some(native_rule("todo_write")),
+        // A plain shell is not an agent.
+        "sh" => None,
+        _ => Some(format!(
             "For work with three or more steps, keep a visible plan: write a fenced \
              code block in your reply, language `{FENCE}`, holding one JSON object: \
              {{\"steps\": [{{\"step\": \"...\", \"status\": \"pending\"}}]}}, where status \
@@ -116,10 +125,6 @@ pub fn rule(backend: &str) -> Option<String> {
              through the block: do not also write the plan or \"step N done\" notes \
              as prose. Skip this for quick answers, and do not mention this format."
         )),
-        "opencode" | "opencode2" => Some(native_rule("todowrite")),
-        "muse" => Some(native_rule("write_todos")),
-        "grok" => Some(native_rule("todo_write")),
-        _ => None,
     }
 }
 
@@ -213,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn only_backends_without_a_reaching_plan_tool_get_a_rule() {
+    fn every_chat_backend_is_told_how_to_keep_a_plan() {
         assert!(rule("codex").is_some_and(|text| text.contains(FENCE)));
         assert!(rule("claude").is_some_and(|text| text.contains(FENCE)));
         assert!(
@@ -230,6 +235,8 @@ mod tests {
         assert!(
             rule("grok").is_some_and(|text| text.contains("todo_write") && !text.contains(FENCE))
         );
-        assert!(rule("cursor").is_none());
+        assert!(rule("cursor").is_some_and(|text| text.contains(FENCE)));
+        assert!(rule("agy").is_some_and(|text| text.contains(FENCE)));
+        assert!(rule("sh").is_none());
     }
 }

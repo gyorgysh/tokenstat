@@ -18,8 +18,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Improved
 
 - Codex keeps working on a goal until it is done. Ask it to keep going until something is finished, and it runs turn after turn until the goal is complete, paused or blocked. The goal and its status show in the chat's activity panel.
-- Plans look the same whichever agent writes them. Plans from Grok, OpenCode, Muse and Cursor show as the same checklist as Codex and Claude, without an extra "Updated the list" row. Grok is now asked to keep a plan for longer tasks.
-- Paid plans include more relayed traffic: 5 GiB, 20 GiB and 40 GiB per rolling 30 days, up from 1, 5 and 20 GiB. Direct connections still do not count.
+- Every agent keeps a plan for longer tasks, and it looks the same whichever agent writes it. Plans from Cursor, Antigravity, Grok, OpenCode and Muse show as the same checklist as Codex and Claude, without an extra "Updated the list" row.
+- Paid plans include more relayed traffic: 5 GiB, 20 GiB and 40 GiB per rolling 30 days, up from 1, 5 and 20 GiB. Direct connections stay unlimited.
 - You can send a text message while a file is still uploading.
 - Automation transcripts show each tool as a compact row.
 

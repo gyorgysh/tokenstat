@@ -2707,6 +2707,19 @@ mod tests {
 
     static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
+    /// A new agent must arrive with a way to show its plan, or its plans
+    /// silently never reach the chat.
+    #[test]
+    fn every_agent_backend_is_told_how_to_keep_a_plan() {
+        for spec in BACKENDS.iter().filter(|spec| spec.id != "sh") {
+            assert!(
+                crate::chat_plan::rule(spec.id).is_some(),
+                "{} has no plan rule",
+                spec.id
+            );
+        }
+    }
+
     fn temp_dir(tag: &str) -> PathBuf {
         let n = DIR_SEQ.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
