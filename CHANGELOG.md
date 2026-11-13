@@ -13,6 +13,7 @@ desktop is a review build. Newest first.
 
 ### Fixed
 
+- On Android, tapping a computer on Home opens its device page.
 - On Android, following a long reply reaches its end when a turn finishes.
 - On small Android screens, the composer keeps its model and controls on one row when space allows.
 - On Android 15 and later, widget setup stays clear of the system bars and display cutouts.
