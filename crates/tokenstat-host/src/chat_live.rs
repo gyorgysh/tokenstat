@@ -23,6 +23,10 @@ const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 const CAPABILITY_TTL: Duration = Duration::from_secs(60);
+/// How long a finished turn waits for Codex to start the next turn of an
+/// active goal. It starts one at once, so this only bounds a goal that Codex
+/// decided not to continue.
+const GOAL_CONTINUATION_WAIT: Duration = Duration::from_secs(20);
 
 type CliVersion = Option<[u64; 3]>;
 type VersionEntry = Arc<Mutex<Option<(Instant, CliVersion)>>>;
@@ -388,6 +392,64 @@ struct Pending {
 
 /// App-server totals are cumulative across resumed turns. Emit only the
 /// increments observed during this launch, never the restored thread total.
+/// Keeps a Codex run open across the turns of an active goal.
+///
+/// Codex continues an active goal on its own: when a turn completes it starts
+/// the next one immediately, and stops when the goal is complete, paused,
+/// blocked or out of budget. It does that only while a client is subscribed
+/// to the thread, so ending the run at the first `turn/completed` ended the
+/// goal with it. The run now holds that completion while the goal is active,
+/// follows each continuation turn, and replays the last completion once the
+/// goal settles or no further turn comes.
+#[derive(Default)]
+struct GoalContinuation {
+    active: bool,
+    held: Option<(String, Value, Instant)>,
+    /// Set once the run has settled, so a replayed completion is not held
+    /// a second time.
+    settled: bool,
+}
+
+impl GoalContinuation {
+    /// Follow the goal through the same activity records the chat shows.
+    fn observe(&mut self, activity: &Value) {
+        if activity["kind"] == "goal" {
+            self.active = activity["goal"]["status"] == "active";
+        }
+    }
+
+    /// Hold a completed turn while the goal is active. False means finish now.
+    fn hold(&mut self, turn: &str, completion: &Value, now: Instant) -> bool {
+        if !self.active || self.settled {
+            return false;
+        }
+        self.held = Some((
+            turn.to_string(),
+            completion.clone(),
+            now + GOAL_CONTINUATION_WAIT,
+        ));
+        true
+    }
+
+    /// Codex started the next turn, which now owns the run.
+    fn continued(&mut self) {
+        self.held = None;
+    }
+
+    /// The held turn and its completion, once the goal is no longer active or
+    /// the wait for another turn has run out.
+    fn settled(&mut self, now: Instant) -> Option<(String, Value)> {
+        let (_, _, until) = self.held.as_ref()?;
+        if self.active && now < *until {
+            return None;
+        }
+        self.settled = true;
+        self.held
+            .take()
+            .map(|(turn, completion, _)| (turn, completion))
+    }
+}
+
 #[derive(Default)]
 struct CodexUsage {
     previous: Option<Value>,
@@ -1076,6 +1138,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         let mut initialized = false;
         let mut mcp_pages = 0;
         let mut goal_notified = false;
+        let mut goal = GoalContinuation::default();
         let mut codex_usage = CodexUsage::default();
         let mut started = false;
         loop {
@@ -1086,7 +1149,12 @@ pub fn run(path: &Path) -> Result<(), String> {
             if !started && Instant::now() >= startup_deadline {
                 return Err("The agent did not initialize its live protocol.".into());
             }
-            let deferred = if protocol.pending.values().any(|pending| pending.steer) {
+            let deferred = if let Some((turn, completion)) = goal.settled(Instant::now()) {
+                // The goal stopped, or Codex started no further turn: close
+                // the run with the last turn's own completion.
+                protocol.turn = turn;
+                Some(completion)
+            } else if protocol.pending.values().any(|pending| pending.steer) {
                 None
             } else {
                 protocol.deferred_result.take()
@@ -1249,12 +1317,14 @@ pub fn run(path: &Path) -> Result<(), String> {
             } else if message["id"] == "inspection-goal" {
                 if let Some(activity) = codex_goal_reply(&message, &protocol.thread, goal_notified)
                 {
+                    goal.observe(&activity);
                     emit(&mut output, &activity)?;
                 }
             } else if let Some(activity) =
                 crate::chat_activity::codex_notification(&message, &protocol.thread, &protocol.turn)
             {
                 goal_notified |= activity["kind"] == "goal";
+                goal.observe(&activity);
                 emit(&mut output, &activity)?;
             } else if message["method"] == "mcpServer/startupStatus/updated" {
                 let params = &message["params"];
@@ -1321,6 +1391,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                             .to_string()
                     })?
                     .into();
+                goal.continued();
                 if !started {
                     write_json(&directory.join("ready.json"), &json!(true))?;
                     started = true;
@@ -1332,8 +1403,18 @@ pub fn run(path: &Path) -> Result<(), String> {
                 {
                     continue;
                 }
-                protocol.finished = true;
                 let completed = turn["status"] == "completed";
+                // Codex keeps an active goal going itself, starting the next
+                // turn straight away, but only while a client is still
+                // subscribed. Hold this completion and stay for that turn.
+                if completed
+                    && initial["tokenstatCompact"] != true
+                    && goal.hold(&protocol.turn, &message, Instant::now())
+                {
+                    protocol.turn.clear();
+                    continue;
+                }
+                protocol.finished = true;
                 if !completed {
                     emit(
                         &mut output,
@@ -1587,6 +1668,50 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn goal(status: &str) -> Value {
+        json!({"type":"tokenstat.activity","kind":"goal","goal":{"objective":"Ship","status":status}})
+    }
+
+    #[test]
+    fn an_active_goal_holds_the_completion_until_codex_continues() {
+        let now = Instant::now();
+        let done = json!({"method":"turn/completed"});
+        let mut continuation = GoalContinuation::default();
+        assert!(!continuation.hold("turn", &done, now), "no goal, finish");
+        continuation.observe(&goal("active"));
+        assert!(continuation.hold("turn", &done, now));
+        assert!(continuation.settled(now).is_none());
+        continuation.continued();
+        assert!(
+            continuation.settled(now + GOAL_CONTINUATION_WAIT).is_none(),
+            "the next turn owns the run"
+        );
+        assert!(continuation.hold("turn-2", &done, now));
+        continuation.observe(&goal("complete"));
+        let (turn, completion) = continuation.settled(now).expect("goal finished");
+        assert_eq!(turn, "turn-2");
+        assert_eq!(completion, done);
+        assert!(!continuation.hold("turn-2", &done, now), "replay finishes");
+    }
+
+    #[test]
+    fn a_goal_codex_does_not_continue_settles_after_the_wait() {
+        let now = Instant::now();
+        let mut continuation = GoalContinuation::default();
+        continuation.observe(&goal("active"));
+        assert!(continuation.hold("turn", &json!({}), now));
+        assert!(continuation.settled(now).is_none());
+        assert!(continuation.settled(now + GOAL_CONTINUATION_WAIT).is_some());
+        let mut paused = GoalContinuation::default();
+        paused.observe(&goal("paused"));
+        assert!(!paused.hold("turn", &json!({}), now));
+        paused.observe(&json!({"type":"tokenstat.activity","kind":"goal","goal":null}));
+        assert!(
+            !paused.hold("turn", &json!({}), now),
+            "a cleared goal finishes"
+        );
+    }
 
     fn protocol(backend: &str) -> Protocol {
         Protocol {

@@ -692,6 +692,12 @@ for line in sys.stdin:
     emit({'method':'item/completed','params':{'threadId':'session','turnId':'turn','item':{'id':'answer','type':'agentMessage','text':'Completed once.'}}})
     emit({'method':'thread/tokenUsage/updated','params':{'threadId':'session','turnId':'turn','tokenUsage':{'last':{'inputTokens':60,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2},'modelContextWindow':200000,'total':{'inputTokens':100,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2}}}})
     emit({'method':'turn/completed','params':{'threadId':'session','turn':{'id':'turn','status':'completed'}}})
+    # The goal is still active, so Codex starts the next turn by itself.
+    emit({'method':'turn/started','params':{'threadId':'session','turn':{'id':'turn-2'}}})
+    emit({'method':'item/completed','params':{'threadId':'session','turnId':'turn-2','item':{'id':'answer-2','type':'agentMessage','text':'Goal continued.'}}})
+    emit({'method':'thread/tokenUsage/updated','params':{'threadId':'session','turnId':'turn-2','tokenUsage':{'last':{'inputTokens':20,'cachedInputTokens':0,'outputTokens':3,'reasoningOutputTokens':0},'modelContextWindow':200000,'total':{'inputTokens':120,'cachedInputTokens':40,'outputTokens':8,'reasoningOutputTokens':2}}}})
+    emit({'method':'thread/goal/updated','params':{'threadId':'session','goal':{'threadId':'session','objective':'Finish current work','status':'complete','tokensUsed':90,'tokenBudget':None,'timeUsedSeconds':3}}})
+    emit({'method':'turn/completed','params':{'threadId':'session','turn':{'id':'turn-2','status':'completed'}}})
   elif method=='thread/unsubscribe':
    emit({'method':'thread/goal/updated','params':{'threadId':'session','goal':{'threadId':'session','objective':'Finish current work','status':'complete','tokensUsed':100,'tokenBudget':None,'timeUsedSeconds':3}}})
    emit({'id':m['id'],'result':{}});break
@@ -837,11 +843,16 @@ stop_stream()
                     .lines()
                     .map(|line| serde_json::from_str(line).unwrap())
                     .collect();
-                let done = rows
+                // The goal's continuation turn belongs to the same run.
+                assert_eq!(output.matches("Goal continued.").count(), 1, "{output}");
+                let completions: Vec<_> = rows
                     .iter()
-                    .find(|row| row["type"] == "turn.completed")
-                    .unwrap();
+                    .filter(|row| row["type"] == "turn.completed")
+                    .collect();
+                assert_eq!(completions.len(), 1, "{output}");
+                let done = completions[0];
                 assert_eq!(done["usage"]["cached_input_tokens"], 40);
+                assert_eq!(done["usage"]["input_tokens"], 80, "both turns are counted");
                 let context = rows
                     .iter()
                     .find(|row| row["type"] == "tokenstat.context" && row["contextUsed"] == 60)
