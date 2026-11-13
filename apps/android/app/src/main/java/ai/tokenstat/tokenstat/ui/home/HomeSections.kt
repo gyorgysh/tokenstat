@@ -451,7 +451,7 @@ data class HomeMachine(
 @Composable
 fun MachinesSection(
     machines: List<HomeMachine>,
-    onOpenWork: (String) -> Unit,
+    onOpenDevice: (String) -> Unit,
     onOpenDevices: () -> Unit,
 ) {
     val colors = LocalTsColors.current
@@ -492,7 +492,7 @@ fun MachinesSection(
                     horizontalArrangement = Arrangement.spacedBy(Space.m),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenWork(machine.id) }
+                        .clickable { onOpenDevice(machine.id) }
                         .heightIn(min = 60.dp)
                         .padding(Space.m),
                 ) {

@@ -1067,6 +1067,10 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             selected = Destination.Workspaces
                         },
                         onOpenDevices = { selected = Destination.Devices },
+                        onOpenDevice = { id ->
+                            pendingDeviceId = id
+                            selected = Destination.Devices
+                        },
                         onSetupWizard = { wizardOpen = true },
                         onSignIn = {
                             model.signIn { url ->
@@ -1286,6 +1290,7 @@ private fun HomeScreen(
     stores: HomeStores,
     onOpenWork: (hostId: String, folderId: String?, kind: String?, item: String?) -> Unit,
     onOpenDevices: () -> Unit,
+    onOpenDevice: (String) -> Unit,
     onSetupWizard: (() -> Unit)? = null,
     onSignIn: (() -> Unit)? = null,
     tabBarScroll: NestedScrollConnection? = null,
@@ -1470,7 +1475,7 @@ private fun HomeScreen(
                     item {
                         MachinesSection(
                             machines = awakeHosts,
-                            onOpenWork = { id -> onOpenWork(id, null, null, null) },
+                            onOpenDevice = onOpenDevice,
                             onOpenDevices = onOpenDevices,
                         )
                     }
