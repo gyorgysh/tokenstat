@@ -9,11 +9,26 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.18.0]
+## [1.18.0] - 2026-11-13
+
+### Added
+
+- Dictate a message on Mac, iPhone and iPad. Press the mic in the composer and talk, and your words appear in the draft as you speak. Switch languages from the recording bar or the mic's menu. Recognition runs on your device when your language supports it.
+
+### Improved
+
+- Codex keeps working on a goal until it is done. Ask it to keep going until something is finished, and it runs turn after turn until the goal is complete, paused or blocked. The goal and its status show in the chat's activity panel.
+- Plans look the same whichever agent writes them. Plans from Grok, OpenCode, Muse and Cursor show as the same checklist as Codex and Claude, without an extra "Updated the list" row. Grok is now asked to keep a plan for longer tasks.
+- Paid plans include more relayed traffic: 5 GiB, 20 GiB and 40 GiB per rolling 30 days, up from 1, 5 and 20 GiB. Direct connections still do not count.
+- You can send a text message while a file is still uploading.
+- Automation transcripts show each tool as a compact row.
 
 ### Fixed
 
 - View screen is back on iPhone, iPad and Android for Apple Silicon Macs. It now shows for every computer running the tokenstat desktop app, and no longer for servers that run only the CLI.
+- A cancelled or unanswered send stays tracked until tokenstat knows whether it arrived, so a retry can no longer post the same message twice.
+- Reopening a chat keeps the current messages on screen until the new ones load.
+- Auto-commit uses the instructions you saved last, even when a job starts while you are editing them.
 
 ## [1.17.0] - 2026-11-12
 
