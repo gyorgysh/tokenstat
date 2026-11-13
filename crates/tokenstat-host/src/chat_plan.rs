@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-//! A visible plan for agents whose CLI gives them no plan tool.
+//! One visible plan format for every agent.
 //!
-//! Some agents report their plan through a tool the host already reads
-//! (Cursor's todos, OpenCode's todowrite). Codex and Claude Code in the modes
-//! tokenstat runs have none: Codex's plan tool is off in exec and app-server
+//! Codex and Claude Code in the modes tokenstat runs have no plan tool: Codex's plan tool is off in exec and app-server
 //! turns, and Claude Code's print mode offers neither TodoWrite nor its task
 //! tools, not even through a tool search. So their plans never reached the
 //! chat. They write one the same way every backend asks a question: a fenced
@@ -13,14 +11,10 @@
 //! The host records completed blocks as timeline updates and keeps the latest
 //! plan in the conversation's activity. Clients hide the raw blocks.
 //!
-//! Cursor has a todo tool the host reads, but a headless Cursor turn did a
-//! multi-step task without ever calling it, so it writes the block too, like
-//! Antigravity and any agent added later.
-//!
-//! OpenCode, Muse and Grok do have a todo tool the host reads, but nothing
-//! told the model to use it, and a smaller model often did the work with no
-//! plan at all. They get a rule pointing at their own tool instead of the
-//! block.
+//! Every other agent writes the block too. Several have a todo tool the host
+//! can read, but pointing each at its own tool failed in practice: OpenCode's
+//! headless run offers none, Cursor never called its own, and a plan split
+//! across a tool and prose looked different from agent to agent.
 
 use serde_json::{Value, json};
 
@@ -104,41 +98,37 @@ fn parse(body: &str) -> Option<Value> {
     Some(Value::Array(steps))
 }
 
-/// How this backend should keep a visible plan: the fenced block, or a
-/// pointer to its own todo tool. Every one ends in the same plan card.
+/// How an agent keeps a visible plan. Every agent writes the same block,
+/// including those with a todo tool of their own: pointing each at its own
+/// tool meant a missing tool (OpenCode's headless run has none) or a half
+/// used one left the chat with no plan. The host still reads a todo tool
+/// into the same card when an agent calls one anyway.
 pub fn rule(backend: &str) -> Option<String> {
-    match backend {
-        "opencode" | "opencode2" => Some(native_rule("todowrite")),
-        "muse" => Some(native_rule("write_todos")),
-        "grok" => Some(native_rule("todo_write")),
-        // A plain shell is not an agent.
-        "sh" => None,
-        _ => Some(format!(
-            "For work with three or more steps, keep a visible plan: write a fenced \
-             code block in your reply, language `{FENCE}`, holding one JSON object: \
-             {{\"steps\": [{{\"step\": \"...\", \"status\": \"pending\"}}]}}, where status \
-             is pending, in_progress or completed. Write the first block before you \
-             start the work, then a new one each time a step starts or finishes, \
-             always with the whole list, \
-             and keep one step in_progress. The app shows \
-             it in its plan panel and hides the block, so report progress only \
-             through the block: do not also write the plan or \"step N done\" notes \
-             as prose. Skip this for quick answers, and do not mention this format."
-        )),
-    }
+    // A plain shell is not an agent.
+    (backend != "sh").then(|| {
+        format!(
+            "{WHEN} keep a visible plan. Write a fenced code block in your reply, \
+             language `{FENCE}`, holding one JSON object: \
+             {{\"steps\": [{{\"step\": \"...\", \"status\": \"pending\"}}]}}, where \
+             status is pending, in_progress or completed. Write the first block before \
+             your first tool call. Write it again, with the whole list, each time a \
+             step starts or finishes, and keep one step in_progress. Write it one \
+             last time right before your final answer, with every finished step \
+             completed. The app shows it in its plan panel and hides the block, so \
+             report progress only through the block: do not also write the plan, a \
+             step table or \"step N done\" notes as prose. {SKIP} Do not mention \
+             this format."
+        )
+    })
 }
 
-fn native_rule(tool: &str) -> String {
-    format!(
-        "For work with three or more steps, keep a visible plan with your `{tool}` \
-         tool. Call it before your first other tool call to write the whole list, \
-         then call it again each time a step starts or finishes, with one step \
-         in progress. A task that reads, writes or edits files more than twice \
-         counts. The app shows that list in its plan panel, so do not also write \
-         the plan or \"step N done\" notes as prose. Skip this only for quick \
-         answers."
-    )
-}
+/// When a plan is due. Concrete on purpose: "skip this for quick answers"
+/// let a model call a six-step file test quick and show no plan at all.
+const WHEN: &str = "For any task that takes three or more tool calls, including a small \
+    test or a series of edits to one file,";
+
+/// The only exception, stated as a count so it cannot be argued.
+const SKIP: &str = "Skip the plan only when you answer with two tool calls or fewer.";
 
 #[cfg(test)]
 mod tests {
@@ -184,6 +174,25 @@ mod tests {
     }
 
     #[test]
+    fn a_block_glued_to_the_last_closing_fence_still_updates_the_plan() {
+        // Captured from Grok: the second plan opens on the first one's
+        // closing line.
+        let text = format!(
+            "Starting.\n\n```{FENCE}\n{{\"steps\":[{{\"step\":\"Write\",\"status\":\"in_progress\"}},{{\"step\":\"Read\",\"status\":\"pending\"}}]}}\n``````{FENCE}\n{{\"steps\":[{{\"step\":\"Write\",\"status\":\"completed\"}},{{\"step\":\"Read\",\"status\":\"in_progress\"}}]}}\n```\nDone.\n"
+        );
+        let plans = Scanner::default().scan_all(&text);
+        assert_eq!(plans.len(), 2, "{plans:?}");
+        assert_eq!(plans[1][0]["status"], "completed");
+        assert_eq!(plans[1][1]["status"], "in_progress");
+        let plain = format!("```{FENCE}\n{{\"steps\":[]}}\n``````\nprose\n");
+        assert_eq!(
+            Scanner::default().scan_all(&plain).len(),
+            1,
+            "a bare run of ticks still only closes"
+        );
+    }
+
+    #[test]
     fn a_closing_fence_glued_to_prose_still_updates_the_plan() {
         // The final update often arrives as ` ```Yes,...` with no newline after
         // the ticks. That must still close the block or the plan sticks mid-run.
@@ -219,24 +228,21 @@ mod tests {
 
     #[test]
     fn every_chat_backend_is_told_how_to_keep_a_plan() {
-        assert!(rule("codex").is_some_and(|text| text.contains(FENCE)));
-        assert!(rule("claude").is_some_and(|text| text.contains(FENCE)));
-        assert!(
-            rule("opencode")
-                .is_some_and(|text| text.contains("todowrite") && !text.contains(FENCE))
-        );
-        assert!(
-            rule("opencode2")
-                .is_some_and(|text| text.contains("todowrite") && !text.contains(FENCE))
-        );
-        assert!(
-            rule("muse").is_some_and(|text| text.contains("write_todos") && !text.contains(FENCE))
-        );
-        assert!(
-            rule("grok").is_some_and(|text| text.contains("todo_write") && !text.contains(FENCE))
-        );
-        assert!(rule("cursor").is_some_and(|text| text.contains(FENCE)));
-        assert!(rule("agy").is_some_and(|text| text.contains(FENCE)));
+        for backend in [
+            "codex",
+            "claude",
+            "cursor",
+            "agy",
+            "opencode",
+            "opencode2",
+            "muse",
+            "grok",
+        ] {
+            assert!(
+                rule(backend).is_some_and(|text| text.contains(FENCE)),
+                "{backend} writes the block"
+            );
+        }
         assert!(rule("sh").is_none());
     }
 }

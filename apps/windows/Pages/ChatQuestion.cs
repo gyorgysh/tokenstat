@@ -78,17 +78,29 @@ internal static class ChatQuestionText
                                 && !string.IsNullOrWhiteSpace(question.GetValue<string>());
                     }
                     catch (System.Text.Json.JsonException) { }
+                    // A model writing one block after another often glues the
+                    // next opening fence to this closing one on a single line.
+                    var next = trailing.Trim(' ', '\t');
+                    var nextInfo = next.StartsWith("```", StringComparison.Ordinal) ? next[3..].Trim() : "";
+                    var opensNext = nextInfo == Fence || nextInfo == PlanFence;
                     if (!valid)
                     {
                         kept.AddRange(block);
-                        kept.Add(line);
+                        kept.Add(opensNext ? line[..^trailing.Length] : line);
                     }
-                    else if (trailing.Length > 0)
+                    else if (trailing.Length > 0 && !opensNext)
                     {
                         kept.Add(trailing);
                     }
                     block.Clear();
                     inside = false;
+                    if (opensNext)
+                    {
+                        inside = true;
+                        isPlan = nextInfo == PlanFence;
+                        block = [next];
+                        bodyBytes = 0;
+                    }
                 }
                 else
                 {
@@ -117,6 +129,14 @@ internal static class ChatQuestionText
         var ticks = 0;
         while (index + ticks < line.Length && line[index + ticks] == '`') ticks++;
         if (ticks < 3) return null;
+        // Host glued_opening: "``````tokenstat-plan" closes on three ticks and
+        // opens the next block with the rest.
+        var afterRun = line[(index + ticks)..].TrimStart(' ', '\t');
+        if (ticks >= 6 && afterRun.Length > 0 && char.IsAsciiLetter(afterRun[0]))
+        {
+            var glued = line[(index + 3)..];
+            return glued.EndsWith('\r') ? glued[..^1] : glued;
+        }
         var trailing = line[(index + ticks)..];
         if (trailing.EndsWith('\r')) trailing = trailing[..^1];
         return trailing.TrimStart(' ', '\t');

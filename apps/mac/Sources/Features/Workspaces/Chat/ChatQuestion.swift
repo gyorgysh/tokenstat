@@ -81,14 +81,25 @@ enum ChatQuestionText {
                     let valid = isPlan
                         ? value?["steps"] is [Any]
                         : question?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    // A model writing one block after another often glues the
+                    // next opening fence to this closing one on a single line.
+                    let next = trailing.trimmingCharacters(in: .whitespaces)
+                    let nextInfo = next.hasPrefix("```") ? next.dropFirst(3).trimmingCharacters(in: .whitespaces) : ""
+                    let opensNext = nextInfo == fence || nextInfo == planFence
                     if !valid {
                         kept.append(contentsOf: block)
-                        kept.append(line)
-                    } else if !trailing.isEmpty {
+                        kept.append(opensNext ? String(line.dropLast(trailing.count)) : line)
+                    } else if !trailing.isEmpty, !opensNext {
                         kept.append(trailing)
                     }
                     block = []
                     inside = false
+                    if opensNext {
+                        inside = true
+                        isPlan = nextInfo == planFence
+                        block = [next]
+                        bodyBytes = 0
+                    }
                 } else {
                     block.append(line)
                     bodyBytes += line.utf8.count + (index < lines.count - 1 ? 1 : 0)
@@ -122,6 +133,15 @@ enum ChatQuestionText {
             cursor = line.index(after: cursor)
         }
         guard ticks >= 3 else { return nil }
+        // Host glued_opening: "``````tokenstat-plan" closes on three ticks
+        // and opens the next block with the rest.
+        let afterThree = line.index(index, offsetBy: 3)
+        let afterRun = line[cursor...].drop { $0 == " " || $0 == "\t" }
+        if ticks >= 6, afterRun.first?.isASCII == true, afterRun.first?.isLetter == true {
+            var glued = line[afterThree...]
+            if glued.last == "\r" { glued = glued.dropLast() }
+            return String(glued)
+        }
         var trailing = line[cursor...]
         if trailing.last == "\r" { trailing = trailing.dropLast() }
         while trailing.first == " " || trailing.first == "\t" {

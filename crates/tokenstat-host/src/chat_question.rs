@@ -131,7 +131,11 @@ pub(crate) fn next_block<'a>(
         // A fence opens a line. Anything but indentation before it on the
         // same line is prose that happens to contain backticks.
         let line_start = text[..at].rfind('\n').map_or(0, |n| n + 1);
-        let opens_line = text[line_start..at].chars().all(|c| c == ' ' || c == '\t');
+        let before = text[line_start..at].trim_matches(|c| c == ' ' || c == '\t');
+        // A model writing one block after another often glues the next
+        // opening fence to the last closing one (```` ``` ```` then
+        // ```` ```tokenstat-plan ````) on a single line.
+        let opens_line = before.is_empty() || before == "```";
         let after = &text[at + 3..];
         let newline = after.find('\n')?;
         let info = after[..newline].trim();
@@ -203,7 +207,22 @@ fn closing_fence_prefix(line: &str) -> Option<usize> {
     if ticks < 3 {
         return None;
     }
+    // ```` ``````tokenstat-plan ```` is this block closing and the next one
+    // opening on the same line: close on the first three ticks only.
+    if glued_opening(&rest[3..]) {
+        return Some(indent + 3);
+    }
     Some(indent + ticks)
+}
+
+/// Whether text right after a closing fence opens another block: three or
+/// more ticks followed by an info string.
+fn glued_opening(after_close: &str) -> bool {
+    let ticks = after_close.bytes().take_while(|&b| b == b'`').count();
+    ticks >= 3
+        && after_close[ticks..]
+            .trim_start_matches([' ', '\t'])
+            .starts_with(|c: char| c.is_ascii_alphabetic())
 }
 
 /// Read one block body. Anything malformed is dropped: a broken question is

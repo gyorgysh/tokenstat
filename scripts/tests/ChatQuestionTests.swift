@@ -25,6 +25,14 @@ struct ChatQuestionTests {
                 "an indented glued closing fence still hides a valid plan")
         require(ChatQuestionText.stripping("\(fence)\n{\"question\":\"Ship?\"}\n```Yes, shipping.") == "Yes, shipping.",
                 "a glued question fence keeps the trailing prose")
+        // Captured from Grok: the next plan opens on the last one's closing line.
+        let glued = "Starting.\n\n\(plan)```tokenstat-plan\n{\"steps\":[{\"step\":\"Read\",\"status\":\"completed\"}]}\n```\nDone."
+        require(ChatQuestionText.stripping(glued) == "Starting.\n\nDone.",
+                "a plan glued to the last closing fence is hidden too: \(ChatQuestionText.stripping(glued))")
+        require(ChatQuestionText.stripping("Starting.\n\(plan)```tokenstat-plan\n{\"steps\":[") == "Starting.",
+                "a glued plan still streaming is cut from its opening")
+        require(ChatQuestionText.stripping("\(plan.dropLast(3))``````\nprose") == "prose",
+                "a bare run of ticks only closes")
         require(ChatQuestionText.stripping("```tokenstat-plan\nnot json\n```", streaming: false).contains("not json"),
                 "a broken plan block stays readable")
         require(ChatQuestionText.stripping("```tokenstat-plan\n{\"question\":\"Q?\"}\n```", streaming: false).contains("question"),

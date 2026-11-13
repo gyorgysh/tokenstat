@@ -67,14 +67,25 @@ fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
                 val question = value?.get("question") as? JsonPrimitive
                 val valid = if (isPlan) value?.get("steps") is JsonArray
                     else question?.isString == true && question.content.isNotBlank()
+                // A model writing one block after another often glues the
+                // next opening fence to this closing one on a single line.
+                val next = trailing.trim(' ', '\t')
+                val nextInfo = if (next.startsWith("```")) next.substring(3).trim() else ""
+                val opensNext = nextInfo == QUESTION_FENCE || nextInfo == PLAN_FENCE
                 if (!valid) {
                     kept.addAll(block)
-                    kept.add(line)
-                } else if (trailing.isNotEmpty()) {
+                    kept.add(if (opensNext) line.dropLast(trailing.length) else line)
+                } else if (trailing.isNotEmpty() && !opensNext) {
                     kept.add(trailing)
                 }
                 block.clear()
                 inside = false
+                if (opensNext) {
+                    inside = true
+                    isPlan = nextInfo == PLAN_FENCE
+                    block.add(next)
+                    bodyBytes = 0
+                }
             } else {
                 block.add(line)
                 bodyBytes += line.toByteArray(Charsets.UTF_8).size + if (index < lines.lastIndex) 1 else 0
@@ -99,6 +110,12 @@ private fun closingFenceTrailing(line: String): String? {
     var ticks = 0
     while (index + ticks < line.length && line[index + ticks] == '`') ticks++
     if (ticks < 3) return null
+    // Host glued_opening: "``````tokenstat-plan" closes on three ticks and
+    // opens the next block with the rest.
+    val afterRun = line.substring(index + ticks).trimStart(' ', '\t')
+    if (ticks >= 6 && afterRun.firstOrNull()?.let { it in 'a'..'z' || it in 'A'..'Z' } == true) {
+        return line.substring(index + 3).removeSuffix("\r")
+    }
     var trailing = line.substring(index + ticks)
     if (trailing.endsWith('\r')) trailing = trailing.dropLast(1)
     return trailing.trimStart(' ', '\t')

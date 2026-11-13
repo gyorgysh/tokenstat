@@ -756,6 +756,13 @@ Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\n{\"steps\":
     "an indented glued closing fence still hides a valid plan");
 Check(ChatQuestionText.Strip(questionFence + "\n{\"question\":\"Ship?\"}\n```Yes, shipping.") == "Yes, shipping.",
     "a glued question fence keeps the trailing prose");
+// Captured from Grok: the next plan opens on the last one's closing line.
+var gluedPlan = "```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```";
+Check(ChatQuestionText.Strip("Starting.\n\n" + gluedPlan + "```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Read\",\"status\":\"completed\"}]}\n```\nDone.") == "Starting.\n\nDone.",
+    "a plan glued to the last closing fence is hidden too");
+Check(ChatQuestionText.Strip("Starting.\n" + gluedPlan + "```" + ChatQuestionText.PlanFence + "\n{\"steps\":[") == "Starting.",
+    "a glued plan still streaming is cut from its opening");
+Check(ChatQuestionText.Strip(gluedPlan[..^3] + "``````\nprose") == "prose", "a bare run of ticks only closes");
 Check(ChatQuestionText.Strip("Before:\n" + questionBlock + "\nGoing with A.") == "Before:\nGoing with A.", "a finished block leaves the prose around it");
 Check(ChatQuestionText.Strip("Before:\n" + questionFence + "\n{\"question\":\"Wh") == "Before:", "a streaming block is cut from its opening line");
 Check(ChatQuestionText.Strip(questionBlock) == "", "a reply that is only a question has no prose");

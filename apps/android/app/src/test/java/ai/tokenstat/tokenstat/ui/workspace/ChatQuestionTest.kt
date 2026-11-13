@@ -31,6 +31,14 @@ class ChatQuestionTest {
             "Yes, shipping.",
             stripQuestionBlocks("$fence\n{\"question\":\"Ship?\"}\n```Yes, shipping."),
         )
+        // Captured from Grok: the next plan opens on the last one's closing line.
+        val plan = "```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```"
+        assertEquals(
+            "Starting.\n\nDone.",
+            stripQuestionBlocks("Starting.\n\n$plan```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Read\",\"status\":\"completed\"}]}\n```\nDone."),
+        )
+        assertEquals("Starting.", stripQuestionBlocks("Starting.\n$plan```$PLAN_FENCE\n{\"steps\":["))
+        assertEquals("prose", stripQuestionBlocks("${plan.dropLast(3)}``````\nprose"))
         assertEquals("Before:\nGoing with A.", stripQuestionBlocks("Before:\n$block\nGoing with A."))
         assertEquals("Before:", stripQuestionBlocks("Before:\n$fence\n{\"question\":\"Wh"))
         assertEquals("", stripQuestionBlocks(block))
