@@ -341,9 +341,13 @@ static PROVIDER_SEEN: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
 /// Several missed beats of the app's idle poll, so one slow round trip does
 /// not read as the app having quit.
+#[cfg(not(windows))]
 const PROVIDER_FRESH: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Whether a desktop app on this machine is attached to capture its screen.
+/// Windows answers from the install instead, because its helper captures by
+/// itself (see `provision::screen_sharing`).
+#[cfg(not(windows))]
 pub(crate) fn provider_attached() -> bool {
     PROVIDER_SEEN
         .lock()
