@@ -63,10 +63,6 @@ Applications.
 Download \`tokenstat-${version}-windows-x64-setup.exe\` below and run the installer.
 The Windows desktop is still a review build.
 
-Unsigned desktop previews and Android debug APKs remain available from the
-**Preview** workflow. Android Play uploads use a separately signed App Bundle;
-this release workflow does not build or publish Android releases.
-
 ## What's changed
 EOF
 

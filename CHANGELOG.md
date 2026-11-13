@@ -3,11 +3,7 @@
 Every version of tokenstat: the CLI, desktop and mobile clients, host daemon,
 and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
-desktop is a review build. Android is in review on Google Play. Newest first.
-
-Collect the complete, person-facing delta under the next version number, without
-a date until it is released. Add the release date when preparing that release,
-then begin the next version. Do not reconstruct release notes from commits at the end.
+desktop is a review build. Newest first.
 
 ## [1.18.0] - 2026-11-13
 
