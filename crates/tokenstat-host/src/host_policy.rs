@@ -331,17 +331,10 @@ pub(crate) fn supervisor_would_restart_this_process() -> bool {
 /// session next to that file is still a login. Only the host unit itself
 /// is safe to bounce.
 pub(crate) fn this_process_can_self_restart() -> bool {
-    if !supervisor_would_restart_this_process() {
-        return false;
-    }
+    let restarts = supervisor_would_restart_this_process();
     #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        this_process_is_the_host_unit().is_some()
-    }
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    {
-        true
-    }
+    let restarts = restarts && this_process_is_the_host_unit().is_some();
+    restarts
 }
 
 /// A loaded launch agent with KeepAlive on is the only launchd arrangement

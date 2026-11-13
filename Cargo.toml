@@ -19,7 +19,7 @@ members = [
 [workspace.package]
 version = "1.17.0"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.100"
 authors = ["tokenstat contributors"]
 repository = "https://github.com/gyorgysh/tokenstat"
 homepage = "https://tokenstat.ai"
