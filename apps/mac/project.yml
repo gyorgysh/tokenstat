@@ -34,7 +34,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/Tokenstat-Bridging-Header.h
-    MARKETING_VERSION: "1.18.0"
+    MARKETING_VERSION: "1.19.0"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -290,7 +290,8 @@ settings:
     # 231 was uploaded as 1.15.0; 232 includes manual chat controls and Back.
     # 234 is reserved for 1.16.0; 235 went up as 1.17.0.
     # 236 went up as 1.17.0 again, with chat dictation. 237 is for 1.18.0.
-    CURRENT_PROJECT_VERSION: "237"
+    # 238 is reserved for 1.19.0.
+    CURRENT_PROJECT_VERSION: "238"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

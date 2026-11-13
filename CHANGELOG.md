@@ -5,11 +5,18 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
-## [1.19.0]
+## [1.19.0] - 2026-11-13
 
 ### Improved
 
 - Agent updates are noticed sooner. tokenstat checks soon after an app starts and about every six hours after, at most once an hour however often an app connects. If a vendor cannot be reached, the last known version stays marked.
+
+### Fixed
+
+- On Android, following a long reply reaches its end when a turn finishes.
+- On small Android screens, the composer keeps its model and controls on one row when space allows.
+- On Android 15 and later, widget setup stays clear of the system bars and display cutouts.
+- A Mac chat can recover while following if its scroll position moves below all its messages.
 
 ## [1.18.0] - 2026-11-13
 
