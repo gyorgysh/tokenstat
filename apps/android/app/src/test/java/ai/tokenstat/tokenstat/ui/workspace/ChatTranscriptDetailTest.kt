@@ -134,15 +134,16 @@ class ChatTranscriptDetailTest {
         )
         for (detail in ChatDetail.entries) {
             val out = fold(rows, detail)
-            for (must in listOf("u1", "p1", "t3", "e1", "h1", "f1", "x1")) {
+            for (must in listOf("u1", "p1", "h1", "f1", "x1")) {
                 assertTrue("$detail shows $must", out.any { it.id == must })
                 assertNull("$detail never folds $must", stepGroupOwner(must, out))
             }
         }
-        assertEquals(
-            listOf("u1", "g:t1", "p1", "g:t2", "t3", "e1", "h1", "f1", "x1"),
-            ids(fold(rows, ChatDetail.Minimal)),
-        )
+        val minimal = fold(rows, ChatDetail.Minimal)
+        assertEquals(listOf("u1", "g:t1", "p1", "g:t2", "h1", "f1", "x1"), ids(minimal))
+        // Failed steps fold with the rest, and the line counts them.
+        assertEquals(2, group(minimal, "g:t2")!!.failures)
+        assertEquals(0, group(minimal, "g:t1")!!.failures)
     }
 
     @Test
@@ -292,7 +293,7 @@ class ChatTranscriptDetailTest {
             edit("e1", "src/a.kt", added = 6, removed = 2), tool("t4", "Read"), say("a1"), tool("t5", "Bash", failed = true),
         )
         val out = fold(rows, ChatDetail.Compact)
-        assertEquals(listOf("u1", "g:k1", "g:t1", "g:t3", "g:e1", "g:t4", "a1", "t5", "changes:e1"), ids(out))
+        assertEquals(listOf("u1", "g:k1", "g:t1", "g:t3", "g:e1", "g:t4", "a1", "g:t5", "changes:e1"), ids(out))
         for (id in listOf("g:k1", "g:t1", "g:t3", "g:e1", "g:t4")) assertTrue(id, group(out, id)!!.plain)
         val ran = group(out, "g:t3")!!
         assertEquals(ChatStepGroup.Style.Step, ran.style)
@@ -302,7 +303,9 @@ class ChatTranscriptDetailTest {
         assertEquals("src/a.kt", edited.subject)
         assertEquals(6L, edited.added)
         assertEquals(ChatStepGroup.Style.Explored, group(out, "g:t4")!!.style)
-        assertNull(stepGroupOwner("t5", out))
+        // A failed step is a line too, marked on the line itself.
+        assertEquals("g:t5", stepGroupOwner("t5", out))
+        assertEquals(1, group(out, "g:t5")!!.failures)
         assertEquals("a.kt", shortStepSubject("Edit", "src/a.kt"))
         assertEquals("cargo test", shortStepSubject("Bash", "cargo test\nmore"))
     }

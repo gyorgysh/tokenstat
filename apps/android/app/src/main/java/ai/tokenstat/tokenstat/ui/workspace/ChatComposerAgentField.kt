@@ -14,6 +14,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,65 +32,84 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonObject
 
-/** Keep model and effort on one line; the spoken label includes the backend too. */
+/// What this chat runs on, as the iPhone composer shows it: the agent's mark,
+/// then "model · effort", sized to its words rather than to the row. The
+/// spoken label names the agent too. A dot on the corner says this agent has
+/// an update, and the picker it opens has the button. Port of
+/// `ChatAgentField(compactLabel: true)`.
 @Composable
 internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject?, onOpen: () -> Unit,
                                     enabled: Boolean, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
-    val shape = RoundedCornerShape(8.dp)
-    Row(modifier.clip(shape).background(colors.panel).border(1.dp, colors.border, shape)
-        .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
-        .semantics {
-            contentDescription = chatAgentSummary(backends, chat) +
-                if (backendOf(backends, chat?.str("backend").orEmpty())?.bol("updateAvailable") == true) {
-                    ", " + L10n.text("common.agent_updates.waiting")
-                } else {
-                    ""
-                }
+    val shape = RoundedCornerShape(10.dp)
+    val updateWaiting = backendOf(backends, chat?.str("backend").orEmpty())?.bol("updateAvailable") == true
+    Box(modifier) {
+        Row(Modifier.clip(shape).background(colors.panel).border(1.dp, colors.border, shape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
+            .semantics {
+                contentDescription = chatAgentSummary(backends, chat) +
+                    if (updateWaiting) ", " + L10n.text("common.agent_updates.waiting") else ""
+            }
+            .heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.clearAndSetSemantics {}) { HarnessMark(chat?.str("backend").orEmpty(), size = 16.dp) }
+            Text(chatAgentCompactSummary(backends, chat),
+                modifier = Modifier.weight(1f, fill = false), style = TsType.callout.copy(fontWeight = FontWeight.Medium),
+                color = if (enabled) colors.textPrimary else colors.textTertiary,
+                maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+            Icon(Icons.Default.UnfoldMore, null, tint = colors.textTertiary, modifier = Modifier.size(14.dp))
         }
-        .heightIn(min = 44.dp).padding(horizontal = 8.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(Modifier.clearAndSetSemantics {}) { HarnessMark(chat?.str("backend").orEmpty(), size = 16.dp) }
-        Text(chatAgentCompactSummary(backends, chat),
-            modifier = Modifier.weight(1f), style = TsType.callout.copy(fontWeight = FontWeight.Medium),
-            color = if (enabled) colors.textPrimary else colors.textTertiary,
-            maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-        Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
-        // This chat's agent has a newer version. Its row in the picker this
-        // opens has the update button.
-        if (backendOf(backends, chat?.str("backend").orEmpty())?.bol("updateAvailable") == true) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(colors.accent).clearAndSetSemantics {})
+        if (updateWaiting) {
+            Box(Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp).size(7.dp).clip(CircleShape)
+                .background(colors.accent).clearAndSetSemantics {})
         }
     }
 }
 
+/// The row above the field, in the iPhone's order: the agent on the left,
+/// then setup, the limits ring, Hide keyboard while it is open, Stop while a
+/// turn runs, and the expand toggle. One row, so the field keeps its height.
+/// Port of `ChatComposerControls(condensed:)` with its chrome.
 @Composable
 internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, locked: Boolean,
                                 expanded: Boolean, onAgent: () -> Unit, onSetup: () -> Unit,
-                                onExpand: () -> Unit, quota: @Composable () -> Unit) {
+                                onExpand: () -> Unit, quota: @Composable () -> Unit,
+                                running: Boolean = false, onStop: () -> Unit = {},
+                                keyboardOpen: Boolean = false, onHideKeyboard: () -> Unit = {}) {
     val colors = LocalTsColors.current
     val actions: @Composable RowScope.() -> Unit = {
-        quota()
         IconButton(onClick = onSetup) {
-            Icon(ActionIcon.Settings.vector, L10n.text("android.chatpullssections.chat_setup.9fa79d00"),
-                tint = colors.accent, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.Tune, L10n.text("android.chatpullssections.chat_setup.9fa79d00"), tint = colors.textPrimary)
+        }
+        quota()
+        if (keyboardOpen) {
+            IconButton(onClick = onHideKeyboard) {
+                Icon(ActionIcon.HideKeyboard.vector, L10n.text("android.chatpullssections.hide_keyboard"), tint = colors.textSecondary)
+            }
+        }
+        if (running) {
+            IconButton(onClick = onStop) {
+                Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
+            }
         }
         IconButton(onClick = onExpand) {
             Icon(if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,
                 if (expanded) L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f") else L10n.text("android.chatpullssections.expand_the_message_box.c0441a94"),
-                tint = colors.accent, modifier = Modifier.size(18.dp))
+                tint = colors.accent)
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        // Keep the model and effort readable beside three action targets.
+        // Large text, or a narrow window: the chip gets its own line so its
+        // words stay readable beside up to five action targets.
         if (maxWidth < 360.dp || LocalDensity.current.fontScale > 1.3f) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ChatComposerAgentField(backends, chat, onAgent, !locked, Modifier.fillMaxWidth())
+                ChatComposerAgentField(backends, chat, onAgent, !locked)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically, content = actions)
             }
         } else {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ChatComposerAgentField(backends, chat, onAgent, !locked, Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // The chip keeps its own width and the actions stay at the end.
+                Box(Modifier.weight(1f)) { ChatComposerAgentField(backends, chat, onAgent, !locked) }
                 actions()
             }
         }

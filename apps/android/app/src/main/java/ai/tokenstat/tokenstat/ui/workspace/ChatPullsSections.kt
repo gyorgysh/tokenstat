@@ -40,6 +40,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.Canvas
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -105,6 +108,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
@@ -124,6 +128,7 @@ import kotlinx.coroutines.ensureActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -3579,6 +3584,11 @@ internal fun ChatComposer(
     }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
+    // Dictation reads and writes the draft as it is now, not as it was when
+    // the mic was pressed.
+    val currentDraft by rememberUpdatedState(draft)
+    val currentOnDraft by rememberUpdatedState(onDraft)
+    val dictation = rememberChatDictation(blocked = sending)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val scrollExtras = compactKeyboard && constraints.hasBoundedHeight
         Box(Modifier.fillMaxWidth()) {
@@ -3601,7 +3611,9 @@ internal fun ChatComposer(
                         )
                     }
                     if (!compactKeyboard) ChatComposerToolbar(backends, chat, locked, expanded, onAgent, onSetup,
-                        onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota)
+                        onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota,
+                        running = locked, onStop = onStop,
+                        keyboardOpen = inputFocused, onHideKeyboard = { keyboard?.hide(); focus.clearFocus(); expanded = false })
                     // Staged files sit above the field, each with its own way out, so
                     // a wrong pick is one tap to undo rather than a sent message.
                     staged.forEach { attachment ->
@@ -3660,7 +3672,12 @@ internal fun ChatComposer(
                     )
                 }
                 if (expandedField) input(Modifier.fillMaxWidth())
-                Row(
+                // While dictation listens, its bar takes the controls' row
+                // and the words appear in the field above it.
+                if (dictation.isActive) {
+                    if (!expandedField) input(Modifier.fillMaxWidth())
+                    ChatDictationBar(dictation)
+                } else Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -3703,47 +3720,45 @@ internal fun ChatComposer(
                         }
                     }
                     if (expandedField) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
-                    if (locked) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                            modifier = Modifier.padding(end = Space.xs),
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(12.dp),
-                                strokeWidth = 1.5.dp,
-                                color = colors.accent,
-                            )
-                            Text(
-                                L10n.text("common.working"),
-                                style = TsType.caption,
-                                color = colors.accent,
-                                maxLines = 1,
-                            )
-                        }
+                    // Beside the field, where the keyboard's own mic would be.
+                    ChatDictationButton(dictation, read = { currentDraft }, write = { currentOnDraft(it) }, enabled = !sending)
+                    // Stop lives in the row above, as on the iPhone. A landscape
+                    // keyboard hides that row, so it stays here then.
+                    if (locked && compactKeyboard) {
                         IconButton(onClick = onStop) {
                             Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
                         }
-                    } else {
-                        IconButton(
-                            onClick = {
-                                // The answer is the point of sending, and it
-                                // arrives under the keyboard. Twin of
-                                // `ClientChatComposer.sendTapped`, which puts the
-                                // keyboard away before it sends.
-                                keyboard?.hide()
-                                focus.clearFocus()
-                                expanded = false
-                                onSend()
-                            },
-                            enabled = canSend,
-                            modifier = sendModifier,
+                    }
+                    // Send appears once there is something to send, and is
+                    // the one filled control in the bar. While a turn runs it
+                    // queues or steers, the way its label says.
+                    AnimatedVisibility(
+                        visible = canSend && !sending,
+                        enter = fadeIn() + scaleIn(initialScale = 0.6f),
+                        exit = fadeOut() + scaleOut(targetScale = 0.6f),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .clickable(onClickLabel = sendLabel, role = Role.Button) {
+                                    // The answer is the point of sending, and it
+                                    // arrives under the keyboard. Twin of
+                                    // `ClientChatComposer.sendTapped`, which puts the
+                                    // keyboard away before it sends.
+                                    dictation.stop()
+                                    keyboard?.hide()
+                                    focus.clearFocus()
+                                    expanded = false
+                                    onSend()
+                                }
+                                .then(sendModifier)
+                                .semantics { contentDescription = sendLabel },
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Icon(
-                                ActionIcon.Send.vector,
-                                sendLabel,
-                                tint = if (canSend) colors.accent else colors.textTertiary,
-                            )
+                            Box(Modifier.size(40.dp).clip(CircleShape).background(colors.accent), contentAlignment = Alignment.Center) {
+                                Icon(ActionIcon.Send.vector, null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(20.dp))
+                            }
                         }
                     }
                 }

@@ -201,7 +201,7 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
         crate::workflows::start_scheduler();
         crate::sync_scheduler::start(Arc::clone(&shared));
         crate::host_update::start_scheduler();
-        crate::agent_updates::start_daily();
+        crate::agent_updates::start_schedule();
     }
 
     // Policy first: if hosting is off, the pause flag is set before the

@@ -43,6 +43,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -231,12 +234,34 @@ private fun RowScope.FloatingTab(
     // One capsule around the glyph and the label together. The old bar put
     // the pill on the glyph alone and left the label outside it, which read
     // as a highlighted icon with a caption rather than as a selected tab.
+    //
+    // The capsule is a layer behind the tab, not a clip on it. Clipped, its
+    // round ends cut the first and last letters of a long label such as
+    // "Repositories". The press ripple stays inside the capsule because it
+    // lives on that layer.
+    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .matchParentSize()
+                // A rounded rectangle rather than a full capsule: the slot is
+                // nearly square, and a capsule's ends leave a long label
+                // sitting half outside the tint.
+                .clip(RoundedCornerShape(18.dp))
+                .background(colors.accentSoft.copy(alpha = pillAlpha))
+                .selectable(selected = selected, enabled = enabled, onClick = onClick, role = Role.Tab)
+                .semantics { contentDescription = spec.label },
+        )
+        FloatingTabContent(spec, selected, labelSize, iconScale)
+    }
+}
+
+@Composable
+private fun FloatingTabContent(spec: TabSpec, selected: Boolean, labelSize: TextUnit, iconScale: Float) {
+    val colors = LocalTsColors.current
     Column(
         Modifier
-            .weight(1f)
-            .clip(RoundedCornerShape(percent = 50))
-            .background(colors.accentSoft.copy(alpha = pillAlpha))
-            .selectable(selected = selected, enabled = enabled, onClick = onClick, role = Role.Tab)
+            .fillMaxWidth()
+            .clearAndSetSemantics {}
             // Horizontal too: without it the longest label runs to the very
             // edge of its slot and reads as one word touching the next.
             .padding(horizontal = 2.dp, vertical = 7.dp),

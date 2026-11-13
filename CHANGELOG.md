@@ -5,11 +5,17 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
+## [1.19.0]
+
+### Improved
+
+- Agent updates are noticed sooner. tokenstat checks soon after an app starts and about every six hours after, at most once an hour however often an app connects. If a vendor cannot be reached, the last known version stays marked.
+
 ## [1.18.0] - 2026-11-13
 
 ### Added
 
-- Dictate a message on Mac, iPhone and iPad. Press the mic in the composer and talk, and your words appear in the draft as you speak. Switch languages from the recording bar or the mic's menu. Recognition runs on your device when your language supports it.
+- Dictate a message on Mac, iPhone, iPad and Android. Press the mic in the composer and talk, and your words appear in the draft as you speak. Switch languages from the recording bar or the mic's menu (long-press the mic on Android). Recognition runs on your device when your language supports it.
 
 ### Improved
 
@@ -17,7 +23,9 @@ desktop is a review build. Newest first.
 - Every agent keeps a plan for longer tasks, and it looks the same whichever agent writes it. Plans from Cursor, Antigravity, Grok, OpenCode and Muse show as the same checklist as Codex and Claude, without an extra "Updated the list" row.
 - Paid plans include more relayed traffic: 5 GiB, 20 GiB and 40 GiB per rolling 30 days, up from 1, 5 and 20 GiB. Direct connections stay unlimited.
 - You can send a text message while a file is still uploading.
-- Automation transcripts show each tool as a compact row.
+- Automation transcripts show each tool as a compact row, on Android too.
+- The Android composer matches the iPhone's. The agent chip shows the model and effort, setup, limits, Stop and expand share one row, and Send appears once there is something to send. The agent picker shows each agent's mark, limits and update button, on the new chat page too.
+- On Android, failed steps in Minimal and Compact chat detail fold like any other step, and the line shows Failed or how many failed.
 
 ### Fixed
 
@@ -25,6 +33,7 @@ desktop is a review build. Newest first.
 - A cancelled or unanswered send stays tracked until tokenstat knows whether it arrived, so a retry can no longer post the same message twice.
 - Reopening a chat keeps the current messages on screen until the new ones load.
 - Auto-commit uses the instructions you saved last, even when a job starts while you are editing them.
+- On Android, the selected tab's highlight no longer cuts off a long label such as Repositories.
 
 ## [1.17.0] - 2026-11-12
 

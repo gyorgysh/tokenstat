@@ -63,6 +63,7 @@ import ai.tokenstat.tokenstat.ui.marks.CadenceGlyph
 import ai.tokenstat.tokenstat.ui.marks.EmptyArt
 import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
 import ai.tokenstat.tokenstat.ui.marks.SlotGauge
+import ai.tokenstat.tokenstat.ui.workspace.CompactToolLine
 import ai.tokenstat.tokenstat.ui.tasks.BackendRef
 import ai.tokenstat.tokenstat.ui.tasks.RunHistory
 import ai.tokenstat.tokenstat.ui.tasks.RunRef
@@ -1373,11 +1374,22 @@ fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolea
         if (error != null) {
             Text(error!!, style = TsType.caption, color = LocalTsColors.current.danger)
         }
-        Text(
-            text.ifBlank { if (live) L10n.text("android.automations.waiting_for_output.f05fefe2") else L10n.text("android.automations.no_readable_output.cd218ba3") },
-            style = TsType.mono(12),
-            color = LocalTsColors.current.textPrimary,
-        )
+        if (text.isBlank()) {
+            Text(
+                if (live) L10n.text("android.automations.waiting_for_output.f05fefe2") else L10n.text("android.automations.no_readable_output.cd218ba3"),
+                style = TsType.mono(12),
+                color = LocalTsColors.current.textPrimary,
+            )
+        } else {
+            // Tool calls as the chat's compact activity lines, prose as text.
+            val blocks = remember(text) { RunTranscriptParser.parse(text) }
+            blocks.forEachIndexed { index, block ->
+                when (block) {
+                    is RunTranscriptBlock.Text -> Text(block.body, style = TsType.mono(12), color = LocalTsColors.current.textPrimary)
+                    is RunTranscriptBlock.Tool -> CompactToolLine("run-$index", block.verb, block.arg, block.snippet)
+                }
+            }
+        }
     }
 }
 

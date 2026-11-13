@@ -46,6 +46,7 @@ import ai.tokenstat.tokenstat.ui.logic.ModelFavorites
 import ai.tokenstat.tokenstat.ui.logic.SharedPrefsModelFavorites
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.logic.favoriteOrderedModels
+import ai.tokenstat.tokenstat.ui.marks.HarnessMark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import kotlinx.coroutines.launch
@@ -265,16 +266,7 @@ fun ChatAgentSheet(
     var checkedUpdates by remember(peer) { mutableStateOf(false) }
     val updatingAgent by model.updatingAgent.collectAsStateWithLifecycle()
     var updateNotes by remember(peer) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    // Every agent's quota for its row: the app's own readings for this
-    // device, one read of the host's for a remote one.
-    val appState by model.state.collectAsStateWithLifecycle()
-    var remoteQuota by remember(peer) { mutableStateOf<JsonArray?>(null) }
-    LaunchedEffect(peer) {
-        if (peer.isNotBlank()) runCatching {
-            model.workspaceSection(peer, "usage.limits", buildJsonObject { put("force", false) }) as? JsonArray
-        }.onSuccess { remoteQuota = it }
-    }
-    val quotaReadings = if (peer.isBlank()) appState.limits else remoteQuota ?: JsonArray(emptyList())
+    val quotaReadings = rememberAgentQuotaReadings(model, peer)
 
     suspend fun load(refresh: Boolean) {
         runCatching {
@@ -505,31 +497,9 @@ fun ChatAgentSheet(
                     enabled = !updating && !locked,
                     pick = {},
                     onStepPick = ::pick,
+                    icon = { ChatAgentRowMark(it) },
                     accessory = { value ->
-                        (value as? ChatAgentChoice.Agent)?.let { agent ->
-                            // From the host's daily check: this agent has a newer
-                            // version. One press updates it.
-                            val behind = backendOf(backends, agent.id)
-                            val launcherId = behind?.str("launcherId")
-                            if (behind != null && launcherId != null && behind.bol("updateAvailable") && !backendNotInstalled(behind)) {
-                                val label = behind.str("label") ?: agent.id
-                                val description = behind.str("latestVersion")?.let { L10n.text("common.agent_updates.update_to", label, it) }
-                                    ?: L10n.text("common.agent_updates.update")
-                                Icon(
-                                    ActionIcon.Download.vector,
-                                    description,
-                                    tint = colors.accent,
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .clickable(enabled = updatingAgent == null && !locked) { updateAgent(launcherId, label) }
-                                        .padding(10.dp)
-                                        .background(colors.accent.copy(alpha = 0.16f), CircleShape)
-                                        .padding(4.dp),
-                                )
-                            }
-                            ChatQuotaLine(chatQuotaReading(quotaReadings, agent.id))
-                        }
+                        ChatAgentRowExtras(value, backends, quotaReadings, enabled = updatingAgent == null && !locked, ::updateAgent)
                         // The favourite star, on model rows only.
                         val id = (value as? ChatAgentChoice.Model)?.id
                         if (!id.isNullOrEmpty() && backendId.isNotEmpty()) {
@@ -593,6 +563,61 @@ fun ChatAgentSheet(
             }
         }
     }
+}
+
+/// Every agent's quota for its row: the app's own readings for this device,
+/// one read of the host's for a remote one.
+@Composable
+internal fun rememberAgentQuotaReadings(model: AppViewModel, peer: String): JsonArray {
+    val appState by model.state.collectAsStateWithLifecycle()
+    var remoteQuota by remember(peer) { mutableStateOf<JsonArray?>(null) }
+    LaunchedEffect(peer) {
+        if (peer.isNotBlank()) runCatching {
+            model.workspaceSection(peer, "usage.limits", buildJsonObject { put("force", false) }) as? JsonArray
+        }.onSuccess { remoteQuota = it }
+    }
+    return if (peer.isBlank()) appState.limits else remoteQuota ?: JsonArray(emptyList())
+}
+
+/// The end of an agent row: an update button when the host's daily check
+/// found a newer version, then the agent's 5-hour and weekly limits. Shared
+/// by an open chat's picker and the new chat page's.
+@Composable
+internal fun ChatAgentRowExtras(
+    value: ChatAgentChoice,
+    backends: List<JsonObject>,
+    quotaReadings: JsonArray,
+    enabled: Boolean,
+    onUpdate: (launcherId: String, label: String) -> Unit,
+) {
+    val agent = value as? ChatAgentChoice.Agent ?: return
+    val colors = LocalTsColors.current
+    val behind = backendOf(backends, agent.id)
+    val launcherId = behind?.str("launcherId")
+    if (behind != null && launcherId != null && behind.bol("updateAvailable") && !backendNotInstalled(behind)) {
+        val label = behind.str("label") ?: agent.id
+        val description = behind.str("latestVersion")?.let { L10n.text("common.agent_updates.update_to", label, it) }
+            ?: L10n.text("common.agent_updates.update")
+        Icon(
+            ActionIcon.Download.vector,
+            description,
+            tint = colors.accent,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .clickable(enabled = enabled) { onUpdate(launcherId, label) }
+                .padding(10.dp)
+                .background(colors.accent.copy(alpha = 0.16f), CircleShape)
+                .padding(4.dp),
+        )
+    }
+    ChatQuotaLine(chatQuotaReading(quotaReadings, agent.id))
+}
+
+/// The agent's brand mark at the start of its row in the picker.
+@Composable
+internal fun ChatAgentRowMark(value: ChatAgentChoice) {
+    (value as? ChatAgentChoice.Agent)?.let { HarnessMark(it.id, 26.dp) }
 }
 
 /// "Version 2.1.318 · 2.1.322 available", from one `launcher.updates` row.

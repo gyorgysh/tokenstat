@@ -34,6 +34,9 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.CloseFullscreen
+import androidx.compose.material.icons.filled.OpenInFull
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -67,7 +70,7 @@ enum class ActionIcon {
     Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen,
     Delete,
     External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
-    Send, Attach, FastMode, Routing, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
+    Send, Attach, Dictate, FastMode, Routing, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
     Disclosure,
     ;
@@ -113,8 +116,9 @@ enum class ActionIcon {
             Reopen -> Icons.Default.History
             Checkout -> Icons.Default.Download
             Filter -> Icons.AutoMirrored.Filled.Sort
-            EnterFullScreen -> Icons.AutoMirrored.Filled.OpenInNew
-            ExitFullScreen -> Icons.Default.Close
+            // The two-arrow pair the Apple clients draw, not an external link.
+            EnterFullScreen -> Icons.Default.OpenInFull
+            ExitFullScreen -> Icons.Default.CloseFullscreen
             Delete -> Icons.Default.Delete
             Next -> Icons.AutoMirrored.Filled.ArrowForward
             // A row that opens something, not a Next button. The Apple
@@ -133,6 +137,7 @@ enum class ActionIcon {
             // A paperclip, like the composer on every other client. A
             // document sheet reads as "a file", not as "add a file".
             Attach -> Icons.Default.AttachFile
+            Dictate -> Icons.Default.Mic
             FastMode -> Icons.Default.Bolt
             Routing -> Icons.AutoMirrored.Outlined.AltRoute
             Persona -> Icons.Default.Person

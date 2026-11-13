@@ -40,6 +40,9 @@ data class ChatStepGroup(
     val reads: Int = 0,
     val searches: Int = 0,
     val pages: Int = 0,
+    /// Steps that failed. A failure folds like any other step, since agents
+    /// retry all the time, and the line says how many so none goes unseen.
+    val failures: Int = 0,
     /// Still being added to.
     val running: Boolean = false,
     val liveVerb: String? = null,
@@ -216,11 +219,12 @@ private fun foldCompact(
                     emitGroup(group, listOf(item), out, isOpen)
                 }
             }
-            item is ChatDisplayItem.Tool && !item.state.failed -> {
+            // A failed step is a line too, marked on the line itself.
+            item is ChatDisplayItem.Tool -> {
                 flushRun(trailing = false)
                 line(ChatStepGroup.Style.Step, listOf(item), item.state.running)
             }
-            item is ChatDisplayItem.Edit && !item.state.failed -> {
+            item is ChatDisplayItem.Edit -> {
                 flushRun(trailing = false)
                 line(ChatStepGroup.Style.Step, listOf(item), item.state.running)
             }
@@ -335,11 +339,11 @@ private fun foldMinimalTurn(
                 cost += item.costUsd ?: 0.0
                 usage.add(item)
             }
-            item is ChatDisplayItem.Thinking -> members.add(item)
-            item is ChatDisplayItem.Tool && !item.state.failed -> members.add(item)
-            item is ChatDisplayItem.Edit && !item.state.failed -> members.add(item)
+            // A failed step folds with the rest. The work line counts it, so
+            // it is marked without taking a card of its own.
+            item is ChatDisplayItem.Thinking || item is ChatDisplayItem.Tool || item is ChatDisplayItem.Edit -> members.add(item)
             else -> {
-                // Replies, questions, failures and handoffs stay in order.
+                // Replies, questions, turn failures and handoffs stay in order.
                 flush(trailing = false)
                 out.add(item)
             }
@@ -388,6 +392,7 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
     var reads = 0
     var searches = 0
     var pages = 0
+    var failures = 0
     var added = 0L
     var removed = 0L
     val paths = HashSet<String>()
@@ -407,6 +412,7 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
             is ChatDisplayItem.Tool -> {
                 val state = member.state
                 steps++
+                if (state.failed) failures++
                 if (state.verb in readVerbs) reads++
                 if (state.verb in searchVerbs) searches++
                 if (state.verb in pageVerbs) pages++
@@ -420,6 +426,7 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
             is ChatDisplayItem.Edit -> {
                 val state = member.state
                 steps++
+                if (state.failed) failures++
                 paths.add(state.path)
                 added += state.added
                 removed += state.removed
@@ -455,6 +462,7 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
         reads = reads,
         searches = searches,
         pages = pages,
+        failures = failures,
         // A step still running is running whatever came after it.
         running = anyRunning || running,
         liveVerb = liveVerb,

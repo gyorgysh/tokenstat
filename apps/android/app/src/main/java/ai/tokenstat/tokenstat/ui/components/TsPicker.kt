@@ -222,6 +222,9 @@ fun <T> TsPickerOptionList(
     enabled: Boolean = true,
     /// Trailing accessory per row, for the model picker's favourite star.
     accessory: (@Composable (T) -> Unit)? = null,
+    /// A mark between the check and the label, for the agent rows' brand
+    /// marks. Draw nothing to leave a row without one.
+    icon: (@Composable (T) -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
@@ -418,6 +421,7 @@ fun <T> TsPickerOptionList(
                             enabled = enabled && !choosing,
                             onPick = { choose(choice) },
                             accessory = accessory,
+                            icon = icon,
                         )
                     }
                 }
@@ -487,6 +491,7 @@ private fun <T> TsPickerRow(
     enabled: Boolean,
     onPick: () -> Unit,
     accessory: (@Composable (T) -> Unit)?,
+    icon: (@Composable (T) -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
     Row(
@@ -507,6 +512,7 @@ private fun <T> TsPickerRow(
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             BrandCheckDisc(isSelected)
+            icon?.invoke(choice.value)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     choice.label,

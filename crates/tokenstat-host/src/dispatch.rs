@@ -3780,6 +3780,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     // is true and useless. This is the one call a client can make first to
     // find out, and it is deliberately cheap: `info` opens the archive.
     if method == "protocol" {
+        // Every client asks this first when it connects, which is the closest
+        // thing the host sees to an app starting. Checks agent versions if
+        // the last check is over an hour old.
+        #[cfg(feature = "local-host")]
+        crate::agent_updates::nudge();
         return Some(Ok(json!({
             "protocolVersion": crate::PROTOCOL_VERSION,
             "coreVersion": tokenstat_core::VERSION,
@@ -4505,8 +4510,9 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // client, so over a remote connection this stays "the user clicked
         // Install on a known tile" rather than "a peer runs anything".
         // Installed agent versions, and with `check` the latest each vendor
-        // publishes. The check is the only part that leaves the machine,
-        // and a client sends it only when somebody presses the button.
+        // publishes. The check is the only part that leaves the machine. A
+        // client sends it when somebody presses the button, and the host
+        // makes its own on a schedule (see `agent_updates::start_schedule`).
         "launcher.updates" => {
             let check = serde_json::from_str::<Value>(params.trim())
                 .ok()

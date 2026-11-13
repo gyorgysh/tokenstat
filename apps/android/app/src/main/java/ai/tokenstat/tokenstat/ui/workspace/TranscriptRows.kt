@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.HighlightOff
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -415,17 +416,15 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
         }
     }
 
+    // A failed step is marked rather than boxed: agents retry all the time,
+    // so a failed read is a step like any other.
     val tint = when {
-        state.failed -> colors.danger
+        state.failed -> colors.textSecondary
         state.running -> colors.accent
         state.verb == "Shell" || state.verb == "Bash" -> colors.warning
         else -> colors.accent
     }
-    val border = when {
-        state.failed -> colors.danger.copy(alpha = 0.45f)
-        state.running -> colors.accent.copy(alpha = 0.45f)
-        else -> colors.border
-    }
+    val border = if (state.running) colors.accent.copy(alpha = 0.45f) else colors.border
     // One line shown while collapsed so a row is never just the verb. The
     // header already shows the target; this is the first output line
     // beneath it. Diffs skip this: their +/- stat lives in the header.
@@ -456,7 +455,8 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
                         color = tint,
                     )
                 } else {
-                    Icon(toolGlyph(state.verb), null, tint = tint, modifier = Modifier.size(14.dp))
+                    Icon(if (state.failed) Icons.Default.HighlightOff else toolGlyph(state.verb), null,
+                        tint = if (state.failed) colors.danger else tint, modifier = Modifier.size(14.dp))
                 }
             }
             Text(
@@ -622,6 +622,13 @@ private fun PlainStepDetail(item: ChatDisplayItem) {
     }
 }
 
+/// A finished tool call drawn as a Compact line, for transcripts that are
+/// not chats (automation runs). The output opens on tap.
+@Composable
+internal fun CompactToolLine(id: String, verb: String, target: String, snippet: List<String>) {
+    PlainStepRow(ChatDisplayItem.Tool(id, ChatToolState(id, verb, target, false, false, null, 0, null, snippet)))
+}
+
 /// One step of a run under an open Compact line: the verb and what it
 /// acted on, with its output a tap away and no card around either.
 @Composable
@@ -699,13 +706,10 @@ private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = fa
         }
     }
 
-    val tint = if (state.failed) colors.danger else colors.accent
-    val bar = if (state.failed) colors.danger else colors.accent
-    val border = when {
-        state.failed -> colors.danger.copy(alpha = 0.45f)
-        state.running -> colors.accent.copy(alpha = 0.45f)
-        else -> colors.border
-    }
+    // A failed edit is marked rather than boxed.
+    val tint = if (state.failed) colors.textSecondary else colors.accent
+    val bar = if (state.failed) colors.danger.copy(alpha = 0.6f) else colors.accent
+    val border = if (state.running) colors.accent.copy(alpha = 0.45f) else colors.border
     val meta = listOfNotNull(state.changeLabel, state.location.ifEmpty { null }).joinToString(" · ")
 
     Row(
@@ -735,7 +739,8 @@ private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = fa
                             color = tint,
                         )
                     } else {
-                        Icon(Icons.Default.Description, null, tint = tint, modifier = Modifier.size(14.dp))
+                        Icon(if (state.failed) Icons.Default.HighlightOff else Icons.Default.Description, null,
+                            tint = if (state.failed) colors.danger else tint, modifier = Modifier.size(14.dp))
                     }
                 }
                 Text(
@@ -1354,6 +1359,7 @@ private fun StepGroupRow(group: ChatStepGroup, onClick: () -> Unit) {
         if (group.added > 0 || group.removed > 0) {
             DiffStat(added = group.added, removed = group.removed)
         }
+        StepGroupFailureMark(group, TsType.mono(11))
         val cost = group.cost
         if (cost != null && cost > 0) {
             Text("$" + "%.2f".format(cost), style = TsType.mono(11), color = colors.accent, maxLines = 1)
@@ -1437,8 +1443,23 @@ private fun PlainStepLine(group: ChatStepGroup, onClick: () -> Unit) {
         if (group.added > 0 || group.removed > 0) {
             DiffStat(added = group.added, removed = group.removed, style = TextStyle(fontSize = 13.sp))
         }
+        StepGroupFailureMark(group, TextStyle(fontSize = 13.sp))
         Spacer(Modifier.weight(1f))
     }
+}
+
+/// A quiet red count of a line's failed steps. A lone step just says Failed.
+/// Port of ChatStepGroupRow.swift `failureMark`.
+@Composable
+private fun StepGroupFailureMark(group: ChatStepGroup, style: TextStyle) {
+    val text = stepGroupFailureText(group) ?: return
+    Text(text, style = style, color = LocalTsColors.current.danger.copy(alpha = 0.85f), maxLines = 1)
+}
+
+internal fun stepGroupFailureText(group: ChatStepGroup): String? = when {
+    group.failures <= 0 || group.running -> null
+    group.memberIds.size == 1 -> L10n.text("common.failed")
+    else -> L10n.text("android.chatdetail.failed_count", "${group.failures}")
 }
 
 /// The files a finished turn changed, under its last reply. Port of

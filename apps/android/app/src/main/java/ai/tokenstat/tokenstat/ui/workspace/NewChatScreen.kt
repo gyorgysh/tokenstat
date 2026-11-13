@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -371,13 +372,37 @@ fun NewChatScreen(
     }
     if (agentMenu) {
         val chat = setup?.chat()
-        val choices = chatAgentChoices(backends.filter { it.newChatText("id") != "sh" }, chat)
+        val agents = backends.filter { it.newChatText("id") != "sh" }
+        val choices = chatAgentChoices(agents, chat)
+        val quotaReadings = rememberAgentQuotaReadings(model, effectivePeer.orEmpty())
+        val updatingAgent by model.updatingAgent.collectAsStateWithLifecycle()
+        // The same stepped panel an open chat uses: agent, then model, then
+        // effort, each row with its mark, limits and update button.
         TsPickerSheet(L10n.text("android.chatagentpanel.agent_model_and_effort.217ff8ae"), { agentMenu = false }) {
             TsPickerOptionList(choices, { chatAgentIsSelected(it, chat) },
                 L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da"),
                 L10n.text("android.chatagentpanel.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
-                pick = { choice -> val (field, value) = chatAgentField(choice); setup = setup?.changed(field, value, backends); onSetup(setup) },
+                pick = {},
                 sectionValue = { chatAgentSectionValue(it, backends, chat) }, sectionTabs = chatAgentSections(choices), selectionSummary = chatAgentSummary(backends, chat),
+                stepped = true,
+                stepPrompt = ::chatAgentSearchPrompt,
+                onFinish = { agentMenu = false },
+                onStepPick = { choice ->
+                    if (choice is ChatAgentChoice.Agent && backendNotInstalled(backendOf(backends, choice.id))) {
+                        null
+                    } else {
+                        val (field, value) = chatAgentField(choice)
+                        setup = setup?.changed(field, value, backends)
+                        onSetup(setup)
+                        chatAgentSections(chatAgentChoices(agents, setup?.chat()))
+                    }
+                },
+                icon = { ChatAgentRowMark(it) },
+                accessory = { value ->
+                    ChatAgentRowExtras(value, backends, quotaReadings, enabled = updatingAgent == null) { launcherId, label ->
+                        effectivePeer?.let { peer -> model.updateAgent(peer, launcherId, label) { catalogAttempt++ } }
+                    }
+                },
                 onRefresh = { catalogAttempt++ })
         }
     }

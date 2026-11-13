@@ -339,19 +339,93 @@ fn row(id: &'static str, check: bool) -> Option<Value> {
 /// Every installed agent that tokenstat knows how to update. Versions are
 /// read on this machine. The latest versions are fetched only with `check`,
 /// which a client sends when somebody presses Check for updates.
+///
+/// One check runs at a time. A press while the scheduled check is running
+/// waits for it and then answers from what it found, rather than asking
+/// every vendor twice in a row.
 pub(crate) fn list(check: bool) -> Value {
+    if !check {
+        return Value::Array(rows(false));
+    }
+    let _flight = FLIGHT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let checked_at = with_cache(|cache| cache.checked_at_ms);
+    if just_checked(crate::chat::now_ms(), checked_at) {
+        return Value::Array(rows(false));
+    }
+    Value::Array(check_now())
+}
+
+fn rows(check: bool) -> Vec<Value> {
     let handles: Vec<_> = IDS
         .iter()
         .map(|id| std::thread::spawn(move || row(id, check)))
         .collect();
-    let rows: Vec<Value> = handles
+    handles
         .into_iter()
         .filter_map(|handle| handle.join().ok().flatten())
-        .collect();
-    if check {
-        remember(&rows);
-    }
-    Value::Array(rows)
+        .collect()
+}
+
+/// Ask every vendor, keep what was learned, and answer with the merged rows.
+/// The caller holds `FLIGHT`.
+fn check_now() -> Vec<Value> {
+    let fresh = rows(true);
+    let merged = with_cache(|cache| merged(&cache.rows, fresh));
+    remember(&merged);
+    merged
+}
+
+/// Held for the whole of a check, so a scheduled one and a button press
+/// never ask the vendors at the same time.
+static FLIGHT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// A check this recent already answers a button press.
+const JUST_CHECKED_MS: i64 = 30 * 1000;
+
+fn just_checked(now: i64, checked_at: i64) -> bool {
+    // Saturating: `checked_at` comes from a file on disk, and a damaged one
+    // must not overflow the subtraction.
+    checked_at <= now && now.saturating_sub(checked_at) < JUST_CHECKED_MS
+}
+
+/// A row whose vendor could not be reached keeps the latest version the
+/// previous check found, compared with what is installed now. One failed
+/// request must not clear a mark that was right an hour ago.
+fn merged(previous: &[Value], fresh: Vec<Value>) -> Vec<Value> {
+    fresh
+        .into_iter()
+        .map(|mut row| {
+            if row.get("error").is_some() && row["latest"].as_str().is_none() {
+                let known = previous
+                    .iter()
+                    .find(|old| old["id"] == row["id"])
+                    .and_then(|old| old["latest"].as_str())
+                    .filter(|latest| plausible_version(latest))
+                    .map(str::to_owned);
+                if let Some(latest) = known {
+                    row["updateAvailable"] = json!(
+                        row["version"]
+                            .as_str()
+                            .is_some_and(|installed| newer(&latest, installed))
+                    );
+                    row["latest"] = json!(latest);
+                }
+            }
+            row
+        })
+        .collect()
+}
+
+/// What a stored version may look like. The cache is a file on disk, and a
+/// damaged or edited one must not put arbitrary text in front of a person.
+fn plausible_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'))
 }
 
 /// What the last check found, kept so the agent picker can mark an agent
@@ -363,8 +437,6 @@ struct Cache {
     checked_at_ms: i64,
     rows: Vec<Value>,
 }
-
-const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 fn cache_path() -> Option<std::path::PathBuf> {
     Some(tokenstat_paths::data_dir()?.join("agent-updates.json"))
@@ -414,6 +486,7 @@ fn cached_latest(id: &str) -> Option<String> {
             .iter()
             .find(|row| row["id"] == id)
             .and_then(|row| row["latest"].as_str())
+            .filter(|latest| plausible_version(latest))
             .map(str::to_owned)
     })
 }
@@ -467,22 +540,94 @@ fn refresh_one(id: &str) {
         });
 }
 
-/// Check every installed agent once a day, so an agent that has fallen
-/// behind is marked where people already look. The check sends each
-/// vendor only the request its own installer makes. It never updates
-/// anything: that stays a button press.
-pub(crate) fn start_daily() {
+/// A check younger than this is fresh enough for anything but a button
+/// press. It is what keeps an app opened ten times an hour, or several
+/// phones connecting at once, from asking every vendor each time.
+const COOLDOWN_MS: i64 = 60 * 60 * 1000;
+/// While the host runs it checks again about this often, give or take
+/// `PERIOD_JITTER`, so machines that started together drift apart.
+const PERIOD: Duration = Duration::from_secs(6 * 60 * 60);
+const PERIOD_JITTER: Duration = Duration::from_secs(45 * 60);
+/// The first check waits this long after the host or an app starts, plus
+/// up to `START_JITTER`, so it never competes with startup work.
+const START_DELAY: Duration = Duration::from_secs(20);
+const START_JITTER: Duration = Duration::from_secs(70);
+
+/// Whether a check last made at `checked_at` should be made again. A time
+/// in the future means the clock moved back, and the cache cannot be
+/// trusted to say how old it is.
+fn due(now: i64, checked_at: i64) -> bool {
+    checked_at > now || now.saturating_sub(checked_at) >= COOLDOWN_MS
+}
+
+/// A random length up to `span`. Spread, not secrecy, so the thread RNG is fine.
+fn jitter(span: Duration) -> Duration {
+    let millis = span.as_millis() as u64;
+    if millis == 0 {
+        return Duration::ZERO;
+    }
+    Duration::from_millis(rand::random::<u64>() % millis)
+}
+
+/// `PERIOD` moved by up to `PERIOD_JITTER` either way.
+fn next_period() -> Duration {
+    PERIOD - PERIOD_JITTER + jitter(PERIOD_JITTER * 2)
+}
+
+/// Check now unless a check is running or one was made within the cooldown.
+/// Never waits: a busy flight means somebody else is already asking.
+fn check_if_due() {
+    let _flight = match FLIGHT.try_lock() {
+        Ok(flight) => flight,
+        // Somebody else is already asking. Their check answers this one.
+        Err(std::sync::TryLockError::WouldBlock) => return,
+        // A panic during a check must not stop every later scheduled one.
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+    };
+    let checked_at = with_cache(|cache| cache.checked_at_ms);
+    if due(crate::chat::now_ms(), checked_at) {
+        let _ = check_now();
+    }
+}
+
+/// An app connected, which usually means it just started. Check soon,
+/// after a little jitter, if the last check is older than the cooldown.
+/// Cheap and safe to call on every connection: at most one wait is pending.
+pub(crate) fn nudge() {
+    static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    // Unit tests call `protocol` all the time. They must not reach vendors.
+    if cfg!(test) {
+        return;
+    }
+    let fresh = with_cache(|cache| !due(crate::chat::now_ms(), cache.checked_at_ms));
+    if fresh || PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("agent-update-nudge".into())
+        .spawn(|| {
+            std::thread::sleep(jitter(START_JITTER));
+            check_if_due();
+            PENDING.store(false, std::sync::atomic::Ordering::Release);
+        });
+    if spawned.is_err() {
+        PENDING.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Check every installed agent when the host starts and about every six
+/// hours after, so an agent that has fallen behind is marked where people
+/// already look. The check sends each vendor only the request its own
+/// installer makes. It never updates anything: that stays a button press.
+pub(crate) fn start_schedule() {
     let _ = std::thread::Builder::new()
         .name("agent-update-check".into())
         .spawn(|| {
-            // Let startup work settle before spawning a version probe per agent.
-            std::thread::sleep(Duration::from_secs(60));
+            std::thread::sleep(START_DELAY + jitter(START_JITTER));
             loop {
-                let due = with_cache(|cache| crate::chat::now_ms() - cache.checked_at_ms >= DAY_MS);
-                if due {
-                    let _ = list(true);
-                }
-                std::thread::sleep(Duration::from_secs(60 * 60));
+                // A panic in one check must not end the schedule.
+                let _ = std::panic::catch_unwind(check_if_due);
+                std::thread::sleep(next_period());
             }
         });
 }
@@ -554,6 +699,59 @@ pub(crate) fn update(id: &str) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_check_is_due_after_the_cooldown_or_when_the_clock_moved_back() {
+        let now = 10 * COOLDOWN_MS;
+        assert!(!due(now, now - COOLDOWN_MS + 1));
+        assert!(due(now, now - COOLDOWN_MS));
+        assert!(due(now, 0));
+        assert!(due(now, now + 1));
+        // A damaged cache may hold any i64; none of it may overflow.
+        assert!(due(now, i64::MIN));
+        assert!(!just_checked(now, i64::MIN));
+        assert!(just_checked(now, now - 1000));
+        assert!(!just_checked(now, now - JUST_CHECKED_MS));
+        assert!(!just_checked(now, now + 1));
+    }
+
+    #[test]
+    fn the_period_stays_within_its_jitter() {
+        for _ in 0..200 {
+            let next = next_period();
+            assert!(next >= PERIOD - PERIOD_JITTER && next < PERIOD + PERIOD_JITTER);
+            assert!(jitter(START_JITTER) < START_JITTER);
+        }
+        assert_eq!(jitter(Duration::ZERO), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_failed_vendor_keeps_the_latest_the_previous_check_found() {
+        let previous = vec![
+            json!({"id": "codex", "latest": "0.9.0"}),
+            json!({"id": "grok", "latest": "<script>"}),
+        ];
+        let fresh = vec![
+            json!({"id": "codex", "version": "0.8.0", "error": "timed out"}),
+            json!({"id": "grok", "version": "1.0.0", "error": "timed out"}),
+            json!({"id": "claude_code", "version": "2.0.0", "latest": "2.0.0", "updateAvailable": false}),
+        ];
+        let rows = merged(&previous, fresh);
+        assert_eq!(rows[0]["latest"], "0.9.0");
+        assert_eq!(rows[0]["updateAvailable"], true);
+        // A stored value that is not a version is not shown.
+        assert!(rows[1].get("latest").is_none());
+        assert_eq!(rows[2]["latest"], "2.0.0");
+    }
+
+    #[test]
+    fn only_version_shaped_text_is_trusted_from_the_cache() {
+        assert!(plausible_version("2.1.318"));
+        assert!(plausible_version("v0.9.0-beta+1"));
+        assert!(!plausible_version(""));
+        assert!(!plausible_version("1.0 now"));
+        assert!(!plausible_version(&"9".repeat(65)));
+    }
 
     #[test]
     fn versions_are_read_from_each_vendors_banner() {
