@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat
 
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -12,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import ai.tokenstat.tokenstat.notifications.NotificationOpen
@@ -32,7 +34,18 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             installLaunchSplash(launchedAt)
         }
-        enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= 35) {
+            // Android 15 already makes the bars transparent. The Activity
+            // helper in our AndroidX version still calls deprecated color setters.
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            val lightBars = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = lightBars
+                isAppearanceLightNavigationBars = lightBars
+            }
+        } else {
+            enableEdgeToEdge()
+        }
         // A notification tap carries the push reason plus the machine id and
         // nothing else. Chat reasons wait in NotificationOpen until the
         // workspaces screen can resolve them. Anything else is dropped here,

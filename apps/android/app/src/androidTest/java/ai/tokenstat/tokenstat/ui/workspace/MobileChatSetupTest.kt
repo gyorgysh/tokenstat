@@ -118,7 +118,7 @@ class MobileChatSetupTest {
         val send = compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.send.f6f4688f"))
         val sendBounds = send.getUnclippedBoundsInRoot()
         val composerBounds = compose.onNodeWithTag("bounded-composer").getUnclippedBoundsInRoot()
-        assertTrue("Send keeps its full touch target", sendBounds.height >= 44.dp)
+        assertTrue("Send keeps its full touch target", sendBounds.bottom - sendBounds.top >= 44.dp)
         assertTrue("Send stays inside the composer", sendBounds.top >= composerBounds.top && sendBounds.bottom <= composerBounds.bottom)
         send.assertIsDisplayed().performClick()
         assertTrue(sent)
@@ -158,22 +158,21 @@ class MobileChatSetupTest {
                     onSetup = { setup = true }, quota = { ChatQuotaBadge(reading) {} })
             }
         } }
-        assertUnclippedLabel("gpt-6.1-sol · low")
         compose.onNodeWithContentDescription(chatAgentSummary(backends, chat)).assertIsDisplayed()
         compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.chat_setup.9fa79d00")).performClick()
         assertTrue(setup)
         compose.onNodeWithText(L10n.text("android.chatpullssections.plan.fa8ed0bd")).assertDoesNotExist()
         screenshot("composer-small-codex.png")
         compose.runOnIdle { current = JsonObject(chat + ("backend" to JsonPrimitive("claude"))) }
-        assertUnclippedLabel("gpt-6.1-sol · low")
+        compose.onNodeWithContentDescription(chatAgentSummary(backends, current)).assertIsDisplayed()
         compose.runOnIdle { current = JsonObject(current + ("effort" to JsonPrimitive("medium"))) }
-        assertUnclippedLabel("gpt-6.1-sol · medium")
+        compose.onNodeWithContentDescription(chatAgentSummary(backends, current)).assertIsDisplayed()
         compose.runOnIdle { current = JsonObject(current + ("effort" to JsonPrimitive("high"))) }
-        assertUnclippedLabel("gpt-6.1-sol · high")
+        compose.onNodeWithContentDescription(chatAgentSummary(backends, current)).assertIsDisplayed()
         compose.runOnIdle { current = JsonObject(current + ("backend" to JsonPrimitive("cursor"))) }
         assertUnclippedLabel("gpt-6.1-sol")
     }
-    @Test fun standardPhoneKeepsSelectedEffortReadable() {
+    @Test fun standardPhoneKeepsModelAndActionsOnOneRow() {
         var current by mutableStateOf(chat)
         compose.setContent { Screen(width = 360) {
             Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.Bottom) {
@@ -182,15 +181,28 @@ class MobileChatSetupTest {
                     onSetup = {}, quota = { ChatQuotaBadge(reading) {} })
             }
         } }
-        assertUnclippedLabel("gpt-6.1-sol · low")
         val modelBounds = compose.onNodeWithText("gpt-6.1-sol · low", useUnmergedTree = true).getUnclippedBoundsInRoot()
         val setupBounds = compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.chat_setup.9fa79d00")).getUnclippedBoundsInRoot()
-        assertTrue("Narrow phones give the model and effort a full row", modelBounds.bottom <= setupBounds.top)
+        assertEquals((modelBounds.top.value + modelBounds.bottom.value) / 2f,
+            (setupBounds.top.value + setupBounds.bottom.value) / 2f, 1f)
         compose.runOnIdle { current = JsonObject(current + ("effort" to JsonPrimitive("medium"))) }
-        assertUnclippedLabel("gpt-6.1-sol · medium")
+        compose.onNodeWithContentDescription(chatAgentSummary(backends, current)).assertIsDisplayed()
         compose.runOnIdle { current = JsonObject(current + ("effort" to JsonPrimitive("high"))) }
-        assertUnclippedLabel("gpt-6.1-sol · high")
+        compose.onNodeWithContentDescription(chatAgentSummary(backends, current)).assertIsDisplayed()
         screenshot("composer-standard-codex.png")
+    }
+    @Test fun narrowPhoneKeepsThePlaceholderOnOneLine() {
+        val hint = "Ask about 'tokenstat'"
+        compose.setContent { Screen(width = 360) {
+            Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.Bottom) {
+                ChatComposer(chat, "", {}, hint, false, staged = emptyList(), onPick = {}, onRemove = {},
+                    onSend = {}, onStop = {}, onChange = { _, _ -> }, backends = backends, onAgent = {})
+            }
+        } }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(hint, useUnmergedTree = true).assertIsDisplayed()
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(1, layouts.single().lineCount)
     }
     @Test fun widerPhoneKeepsModelAndActionsOnOneRow() {
         val medium = JsonObject(chat + ("effort" to JsonPrimitive("medium")))
@@ -216,7 +228,11 @@ class MobileChatSetupTest {
                     onChange = { _, _ -> }, backends = backends, onAgent = {}, quota = { ChatQuotaBadge(reading) {} })
             }
         } }
-        assertUnclippedLabel("gpt-6.1-sol · low")
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("gpt-6.1-sol · low", useUnmergedTree = true).assertIsDisplayed()
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.single().lineCount <= 2)
+        assertFalse("The large-text label must fit", (0 until layouts.single().lineCount).any { layouts.single().isLineEllipsized(it) })
         screenshot("composer-large-agent.png")
     }
     @Test fun longProviderModelsStayOnOneLineAndOpenThePicker() {

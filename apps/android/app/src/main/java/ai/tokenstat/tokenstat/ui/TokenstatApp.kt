@@ -382,7 +382,7 @@ private fun AuthRetryScreen(
         Modifier
             .fillMaxSize()
             .background(colors.background)
-            .systemBarsPadding()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(horizontal = Space.l),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -1013,8 +1013,8 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         // `TabBarChrome.contentBottomInset` so the last row rests clear of it.
         Box(
             Modifier.fillMaxSize()
-                .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
-                .consumeWindowInsets(PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()))
+                .padding(padding)
+                .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
         if (teamOpen) {

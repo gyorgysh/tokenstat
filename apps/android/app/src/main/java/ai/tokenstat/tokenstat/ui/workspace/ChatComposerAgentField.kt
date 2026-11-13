@@ -42,6 +42,7 @@ internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject
                                     enabled: Boolean, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
     val shape = RoundedCornerShape(10.dp)
+    val largeText = LocalDensity.current.fontScale > 1.3f
     val updateWaiting = backendOf(backends, chat?.str("backend").orEmpty())?.bol("updateAvailable") == true
     Box(modifier) {
         Row(Modifier.clip(shape).background(colors.panel).border(1.dp, colors.border, shape)
@@ -56,7 +57,8 @@ internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject
             Text(chatAgentCompactSummary(backends, chat),
                 modifier = Modifier.weight(1f, fill = false), style = TsType.callout.copy(fontWeight = FontWeight.Medium),
                 color = if (enabled) colors.textPrimary else colors.textTertiary,
-                maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                maxLines = if (largeText) 2 else 1,
+                overflow = if (largeText) TextOverflow.Ellipsis else TextOverflow.MiddleEllipsis)
             Icon(Icons.Default.UnfoldMore, null, tint = colors.textTertiary, modifier = Modifier.size(14.dp))
         }
         if (updateWaiting) {
@@ -99,9 +101,12 @@ internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, 
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        // Large text, or a narrow window: the chip gets its own line so its
-        // words stay readable beside up to five action targets.
-        if (maxWidth < 360.dp || LocalDensity.current.fontScale > 1.3f) {
+        // Keep the usual three actions on one line on phones. The chip can
+        // ellipsize its visible label while its accessibility label stays full.
+        // Give it a separate line if extra actions or large text leave too
+        // little room for a usable selector.
+        val actionCount = 3 + (if (keyboardOpen) 1 else 0) + (if (running) 1 else 0)
+        if (maxWidth < (120 + actionCount * 48).dp || LocalDensity.current.fontScale > 1.3f) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ChatComposerAgentField(backends, chat, onAgent, !locked)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically, content = actions)

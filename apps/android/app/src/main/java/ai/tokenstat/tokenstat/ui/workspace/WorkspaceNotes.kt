@@ -9,7 +9,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
@@ -447,7 +447,7 @@ private fun NoteEditorDialog(
     val colors = LocalTsColors.current
     Dialog(onDismissRequest = { if (!saving) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !saving, dismissOnClickOutside = false)) {
-        Column(Modifier.fillMaxSize().background(colors.background).systemBarsPadding().imePadding().padding(Space.m),
+        Column(Modifier.fillMaxSize().background(colors.background).safeDrawingPadding().imePadding().padding(Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 TextButton(enabled = !saving, onClick = onDismiss) { Text(L10n.text("common.cancel")) }

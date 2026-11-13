@@ -61,6 +61,9 @@ class UsageWidgetConfigurationActivity : Activity() {
                 setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)); finish()
             }
         })
-        setContentView(ScrollView(this).apply { addView(layout) })
+        setContentView(ScrollView(this).apply {
+            addView(layout)
+            applyWidgetConfigurationInsets()
+        })
     }
 }

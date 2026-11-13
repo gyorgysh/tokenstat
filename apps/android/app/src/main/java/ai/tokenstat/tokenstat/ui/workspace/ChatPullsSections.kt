@@ -3663,7 +3663,7 @@ internal fun ChatComposer(
                                     hint,
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = colors.textTertiary,
-                                    maxLines = 2,
+                                    maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 innerTextField()

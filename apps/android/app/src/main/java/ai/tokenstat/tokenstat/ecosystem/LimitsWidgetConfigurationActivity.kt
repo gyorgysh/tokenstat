@@ -102,7 +102,10 @@ class LimitsWidgetConfigurationActivity : Activity() {
             UsageWidgetProvider.schedule(this)
             setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)); finish()
         }
-        val scroll = ScrollView(this).apply { addView(layout, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)) }
+        val scroll = ScrollView(this).apply {
+            addView(layout, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            applyWidgetConfigurationInsets()
+        }
         setContentView(scroll)
     }
 }
