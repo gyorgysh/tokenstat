@@ -4,6 +4,10 @@ package ai.tokenstat.tokenstat.ui.workspace
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +24,16 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 object TranscriptFollow {
     /// How far from the bottom counts as "still with the conversation".
     val thresholdDp = 56.dp
+}
+
+internal suspend fun LazyListState.scrollToTranscriptEnd() {
+    val last = layoutInfo.totalItemsCount - 1
+    if (last >= 0) scrollToItem(last)
+}
+
+/** A real last item lets a tall final message scroll all the way to its end. */
+internal fun LazyListScope.transcriptEnd() {
+    item(key = "transcript-end") { Spacer(Modifier.height(1.dp)) }
 }
 
 /// Whether the end is under the viewport, from a lazy list's visible items.

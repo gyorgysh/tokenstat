@@ -200,6 +200,16 @@ struct TranscriptMetrics: Equatable {
     var viewportHeight: CGFloat
     /// Nil on systems without scroll phases; those keep the geometry heuristic.
     var readerIsScrolling: Bool? = nil
+
+    /// Clamping distanceFromBottom to zero also covers offsets below the
+    /// entire document. That is an empty viewport, not a reached end.
+    var viewportPastContent: Bool {
+        #if os(macOS)
+        viewportHeight > 0 && contentHeight > 0 && distanceFromTop >= contentHeight
+        #else
+        false
+        #endif
+    }
 }
 
 @available(macOS 15.0, iOS 18.0, *)
@@ -324,6 +334,10 @@ final class TranscriptFollowState {
     /// A conversation the reader can leave is better than one
     /// nobody can use.
     @ObservationIgnored private var repinsSpent = 0
+    /// A blank viewport gets one rescue even if ordinary growth corrections
+    /// exhausted their budget. It cannot replenish until content intersects.
+    @ObservationIgnored private var pastContentRecoveryAttempted = false
+    @ObservationIgnored private var viewportPastContent = false
     /// When the last repin walk ran. Growth frames arrive faster than walks
     /// pay off, so repins coalesce to ~6 a second (see the throttle below).
     /// Reset wherever a new pursuit starts so Jump and send act at once.
@@ -469,6 +483,8 @@ final class TranscriptFollowState {
         undrivenDrift = 0
         farMovedFrames = 0
         retreatingFrames = 0
+        pastContentRecoveryAttempted = false
+        viewportPastContent = false
     }
 
     func note(_ metrics: TranscriptMetrics) {
@@ -476,6 +492,8 @@ final class TranscriptFollowState {
         // re-lays out. Acting on it is what redrew markdown behind opacity
         // zero while the person was on another destination.
         guard active else { return }
+        viewportPastContent = metrics.viewportPastContent
+        if !viewportPastContent { pastContentRecoveryAttempted = false }
         let grew = metrics.contentHeight > lastContentHeight + 0.5
         let shrank = metrics.contentHeight < lastContentHeight - 0.5
         let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
@@ -513,7 +531,7 @@ final class TranscriptFollowState {
                 set(jump: false)
                 return
             }
-            atEnd = metrics.contentHeight > 0
+            atEnd = metrics.contentHeight > 0 && !metrics.viewportPastContent
                 && metrics.distanceFromBottom <= TranscriptFollow.threshold
             steadyFrames = (atEnd && !grew && !shrank) ? steadyFrames + 1 : 0
             if steadyFrames >= Self.steadyToArrive { set(arrived: true) }
@@ -528,7 +546,7 @@ final class TranscriptFollowState {
             set(jump: false)
             return
         }
-        atEnd = metrics.contentHeight > 0
+        atEnd = metrics.contentHeight > 0 && !metrics.viewportPastContent
             && metrics.distanceFromBottom <= TranscriptFollow.threshold
         guard metrics.viewportHeight > 0, metrics.contentHeight > 0 else { return }
         // Estimate resolution moves the offset in single large frames and
@@ -551,6 +569,12 @@ final class TranscriptFollowState {
         // scrolling, and that frame still says where they are.
         lastContentHeight = metrics.contentHeight
         lastOffset = metrics.distanceFromTop
+        // Never correct a viewport while a person is moving it, including
+        // the idle geometry callbacks sent during a native scroll phase.
+        if metrics.viewportPastContent && (readerMoved || metrics.readerIsScrolling == true) {
+            repinDelivery.cancel()
+            return
+        }
         if driven {
             // Instant pins land on the same frame. A slow trackpad scroll
             // retreating inside that window is still the reader leaving:
@@ -565,31 +589,41 @@ final class TranscriptFollowState {
         } else if readerMoved {
             undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
         }
-        if metrics.distanceFromBottom > TranscriptFollow.threshold,
-           (grew && !moved) || metrics.readerIsScrolling == false {
+        let pastContent = metrics.viewportPastContent
+        if metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent,
+           (grew && !moved) || metrics.readerIsScrolling == false || pastContent {
             // Layout can move the offset or resize the viewport without
             // input. Keep following within the existing scroll budget.
-            if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold {
+            if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent {
                 // One walk per frame is the sluggishness: a streaming turn
                 // grows for hundreds of frames and each repin walks the lazy
                 // stack over every row in between. Coalesce to ~6 walks a
                 // second; the end still catches up every frame it matters.
-                guard repinsSpent < Self.repinBudget else { return }
+                if pastContent {
+                    guard !pastContentRecoveryAttempted else { return }
+                } else {
+                    guard repinsSpent < Self.repinBudget else { return }
+                }
                 let delay = max(0, 0.15 - Date().timeIntervalSince(lastRepinAt))
                 // A final layout frame inside the throttle must still land.
                 // Dropping it leaves a quiet, completed reply above the end.
                 repinDelivery.submit(after: delay) { [weak self] in
                     guard let self, self.active, self.pinned,
                           !self.atEnd, !self.sliceHidesNewest,
-                          !self.suppressed, !self.settling,
-                          self.repinsSpent < Self.repinBudget else { return }
+                          !self.suppressed, !self.settling else { return }
+                    if pastContent {
+                        guard self.viewportPastContent, !self.pastContentRecoveryAttempted else { return }
+                        self.pastContentRecoveryAttempted = true
+                    } else {
+                        guard self.repinsSpent < Self.repinBudget else { return }
+                    }
                     self.lastRepinAt = Date()
                     self.repinsSpent += 1
                     self.markDrivenInstant()
                     if self.repin?() == false { self.stopFollowing() }
                 }
             } else if !pinned,
-                metrics.distanceFromBottom > TranscriptFollow.threshold
+                metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent
             {
                 // Drifted away while not following (paused, or a page that
                 // landed above): offer the way back.

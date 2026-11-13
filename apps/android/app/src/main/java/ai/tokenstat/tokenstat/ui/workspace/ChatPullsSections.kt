@@ -687,8 +687,7 @@ fun ChatSection(
     suspend fun scrollToEnd() {
         autoScrolling = true
         try {
-            val last = listState.layoutInfo.totalItemsCount - 1
-            if (last >= 0) listState.scrollToItem(last)
+            listState.scrollToTranscriptEnd()
         } finally {
             autoScrolling = false
         }
@@ -1903,6 +1902,7 @@ fun ChatSection(
                                 )
                             }
                         }
+                        transcriptEnd()
                     }
                     follow.pill(busy)?.let { pill ->
                         TranscriptFollowPill(

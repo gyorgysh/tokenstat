@@ -105,6 +105,41 @@ resize.note(native(6751, 7270, 119, scrolling: false, viewport: 400))
 drain()
 assert(resize.pinned && resizePins == 1, "viewport shrink must preserve follow")
 
+// A completed row can shrink while its old offset lies beyond the whole
+// document. The clamped bottom distance is zero, but nothing intersects the
+// viewport. Correct once, without interpreting a real gesture as layout.
+let belowContent = TranscriptFollowState()
+belowContent.note(native(600, 1000, 0, scrolling: false, viewport: 400))
+var recoveryPins = 0
+belowContent.repin = { recoveryPins += 1; return true }
+belowContent.note(native(600, 500, 0, scrolling: false, viewport: 400))
+assert(!belowContent.atEnd, "a viewport below all content is not at the end")
+drain()
+assert(recoveryPins == 1, "a following reader must recover from a blank viewport")
+belowContent.note(native(100, 500, 0, scrolling: false, viewport: 400))
+assert(belowContent.atEnd, "a valid bottom position ends recovery")
+
+let interactingBelow = TranscriptFollowState()
+interactingBelow.note(native(600, 1000, 0, scrolling: false, viewport: 400))
+var interactionPins = 0
+interactingBelow.repin = { interactionPins += 1; return true }
+interactingBelow.note(native(600, 500, 0, scrolling: false, viewport: 400))
+interactingBelow.note(native(605, 500, 0, scrolling: true, viewport: 400))
+drain()
+assert(interactionPins == 0, "a gesture must cancel a pending blank-viewport correction")
+interactingBelow.note(native(605, 500, 0, scrolling: false, viewport: 400))
+drain()
+assert(interactionPins == 1, "correction may resume after interaction ends")
+
+let pausedBelow = TranscriptFollowState()
+pausedBelow.note(native(600, 1000, 0, scrolling: false, viewport: 400))
+pausedBelow.pause()
+var pausedRecoveryPins = 0
+pausedBelow.repin = { pausedRecoveryPins += 1; return true }
+pausedBelow.note(native(600, 500, 0, scrolling: false, viewport: 400))
+drain()
+assert(pausedRecoveryPins == 0 && pausedBelow.showJump, "a paused reader keeps control and can jump back")
+
 let growth = TranscriptFollowState()
 growth.note(metrics(600))
 var repins = 0
@@ -151,6 +186,12 @@ for index in 0..<12 {
     RunLoop.main.run(until: Date().addingTimeInterval(0.17))
 }
 assert(boundedPins == 6, "a nonconverging lazy stack must retain its six-walk limit")
+bounded.note(native(600, 500, 0, scrolling: false, viewport: 400))
+RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+assert(boundedPins == 7, "a blank viewport gets one rescue even after the ordinary budget is spent")
+bounded.note(native(600, 500, 0, scrolling: false, viewport: 400))
+RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+assert(boundedPins == 7, "a failed blank-viewport rescue must not loop")
 
 let departed = TranscriptFollowState()
 departed.note(metrics(600))
