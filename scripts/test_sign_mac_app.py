@@ -42,6 +42,9 @@ class ProfileTests(unittest.TestCase):
             "com.apple.application-identifier": "EXAMPLETEAM.ai.tokenstat.tokenstat",
             "com.apple.developer.team-identifier": "EXAMPLETEAM",
             "keychain-access-groups": ["EXAMPLETEAM.ai.tokenstat.tokenstat"],
+            # Chat dictation: the hardened runtime blocks the microphone
+            # without it.
+            "com.apple.security.device.audio-input": True,
             "com.apple.security.application-groups": ["group.ai.tokenstat.tokenstat"],
         })
 
@@ -119,7 +122,12 @@ class OptionalSigningTests(unittest.TestCase):
                      mock.patch.object(signing.subprocess, "check_output", return_value=identity), \
                      mock.patch.object(signing.subprocess, "run") as run:
                     signing.main()
-                    self.assertEqual(run.call_count, 0 if check_only else 3)
+                    # Helper, deep pass, the app's microphone entitlement, verify.
+                    self.assertEqual(run.call_count, 0 if check_only else 4)
+                    if not check_only:
+                        entitled = run.call_args_list[2].args[0]
+                        self.assertIn("--entitlements", entitled)
+                        self.assertEqual(entitled[-1], str(app))
 
 
 class DebugLibrarySigningTests(unittest.TestCase):
