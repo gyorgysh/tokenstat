@@ -54,6 +54,9 @@ ALLOWED = {
 # because other bridge models also use the nested name Payload.
 LOCAL_FIELDS = {
     ("Features/Work/WorkSavedPreview.swift", "Payload", "attachmentID"),
+    # The outbox is this app's own file on this device. The id links an edited
+    # pending message back to its composer draft and never reaches a host.
+    ("Features/Work/ChatOutboxStore.swift", "ChatQueuedMessage", "sourceDraftMessageID"),
 }
 
 DECL = re.compile(
