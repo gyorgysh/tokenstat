@@ -2713,8 +2713,9 @@ mod tests {
     fn every_agent_backend_is_told_how_to_keep_a_plan() {
         for spec in BACKENDS.iter().filter(|spec| spec.id != "sh") {
             assert!(
-                crate::chat_plan::rule(spec.id).is_some(),
-                "{} has no plan rule",
+                crate::chat_plan::rule(spec.id)
+                    .is_some_and(|rule| rule.contains(crate::chat_plan::FENCE)),
+                "{} does not write the plan block",
                 spec.id
             );
         }

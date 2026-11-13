@@ -2,12 +2,13 @@
 //
 //! One visible plan format for every agent.
 //!
-//! Codex and Claude Code in the modes tokenstat runs have no plan tool: Codex's plan tool is off in exec and app-server
-//! turns, and Claude Code's print mode offers neither TodoWrite nor its task
-//! tools, not even through a tool search. So their plans never reached the
-//! chat. They write one the same way every backend asks a question: a fenced
-//! block in the reply, language `tokenstat-plan`, holding the whole list each
-//! time.
+//! Codex and Claude Code in the modes tokenstat runs have no plan tool:
+//! Codex's plan tool is off in exec and app-server turns, and Claude Code's
+//! print mode offers neither TodoWrite nor its task tools, not even through a
+//! tool search. So their plans never reached the chat. They write one the same
+//! way every backend asks a question: a fenced block in the reply, language
+//! `tokenstat-plan`, holding the whole list each time.
+//!
 //! The host records completed blocks as timeline updates and keeps the latest
 //! plan in the conversation's activity. Clients hide the raw blocks.
 //!

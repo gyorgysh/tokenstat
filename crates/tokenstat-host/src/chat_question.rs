@@ -132,9 +132,9 @@ pub(crate) fn next_block<'a>(
         // same line is prose that happens to contain backticks.
         let line_start = text[..at].rfind('\n').map_or(0, |n| n + 1);
         let before = text[line_start..at].trim_matches(|c| c == ' ' || c == '\t');
-        // A model writing one block after another often glues the next
-        // opening fence to the last closing one (```` ``` ```` then
-        // ```` ```tokenstat-plan ````) on a single line.
+        // A model writing one block after another often writes the next
+        // block's opening fence on the last block's closing line, so six
+        // backticks then an info string closes one block and opens the next.
         let opens_line = before.is_empty() || before == "```";
         let after = &text[at + 3..];
         let newline = after.find('\n')?;
@@ -462,6 +462,19 @@ mod tests {
         // Indentation and a CRLF reply must still close.
         let crlf = format!("```{FENCE}\r\n{{\"question\":\"Ship?\"}}\r\n  ```Yes\r\n");
         assert_eq!(Scanner::default().scan(&crlf).len(), 1);
+    }
+
+    #[test]
+    fn a_second_question_glued_to_the_closing_fence_is_still_read() {
+        // The next block's opening fence starts on the previous block's
+        // closing line, so that line begins with six backticks.
+        let text = format!(
+            "```{FENCE}\n{{\"question\":\"First?\"}}\n``````{FENCE}\n{{\"question\":\"Second?\"}}\n```\n"
+        );
+        let found = Scanner::default().scan(&text);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert_eq!(found[0].question, "First?");
+        assert_eq!(found[1].question, "Second?");
     }
 
     #[test]

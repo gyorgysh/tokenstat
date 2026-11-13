@@ -116,18 +116,30 @@ class OptionalSigningTests(unittest.TestCase):
             identity = '  1) ' + 'A' * 40 + ' "Developer ID Application: Fixture (TEAM)"'
             for check_only in (True, False):
                 argv = ["sign-mac-app.py", str(app), "--optional"] + (["--check-only"] if check_only else [])
+                signed = {}
+
+                def capture(command, *args, **kwargs):
+                    if "--entitlements" in command:
+                        path = Path(command[command.index("--entitlements") + 1])
+                        signed["entitlements"] = plistlib.loads(path.read_bytes())
+                        signed["app"] = command[-1]
+
                 with self.subTest(check_only=check_only), mock.patch.object(sys, "argv", argv), \
                      mock.patch.dict(signing.os.environ, {}, clear=True), \
                      mock.patch.object(Path, "home", return_value=root), \
                      mock.patch.object(signing.subprocess, "check_output", return_value=identity), \
-                     mock.patch.object(signing.subprocess, "run") as run:
+                     mock.patch.object(signing.subprocess, "run", side_effect=capture) as run:
                     signing.main()
                     # Helper, deep pass, the app's microphone entitlement, verify.
                     self.assertEqual(run.call_count, 0 if check_only else 4)
                     if not check_only:
-                        entitled = run.call_args_list[2].args[0]
-                        self.assertIn("--entitlements", entitled)
-                        self.assertEqual(entitled[-1], str(app))
+                        # No profile carries the entitlement on this path, so
+                        # the extra pass has to add it itself.
+                        self.assertEqual(
+                            signed["entitlements"],
+                            {"com.apple.security.device.audio-input": True},
+                        )
+                        self.assertEqual(signed["app"], str(app))
 
 
 class DebugLibrarySigningTests(unittest.TestCase):

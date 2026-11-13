@@ -4270,9 +4270,9 @@ impl Store {
         if let Some(note) = crate::chat_question::native_tool_note(&chat.backend) {
             composed.append_standing(note);
         }
-        // How to keep a plan the chat can show: the plan block, or a pointer
-        // to the agent's own todo tool. Nothing for a backend that already
-        // keeps one unprompted.
+        // How to keep a plan the chat can show. Every agent writes the block.
+        // An agent that calls a todo tool of its own anyway still reaches the
+        // same card, because the host reads that list too.
         if let Some(plan) = crate::chat_plan::rule(&chat.backend) {
             composed.append_standing(&plan);
         }
@@ -12136,6 +12136,47 @@ mod tests {
                 .contains("Between")
         );
         assert_eq!(rows[4]["event"]["delta"], "End");
+    }
+
+    #[test]
+    fn a_plan_glued_to_the_previous_closing_fence_keeps_its_message_order() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let mut parser = crate::transcript::Parser::new("claude");
+        let mut text = String::new();
+        let mut questions = crate::chat_question::Scanner::default();
+        let mut plans = crate::chat_plan::Scanner::default();
+        // The second block opens on the first one's closing line, so the
+        // closing fence and the next opening fence share a run of ticks.
+        let delta = "Start\n```tokenstat-plan\n{\"steps\":[{\"step\":\"Do\",\"status\":\"pending\"}]}\n``````tokenstat-plan\n{\"steps\":[{\"step\":\"Do\",\"status\":\"completed\"}]}\n```\nEnd";
+        store.record_stream_events(
+            "chat-test",
+            "claude",
+            0,
+            None,
+            vec![Event::Text {
+                delta: delta.into(),
+            }],
+            &mut parser,
+            &mut text,
+            &mut questions,
+            &mut plans,
+        );
+        let (rows, _) = store.events("chat-test", 0).unwrap();
+        let kinds: Vec<_> = rows
+            .iter()
+            .filter_map(|row| row["event"]["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["text", "plan", "text", "plan", "text"]);
+        assert_eq!(rows[3]["event"]["steps"][0]["status"], "completed");
+        // The text rows still assemble the whole reply, glue included, so a
+        // client strips it with the same rule the host used to read it.
+        let shown: String = rows
+            .iter()
+            .filter_map(|row| row["event"]["delta"].as_str())
+            .collect();
+        assert_eq!(shown, delta);
     }
 
     #[test]
