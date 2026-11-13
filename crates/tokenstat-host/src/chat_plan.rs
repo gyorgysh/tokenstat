@@ -13,9 +13,10 @@
 //! The host records completed blocks as timeline updates and keeps the latest
 //! plan in the conversation's activity. Clients hide the raw blocks.
 //!
-//! OpenCode and Muse do have a todo tool the host reads, but nothing told the
-//! model to use it, and a smaller model often did the work with no plan at
-//! all. They get one sentence pointing at their own tool instead of the block.
+//! OpenCode, Muse and Grok do have a todo tool the host reads, but nothing
+//! told the model to use it, and a smaller model often did the work with no
+//! plan at all. They get a rule pointing at their own tool instead of the
+//! block. Cursor keeps its todos without being asked.
 
 use serde_json::{Value, json};
 
@@ -115,8 +116,9 @@ pub fn rule(backend: &str) -> Option<String> {
              through the block: do not also write the plan or \"step N done\" notes \
              as prose. Skip this for quick answers, and do not mention this format."
         )),
-        "opencode" => Some(native_rule("todowrite")),
+        "opencode" | "opencode2" => Some(native_rule("todowrite")),
         "muse" => Some(native_rule("write_todos")),
+        "grok" => Some(native_rule("todo_write")),
         _ => None,
     }
 }
@@ -124,10 +126,12 @@ pub fn rule(backend: &str) -> Option<String> {
 fn native_rule(tool: &str) -> String {
     format!(
         "For work with three or more steps, keep a visible plan with your `{tool}` \
-         tool: write the list before you start the work, then update it each time \
-         a step starts or finishes, with one step in progress. The app shows that \
-         list in its plan panel, so do not also write the plan or \"step N done\" \
-         notes as prose. Skip this for quick answers."
+         tool. Call it before your first other tool call to write the whole list, \
+         then call it again each time a step starts or finishes, with one step \
+         in progress. A task that reads, writes or edits files more than twice \
+         counts. The app shows that list in its plan panel, so do not also write \
+         the plan or \"step N done\" notes as prose. Skip this only for quick \
+         answers."
     )
 }
 
@@ -217,7 +221,14 @@ mod tests {
                 .is_some_and(|text| text.contains("todowrite") && !text.contains(FENCE))
         );
         assert!(
+            rule("opencode2")
+                .is_some_and(|text| text.contains("todowrite") && !text.contains(FENCE))
+        );
+        assert!(
             rule("muse").is_some_and(|text| text.contains("write_todos") && !text.contains(FENCE))
+        );
+        assert!(
+            rule("grok").is_some_and(|text| text.contains("todo_write") && !text.contains(FENCE))
         );
         assert!(rule("cursor").is_none());
     }

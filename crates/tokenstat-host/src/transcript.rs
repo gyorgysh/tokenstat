@@ -13,7 +13,7 @@
 //! freezes the app. This module turns complete events into short display text
 //! while a run drains.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -208,6 +208,8 @@ pub struct Parser {
     inspection: crate::chat_inspection::Snapshot,
     inspection_dirty: bool,
     last_timeline_plan: Option<(Vec<String>, Vec<bool>)>,
+    /// Todo tool calls shown as the plan card instead of a tool row.
+    plan_tool_calls: HashSet<String>,
     images: crate::chat_images::Collector,
     collect_images: bool,
 }
@@ -239,6 +241,7 @@ impl Parser {
             inspection: Default::default(),
             inspection_dirty: false,
             last_timeline_plan: None,
+            plan_tool_calls: HashSet::new(),
             images: Default::default(),
             collect_images: true,
         }
@@ -372,7 +375,25 @@ impl Parser {
             }
             events.extend(self.line_events(&line));
         }
+        self.hide_plan_tools(events)
+    }
+
+    /// A todo tool's only job is the plan, and the plan already reaches the
+    /// chat as its card (`Event::Plan`), the same card a `tokenstat-plan`
+    /// block draws. Showing its call as a tool row as well would make a plan
+    /// look different depending on which agent wrote it.
+    fn hide_plan_tools(&mut self, events: Vec<Event>) -> Vec<Event> {
         events
+            .into_iter()
+            .filter(|event| match event {
+                Event::ToolStart { call_id, verb, .. } if verb == "TodoWrite" => {
+                    self.plan_tool_calls.insert(call_id.clone());
+                    false
+                }
+                Event::ToolEnd { call_id, .. } => !self.plan_tool_calls.remove(call_id),
+                _ => true,
+            })
+            .collect()
     }
 
     /// Flush a final structured event from a line without a trailing newline.
@@ -390,7 +411,7 @@ impl Parser {
         }
         events.extend(self.close_open_tools(false, Some("ended".into())));
         self.cursor_reset();
-        events
+        self.hide_plan_tools(events)
     }
 
     /// Treat any leftover partial line as complete. Call when the process
@@ -3343,7 +3364,7 @@ fn display_verb(name: &str) -> String {
         "list_dir" | "list_directory" | "Glob" | "glob" | "find_by_name" => "Glob".into(),
         "WebFetch" | "web_fetch" | "read_url_content" => "WebFetch".into(),
         "WebSearch" | "web_search" | "search_web" => "WebSearch".into(),
-        "TodoWrite" | "todo_write" => "TodoWrite".into(),
+        "TodoWrite" | "todo_write" | "updateTodos" => "TodoWrite".into(),
         "get_command_or_subagent_output" | "Task" | "task" => "Subagent".into(),
         other if other.contains('_') => other
             .split('_')
@@ -3471,6 +3492,82 @@ pub fn strip_ansi(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every backend's own plan record, whether a tool call or a protocol
+    /// update, reaches the chat as the same timeline plan card a
+    /// `tokenstat-plan` block draws.
+    #[test]
+    fn every_backend_plan_becomes_the_same_timeline_card() {
+        let records = [
+            (
+                "grok",
+                vec![
+                    json!({"type":"tool_call","toolCallId":"todo","title":"todo_write","kind":"plan","status":"pending","toolName":"todo_write","rawInput":{"todos":[{"id":"1","content":"Create x.txt","status":"in_progress"}]}}),
+                    json!({"type":"tool_call_update","toolCallId":"todo","status":"completed","content":[]}),
+                    json!({"type":"plan","entries":[{"content":"Create x.txt","priority":"medium","status":"in_progress"},{"content":"List files","priority":"medium","status":"pending"}]}),
+                ],
+            ),
+            (
+                "opencode",
+                vec![
+                    json!({"type":"tool_use","part":{"tool":"todowrite","state":{"status":"completed","input":{"todos":[{"content":"Create x.txt","status":"in_progress"},{"content":"List files","status":"pending"}]}}}}),
+                ],
+            ),
+            (
+                "opencode2",
+                vec![
+                    json!({"type":"tool_use","part":{"tool":"todowrite","state":{"status":"completed","input":{"todos":[{"content":"Create x.txt","status":"in_progress"},{"content":"List files","status":"pending"}]}}}}),
+                ],
+            ),
+            (
+                "muse",
+                vec![
+                    json!({"payload_type":"todo.snapshot.updated","payload":{"items":[{"text":"Create x.txt","status":"in_progress"},{"text":"List files","status":"pending"}]}}),
+                ],
+            ),
+            (
+                "cursor",
+                vec![
+                    json!({"type":"tool_call","subtype":"started","call_id":"todo","tool_call":{"updateTodosToolCall":{"args":{"todos":[]}}}}),
+                    json!({"type":"tool_call","subtype":"completed","call_id":"todo","tool_call":{"updateTodosToolCall":{"args":{"todos":[]},"result":{"success":{"todos":[{"content":"Create x.txt","status":"TODO_STATUS_IN_PROGRESS"},{"content":"List files","status":"TODO_STATUS_PENDING"}]}}}}}),
+                ],
+            ),
+            (
+                "claude",
+                vec![
+                    json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"todo","name":"TodoWrite","input":{"todos":[{"content":"Create x.txt","status":"in_progress"},{"content":"List files","status":"pending"}]}}]}}),
+                    json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"todo","content":"ok"}]}}),
+                ],
+            ),
+        ];
+        for (backend, lines) in records {
+            let mut parser = Parser::new(backend);
+            let mut raw = String::new();
+            for line in lines {
+                raw.push_str(&format!("{line}\n"));
+            }
+            let events = parser.push_events(raw.as_bytes());
+            let plan = events
+                .iter()
+                .find_map(|event| match event {
+                    Event::Plan { steps } => Some(steps.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{backend}: no plan card in {events:?}"));
+            assert_eq!(plan.len(), 2, "{backend}");
+            assert_eq!(plan[0]["text"], "Create x.txt", "{backend}");
+            assert_eq!(plan[0]["status"], "inProgress", "{backend}");
+            assert_eq!(plan[1]["status"], "pending", "{backend}");
+            let mut events = events;
+            events.extend(parser.finish_events());
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| matches!(event, Event::ToolStart { .. } | Event::ToolEnd { .. })),
+                "{backend}: the todo call shows only as the plan card: {events:?}"
+            );
+        }
+    }
 
     fn feed(backend: &str, raw: &str) -> String {
         let mut p = Parser::new(backend);
@@ -4043,10 +4140,11 @@ mod tests {
     }
 
     #[test]
-    fn muse_unwraps_todo_json_into_a_readable_count() {
+    fn muse_todo_results_show_as_the_plan_card_not_a_row() {
         // Captured from Muse Spark: the todo tools answer with a bare
         // status document inside `tool.result.text`, which used to land on
-        // the card as raw JSON.
+        // the card as raw JSON. Chat now shows the plan card instead of the
+        // todo row.
         let raw = concat!(
             r#"{"payload_type":"tool.result","payload":{"call_id":"todo-1","text":"{\"ok\":true,\"revision\":2,\"items\":4}","correlation_facts":{"tool_name":"write_todos","outcome":"success"}}}"#,
             "\n",
@@ -4056,19 +4154,10 @@ mod tests {
         let mut parser = Parser::new("muse");
         let events = parser.push_events(raw.as_bytes());
         assert!(
-            events.iter().any(|event| matches!(
-                event,
-                Event::ToolEnd { call_id, ok: true, detail: Some(detail) }
-                    if call_id == "todo-1" && detail == "4 todos (revision 2)"
-            )),
-            "{events:?}"
-        );
-        assert!(
-            events.iter().any(|event| matches!(
-                event,
-                Event::ToolEnd { call_id, ok: false, .. } if call_id == "todo-2"
-            )),
-            "{events:?}"
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::ToolStart { .. } | Event::ToolEnd { .. })),
+            "chat shows todo writes as the plan card: {events:?}"
         );
     }
 
@@ -4092,12 +4181,6 @@ mod tests {
                 json!({"query":"Muse release notes", "results":[]}),
                 "WebSearch",
                 "Muse release notes",
-            ),
-            (
-                "write_todos",
-                json!({"ok":true, "revision":2, "items":4}),
-                "TodoWrite",
-                "4 todos (revision 2)",
             ),
         ];
         for (name, result, verb, target) in cases {
