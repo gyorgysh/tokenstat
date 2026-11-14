@@ -343,7 +343,9 @@ private fun copyToClipboard(context: Context, text: String) {
 @Composable
 fun ChatSteerNoteBanner(
     note: String,
+    turnRunning: Boolean = false,
     onRemove: () -> Unit,
+    onSendNow: (() -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
     val shape = RoundedCornerShape(16.dp)
@@ -376,6 +378,14 @@ fun ChatSteerNoteBanner(
                 color = colors.textPrimary,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (!turnRunning && onSendNow != null) {
+            TsAccentButton(
+                label = L10n.text("android.chatqueuestrip.send_now.58803287"),
+                icon = ActionIcon.Send.vector,
+                small = true,
+                onClick = { onSendNow.invoke() },
             )
         }
         TsSecondaryButton(

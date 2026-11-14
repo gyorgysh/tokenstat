@@ -475,6 +475,9 @@ private func activityStatus(_ status: String) -> String {
     case "usageLimited": L10n.text("common.chat.activity.status_usageLimited")
     case "pending": L10n.text("common.chat.activity.status_pending")
     case "inProgress": L10n.text("common.chat.activity.status_inProgress")
+    // Host normalises to camelCase, but an older or remote writer may send the
+    // snake_case status the plan JSON uses.
+    case "in_progress": L10n.text("common.chat.activity.status_inProgress")
     case "running": L10n.text("common.chat.activity.status_running")
     case "waiting": L10n.text("common.chat.activity.status_waiting")
     case "failed": L10n.text("common.chat.activity.status_failed")

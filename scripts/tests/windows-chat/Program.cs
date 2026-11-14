@@ -750,6 +750,15 @@ Console.WriteLine("Windows folded history: collapsed and expanded windows reach 
 var questionFence = "```" + ChatQuestionText.Fence;
 var questionBlock = questionFence + "\n{\"question\":\"Which database?\"}\n```";
 Check(ChatQuestionText.Strip("Plain reply.") == "Plain reply.", "text without a block is untouched");
+var plan = "```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```";
+Check(ChatQuestionText.Strip("Working now. " + plan + "\nDone.") == "Working now.\nDone.",
+    "an inline opening fence still hides a valid plan");
+Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + " {\"steps\":[{\"step\":\"Same\",\"status\":\"pending\"}]}\n```\nAfter.") == "After.",
+    "JSON on the opening line is still hidden");
+Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Tail\",\"status\":\"completed\"}]}```\nDone.") == "Done.",
+    "closing ticks on the JSON line are still hidden");
+Check(ChatQuestionText.Strip("Before. ```" + ChatQuestionText.PlanFence + " {\"steps\":[{\"step\":\"One\",\"status\":\"completed\"}]}```\nAfter.") == "Before.\nAfter.",
+    "a one-line plan fence is still hidden");
 Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n```Yes, done.") == "Yes, done.",
     "a closing fence glued to prose still hides a valid plan");
 Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n  ```Yes, done.") == "Yes, done.",
@@ -781,6 +790,13 @@ foreach (var extra in new[] { 0, 1 })
     Check(ChatQuestionText.Strip(edge) == (extra == 0 ? "" : edge), "the body limit includes its closing newline");
 }
 Check(ChatQuestionText.Strip("Run:\n```sh\nls\n```") == "Run:\n```sh\nls\n```", "ordinary code blocks stay");
+var proseAfterTag = "Use " + questionFence + " carefully.\nStill prose.\n```\nAfter.";
+Check(ChatQuestionText.Strip(proseAfterTag) == proseAfterTag, "prose after the language tag is not a block");
+Check(ChatQuestionText.Strip("  " + questionFence + "\n{\"question\":\"Pick?\"}\n  ```\nafter") == "after", "indented fences count");
+Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\nnot json\n```", streaming: false).Contains("not json"),
+    "a broken plan block stays readable");
+Check(ChatQuestionText.Strip("```" + ChatQuestionText.PlanFence + "\n{\"question\":\"Q?\"}\n```", streaming: false).Contains("question"),
+    "a plan block without steps is not hidden");
 foreach (var body in new[] { "{}", "broken JSON", "{\"question\":42}", "{\"question\":\" \"}" })
 {
     var invalid = questionFence + "\n" + body + "\n```";

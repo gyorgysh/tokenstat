@@ -60,6 +60,7 @@ struct ChatBackend {
 }
 struct Conversation {
     var id = "chat"
+    var pendingSteer: String? = nil
     var nativeSteer: Bool? = true
     var nativeSteerAttachments: Bool? = true
     var backend = "claude"
@@ -179,6 +180,17 @@ tests = '''
                    "A retiring native capability must queue the complete attached payload")
             assert(Bridge.steerCalls == 0, "The legacy text hook cannot receive a reserved attached message")
         }
+        // A note the host parked from elsewhere owns the next send. The
+        // reserved message waits behind it instead of starting a second turn.
+        let behindParkedNote = Model()
+        behindParkedNote.attachments = []
+        guard case let .steering(parkedToken) = behindParkedNote.beginBusyNote(behindParkedNote.draft) else { fatalError() }
+        behindParkedNote.selected?.pendingSteer = "A different parked note"
+        await behindParkedNote.finishBusyNote(parkedToken)
+        assert(behindParkedNote.queuedSubmission?.text == "Add the highlighted detail"
+               && behindParkedNote.queuedAsSteer == true,
+               "A different parked note must queue the message as the next steer")
+        assert(Bridge.steerCalls == 0, "The parked note must be delivered before this message")
         for running in [false, true] {
             for savedCopy in [false, true] {
                 for name in ["/goal", "/plan", "/subagents", "/status", "/context", "/usage", "/mcp", "/tools", "/help"] {

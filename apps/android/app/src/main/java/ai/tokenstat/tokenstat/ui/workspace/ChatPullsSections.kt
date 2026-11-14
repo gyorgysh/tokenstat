@@ -834,19 +834,14 @@ fun ChatSection(
                 return false
             }
             if (stopCurrent && chats.firstOrNull { it.str("id") == id }?.bol("running") == true) {
-                val noteVersion = steerVersions.version(id)
-                var stopped = false
                 try {
                     stopChat(id)
-                    stopped = true
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
                 }
-                if (stopped && steerVersions.current(id, noteVersion)) {
-                    clearLocalSteer(id)
-                    retireSteer(id)
-                }
+                // Stop leaves a parked note in place. The note stays visible,
+                // and the poll delivers it once this conversation is idle.
                 repeat(80) {
                     if (!ownsProject()) return false
                     if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) return@repeat
@@ -1985,9 +1980,14 @@ fun ChatSection(
             if (steerNote.isNotEmpty()) {
                 ChatSteerNoteBanner(
                     note = steerNote,
+                    turnRunning = runningTurn,
                     onRemove = {
                         val id = openId ?: return@ChatSteerNoteBanner
                         scope.launch { clearSteer(id) }
+                    },
+                    onSendNow = {
+                        val id = openId ?: return@ChatSteerNoteBanner
+                        scope.launch { deliverParked(id) }
                     },
                 )
             }
@@ -2074,13 +2074,10 @@ fun ChatSection(
                     val id = openId ?: return@ChatComposer
                     scope.launch {
                         if (id in preparingIds) fileTransferJob?.cancel()
-                        val noteVersion = steerVersions.version(id)
                         try {
                             stopChat(id)
-                            if (steerVersions.current(id, noteVersion)) {
-                                clearLocalSteer(id)
-                                retireSteer(id)
-                            }
+                            // Stop keeps a parked note; the refreshed list shows
+                            // it with Send now and the poll delivers it later.
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (failure: Exception) {

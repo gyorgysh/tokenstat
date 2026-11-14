@@ -125,10 +125,12 @@ internal static class ChatQuestionText
             if (trimmed == name) return new FenceMatch(name, null, isPlan);
             if (!trimmed.StartsWith(name, StringComparison.Ordinal)) continue;
             var rest = trimmed[name.Length..];
-            if (rest.Length == 0) return new FenceMatch(name, null, isPlan);
             if (!char.IsWhiteSpace(rest[0])) continue;
             var body = rest.TrimStart();
-            return new FenceMatch(name, body.Length == 0 ? null : body, isPlan);
+            // Prose after the language tag is not a block. The body is a JSON
+            // object, so a same-line body must open one.
+            if (body.Length == 0 || body[0] != '{') continue;
+            return new FenceMatch(name, body, isPlan);
         }
         return null;
     }

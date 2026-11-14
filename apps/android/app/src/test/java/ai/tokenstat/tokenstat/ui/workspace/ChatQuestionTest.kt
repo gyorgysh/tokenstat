@@ -71,6 +71,8 @@ class ChatQuestionTest {
             assertEquals(if (extra == 0) "" else edge, stripQuestionBlocks(edge))
         }
         assertEquals("Run:\n```sh\nls\n```", stripQuestionBlocks("Run:\n```sh\nls\n```"))
+        val prose = "Use ```$QUESTION_FENCE carefully.\nStill prose.\n```\nAfter."
+        assertEquals(prose, stripQuestionBlocks(prose))
         assertEquals("after", stripQuestionBlocks("  $fence\n{\"question\":\"Pick?\"}\n  ```\nafter"))
         for (body in listOf("{}", "broken JSON", "{\"question\":42}", "{\"question\":\" \"}")) {
             val invalid = "$fence\n$body\n```"

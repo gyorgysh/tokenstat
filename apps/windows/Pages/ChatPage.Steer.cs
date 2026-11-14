@@ -15,7 +15,8 @@ namespace Tokenstat.Pages;
 
 /// <summary>
 /// A short note that rides the next step. The turn keeps going.
-/// Stop drops the note. A host that cannot carry one falls back to the queue.
+/// Stop leaves the note parked so it can be sent once the turn is idle.
+/// A host that cannot carry one falls back to the queue.
 /// </summary>
 internal sealed partial class ChatPage
 {
@@ -277,9 +278,10 @@ internal sealed partial class ChatPage
                 return;
             }
 
-            var reloaded = await ReloadOpenChatAsync(chat);
+            await ReloadOpenChatAsync(chat);
             if (!Current()) return;
-            if (!reloaded) ClearLocalSteer();
+            // A failed reload says nothing about the note, which the host
+            // keeps when it did not deliver. Leave it for the next poll.
             _deliveringSteer = false;
             await DrainQueueAsync(deliverNote: false);
             if (Current()) PaintConversation();
@@ -416,14 +418,24 @@ internal sealed partial class ChatPage
             Foreground = Theme.AccentBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        var sendNow = Buttons.Primary(L10n.Text("windows.chatpage_steer.send_now.58803287"), ActionIcon.Send,
+            async (_, _) =>
+            {
+                if (_openId is string chat) await DeliverParkedSteerAsync(chat);
+            }, small: true);
+        sendNow.Visibility = Busy() ? Visibility.Collapsed : Visibility.Visible;
+        ToolTipService.SetToolTip(sendNow, L10n.Text("windows.chatpage_steer.ready_choose_send_now_when_you_are_ready.f283a341"));
         var remove = ActionIconGlyph.Button(L10n.Text("common.remove"), ActionIcon.Delete, async (_, _) => await ClearSteerAsync());
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, L10n.Text("windows.chatpage_steer.remove_this_note.80951b12"));
         ToolTipService.SetToolTip(remove, L10n.Text("windows.chatpage_steer.remove_this_note.80951b12"));
         var header = new Grid { ColumnSpacing = Theme.SpaceS };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.Children.Add(title);
-        Grid.SetColumn(remove, 1);
+        Grid.SetColumn(sendNow, 1);
+        header.Children.Add(sendNow);
+        Grid.SetColumn(remove, 2);
         header.Children.Add(remove);
         var body = new TextBlock
         {

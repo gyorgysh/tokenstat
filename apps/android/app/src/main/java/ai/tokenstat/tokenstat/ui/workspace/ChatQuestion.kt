@@ -114,10 +114,12 @@ private fun fenceBody(header: String): FenceMatch? {
         if (trimmed == name) return FenceMatch(name, null, isPlan)
         if (!trimmed.startsWith(name)) continue
         val rest = trimmed.substring(name.length)
-        if (rest.isEmpty()) return FenceMatch(name, null, isPlan)
         if (!rest.first().isWhitespace()) continue
         val body = rest.trimStart()
-        return FenceMatch(name, body.ifEmpty { null }, isPlan)
+        // Prose after the language tag is not a block. The body is a JSON
+        // object, so a same-line body must open one.
+        if (!body.startsWith("{")) continue
+        return FenceMatch(name, body, isPlan)
     }
     return null
 }

@@ -65,6 +65,9 @@ struct ChatQuestionTests {
         }
         require(ChatQuestionText.stripping("Run:\n```sh\nls\n```") == "Run:\n```sh\nls\n```",
                 "ordinary code blocks stay")
+        let prose = "Use ```tokenstat-question carefully.\nStill prose.\n```\nAfter."
+        require(ChatQuestionText.stripping(prose) == prose,
+                "prose after the language tag is not a block")
         require(ChatQuestionText.stripping("  \(fence)\n{\"question\":\"Pick?\"}\n  ```\nafter") == "after", "indented fences count")
         for body in ["{}", "broken JSON", "{\"question\":42}", "{\"question\":\" \"}"] {
             let invalid = "\(fence)\n\(body)\n```"

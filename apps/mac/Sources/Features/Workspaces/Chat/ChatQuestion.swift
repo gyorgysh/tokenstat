@@ -128,7 +128,10 @@ enum ChatQuestionText {
             let rest = trimmed.dropFirst(name.count)
             guard rest.first?.isWhitespace == true else { continue }
             let body = rest.drop(while: { $0.isWhitespace })
-            return (name, body.isEmpty ? nil : String(body), isPlan)
+            // Prose after the language tag is not a block. The body is a JSON
+            // object, so a same-line body must open one.
+            guard body.first == "{" else { continue }
+            return (name, String(body), isPlan)
         }
         return nil
     }

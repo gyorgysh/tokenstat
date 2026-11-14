@@ -189,13 +189,18 @@ fn fence_open_body_at(header: &str, fence: &str) -> Option<Option<usize>> {
         return Some(None);
     }
     let rest = info.strip_prefix(fence)?;
-    if rest.is_empty() {
-        return Some(None);
-    }
     if !rest.starts_with(|c: char| c.is_whitespace()) {
         return None;
     }
     let body = rest.trim_start();
+    if body.is_empty() {
+        return Some(None);
+    }
+    // Prose after the language tag is not a block. The body is a JSON object,
+    // so a same-line body must open one.
+    if !body.starts_with('{') {
+        return None;
+    }
     let offset = lead + fence.len() + (rest.len() - body.len());
     Some(Some(offset))
 }
@@ -536,6 +541,24 @@ mod tests {
         assert!(Scanner::default().scan(text).is_empty());
         let json = "```json\n{\"question\":\"x\"}\n```\n";
         assert!(Scanner::default().scan(json).is_empty());
+    }
+
+    #[test]
+    fn prose_after_the_language_tag_is_not_an_opening() {
+        assert_eq!(fence_open_body_at(FENCE, FENCE), Some(None));
+        assert_eq!(
+            fence_open_body_at(&format!("{FENCE}   "), FENCE),
+            Some(None)
+        );
+        assert_eq!(
+            fence_open_body_at(&format!("{FENCE} carefully"), FENCE),
+            None
+        );
+        assert!(
+            fence_open_body_at(&format!("{FENCE} {{\"question\":\"Q\"}}"), FENCE)
+                .flatten()
+                .is_some()
+        );
     }
 
     #[test]

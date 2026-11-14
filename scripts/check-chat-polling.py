@@ -145,6 +145,8 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         return pendingClaim
     }
     var busy: Bool { selected?.running == true }
+    var drains = 0
+    func drainQueue() async { drains += 1 }
     var remoteSteer: Bool?, steerProbeStarted = false, steerProbeTicket: UUID?, steerProbeOwner: PollOwner?
     func performSteerDelivery(_ item: String) async { deliveries.append(deliveringSteerToken ?? 0) }
     func finishSteerDelivery(_ item: String, token: UInt64) {
@@ -293,6 +295,16 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         for _ in 0..<100 { await Task.yield() }
         precondition(catchup.eventWire.calls == 3, "Caught-up readers must stop draining")
         catchup.cancelPollReads()
+        // An idle tick drains messages queued behind a note the host has
+        // since taken, without waiting for another polling interval.
+        let idle = Model()
+        idle.selected = ChatConversation(id: "chat", running: false)
+        Bridge.statusReply = [.init(id: "chat", running: false)]
+        let idleStatus = Bridge.status.calls
+        let idlePoll = Task { await idle.performStatusPoll(owner: idle.pollingIdentity!, permitsPublication: { true }) }
+        await until { Bridge.status.calls == idleStatus + 1 }
+        Bridge.status.finish(idleStatus); await idlePoll.value
+        precondition(idle.drains == 1, "An idle status tick must drain the queue")
         print("ChatModel: held events allow metadata, terminal wake, scoped late replies, usage fences, cached descriptor scans, attachment retry")
     }
 }

@@ -551,9 +551,9 @@ pub struct Store {
     /// It rides the next step, or becomes the next message if the turn ends
     /// first. A restart drops it rather than sending it later unasked.
     steers: Mutex<HashMap<String, String>>,
-    /// Conversations whose parked note must not start a turn. Stop and a
-    /// removed note set this so a delivery that already holds the text comes
-    /// back without launching. A person's own send, or a newer note, clears it.
+    /// Conversations whose parked note must not start a turn. A removed note
+    /// sets this so a delivery that already holds the text comes back without
+    /// launching. A person's own send, or a newer note, clears it.
     suppress_follow_up: Mutex<HashSet<String>>,
     /// Answers that ride the parked note in `steers`. Never locked together
     /// with `steers`, for the same reason as `suppress_follow_up`.
@@ -573,7 +573,7 @@ struct CompletedWork {
     finished_at: Instant,
 }
 
-/// How `send` finished. A suppressed follow-up is a note Stop already retired,
+/// How `send` finished. A suppressed follow-up is a note the person cleared,
 /// so the caller must not treat it as a turn that started.
 enum SendOutcome {
     Started(Conversation),
@@ -1760,7 +1760,7 @@ impl Store {
 
     /// Forget a parked note and refuse a delivery that already holds its text.
     ///
-    /// The two maps are never locked together. Holding both is how a Stop and
+    /// The two maps are never locked together. Holding both is how a clear and
     /// a delivery would wait on each other.
     fn retire_steer(&self, id: &str) {
         self.steers
@@ -1830,7 +1830,7 @@ impl Store {
     }
 
     /// Reopen every parked answer whose words are no longer in the parked
-    /// note. Stop, a cleared note and a new message all drop the note, and an
+    /// note. A cleared note and a new message both drop the note, and an
     /// answer recorded against its question would otherwise read as given to
     /// an agent that never saw it.
     fn reconcile_parked_answers(&self, id: &str) {
@@ -2064,8 +2064,8 @@ impl Store {
     }
 
     /// Put a note back when the send that was supposed to carry it did not
-    /// start, and the turn is still idle. A newer note, a Stop, or a turn
-    /// that started in between wins, and this copy is dropped.
+    /// start, and the turn is still idle. A newer note, a cleared note, or a
+    /// turn that started in between wins, and this copy is dropped.
     #[cfg(test)]
     fn restore_steer_if_idle(&self, id: &str, note: &str, error: &DispatchError) {
         let Ok(_acceptance) = crate::chat_receipts::Operation::conversation(&self.root, id) else {
@@ -9902,7 +9902,7 @@ mod tests {
         store.answer_question("chat-test", &question, "B").unwrap();
         assert_eq!(withdrawn(&store, "chat-test", &question), 0);
 
-        // Clearing the note, like Stop, takes the answer with it.
+        // Clearing the note takes the answer with it.
         store.steer_clear("chat-test").unwrap();
         assert_eq!(withdrawn(&store, "chat-test", &question), 1);
         let again = store.answer_question("chat-test", &question, "A").unwrap();
@@ -11251,12 +11251,57 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         prepare_live_chat(&store, "chat-test");
-        retune_chat(&store, "chat-test", "muse", "standard");
+        retune_chat(&store, "chat-test", "claude", "standard");
+        let mailbox = tempfile::tempdir().unwrap();
+        fs::write(mailbox.path().join("ready.json"), "true").unwrap();
+        let manager = tokenstat_pty::manager();
+        let process = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: std::env::current_exe()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                args: vec![
+                    "--ignored".into(),
+                    "--exact".into(),
+                    "chat::tests::native_steering_process_fixture".into(),
+                ],
+                cwd: root.path().into(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .unwrap();
+        store
+            .active
+            .lock()
+            .unwrap()
+            .insert("chat-test".into(), process.id.clone());
+        store.live_speed.lock().unwrap().insert(
+            "chat-test".into(),
+            (
+                process.id.clone(),
+                Arc::new(crate::chat_live::Launch::test_mailbox(mailbox)),
+            ),
+        );
+
+        // A live speed entry advertises native steering for other backends, so
+        // the muse refusal below is the backend rule and not a missing process.
+        let mut native = serde_json::to_value(store.list("workspace-a")).unwrap();
+        store.attach_pending_steers(&mut native);
+        assert_eq!(native[0]["nativeSteer"], true);
+
         store.steer("chat-test", "hook note").unwrap();
+        retune_chat(&store, "chat-test", "muse", "standard");
         let mut value = serde_json::to_value(store.list("workspace-a")).unwrap();
         store.attach_pending_steers(&mut value);
         assert_eq!(value[0]["pendingSteer"], "hook note");
         assert!(!value[0]["nativeSteer"].as_bool().unwrap_or(true));
+        manager.kill(&process.id).ok();
     }
 
     #[test]

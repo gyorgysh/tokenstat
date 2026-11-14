@@ -71,7 +71,10 @@ internal sealed partial class ChatPage
     }
     private static string ActivityStatus(string status, bool live)
     {
-        var text = ActivityText("status_" + status);
+        // Host normalises to camelCase, but an older or remote writer may send
+        // the snake_case status the plan JSON uses.
+        var key = status == "in_progress" ? "inProgress" : status;
+        var text = ActivityText("status_" + key);
         return live ? text : ActivityText("last_reported", text);
     }
     private static string ActivitySummary(ChatActivityData data)

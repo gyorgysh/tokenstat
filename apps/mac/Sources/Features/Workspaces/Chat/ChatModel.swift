@@ -3971,9 +3971,9 @@ final class ChatModel {
             }
             _ = await reloadOpenChats()
             guard current() else { return }
-            if selected?.pendingSteer != note {
-                clearLocalSteer()
-            }
+            // The refresh is host truth, including a newer note another
+            // client parked while this delivery was in flight. Never clear a
+            // note just because it differs from the one this attempt used.
         } catch {
             guard current() else { return }
             let message = hostMessage(error)

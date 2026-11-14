@@ -2164,13 +2164,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             ContextMenus.AddAsync(ContextMenus.Menu(queue), L10n.Text("windows.chatpage.stop_and_send_now.8ad0a50d"), async () =>
             {
                 if (_openId is not string chat) return;
-                var noteRevision = _steerOverlay.Revision(chat);
                 try
                 {
                     await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
-                    var cleared = _steerOverlay.RememberIfCurrent(chat, null, noteRevision);
                     if (!OpenChatIs(chat)) return;
-                    if (cleared) ClearLocalSteer();
+                    // The note stays parked; it rides the next step of the
+                    // message this action is about to send.
                     await SendAsync(sendNext: true);
                     StartPoll();
                 }
@@ -2309,7 +2308,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_openId is not string chat) return;
         var generation = _openGeneration;
         var revision = _openChat?["sendRevision"] is null ? (long?)null : Format.Long(_openChat, "sendRevision");
-        var noteRevision = _steerOverlay.Revision(chat);
         try
         {
             var protocol = RemoteFeatureGate.ProtocolOf(await CallChatAsync("protocol", new JsonObject()));
@@ -2318,9 +2316,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 await CallChatAsync("chat.recover", new JsonObject { ["id"] = chat,
                     ["expectedRevision"] = revision.Value, ["stopActive"] = true });
             else await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
-            var cleared = _steerOverlay.RememberIfCurrent(chat, null, noteRevision);
+            // Stop leaves a parked note. The refreshed list still shows it,
+            // with Send now, until it is delivered or removed.
             if (!OpenChatIs(chat) || generation != _openGeneration) return;
-            if (cleared) ClearLocalSteer();
             PaintConversation();
             StartPoll();
         }

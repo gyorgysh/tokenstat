@@ -28,7 +28,10 @@ private fun activityText(key: String, vararg args: String): String {
 private fun activitySource(value: String) = if (value in listOf("agent", "tool")) activityText("source_$value") else value
 private fun activityNumber(value: Double) = NumberFormat.getIntegerInstance().format(value)
 private fun activityStatus(status: String, live: Boolean): String {
-    val value = activityText("status_$status")
+    // Host normalises to camelCase, but an older or remote writer may send the
+    // snake_case status the plan JSON uses.
+    val key = if (status == "in_progress") "inProgress" else status
+    val value = activityText("status_$key")
     return if (live) value else activityText("last_reported", value)
 }
 private fun activitySummary(data: ChatActivityData): String = buildList {
