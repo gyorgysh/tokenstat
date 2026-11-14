@@ -771,6 +771,13 @@ Check(ChatQuestionText.Strip("Starting.\n\n" + gluedPlan + "```" + ChatQuestionT
     "a plan glued to the last closing fence is hidden too");
 Check(ChatQuestionText.Strip("Starting.\n" + gluedPlan + "```" + ChatQuestionText.PlanFence + "\n{\"steps\":[") == "Starting.",
     "a glued plan still streaming is cut from its opening");
+// Captured from Cursor: the first plan closes and the next opens on the same
+// line with prose between the fences.
+var chainedPlan = "A.\n```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"A\",\"status\":\"completed\"}]}\n```Next works.```" + ChatQuestionText.PlanFence + "\n{\"steps\":[{\"step\":\"B\",\"status\":\"in_progress\"}]}\n```\nDone.";
+Check(ChatQuestionText.Strip(chainedPlan) == "A.\nNext works.\nDone.",
+    "a plan reopened after prose on its closing line is hidden too");
+Check(ChatQuestionText.Strip("Before. ```" + ChatQuestionText.PlanFence + " {\"steps\":[{\"step\":\"A\",\"status\":\"completed\"}]}``` mid ```" + ChatQuestionText.PlanFence + " {\"steps\":[{\"step\":\"B\",\"status\":\"completed\"}]}``` after") == "Before.\nmid\nafter",
+    "two one-line plans sharing lines are both hidden");
 Check(ChatQuestionText.Strip(gluedPlan[..^3] + "``````\nprose") == "prose", "a bare run of ticks only closes");
 Check(ChatQuestionText.Strip("Before:\n" + questionBlock + "\nGoing with A.") == "Before:\nGoing with A.", "a finished block leaves the prose around it");
 Check(ChatQuestionText.Strip("Before:\n" + questionFence + "\n{\"question\":\"Wh") == "Before:", "a streaming block is cut from its opening line");

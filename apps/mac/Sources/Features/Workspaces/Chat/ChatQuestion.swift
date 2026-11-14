@@ -154,7 +154,13 @@ enum ChatQuestionText {
             : question?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let next = closed.trailing.trimmingCharacters(in: .whitespaces)
         let nextInfo = Self.fenceBody(in: next.hasPrefix("```") ? String(next.dropFirst(3)) : "")
-        let opensNext = nextInfo != nil
+        // The next block can reopen anywhere in the trailing text, not only
+        // at its start: a close glued to prose that itself ends in a new
+        // opening (` ```Next works.```tokenstat-plan`) hides both blocks.
+        // `opening` scans the whole fragment, mirroring the host scanner,
+        // which resumes mid-line after a close.
+        let reopen = Self.opening(in: closed.trailing)
+        let opensNext = nextInfo != nil || reopen != nil
         if !valid {
             kept.append(contentsOf: block)
             if closed.bodyPrefix.isEmpty {
@@ -162,10 +168,25 @@ enum ChatQuestionText {
             } else if !opensNext, !closed.trailing.isEmpty {
                 kept.append(closed.trailing)
             }
-        } else if !closed.trailing.isEmpty, !opensNext {
+            if opensNext, let reopen, !reopen.prefix.isEmpty {
+                kept.append(reopen.prefix)
+            }
+        } else if let reopen {
+            if !reopen.prefix.isEmpty { kept.append(reopen.prefix) }
+        } else if !closed.trailing.isEmpty {
             kept.append(closed.trailing)
         }
         block = []
+        if let reopen {
+            block = [reopen.fenceLine]
+            if let same = reopen.sameLineBody {
+                if let closed = Self.closeBodyLine(same, block: &block, isPlan: reopen.isPlan, kept: &kept) {
+                    return closed
+                }
+                block.append(same)
+            }
+            return (true, reopen.isPlan)
+        }
         if let nextInfo {
             block = ["```" + nextInfo.language]
             return (true, nextInfo.isPlan)

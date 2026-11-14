@@ -221,6 +221,20 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_reopened_after_prose_on_its_closing_line_still_counts() {
+        // Captured from Cursor: the first plan closes and the next opens on
+        // the same line with prose between the fences.
+        let text = format!(
+            "A.\n```{FENCE}\n{{\"steps\":[{{\"step\":\"A\",\"status\":\"completed\"}}]}}\n```Next works.```{FENCE}\n{{\"steps\":[{{\"step\":\"B\",\"status\":\"in_progress\"}}]}}\n```\nDone.\n"
+        );
+        let plans = Scanner::default().scan_all(&text);
+        assert_eq!(plans.len(), 2, "{plans:?}");
+        assert_eq!(plans[0][0]["text"], "A");
+        assert_eq!(plans[1][0]["text"], "B");
+        assert_eq!(plans[1][0]["status"], "in_progress");
+    }
+
+    #[test]
     fn a_closing_fence_glued_to_prose_still_updates_the_plan() {
         // The final update often arrives as ` ```Yes,...` with no newline after
         // the ticks. That must still close the block or the plan sticks mid-run.

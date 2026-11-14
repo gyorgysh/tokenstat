@@ -155,23 +155,46 @@ internal static class ChatQuestionText
         catch (System.Text.Json.JsonException) { }
         var next = closed.Trailing.Trim(' ', '\t');
         var nextInfo = next.StartsWith("```", StringComparison.Ordinal) ? FenceBody(next[3..]) : null;
+        // The next block can reopen anywhere in the trailing text, not only at
+        // its start: a close glued to prose that itself ends in a new opening
+        // (` ```Next works.```tokenstat-plan`) hides both blocks. `Opening`
+        // scans the whole fragment, mirroring the host scanner, which resumes
+        // mid-line after a close.
+        var reopen = Opening(closed.Trailing);
+        var opensNext = nextInfo is not null || reopen is not null;
         if (!valid)
         {
             kept.AddRange(block);
             if (closed.BodyPrefix.Length == 0)
             {
-                kept.Add(nextInfo is not null ? line[..^closed.Trailing.Length] : line);
+                kept.Add(opensNext ? line[..^closed.Trailing.Length] : line);
             }
-            else if (nextInfo is null && closed.Trailing.Length > 0)
+            else if (!opensNext && closed.Trailing.Length > 0)
             {
                 kept.Add(closed.Trailing);
             }
+            if (opensNext && reopen is { Prefix.Length: > 0 } invalidReopen) kept.Add(invalidReopen.Prefix);
         }
-        else if (closed.Trailing.Length > 0 && nextInfo is null)
+        else if (reopen is { } validReopen)
+        {
+            if (validReopen.Prefix.Length > 0) kept.Add(validReopen.Prefix);
+        }
+        else if (closed.Trailing.Length > 0)
         {
             kept.Add(closed.Trailing);
         }
         block.Clear();
+        if (reopen is { } openAgain)
+        {
+            isPlan = openAgain.IsPlan;
+            block.Add(openAgain.FenceLine);
+            if (openAgain.SameLineBody is { } same)
+            {
+                if (CloseBodyLine(same, block, ref isPlan, kept) is { } nested) return nested;
+                block.Add(same);
+            }
+            return true;
+        }
         if (nextInfo is { } openNext)
         {
             isPlan = openNext.IsPlan;

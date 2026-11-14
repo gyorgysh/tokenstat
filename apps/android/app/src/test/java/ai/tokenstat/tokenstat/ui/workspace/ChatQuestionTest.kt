@@ -55,6 +55,16 @@ class ChatQuestionTest {
         )
         assertEquals("Starting.", stripQuestionBlocks("Starting.\n$plan```$PLAN_FENCE\n{\"steps\":["))
         assertEquals("prose", stripQuestionBlocks("${plan.dropLast(3)}``````\nprose"))
+        // Captured from Cursor: the first plan closes and the next opens on
+        // the same line with prose between the fences.
+        assertEquals(
+            "A.\nNext works.\nDone.",
+            stripQuestionBlocks("A.\n```$PLAN_FENCE\n{\"steps\":[{\"step\":\"A\",\"status\":\"completed\"}]}\n```Next works.```$PLAN_FENCE\n{\"steps\":[{\"step\":\"B\",\"status\":\"in_progress\"}]}\n```\nDone."),
+        )
+        assertEquals(
+            "Before.\nmid\nafter",
+            stripQuestionBlocks("Before. ```$PLAN_FENCE {\"steps\":[{\"step\":\"A\",\"status\":\"completed\"}]}``` mid ```$PLAN_FENCE {\"steps\":[{\"step\":\"B\",\"status\":\"completed\"}]}``` after"),
+        )
         assertEquals("Before:\nGoing with A.", stripQuestionBlocks("Before:\n$block\nGoing with A."))
         assertEquals("Before:", stripQuestionBlocks("Before:\n$fence\n{\"question\":\"Wh"))
         assertEquals("", stripQuestionBlocks(block))

@@ -39,6 +39,13 @@ struct ChatQuestionTests {
                 "a plan glued to the last closing fence is hidden too: \(ChatQuestionText.stripping(glued))")
         require(ChatQuestionText.stripping("Starting.\n\(plan)```tokenstat-plan\n{\"steps\":[") == "Starting.",
                 "a glued plan still streaming is cut from its opening")
+        // Captured from Cursor: the first plan closes and the next opens on
+        // the same line with prose between the fences.
+        let chained = "A.\n```tokenstat-plan\n{\"steps\":[{\"step\":\"A\",\"status\":\"completed\"}]}\n```Next works.```tokenstat-plan\n{\"steps\":[{\"step\":\"B\",\"status\":\"in_progress\"}]}\n```\nDone."
+        require(ChatQuestionText.stripping(chained) == "A.\nNext works.\nDone.",
+                "a plan reopened after prose on its closing line is hidden too: \(ChatQuestionText.stripping(chained))")
+        require(ChatQuestionText.stripping("Before. ```tokenstat-plan {\"steps\":[{\"step\":\"A\",\"status\":\"completed\"}]}``` mid ```tokenstat-plan {\"steps\":[{\"step\":\"B\",\"status\":\"completed\"}]}``` after") == "Before.\nmid\nafter",
+                "two one-line plans sharing lines are both hidden")
         require(ChatQuestionText.stripping("\(plan.dropLast(3))``````\nprose") == "prose",
                 "a bare run of ticks only closes")
         require(ChatQuestionText.stripping("```tokenstat-plan\nnot json\n```", streaming: false).contains("not json"),

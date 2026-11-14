@@ -140,17 +140,37 @@ private fun closeBodyLine(
         else question?.isString == true && question.content.isNotBlank()
     val next = closed.trailing.trim(' ', '\t')
     val nextInfo = if (next.startsWith("```")) fenceBody(next.substring(3)) else null
+    // The next block can reopen anywhere in the trailing text, not only at
+    // its start: a close glued to prose that itself ends in a new opening
+    // (` ```Next works.```tokenstat-plan`) hides both blocks. `opening`
+    // scans the whole fragment, mirroring the host scanner, which resumes
+    // mid-line after a close.
+    val reopen = opening(closed.trailing)
+    val opensNext = nextInfo != null || reopen != null
     if (!valid) {
         kept.addAll(block)
         if (closed.bodyPrefix.isEmpty()) {
-            kept.add(if (nextInfo != null) line.dropLast(closed.trailing.length) else line)
-        } else if (nextInfo == null && closed.trailing.isNotEmpty()) {
+            kept.add(if (opensNext) line.dropLast(closed.trailing.length) else line)
+        } else if (!opensNext && closed.trailing.isNotEmpty()) {
             kept.add(closed.trailing)
         }
-    } else if (closed.trailing.isNotEmpty() && nextInfo == null) {
+        if (opensNext && reopen?.prefix?.isNotEmpty() == true) kept.add(reopen.prefix)
+    } else if (reopen != null) {
+        if (reopen.prefix.isNotEmpty()) kept.add(reopen.prefix)
+    } else if (closed.trailing.isNotEmpty()) {
         kept.add(closed.trailing)
     }
     block.clear()
+    if (reopen != null) {
+        block.add(reopen.fenceLine)
+        val same = reopen.sameLineBody
+        if (same != null) {
+            val nested = closeBodyLine(same, block, reopen.isPlan, kept)
+            if (nested != null) return nested
+            block.add(same)
+        }
+        return true to reopen.isPlan
+    }
     if (nextInfo != null) {
         block.add("```${nextInfo.language}")
         return true to nextInfo.isPlan
