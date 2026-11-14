@@ -2459,9 +2459,11 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 p.expected_revision
                     .ok_or("chat.steerSend needs expectedRevision")?,
             )?;
+            let backend = chat.backend.clone();
             let mut value = serde_json::to_value(chat).map_err(|error| error.to_string())?;
-            value["nativeSteer"] = json!(store.native_steer(&id).is_some());
-            value["nativeSteerAttachments"] = value["nativeSteer"].clone();
+            let native = store.client_native_steer(&id, &backend);
+            value["nativeSteer"] = json!(native);
+            value["nativeSteerAttachments"] = json!(native);
             Ok(value)
         }
         "chat.steer" => {

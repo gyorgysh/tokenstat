@@ -1434,7 +1434,7 @@ impl Store {
     ///
     /// A parked note is not yet a chat message. The next step records it and
     /// hands it over, and the turn keeps going. A second note replaces the
-    /// first. Stop drops it.
+    /// first. Stop leaves it parked so the client can deliver it once idle.
     pub fn steer(&self, id: &str, text: &str) -> Result<(), String> {
         if text.trim() == "/compact" {
             return Err("Native compaction must run between turns, not as an agent note.".into());
@@ -1696,8 +1696,7 @@ impl Store {
     /// Send a parked note as the next message once the turn has finished.
     ///
     /// Called by the client that still shows the note. If the turn is still
-    /// going, this refuses and leaves the note where it is. If Stop already
-    /// retired it, the answer is that nothing was sent.
+    /// going, this refuses and leaves the note where it is.
     pub fn steer_deliver(self: &Arc<Self>, id: &str) -> Result<Value, DispatchError> {
         let Some(note) = self.claim_idle_steer(id)? else {
             return Ok(json!({ "delivered": false }));
@@ -1714,6 +1713,9 @@ impl Store {
                 }))
             }
             Ok(SendOutcome::Suppressed(_)) => {
+                // Clear already retired this note (suppress was consumed by
+                // send). A newer parked note is already in `steers`. Restoring
+                // here would put a cleared note back.
                 self.reconcile_parked_answers(id);
                 Ok(json!({ "delivered": false }))
             }
@@ -1742,7 +1744,8 @@ impl Store {
             let Some(id) = row.get("id").and_then(Value::as_str) else {
                 continue;
             };
-            let native_steer = self.native_steer(id).is_some();
+            let backend = row.get("backend").and_then(Value::as_str).unwrap_or("");
+            let native_steer = self.client_native_steer(id, backend);
             let note = steers.get(id).cloned();
             let Some(object) = row.as_object_mut() else {
                 continue;
@@ -2010,11 +2013,9 @@ impl Store {
         }
     }
 
-    /// A follow-up is the note Stop may already have retired. A person's own
-    /// send clears that refusal and is never skipped.
-    ///
-    /// A newer note parked after this text was taken also skips the launch.
-    /// The newer words stay in the map for the next step.
+    /// A follow-up delivery may be refused when the person cleared the note or
+    /// parked a newer one after this text was claimed. A person's own send
+    /// clears that refusal and is never skipped.
     fn follow_up_should_skip(&self, id: &str, follow_up: bool) -> bool {
         if !follow_up {
             self.suppress_follow_up
@@ -3697,11 +3698,15 @@ impl Store {
             return Ok(None);
         };
         brief.push_str(&format!(
-            "\nFull history: {}. Read it if the summary above is missing what you need.\n",
+            "\nHistory log: {}. It may be large. Do not cat or read the whole file. For continue \
+             or handoff, use small slices only: `tail -n 120` on the path (PowerShell: \
+             `Get-Content -Tail 120`), or `grep -n '^## Person'`, `grep -n tokenstat-plan`, \
+             or `grep -n 'tool finished'` piped to `tail` to find the last person message, \
+             plan, or tool. Read a line range only after grep gives offsets.\n",
             path.display()
         ));
         if dropped > 0 {
-            brief.push_str("Earlier turns were omitted from this inline summary; the full history retains them.\n");
+            brief.push_str("Earlier turns were omitted from this inline summary; use the log with tail/grep for older detail.\n");
         }
         let sessions = {
             let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
@@ -3765,8 +3770,9 @@ impl Store {
         let mut brief = format!(
             "This chat continues an earlier conversation in this folder, \"{}\". \
              It was not loaded here, to keep this conversation small.\n\
-             Full history: {}. Do not read it up front. Search it only when the person \
-             refers to something this conversation does not have.\n",
+             History log: {}. It may be large. Do not cat or read the whole file. Use `tail -n 120` \
+             (PowerShell: `Get-Content -Tail 120`) or `grep -n` for `^## Person`, plan fences, \
+             and recent tools, then read only the matching range when you need more than this brief.\n",
             source.title,
             path.display()
         );
@@ -4037,9 +4043,10 @@ impl Store {
         .map(SendOutcome::into_conversation)
     }
 
-    /// `follow_up` is a parked note being sent after its turn ended. Stop can
-    /// retire that note after it was already taken, and this returns the
-    /// conversation without launching. A person's own send is never that path.
+    /// `follow_up` is a parked note being sent after its turn ended. A clear
+    /// (or a newer parked note) can suppress a follow-up that already claimed
+    /// the text, and this returns the conversation without launching. A
+    /// person's own send is never that path.
     #[allow(clippy::too_many_arguments)]
     fn send_inner(
         self: &Arc<Self>,
@@ -4854,9 +4861,6 @@ impl Store {
             .get(id)
             .cloned();
         if let Some(pty) = pty {
-            // Before kill, and before any path that clears `running`. A poll
-            // must not see a finished turn that still carries the note.
-            self.retire_steer(id);
             self.killed
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -4926,7 +4930,6 @@ impl Store {
             // before `running` is cleared. A missing id still takes the
             // existing error and leaves any note alone.
             let chat = self.get(id)?;
-            self.retire_steer(id);
             self.append(
                 id,
                 &StoredEvent::Agent {
@@ -10454,15 +10457,23 @@ mod tests {
     }
 
     #[test]
-    fn steer_stop_drops_a_parked_note_and_a_missing_chat_does_not() {
+    fn steer_stop_keeps_a_parked_note_and_a_missing_chat_does_not() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         prepare_live_chat(&store, "chat-test");
         store.steer("chat-test", "hold this").unwrap();
         store.stop("chat-test").unwrap();
-        assert!(parked_note(&store, "chat-test").is_none());
-        assert!(store.follow_up_should_skip("chat-test", true));
-        assert!(!store.follow_up_should_skip("chat-test", true));
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("hold this")
+        );
+        assert!(
+            !store
+                .suppress_follow_up
+                .lock()
+                .unwrap()
+                .contains("chat-test")
+        );
 
         prepare_live_chat(&store, "kept");
         store.steer("kept", "stay").unwrap();
@@ -10616,7 +10627,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(!brief.announce);
-        assert!(brief.brief.contains("Do not read it up front"));
+        assert!(brief.brief.contains("Do not cat or read the whole file"));
         assert!(brief.brief.contains("Fix the uploader retries"));
         assert!(!brief.brief.contains("and the tests"));
         assert!(brief.brief.contains("Retries are in place."));
@@ -10831,7 +10842,7 @@ mod tests {
             assert!(handover.brief.contains(id));
         }
         assert!(
-            handover.brief.contains("Full history:")
+            handover.brief.contains("History log:")
                 && handover.brief.contains("transcript lookup only")
         );
         assert!(root.path().join("chat/chat-test/history.md").is_file());
@@ -11185,7 +11196,7 @@ mod tests {
     }
 
     #[test]
-    fn steer_follow_up_skips_when_stop_retired_the_note_or_a_newer_one_arrived() {
+    fn steer_follow_up_skips_when_clear_retired_the_note_or_a_newer_one_arrived() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         prepare_live_chat(&store, "chat-test");
@@ -11197,7 +11208,6 @@ mod tests {
         assert!(!store.follow_up_should_skip("chat-test", false));
         assert!(!store.follow_up_should_skip("chat-test", true));
 
-        store.retire_steer("chat-test");
         store.steer("chat-test", "newer").unwrap();
         assert!(store.follow_up_should_skip("chat-test", true));
         assert_eq!(parked_note(&store, "chat-test").as_deref(), Some("newer"));
@@ -11234,6 +11244,19 @@ mod tests {
         let disk = fs::read_to_string(store.root.join("conversations.json")).unwrap();
         assert!(!disk.contains("pendingSteer"));
         assert!(!disk.contains("on the next step"));
+    }
+
+    #[test]
+    fn muse_list_does_not_advertise_native_steer() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "muse", "standard");
+        store.steer("chat-test", "hook note").unwrap();
+        let mut value = serde_json::to_value(store.list("workspace-a")).unwrap();
+        store.attach_pending_steers(&mut value);
+        assert_eq!(value[0]["pendingSteer"], "hook note");
+        assert!(!value[0]["nativeSteer"].as_bool().unwrap_or(true));
     }
 
     #[test]
@@ -12136,6 +12159,72 @@ mod tests {
                 .contains("Between")
         );
         assert_eq!(rows[4]["event"]["delta"], "End");
+    }
+
+    #[test]
+    fn a_plan_after_prose_on_one_line_splits_the_reply() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let mut parser = crate::transcript::Parser::new("claude");
+        let mut text = String::new();
+        let mut questions = crate::chat_question::Scanner::default();
+        let mut plans = crate::chat_plan::Scanner::default();
+        let delta = "Before. ```tokenstat-plan\n{\"steps\":[{\"step\":\"Do\",\"status\":\"pending\"}]}\n```\nAfter.";
+        store.record_stream_events(
+            "chat-test",
+            "claude",
+            0,
+            None,
+            vec![Event::Text {
+                delta: delta.into(),
+            }],
+            &mut parser,
+            &mut text,
+            &mut questions,
+            &mut plans,
+        );
+        let (rows, _) = store.events("chat-test", 0).unwrap();
+        let kinds: Vec<_> = rows
+            .iter()
+            .filter_map(|row| row["event"]["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["text", "plan", "text"]);
+        assert_eq!(rows[1]["event"]["steps"][0]["text"], "Do");
+        assert_eq!(rows[2]["event"]["delta"], "After.");
+    }
+
+    #[test]
+    fn a_one_line_plan_fence_still_splits_the_reply() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let mut parser = crate::transcript::Parser::new("claude");
+        let mut text = String::new();
+        let mut questions = crate::chat_question::Scanner::default();
+        let mut plans = crate::chat_plan::Scanner::default();
+        let delta = "Before. ```tokenstat-plan {\"steps\":[{\"step\":\"Do\",\"status\":\"completed\"}]}```\nAfter.";
+        store.record_stream_events(
+            "chat-test",
+            "claude",
+            0,
+            None,
+            vec![Event::Text {
+                delta: delta.into(),
+            }],
+            &mut parser,
+            &mut text,
+            &mut questions,
+            &mut plans,
+        );
+        let (rows, _) = store.events("chat-test", 0).unwrap();
+        let kinds: Vec<_> = rows
+            .iter()
+            .filter_map(|row| row["event"]["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, ["text", "plan", "text"]);
+        assert_eq!(rows[1]["event"]["steps"][0]["text"], "Do");
+        assert_eq!(rows[2]["event"]["delta"], "After.");
     }
 
     #[test]

@@ -128,36 +128,48 @@ pub(crate) fn next_block<'a>(
         };
         let at = search + relative;
         *from = at; // An unfinished header or body is retried from here.
-        // A fence opens a line. Anything but indentation before it on the
-        // same line is prose that happens to contain backticks.
-        let line_start = text[..at].rfind('\n').map_or(0, |n| n + 1);
-        let before = text[line_start..at].trim_matches(|c| c == ' ' || c == '\t');
-        // A model writing one block after another often writes the next
-        // block's opening fence on the last block's closing line, so six
-        // backticks then an info string closes one block and opens the next.
-        let opens_line = before.is_empty() || before == "```";
         let after = &text[at + 3..];
-        let newline = after.find('\n')?;
-        let info = after[..newline].trim();
-        if !opens_line || info != fence {
-            search = at + 3;
-            *from = search;
-            continue;
-        }
-        let body_start = at + 3 + newline + 1;
+        // Named fences count even after prose on the same line, and even when
+        // the JSON shares that line. Other backtick runs stay prose.
+        let body_start = match after.find('\n') {
+            None => {
+                // Header line still growing. Wait unless the language tag is
+                // already complete and the JSON body has started on this line.
+                // Skipping a partial `tokenstat-q` would lose the fence.
+                let header = after.strip_suffix('\r').unwrap_or(after);
+                match fence_open_body_at(header, fence) {
+                    Some(Some(offset)) => at + 3 + offset,
+                    _ => return None,
+                }
+            }
+            Some(line_end) => {
+                let header = after[..line_end]
+                    .strip_suffix('\r')
+                    .unwrap_or(&after[..line_end]);
+                match fence_open_body_at(header, fence) {
+                    None => {
+                        search = at + 3;
+                        *from = search;
+                        continue;
+                    }
+                    Some(Some(offset)) => at + 3 + offset,
+                    Some(None) => at + 3 + line_end + 1,
+                }
+            }
+        };
         let Some(close) = closing_fence(text, body_start) else {
             // A question is a few lines of JSON. A block that has run this
             // long without closing is not one, and waiting on it would rescan
             // the whole rest of the reply on every chunk and hide every later
             // question behind it.
-            if text.len() - body_start > BLOCK_MAX_BYTES {
+            if text.len().saturating_sub(body_start) > BLOCK_MAX_BYTES {
                 search = at + 3;
                 *from = search;
                 continue;
             }
             return None;
         };
-        if close.0 - body_start > BLOCK_MAX_BYTES {
+        if close.0.saturating_sub(body_start) > BLOCK_MAX_BYTES {
             search = at + 3;
             *from = search;
             continue;
@@ -166,10 +178,31 @@ pub(crate) fn next_block<'a>(
     }
 }
 
-/// The line that closes a fence: where the body ends, and where following
-/// text starts. A model often streams the closing ticks and the next sentence
-/// on one line (` ```Yes,...`), so anything after the ticks belongs after the
-/// block rather than inside it.
+/// When `header` (text after the opening ticks on that line) opens `fence`,
+/// `Some(Some(offset))` is where the body starts inside `header`, and
+/// `Some(None)` means the body begins on the following line. `None` when this
+/// is some other fence.
+fn fence_open_body_at(header: &str, fence: &str) -> Option<Option<usize>> {
+    let lead = header.len() - header.trim_start().len();
+    let info = &header[lead..];
+    if info == fence {
+        return Some(None);
+    }
+    let rest = info.strip_prefix(fence)?;
+    if rest.is_empty() {
+        return Some(None);
+    }
+    if !rest.starts_with(|c: char| c.is_whitespace()) {
+        return None;
+    }
+    let body = rest.trim_start();
+    let offset = lead + fence.len() + (rest.len() - body.len());
+    Some(Some(offset))
+}
+
+/// Where the body ends and where following text starts. Closing ticks may
+/// stand alone, share a line with the next sentence (` ```Yes`), sit on the
+/// same line as the JSON (`{...}```), or open the next named fence.
 fn closing_fence(text: &str, from: usize) -> Option<(usize, usize)> {
     let mut line_start = from;
     loop {
@@ -177,42 +210,62 @@ fn closing_fence(text: &str, from: usize) -> Option<(usize, usize)> {
         // The last line counts only once the stream has moved past it.
         // Until then the closing backticks may still be arriving.
         let n = rest.find('\n')?;
-        let (line, next) = (&rest[..n], line_start + n + 1);
-        if let Some(after_ticks) = closing_fence_prefix(line) {
-            let trailing = &line[after_ticks..];
+        let (raw_line, next) = (&rest[..n], line_start + n + 1);
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if let Some((body_end_in_line, after_in_line)) = close_on_line(line) {
+            let body_end = line_start + body_end_in_line;
+            let trailing = &line[after_in_line..];
             if trailing.chars().any(|c| !c.is_whitespace()) {
                 let skip = trailing.len() - trailing.trim_start().len();
-                return Some((line_start, line_start + after_ticks + skip));
+                return Some((body_end, line_start + after_in_line + skip));
             }
-            return Some((line_start, next));
+            return Some((body_end, next));
         }
         line_start = next;
     }
 }
 
-/// Byte offset in `line` just past a closing run of backticks, when this line
-/// closes a fence. Only space/tab indentation counts, matching an opening
-/// fence. Trailing prose after the ticks is allowed so a glued ` ```Yes`
-/// still ends the block; plan/question bodies are JSON and must not start a
-/// line with ticks.
-fn closing_fence_prefix(line: &str) -> Option<usize> {
-    // Trim a trailing CR left by a CRLF reply split on `\n` alone.
-    let line = line.strip_suffix('\r').unwrap_or(line);
+/// Body end and offset past the closing ticks inside one line, when that line
+/// closes a fence.
+fn close_on_line(line: &str) -> Option<(usize, usize)> {
     let indent = line
         .bytes()
         .take_while(|&b| b == b' ' || b == b'\t')
         .count();
     let rest = &line[indent..];
     let ticks = rest.bytes().take_while(|&b| b == b'`').count();
-    if ticks < 3 {
-        return None;
+    if ticks >= 3 {
+        // Line is only a closing fence (plus optional glued next open / prose).
+        let after = if glued_opening(&rest[3..]) {
+            indent + 3
+        } else {
+            indent + ticks
+        };
+        return Some((0, after));
     }
-    // ```` ``````tokenstat-plan ```` is this block closing and the next one
-    // opening on the same line: close on the first three ticks only.
-    if glued_opening(&rest[3..]) {
-        return Some(indent + 3);
+    // JSON (or other body) with closing ticks on the same line.
+    trailing_close(line)
+}
+
+/// `{...}``` or `{...} ```Yes` or `{...}``````tokenstat-plan`.
+fn trailing_close(line: &str) -> Option<(usize, usize)> {
+    let mut search = 0;
+    while search < line.len() {
+        let relative = line[search..].find("```")?;
+        let at = search + relative;
+        if line[..at].trim().is_empty() {
+            search = at + 3;
+            continue;
+        }
+        let ticks = line[at..].bytes().take_while(|&b| b == b'`').count();
+        let after = if glued_opening(&line[at + 3..]) {
+            at + 3
+        } else {
+            at + ticks
+        };
+        return Some((at, after));
     }
-    Some(indent + ticks)
+    None
 }
 
 /// Whether text right after a closing fence opens another block: three or
@@ -478,14 +531,38 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_code_and_prose_are_never_questions() {
-        let text = "Run this:\n```sh\ncargo test\n```\nand the word ```tokenstat-question\n{\"question\":\"x\"}\n```\n";
-        assert!(
-            Scanner::default().scan(text).is_empty(),
-            "a fence in the middle of a line is prose"
-        );
+    fn ordinary_code_blocks_are_never_questions() {
+        let text = "Run this:\n```sh\ncargo test\n```\n";
+        assert!(Scanner::default().scan(text).is_empty());
         let json = "```json\n{\"question\":\"x\"}\n```\n";
         assert!(Scanner::default().scan(json).is_empty());
+    }
+
+    #[test]
+    fn an_opening_fence_after_prose_on_one_line_is_still_read() {
+        let text = format!("Going now. ```{FENCE}\n{{\"question\":\"Ship?\"}}\n```\n",);
+        let found = Scanner::default().scan(&text);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].question, "Ship?");
+    }
+
+    #[test]
+    fn json_on_the_opening_line_and_ticks_on_the_json_line_still_count() {
+        let text = format!("```{FENCE} {{\"question\":\"Same?\"}}\n```\n");
+        assert_eq!(Scanner::default().scan(&text)[0].question, "Same?");
+
+        let glued = format!("```{FENCE}\n{{\"question\":\"Tail?\"}}```\nAfter.\n");
+        let found = Scanner::default().scan(&glued);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].question, "Tail?");
+
+        let one = format!("Before. ```{FENCE} {{\"question\":\"One?\"}}```\nAfter.\n");
+        assert_eq!(Scanner::default().scan(&one)[0].question, "One?");
+        assert_eq!(
+            Scanner::default().finish(&format!("```{FENCE}\n{{\"question\":\"End?\"}}```"))[0]
+                .question,
+            "End?"
+        );
     }
 
     #[test]

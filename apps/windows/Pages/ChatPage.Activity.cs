@@ -150,12 +150,29 @@ internal sealed partial class ChatPage
             var row = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 3, 0, 3) };
             row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-            var icon = (step.Status == "completed" ? ActionIcon.Done : step.Status == "inProgress" ? ActionIcon.Run : ActionIcon.Scheduled).Icon();
-            icon.Width = 16; icon.Height = 16;
-            icon.Foreground = live && step.Status == "inProgress" ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText);
-            icon.Opacity = step.Status == "inProgress" ? 1 : .65;
-            AutomationProperties.SetName(icon, ActivityStatus(step.Status, live));
-            row.Children.Add(icon);
+            var running = step.Status is "inProgress" or "in_progress";
+            FrameworkElement mark;
+            if (live && running)
+            {
+                mark = new ProgressRing
+                {
+                    Width = 16,
+                    Height = 16,
+                    IsActive = true,
+                    Foreground = Theme.AccentBrush,
+                };
+            }
+            else
+            {
+                var icon = (step.Status == "completed" ? ActionIcon.Done : running ? ActionIcon.Run : ActionIcon.Scheduled).Icon();
+                icon.Width = 16;
+                icon.Height = 16;
+                icon.Foreground = Theme.Brush(static () => Theme.DefaultText);
+                icon.Opacity = running ? 1 : .65;
+                mark = icon;
+            }
+            AutomationProperties.SetName(mark, ActivityStatus(step.Status, live));
+            row.Children.Add(mark);
             var text = new TextBlock { Text = step.Text, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
                 Opacity = step.Status == "completed" ? .65 : 1 };
             Grid.SetColumn(text, 1); row.Children.Add(text); body.Children.Add(row);

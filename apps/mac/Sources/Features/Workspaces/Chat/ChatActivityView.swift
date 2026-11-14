@@ -305,9 +305,8 @@ private struct ChatPlanSteps: View {
     var body: some View {
         ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
             HStack(alignment: .top, spacing: Theme.Space.s) {
-                Image(systemName: step.status == "completed" ? "checkmark.circle.fill" : step.status == "inProgress" ? "circle.inset.filled" : "circle.dashed")
-                    .foregroundStyle(live && step.status == "inProgress" ? Theme.accent : Color.secondary)
-                    .frame(width: 16)
+                planMark(status: step.status)
+                    .frame(width: 16, height: 16)
                 Text(step.text).textSelection(.enabled)
                     .foregroundStyle(step.status == "completed" ? Color.secondary : Color.primary)
                 Spacer(minLength: 0)
@@ -315,6 +314,22 @@ private struct ChatPlanSteps: View {
             .font(Theme.callout).padding(.vertical, 3)
             .accessibilityElement(children: .combine).accessibilityValue(activityStatus(step.status))
         }
+    }
+
+    @ViewBuilder
+    private func planMark(status: String) -> some View {
+        if live, Self.running(status) {
+            ProgressView()
+                .controlSize(.mini)
+                .tint(Theme.accent)
+        } else {
+            Image(systemName: status == "completed" ? "checkmark.circle.fill" : Self.running(status) ? "circle.inset.filled" : "circle.dashed")
+                .foregroundStyle(Color.secondary)
+        }
+    }
+
+    private static func running(_ status: String) -> Bool {
+        status == "inProgress" || status == "in_progress"
     }
 }
 

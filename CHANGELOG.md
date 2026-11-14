@@ -5,6 +5,18 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
+## [1.20.0] - 2026-11-14
+
+### Improved
+
+- The current plan step spins while the agent is working on it.
+- A note for Muse during a turn can be cancelled or sent when the turn finishes, and a second message waits in the queue instead of replacing that note.
+
+### Fixed
+
+- Plan and question blocks written mid-sentence, or with the closing ticks on the same line as the JSON, no longer leave raw JSON in the chat.
+- Muse mid-turn notes park and deliver after the turn ends. Stopping the turn keeps the note.
+
 ## [1.19.0] - 2026-11-13
 
 ### Improved

@@ -2,6 +2,12 @@
 use super::*;
 
 impl Store {
+    /// Whether a client should use live `chat.steerSend` on a running turn.
+    /// Muse notes ride the post-step hook from a parked `chat.steer` instead.
+    pub(crate) fn client_native_steer(&self, id: &str, backend: &str) -> bool {
+        backend != "muse" && self.native_steer(id).is_some()
+    }
+
     pub(crate) fn native_steer(&self, id: &str) -> Option<(String, Arc<crate::chat_live::Launch>)> {
         let live = self
             .live_speed

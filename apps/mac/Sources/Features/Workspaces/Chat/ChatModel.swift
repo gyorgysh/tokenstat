@@ -3247,16 +3247,8 @@ final class ChatModel {
         guard savedCopy == nil else { return }
         guard let selected else { return }
         let generation = selectionGeneration
-        let reference = currentReference
-        let mutation = reference.flatMap { steerMutationSnapshot($0) }
-        var removedNote = false
         do {
             try await Bridge.stopChat(id: selected.id, expectedRevision: selected.sendRevision, peer: peer)
-            if let reference, let mutation,
-               currentReference != reference || self.selected?.pendingSteer == nil
-                   || self.selected?.pendingSteer == selected.pendingSteer {
-                removedNote = rememberSteerMutation(reference, note: nil, since: mutation)
-            }
         } catch {
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
@@ -3264,7 +3256,6 @@ final class ChatModel {
             return
         }
         guard selectionMatches(id: selected.id, generation: generation) else { return }
-        if removedNote { clearLocalSteer() }
         await loadEvents(id: selected.id, reset: false, generation: generation)
         await loadApprovals(id: selected.id, generation: generation)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
@@ -3293,6 +3284,12 @@ final class ChatModel {
             }
             settleNotifications()
         } catch {}
+        guard selectionMatches(id: selected.id, generation: generation) else { return }
+        if let delivery = claimSteerDelivery() {
+            await performSteerDelivery(delivery)
+        } else {
+            await drainQueue()
+        }
     }
 
     func resolve(_ approval: ChatApproval, choice: String, owner: WorkReference?) async {
@@ -3573,6 +3570,10 @@ final class ChatModel {
             } else {
                 finishSteerDelivery(claimed, token: token)
             }
+        } else if pollIsCurrent(owner), permitsPublication(), !busy {
+            // A message queued behind a parked Muse note must drain once the
+            // note is gone and the follow-up turn has ended.
+            await drainQueue()
         }
     }
 
@@ -3665,9 +3666,19 @@ final class ChatModel {
             !Task.isCancelled && context.matches(reference: currentReference,
                 generation: selectionGeneration, peer: peer, scope: WorkSessionContext.shared.scope)
         }
-        guard current() else { return }
+        guard current() else {
+            queueBusyNote(submission)
+            return
+        }
         let id = submission.conversationID
         let asked = submission.peer
+        if let parked = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !parked.isEmpty, parked != submission.text.trimmingCharacters(in: .whitespacesAndNewlines) {
+            queueBusyNote(submission, deliverAsSteer: selected?.nativeSteer == true
+                && ChatCommandRules.canSteer(submission.text, attachments: !submission.attachments.isEmpty,
+                                             acceptsAttachments: nativeSteerAcceptsAttachments))
+            return
+        }
         do {
             // A poll can retire a native run after its payload was reserved.
             // The legacy hook accepts text only, so keep attached messages
@@ -3716,14 +3727,15 @@ final class ChatModel {
     /// separate draft, with their own delivery identity.
     private func queueBusyNote(_ submission: ChatDraftSubmission, deliverAsSteer: Bool = false) {
         guard let reference = submission.reference, let messageID = submission.messageID,
-              submission.owns(reference: currentReference, conversationID: selected?.id,
-                              peer: peer, scope: WorkSessionContext.shared.scope),
-              selectionGeneration == submission.generation, ownsQueue else { return }
+              submission.owns(reference: reference, conversationID: submission.conversationID,
+                              peer: submission.peer, scope: WorkSessionContext.shared.scope),
+              WorkCacheAccess.canSave(reference) else { return }
+        let onScreen = currentReference == reference && selectionGeneration == submission.generation && ownsQueue
         var item = ChatQueuedMessage(id: messageID, text: submission.text, attachments: submission.attachments)
         item.sourceDraftText = submission.draftText
         item.expectedRevision = submission.expectedRevision
         do {
-            queued = try ChatOutboxStore.shared.update(reference) { items in
+            let items = try ChatOutboxStore.shared.update(reference) { items in
                 if let existing = items.first(where: { $0.id == item.id }) {
                     guard existing.text == item.text, existing.attachments == item.attachments else {
                         throw ChatOutboxStore.Failure.conflict
@@ -3733,6 +3745,13 @@ final class ChatModel {
                 guard items.count < ChatOutboxStore.capacity else { throw ChatOutboxStore.Failure.full }
                 items.append(item)
             }
+            if let held = ChatDraftStore.shared.draft(for: reference),
+               held.text == submission.draftText,
+               held.attachments == submission.attachments {
+                ChatDraftStore.shared.clear(held)
+            }
+            guard onScreen else { return }
+            queued = items
             guard let stored = queued.first(where: { $0.id == messageID }), !stored.needsReceipt else {
                 error = L10n.text("apple.chatmodel.check_delivery_in_pending_messages_before.af602276")
                 return
@@ -3754,6 +3773,19 @@ final class ChatModel {
         } catch {
             self.error = L10n.text("apple.chatmodel.this_message_could_not_be_saved_to_the_que.342364f9")
         }
+    }
+
+    /// Send a parked steer as the next message once the turn has finished.
+    func deliverParkedSteerNow() async {
+        guard savedCopy == nil, !isSharedSource else { return }
+        if busy {
+            error = L10n.text("apple.chatmodel.this_conversation_is_still_finishing_its_p.01b9e26a")
+            return
+        }
+        guard let delivery = claimSteerDelivery() else { return }
+        await performSteerDelivery(delivery)
+        guard selectionMatches(id: selected?.id ?? "", generation: selectionGeneration) else { return }
+        await drainQueue()
     }
 
     /// Keep the executable note visible until the host acknowledges removal.
@@ -3937,7 +3969,11 @@ final class ChatModel {
                 else { clearLocalSteer() }
                 return
             }
-            clearLocalSteer()
+            _ = await reloadOpenChats()
+            guard current() else { return }
+            if selected?.pendingSteer != note {
+                clearLocalSteer()
+            }
         } catch {
             guard current() else { return }
             let message = hostMessage(error)

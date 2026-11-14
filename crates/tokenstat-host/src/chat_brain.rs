@@ -164,7 +164,10 @@ fn render(folded: &Folded, folder: &str, budget: usize) -> (String, usize) {
     let mut out = String::from(
         "Handover: this conversation already ran with a different agent and you are \
          continuing it. Treat the summary below as what has happened so far. Do not \
-         redo work that is listed as done, and do not mention or describe this note.\n",
+         redo work that is listed as done, and do not mention or describe this note. \
+         When the person says continue, or the summary is not enough, use the history \
+         log only through small bounded reads (`tail`, `grep -n`, or PowerShell \
+         `Get-Content -Tail`). Never load the whole file into context.\n",
     );
     if !folder.is_empty() {
         out.push_str(&format!("\nFolder: {}", one_line(folder, 240)));

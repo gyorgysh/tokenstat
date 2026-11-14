@@ -109,23 +109,31 @@ struct ChatQueueStrip: View {
 /// removing it drops the note before that step arrives.
 struct ChatSteerNoteBanner: View {
     let note: String
+    var waitingCount = 0
+    var turnRunning = false
     var onRemove: () -> Void
+    var onSendNow: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
-                Text(L10n.text("apple.chatqueuestrip.on_the_next_step.78ea7972"))
+                Text(title)
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(Theme.accent)
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Spacer(minLength: 0)
+                if !turnRunning, onSendNow != nil {
+                    Button(L10n.text("apple.chatqueuestrip.send_now.58803287"), .send) { onSendNow?() }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                        .help(L10n.text("apple.chatqueuestrip.ready_choose_send_now_when_you_are_ready.f283a341"))
+                }
                 Button(L10n.text("common.remove"), .dismiss, action: onRemove)
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .help(L10n.text("apple.chatqueuestrip.remove_this_note.80951b12"))
             }
             Text(note)
                 .font(Theme.callout)
-                .lineLimit(3)
+                .lineLimit(waitingCount > 0 ? 4 : 8)
         }
         .padding(Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -136,6 +144,13 @@ struct ChatSteerNoteBanner: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(L10n.text("apple.chatqueuestrip.on_the_next_step_0.81127e40", "\(note)"))
+    }
+
+    private var title: String {
+        if waitingCount > 0 {
+            return "\(L10n.text("apple.chatqueuestrip.on_the_next_step.78ea7972")) · \(L10n.text("apple.chatqueuestrip.waiting_to_send_after_this_turn_0.a42fb840", "\(waitingCount)"))"
+        }
+        return L10n.text("apple.chatqueuestrip.on_the_next_step.78ea7972")
     }
 }
 

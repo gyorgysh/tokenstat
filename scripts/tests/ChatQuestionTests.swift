@@ -19,6 +19,14 @@ struct ChatQuestionTests {
         require(ChatQuestionText.stripping("Plain reply.") == "Plain reply.", "text without a block is untouched")
         let plan = "```tokenstat-plan\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```"
         require(ChatQuestionText.stripping("Working.\n\(plan)\nDone.") == "Working.\nDone.", "a plan block is hidden from the reply")
+        require(ChatQuestionText.stripping("Working now. \(plan)\nDone.") == "Working now.\nDone.",
+                "an inline opening fence still hides a valid plan")
+        require(ChatQuestionText.stripping("```tokenstat-plan {\"steps\":[{\"step\":\"Same\",\"status\":\"pending\"}]}\n```\nAfter.") == "After.",
+                "JSON on the opening line is still hidden")
+        require(ChatQuestionText.stripping("```tokenstat-plan\n{\"steps\":[{\"step\":\"Tail\",\"status\":\"completed\"}]}```\nDone.") == "Done.",
+                "closing ticks on the JSON line are still hidden")
+        require(ChatQuestionText.stripping("Before. ```tokenstat-plan {\"steps\":[{\"step\":\"One\",\"status\":\"completed\"}]}```\nAfter.") == "Before.\nAfter.",
+                "a one-line plan fence is still hidden")
         require(ChatQuestionText.stripping("```tokenstat-plan\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n```Yes, done.") == "Yes, done.",
                 "a closing fence glued to prose still hides a valid plan")
         require(ChatQuestionText.stripping("```tokenstat-plan\n{\"steps\":[{\"step\":\"Validate\",\"status\":\"completed\"}]}\n  ```Yes, done.") == "Yes, done.",

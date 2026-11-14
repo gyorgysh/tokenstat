@@ -1720,7 +1720,13 @@ struct ClientChatThread: View {
             // Pending writing stays available offline for copying or cancellation.
             // Sending and receipt checks require a live, verified owner.
             if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
-                ChatSteerNoteBanner(note: note) { model.clearSteer() }
+                ChatSteerNoteBanner(
+                    note: note,
+                    waitingCount: model.pendingQueue.count,
+                    turnRunning: model.busy,
+                    onRemove: { model.clearSteer() },
+                    onSendNow: { Task { await model.deliverParkedSteerNow() } }
+                )
                     .padding(.horizontal, Theme.Space.s)
             }
             if !model.pendingQueue.isEmpty {

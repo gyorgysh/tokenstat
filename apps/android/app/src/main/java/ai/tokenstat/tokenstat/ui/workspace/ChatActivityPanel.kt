@@ -73,10 +73,24 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
 
 @Composable private fun ActivityPlanSteps(plan: List<ChatActivityStep>, live: Boolean) {
     plan.forEach { step ->
+        val running = step.status == "inProgress" || step.status == "in_progress"
         Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Icon(if (step.status == "completed") ActionIcon.Done.vector else if (step.status == "inProgress") ActionIcon.Run.vector else ActionIcon.Scheduled.vector,
-                activityStatus(step.status, live), Modifier.size(16.dp),
-                tint = if (live && step.status == "inProgress") LocalTsColors.current.accent else LocalTsColors.current.textSecondary)
+            if (live && running) {
+                CircularProgressIndicator(
+                    Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = LocalTsColors.current.accent,
+                )
+            } else {
+                Icon(
+                    if (step.status == "completed") ActionIcon.Done.vector
+                    else if (running) ActionIcon.Run.vector
+                    else ActionIcon.Scheduled.vector,
+                    activityStatus(step.status, live),
+                    Modifier.size(16.dp),
+                    tint = LocalTsColors.current.textSecondary,
+                )
+            }
             Text(step.text, style = MaterialTheme.typography.bodySmall,
                 color = if (step.status == "completed") LocalTsColors.current.textSecondary else LocalTsColors.current.textPrimary)
         }

@@ -2722,7 +2722,7 @@ struct RootView: View {
                 }
             } else if projectsDisplay == .byChat {
                 projectsChatCentricList
-                    .task(id: workspaces.folders.map(\.id)) {
+                    .task(id: workspaces.folders.map(\.id) + [String(describing: ObjectIdentifier(chat)), projectsDisplay.rawValue]) {
                         await warmAllProjectChatLists()
                     }
                     // Here, not inside the list: an empty result unmounts the
@@ -2737,7 +2737,7 @@ struct RootView: View {
                 // The filter and the recent sort read every folder's chats.
                 // Closing the filter needs no read, and a folder already
                 // read is not asked again just because the filter opened.
-                .task(id: workspaces.folders.map(\.id) + [projectsSort.rawValue, showingProjectsFilter ? "filter" : ""]) {
+                .task(id: workspaces.folders.map(\.id) + [projectsSort.rawValue, showingProjectsFilter ? "filter" : "", String(describing: ObjectIdentifier(chat))]) {
                     #if os(macOS)
                     if projectsSort == .recent {
                         await warmAllProjectChatLists()

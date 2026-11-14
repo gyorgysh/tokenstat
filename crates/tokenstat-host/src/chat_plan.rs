@@ -108,8 +108,8 @@ pub fn rule(backend: &str) -> Option<String> {
     // A plain shell is not an agent.
     (backend != "sh").then(|| {
         format!(
-            "{WHEN} keep a visible plan. Write a fenced code block in your reply, \
-             language `{FENCE}`, holding one JSON object: \
+            "{WHEN} keep a visible plan. Write a fenced code block in your reply on its \
+             own line when you can, language `{FENCE}`, holding one JSON object: \
              {{\"steps\": [{{\"step\": \"...\", \"status\": \"pending\"}}]}}, where \
              status is pending, in_progress or completed. Write the first block before \
              your first tool call. Write it again, with the whole list, each time a \
@@ -162,6 +162,33 @@ mod tests {
             "the last line may still be arriving"
         );
         assert!(scanner.finish(&done).is_some());
+    }
+
+    #[test]
+    fn an_opening_fence_after_prose_on_one_line_is_still_read() {
+        let text = format!(
+            "Working. ```{FENCE}\n{{\"steps\":[{{\"step\":\"Read\",\"status\":\"in_progress\"}}]}}\n```\n"
+        );
+        let plan = Scanner::default().scan(&text).expect("inline plan");
+        assert_eq!(plan[0]["text"], "Read");
+    }
+
+    #[test]
+    fn json_on_the_opening_line_and_ticks_on_the_json_line_still_count() {
+        let text = format!(
+            "```{FENCE} {{\"steps\":[{{\"step\":\"Same\",\"status\":\"pending\"}}]}}\n```\n"
+        );
+        assert_eq!(Scanner::default().scan(&text).unwrap()[0]["text"], "Same");
+
+        let glued = format!(
+            "```{FENCE}\n{{\"steps\":[{{\"step\":\"Tail\",\"status\":\"completed\"}}]}}```\nDone.\n"
+        );
+        assert_eq!(Scanner::default().scan(&glued).unwrap()[0]["text"], "Tail");
+
+        let one = format!(
+            "Before. ```{FENCE} {{\"steps\":[{{\"step\":\"One\",\"status\":\"completed\"}}]}}```\nAfter.\n"
+        );
+        assert_eq!(Scanner::default().scan(&one).unwrap()[0]["text"], "One");
     }
 
     #[test]

@@ -57,49 +57,32 @@ enum ChatQuestionText {
         // Character splitting treats CRLF as one character, missing its LF.
         let lines = text.components(separatedBy: "\n")
         for (index, line) in lines.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            // The host reads the info string trimmed, so "``` tokenstat-question"
-            // is a question there too and must not show as raw JSON here.
-            let info = trimmed.hasPrefix("```") ? trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces) : ""
-            if !inside, info == fence || info == planFence {
+            if !inside, let opening = Self.opening(in: line) {
+                if !opening.prefix.isEmpty { kept.append(opening.prefix) }
                 inside = true
-                isPlan = info == planFence
-                block = [line]
+                isPlan = opening.isPlan
+                block = [opening.fenceLine]
                 bodyBytes = 0
+                if let sameLine = opening.sameLineBody {
+                    if let closed = Self.closeBodyLine(sameLine, block: &block, isPlan: isPlan, kept: &kept) {
+                        inside = closed.inside
+                        isPlan = closed.isPlan
+                        bodyBytes = 0
+                    } else {
+                        block.append(sameLine)
+                        bodyBytes = sameLine.utf8.count
+                    }
+                }
                 continue
             }
             if inside {
                 // Host closing_fence: ticks may share the line with the next
-                // sentence (` ```Yes,...`), so trailing text stays as prose.
-                // Probe the raw line (leading space/tab only) so a full trim
-                // cannot eat spaces that belong to the glued sentence.
-                if let trailing = Self.closingFenceTrailing(in: line) {
-                    let body = block.dropFirst().joined(separator: "\n")
-                    let value = body.utf8.count < blockMaxBytes
-                        ? try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any] : nil
-                    let question = value?["question"] as? String
-                    let valid = isPlan
-                        ? value?["steps"] is [Any]
-                        : question?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                    // A model writing one block after another often glues the
-                    // next opening fence to this closing one on a single line.
-                    let next = trailing.trimmingCharacters(in: .whitespaces)
-                    let nextInfo = next.hasPrefix("```") ? next.dropFirst(3).trimmingCharacters(in: .whitespaces) : ""
-                    let opensNext = nextInfo == fence || nextInfo == planFence
-                    if !valid {
-                        kept.append(contentsOf: block)
-                        kept.append(opensNext ? String(line.dropLast(trailing.count)) : line)
-                    } else if !trailing.isEmpty, !opensNext {
-                        kept.append(trailing)
-                    }
-                    block = []
-                    inside = false
-                    if opensNext {
-                        inside = true
-                        isPlan = nextInfo == planFence
-                        block = [next]
-                        bodyBytes = 0
-                    }
+                // sentence (` ```Yes,...`), sit on the JSON line (`{...}```),
+                // or open the next named fence on the same run of ticks.
+                if let closed = Self.closeBodyLine(line, block: &block, isPlan: isPlan, kept: &kept) {
+                    inside = closed.inside
+                    isPlan = closed.isPlan
+                    bodyBytes = 0
                 } else {
                     block.append(line)
                     bodyBytes += line.utf8.count + (index < lines.count - 1 ? 1 : 0)
@@ -119,9 +102,76 @@ enum ChatQuestionText {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Prose after a closing run of backticks, or an empty string when the
-    /// line is only the fence. `nil` when the line does not close a fence.
-    private static func closingFenceTrailing(in line: String) -> String? {
+    /// Opening fence on its own line or after prose, matching the host scanner.
+    private static func opening(in line: String) -> (prefix: String, fenceLine: String, sameLineBody: String?, isPlan: Bool)? {
+        var start = line.startIndex
+        while start < line.endIndex, let range = line.range(of: "```", range: start..<line.endIndex) {
+            let afterTicks = line[range.upperBound...]
+            let headerEnd = afterTicks.firstIndex(of: "\n") ?? afterTicks.endIndex
+            let header = String(afterTicks[..<headerEnd]).trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+            if let matched = Self.fenceBody(in: header) {
+                let prefix = String(line[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let fenceLine = "```" + matched.language
+                return (prefix, fenceLine, matched.body, matched.isPlan)
+            }
+            start = range.upperBound
+        }
+        return nil
+    }
+
+    /// Named fence language tag, with optional JSON body on the same line.
+    private static func fenceBody(in header: String) -> (language: String, body: String?, isPlan: Bool)? {
+        let trimmed = header.trimmingCharacters(in: .whitespaces)
+        for (name, isPlan) in [(planFence, true), (fence, false)] {
+            if trimmed == name { return (name, nil, isPlan) }
+            guard trimmed.hasPrefix(name) else { continue }
+            let rest = trimmed.dropFirst(name.count)
+            guard rest.first?.isWhitespace == true else { continue }
+            let body = rest.drop(while: { $0.isWhitespace })
+            return (name, body.isEmpty ? nil : String(body), isPlan)
+        }
+        return nil
+    }
+
+    /// Close a body line. Returns the next inside/isPlan state when it closed.
+    private static func closeBodyLine(
+        _ line: String,
+        block: inout [String],
+        isPlan: Bool,
+        kept: inout [String]
+    ) -> (inside: Bool, isPlan: Bool)? {
+        guard let closed = Self.closingFence(in: line) else { return nil }
+        if !closed.bodyPrefix.isEmpty { block.append(closed.bodyPrefix) }
+        let body = block.dropFirst().joined(separator: "\n")
+        let value = body.utf8.count < blockMaxBytes
+            ? try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any] : nil
+        let question = value?["question"] as? String
+        let valid = isPlan
+            ? value?["steps"] is [Any]
+            : question?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let next = closed.trailing.trimmingCharacters(in: .whitespaces)
+        let nextInfo = Self.fenceBody(in: next.hasPrefix("```") ? String(next.dropFirst(3)) : "")
+        let opensNext = nextInfo != nil
+        if !valid {
+            kept.append(contentsOf: block)
+            if closed.bodyPrefix.isEmpty {
+                kept.append(opensNext ? String(line.dropLast(closed.trailing.count)) : line)
+            } else if !opensNext, !closed.trailing.isEmpty {
+                kept.append(closed.trailing)
+            }
+        } else if !closed.trailing.isEmpty, !opensNext {
+            kept.append(closed.trailing)
+        }
+        block = []
+        if let nextInfo {
+            block = ["```" + nextInfo.language]
+            return (true, nextInfo.isPlan)
+        }
+        return (false, isPlan)
+    }
+
+    /// Body text before closing ticks, and prose / next fence after them.
+    private static func closingFence(in line: String) -> (bodyPrefix: String, trailing: String)? {
         var index = line.startIndex
         while index < line.endIndex, line[index] == " " || line[index] == "\t" {
             index = line.index(after: index)
@@ -132,21 +182,53 @@ enum ChatQuestionText {
             ticks += 1
             cursor = line.index(after: cursor)
         }
-        guard ticks >= 3 else { return nil }
-        // Host glued_opening: "``````tokenstat-plan" closes on three ticks
-        // and opens the next block with the rest.
-        let afterThree = line.index(index, offsetBy: 3)
-        let afterRun = line[cursor...].drop { $0 == " " || $0 == "\t" }
-        if ticks >= 6, afterRun.first?.isASCII == true, afterRun.first?.isLetter == true {
-            var glued = line[afterThree...]
-            if glued.last == "\r" { glued = glued.dropLast() }
-            return String(glued)
+        if ticks >= 3 {
+            let afterThree = line.index(index, offsetBy: 3)
+            let afterRun = line[cursor...].drop { $0 == " " || $0 == "\t" }
+            if ticks >= 6, afterRun.first?.isASCII == true, afterRun.first?.isLetter == true {
+                var glued = line[afterThree...]
+                if glued.last == "\r" { glued = glued.dropLast() }
+                return ("", String(glued))
+            }
+            var trailing = line[cursor...]
+            if trailing.last == "\r" { trailing = trailing.dropLast() }
+            while trailing.first == " " || trailing.first == "\t" {
+                trailing = trailing.dropFirst()
+            }
+            return ("", String(trailing))
         }
-        var trailing = line[cursor...]
-        if trailing.last == "\r" { trailing = trailing.dropLast() }
-        while trailing.first == " " || trailing.first == "\t" {
-            trailing = trailing.dropFirst()
+        return trailingClose(in: line)
+    }
+
+    /// `{...}``` or `{...} ```Yes` or `{...}``````tokenstat-plan`.
+    private static func trailingClose(in line: String) -> (bodyPrefix: String, trailing: String)? {
+        var start = line.startIndex
+        while start < line.endIndex, let range = line.range(of: "```", range: start..<line.endIndex) {
+            let before = String(line[..<range.lowerBound])
+            if before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                start = range.upperBound
+                continue
+            }
+            var cursor = range.lowerBound
+            var ticks = 0
+            while cursor < line.endIndex, line[cursor] == "`" {
+                ticks += 1
+                cursor = line.index(after: cursor)
+            }
+            let afterThree = line.index(range.lowerBound, offsetBy: 3, limitedBy: line.endIndex) ?? line.endIndex
+            let afterRun = line[cursor...].drop { $0 == " " || $0 == "\t" }
+            if ticks >= 6, afterRun.first?.isASCII == true, afterRun.first?.isLetter == true {
+                var glued = line[afterThree...]
+                if glued.last == "\r" { glued = glued.dropLast() }
+                return (before, String(glued))
+            }
+            var trailing = line[cursor...]
+            if trailing.last == "\r" { trailing = trailing.dropLast() }
+            while trailing.first == " " || trailing.first == "\t" {
+                trailing = trailing.dropFirst()
+            }
+            return (before, String(trailing))
         }
-        return String(trailing)
+        return nil
     }
 }

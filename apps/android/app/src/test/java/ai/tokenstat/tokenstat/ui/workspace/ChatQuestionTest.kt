@@ -34,6 +34,22 @@ class ChatQuestionTest {
         // Captured from Grok: the next plan opens on the last one's closing line.
         val plan = "```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```"
         assertEquals(
+            "Working now.\nDone.",
+            stripQuestionBlocks("Working now. $plan\nDone."),
+        )
+        assertEquals(
+            "After.",
+            stripQuestionBlocks("```$PLAN_FENCE {\"steps\":[{\"step\":\"Same\",\"status\":\"pending\"}]}\n```\nAfter."),
+        )
+        assertEquals(
+            "Done.",
+            stripQuestionBlocks("```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Tail\",\"status\":\"completed\"}]}```\nDone."),
+        )
+        assertEquals(
+            "Before.\nAfter.",
+            stripQuestionBlocks("Before. ```$PLAN_FENCE {\"steps\":[{\"step\":\"One\",\"status\":\"completed\"}]}```\nAfter."),
+        )
+        assertEquals(
             "Starting.\n\nDone.",
             stripQuestionBlocks("Starting.\n\n$plan```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Read\",\"status\":\"completed\"}]}\n```\nDone."),
         )

@@ -324,7 +324,13 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity)
                 }
                 if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
-                    ChatSteerNoteBanner(note: note) { model.clearSteer() }
+                    ChatSteerNoteBanner(
+                        note: note,
+                        waitingCount: model.pendingQueue.count,
+                        turnRunning: model.busy,
+                        onRemove: { model.clearSteer() },
+                        onSendNow: { Task { await model.deliverParkedSteerNow() } }
+                    )
                         .frame(maxWidth: ReadingRoom.laneWidth)
                         .padding(.horizontal, Theme.Space.l)
                         .padding(.bottom, Theme.Space.s)
