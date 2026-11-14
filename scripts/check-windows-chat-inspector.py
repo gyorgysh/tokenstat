@@ -141,6 +141,7 @@ class Polyline : FrameworkElement {
     public PointCollection Points { get; set; } = new();
 }
 class ProgressBar : FrameworkElement { public double Minimum { get; set; } public double Maximum { get; set; } public double Value { get; set; } }
+class ProgressRing : FrameworkElement { public bool IsActive { get; set; } public Brush? Foreground { get; set; } }
 static class ToolTipService { public static void SetToolTip(UIElement item, object text) {} }
 static class Fonts { public static TextBlock Tabular(TextBlock text) => text; }
 static class L10n { public static string Text(string key, params string[] args) => args.Length == 0 ? key : key + ":" + string.Join(",", args); }
