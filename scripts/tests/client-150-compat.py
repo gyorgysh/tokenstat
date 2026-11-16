@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Exercise 1.5.0 client wire requests against the current host daemon.
 
 The request shapes and required response fields come from v1.5.0's Apple

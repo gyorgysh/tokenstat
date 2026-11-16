@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Discovery and parallel ingestion.
 
 use std::path::PathBuf;

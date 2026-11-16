@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! What Claude Code's own account says is left of the plan.
 //!
 //! Here rather than in `tokenstat-core` because it makes a request. Codex

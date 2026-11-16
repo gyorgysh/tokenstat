@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-// Source-available for review, NOT open source. See LICENSE.
+// Source-available, not open source. See LICENSE for permissions and restrictions.
 
 //! Line counts for an edit whose agent named only the file it touched.
 //!

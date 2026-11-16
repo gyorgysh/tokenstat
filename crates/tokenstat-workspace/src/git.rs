@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Read-only git state for a folder.
 //!
 //! Shells out to `git` rather than linking a git library. `git` is present on

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 # Build a concise release body for softprops/action-gh-release.
 #
 # Usage: release-notes.sh <version> > notes.md

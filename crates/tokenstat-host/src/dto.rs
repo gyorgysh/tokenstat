@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! The wire contract between the core and any front end.
 //!
 //! These types are deliberately separate from the core's own types. The core is

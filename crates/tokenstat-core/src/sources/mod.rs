@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Per-tool log readers.
 //!
 //! Each source is responsible for finding its own data, mapping vendor field

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
 use serde::{Deserialize, Serialize};
 
 use super::CredentialSource;

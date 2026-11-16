@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Pull-request requests that change something other people can see.
 //!
 //! Nothing in this module may run from a watcher, refresh path, or timer.

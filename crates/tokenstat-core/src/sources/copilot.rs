@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! GitHub Copilot CLI session reader.
 //!
 //! Layout on disk:

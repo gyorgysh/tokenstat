@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Model prices and the money types.
 //!
 //! Two product rules are enforced here by construction rather than by care:

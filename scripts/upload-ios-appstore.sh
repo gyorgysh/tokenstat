@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # Build a TestFlight IPA from this checkout and upload it to App Store Connect.
 # Does not submit for App Review, and does not change listing metadata.

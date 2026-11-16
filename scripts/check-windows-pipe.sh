@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # The Windows host pipe opens asynchronously and never sets ReadTimeout.
 #

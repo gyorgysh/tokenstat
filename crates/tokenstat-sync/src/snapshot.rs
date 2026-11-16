@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Shared plumbing for the tokenstat.ai snapshot feeds.
 //!
 //! Pricing, catalog, and plans are all the same shape: a public GET that

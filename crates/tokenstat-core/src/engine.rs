@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Shared front-end facade over the local archive.
 //!
 //! CLI, MCP, and (later) GUI should open an [`Engine`] rather than constructing

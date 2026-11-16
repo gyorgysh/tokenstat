@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Refresh the tokenstat.ai list-rate snapshot into the local data directory.
 //! Core only reads the resulting file, it never fetches.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Persist vendor session tokens under tokenstat's own data dir, and fall back
 //! to tokens the vendor app already left in the OS keychain.
 //!

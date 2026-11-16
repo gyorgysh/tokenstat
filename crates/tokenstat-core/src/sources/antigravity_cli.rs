@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Antigravity CLI conversation reader.
 //!
 //! Layout on disk:

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Output formatting for every command.
 //!
 //! Two rules shape what appears here. Plan usage is never printed as money,

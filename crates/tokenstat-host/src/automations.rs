@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Daemon-owned agent jobs: a backend, a prompt, a schedule, and a budget.
 //!
 //! Automations are deliberately separate from `tokenstat_workspace::gitwrite`.

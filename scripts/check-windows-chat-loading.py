@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Exercise actual Windows catalog, modal ownership and drop-import methods."""
 from pathlib import Path
 import subprocess

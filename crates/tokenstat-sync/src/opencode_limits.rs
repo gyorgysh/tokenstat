@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! OpenCode Go/Zen subscription quota.
 
 use std::time::Duration;

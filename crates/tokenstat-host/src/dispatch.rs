@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Method dispatch. One implementation, however the request arrived.
 //!
 //! Every method takes one JSON object and returns one JSON envelope:

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use tokenstat_core::{

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! The C boundary. The only module in the crate with `unsafe`.
 //!
 //! Two functions, both taking and returning UTF-8 C strings. Everything the

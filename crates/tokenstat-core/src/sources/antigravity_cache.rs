@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Antigravity IDE usage cache reader.
 //!
 //! The IDE does not leave plain token counters on disk. `tokenstat-sync` talks

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #Requires -Version 5.1
 <#
 .SYNOPSIS

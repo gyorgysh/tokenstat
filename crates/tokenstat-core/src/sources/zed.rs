@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Zed agent thread reader.
 //!
 //! Layout on disk (macOS):

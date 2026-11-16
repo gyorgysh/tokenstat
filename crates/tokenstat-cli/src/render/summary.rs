@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
 use anstream::println;
 use anyhow::Result;
 use tokenstat_core::{EquivalentValue, EstimateSource, GroupBy, PriceTable, Query, Store};

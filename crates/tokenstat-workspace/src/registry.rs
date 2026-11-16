@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! The folders a user chose to work in.
 //!
 //! Deliberately **not** derived from the usage archive. The archive's `project`

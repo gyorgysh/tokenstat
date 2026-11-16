@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Resolve the tokenstat.ai API origin (sandbox vs prod vs custom).
 
 use thiserror::Error;

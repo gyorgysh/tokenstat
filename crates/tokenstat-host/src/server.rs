@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Local socket transport for [`crate::dispatch`].
 //!
 //! Unix: a filesystem socket. Windows: a named pipe. Framing is the same.

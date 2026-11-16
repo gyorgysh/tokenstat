@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Check transcript follow and deferred scrolling using the production Swift types.
 
 Run on macOS with the Swift toolchain. No app, host daemon, or signing needed.

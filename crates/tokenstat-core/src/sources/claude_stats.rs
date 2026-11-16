@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Reader for Claude Code's own rollup, `~/.claude/stats-cache.json`.
 //!
 //! This is not an event source and is never ingested as usage. It is a

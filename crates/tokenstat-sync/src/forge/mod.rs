@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Git forge access used by the pull-request screens.
 //!
 //! Requests go directly from the host machine to the forge. Credentials stay

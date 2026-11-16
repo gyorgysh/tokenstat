@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Exercise the actual SwiftUI sidebar heading at narrow and wide widths."""
 from pathlib import Path
 import subprocess

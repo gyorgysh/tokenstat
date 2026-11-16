@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # Fail if a build artifact, a large binary, or an internal note has been
 # committed. Internal notes are docs/, tools/, WORKLOG.md, CLAUDE.md,

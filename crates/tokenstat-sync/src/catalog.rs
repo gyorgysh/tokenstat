@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Refresh the tokenstat.ai model catalog and subscription plans.
 //!
 //! The hosted catalog is a merge of several upstream feeds and is roughly 4 MB,

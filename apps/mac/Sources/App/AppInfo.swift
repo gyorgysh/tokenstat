@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-// Source-available for review, NOT open source. See LICENSE: no rights to
-// redistribute, publish, or ship a build are granted. Read it, study it, run
-// your own build of it.
+// Source-available: source sharing and own builds are permitted.
+// Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import Foundation
@@ -40,8 +39,8 @@ enum AppInfo {
     static let website = URL(string: "https://tokenstat.ai/?ref=\(referrer)")!
     static let websiteLabel = "tokenstat.ai"
 
-    /// The source repository. Readable and auditable, not redistributable:
-    /// see LICENSE. Linked because the privacy claim is only worth what a
+    /// The source repository. Readable and auditable. Store builds are
+    /// reserved: see LICENSE. Linked because the privacy claim is only worth what a
     /// reader can check.
     static let repository = URL(string: "https://github.com/gyorgysh/tokenstat")!
 

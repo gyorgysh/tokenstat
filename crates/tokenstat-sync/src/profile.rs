@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! tokenstat.ai device login and profile sync client.
 //!
 //! Opt-in only. Builds a sealed day × source × model × opaque-project payload

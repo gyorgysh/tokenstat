@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Model catalog and subscription plans, read from local snapshots.
 //!
 //! The price book ([`crate::pricing::PriceTable`]) answers one question: what

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Pull-request connection methods for registered workspaces.
 //!
 //! The authorization secret stays in this process while the UI shows only the

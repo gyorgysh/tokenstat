@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! The file tree of a workspace folder.
 //!
 //! **Read only, like everything else about a user's project.** This module

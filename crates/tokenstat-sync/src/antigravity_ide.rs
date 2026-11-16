@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Antigravity IDE language-server sync.
 //!
 //! The IDE keeps per-turn usage inside a local language server. When that

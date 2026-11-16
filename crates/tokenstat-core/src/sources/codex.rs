@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Codex CLI rollout reader.
 //!
 //! Layout on disk:

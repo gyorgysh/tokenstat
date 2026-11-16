@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Terminal rendering.
 //!
 //! Deliberately hand rolled rather than pulling a table crate. The output has a

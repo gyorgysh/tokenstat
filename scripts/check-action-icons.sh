@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 # Every button in the app's own content carries a glyph from the vocabulary.
 #
 # The vocabulary is apps/mac/Sources/Design/ActionIcon.swift, the twin of

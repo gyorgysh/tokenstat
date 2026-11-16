@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! OpenCode SQLite reader.
 //!
 //! Layout on disk:
