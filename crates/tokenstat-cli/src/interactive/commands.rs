@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 /// One slash command the prompt can run or complete.
 pub(super) struct CommandDef {
     pub(super) name: &'static str,

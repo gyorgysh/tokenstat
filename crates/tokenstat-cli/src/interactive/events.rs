@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
 use std::io::{self, Write};
 
 use anyhow::{Context, Result};

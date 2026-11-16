@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
 package ai.tokenstat.tokenstat.ui.logic
 
 import kotlinx.serialization.json.JsonObject

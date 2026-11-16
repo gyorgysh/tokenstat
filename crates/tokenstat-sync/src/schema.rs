@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Fetch and interpret `GET /api/v1/schema` version envelopes.
 
 use std::thread;

@@ -1,29 +1,105 @@
 # Contributing
 
-## Code contributions are not accepted
+## Contributions are welcome
 
-This repository does not take pull requests. Please do not open one: it will be
-closed unread, which wastes your time and is a rude way to treat work somebody
-did in good faith. Saying so here is the only way to prevent that.
+Pull requests, bug reports, documentation fixes and translations are welcome.
+Useful reports include unsupported tool log formats, incorrect counts,
+crashes, and privacy behavior that differs from the documentation. Use redacted
+examples; never submit private session logs.
 
-**Issues are very welcome**, and are the most useful thing you can send:
+You may fork the source on GitHub, change it, experiment, test locally, and
+build and run your own version. You do not need to send us your changes. You
+may also share free builds of a public fork outside app stores and package
+registries, under the conditions in section 4.2 of the licence.
 
-- a harness tokenstat does not read yet, with the shape of its log files
-- counts that disagree with what the tool itself reports, with both numbers
-- a crash, or a parser that skips rows it should not
-- anything in the privacy claim that does not match what the code does
+If you want a change considered for tokenstat, open a pull request. PRs are
+proposals. Maintainers may request changes, defer or decline them. Submission
+does not guarantee review, merge, maintenance or inclusion in a future build.
 
-Why closed. Every contributor keeps copyright in their work, so a merged patch
-makes them a co-owner. tokenstat is shipped only by pueev OÜ, which is possible
-precisely because pueev owns all of it. One merged patch would end that
-permanently, and the rights cannot be collected afterwards.
-The alternative is a contributor licence agreement, which is a real imposition
-to place on someone fixing a typo.
+## Contribution terms
 
-So: the source is readable, the reports are open, and the door for patches is
-shut on purpose. The whole repository is source-available and not open source:
-read it, study it, fork it, build it, run your build. Publishing a copy or a
-build is reserved. See `LICENSE`.
+Read [LICENSE, section 6](LICENSE) before submitting a contribution. You keep
+any copyright you hold in your work and license it under the repository's
+custom licence. You also grant pueev OÜ the additional rights stated there
+to distribute and sublicense your contribution as part of tokenstat and its
+derivative works,
+including under future licence versions, commercial terms and app-store
+terms. That additional grant is irrevocable and lets pueev OÜ ship the official
+apps. You retain your copyright.
+
+Opening a pull request, or sending a patch any other way, is your acceptance
+of those terms. There is no form to sign and no box to tick. The pull request
+template says so, so nobody submits without having seen it. The grant takes
+effect when you submit, even if the PR is not merged. A fork or an issue
+report by itself is not a contribution.
+
+You can only grant rights you hold. If a submission includes work by other
+authors, each of them has to agree, or the material has to come under a
+licence that already allows it. Say so in the pull request.
+
+Only submit work you have authority to license. Obtain employer permission
+where required, and identify any third-party code, assets and licence terms.
+Do not assume that publicly available code can be copied into this project.
+Maintainers must review separately licensed material for compatibility.
+
+You may share source forks and build and run your own version under
+[LICENSE](LICENSE). A public fork may also offer free builds, for example as
+release attachments or CI artifacts, when it publishes the matching source,
+uses its own name and icon, and leaves accounts, sign-in and licensing
+untouched. Publishing through any app store or package registry, selling a
+build, and offering
+the software as a service to others require separate written permission from
+pueev OÜ. Personal and internal hosting is allowed. The trademark policy
+grants no distribution rights. See [TRADEMARK.md](TRADEMARK.md) and the
+[licensing guide](LICENSING.md) for examples.
+
+## Human, agent and bot submissions
+
+The contributor is the person or entity authorized to grant rights, not the
+account name of a bot. Using AI or automation does not itself establish that
+anyone owns the output or has permission to copy third-party material.
+
+| Submission | Required handling |
+| --- | --- |
+| Human-authored code, docs, translations or assets | The submitter accepts by submitting; confirm other authors and employer rights where applicable |
+| Human using an AI assistant | The person submitting accepts section 6 for rights they can grant, reviews the result, and discloses known third-party sources in the PR |
+| An autonomous agent opening a PR | The person or entity directing the agent is the contributor; the PR must name them |
+| Maintainer automation acting for pueev OÜ | Record who authorized it, which accounts and tasks are covered, and the basis on which pueev OÜ can use the output |
+| Dependabot or similar mechanical version/lockfile updates | A maintainer records that the diff is mechanical, identifies the bot, and reviews dependency licence changes; do not pretend the bot signed a contributor agreement |
+| Bot changes that add code, assets, patches or other expressive material | Use the normal contributor or third-party licensing review; do not exempt it just because it is a bot |
+
+Changing the licence used to distribute accepted contributions does not
+require renewed acceptance: section 6(b) already permits that. Changed
+contribution terms apply to submissions made after the change. Keep private
+contracts and personal information out of the public repository.
+
+For mechanical dependency updates, record the review basis, for example:
+"Mechanical dependency update reviewed: version and lockfile changes only;
+no new authored code or assets; dependency licence checks reviewed."
+If there is any material requiring a grant, obtain that grant or use a
+compatible existing licence. Dependabot does not grant rights to dependency
+code; each dependency keeps its own licence. This rule also applies to actions,
+vendor files, fonts, models and generated assets outside the Cargo graph.
+
+## Maintainer acceptance and release review
+
+Before merging, cherry-picking, directly committing an external submission,
+or publishing its preview build:
+
+- Check that the submission came through a channel where the contributor saw
+  the terms: a pull request to this repository, or a message that refers to
+  them.
+- Check for other authors, employer-owned work and separately licensed
+  material. Record the applicable licence, and retain required notices.
+- Review later commits on the same pull request for new authors or material.
+
+Official preview artifacts are published only by pueev OÜ maintainers. A fork
+may publish its own free builds under section 4.2 of the licence.
+
+For already-merged material, a new licence does not retroactively obtain
+rights. Verify the existing grant or obtain one before distributing
+that material under new terms. Authorship metadata alone does not prove that
+pueev OÜ holds an individual's or employer's rights.
 
 ## Language
 
@@ -90,8 +166,10 @@ Optional, but preferred. Use the crate or area the change touches:
 - Breaking changes get a `!` after the type or scope, and a `BREAKING CHANGE:`
   footer explaining the migration.
 - Reference issues in the footer: `Closes #12`.
-- No tooling attribution of any kind, no session identifiers, no email
-  addresses, no absolute local paths, no host names, no credentials.
+- Keep tooling attribution out of commit messages; required provenance and
+  AI-assistance disclosures belong in the PR.
+  No session identifiers, email addresses, absolute local paths, host names
+  or credentials in commit messages.
 
 ### Examples
 

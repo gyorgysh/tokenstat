@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Sealed day × source × model × project-key rollup for tokenstat.ai sync.
 //!
 //! Only allowlisted fields exist on these types. Opaque `proj` / `salt_id` are

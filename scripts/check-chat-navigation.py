@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Compile the production mobile navigation/coordinator on Mac with UI value stubs.
 
 No app, network, credential, or user-default mutation. SwiftUI view bodies are

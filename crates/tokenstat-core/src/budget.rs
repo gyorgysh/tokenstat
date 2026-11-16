@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Local spend budgets against list-rate equivalent value.
 //!
 //! Budgets are advisory. They compare the list-rate value of usage in the

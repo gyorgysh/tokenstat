@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-// Source-available for review, NOT open source. See LICENSE: no rights to
-// redistribute, publish, or ship a build are granted. Read it, study it, run
-// your own build of it.
+// Source-available: source sharing and own builds are permitted.
+// Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
 
 //! Third party attribution for a shipped binary.
 //!
-//! tokenstat itself is source-available and not redistributable, but almost
-//! every crate it links is MIT, Apache-2.0 or BSD, and each of those asks that
+//! tokenstat itself is source-available, with store distribution reserved, but
+//! almost every crate it links is MIT, Apache-2.0 or BSD, and each of those asks that
 //! its notice travels with the binary. Credit is owed and is cheap to give.
 //!
 //! The file is generated rather than committed, because a tracked generated

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! How much of a plan's allowance is left.
 //!
 //! This is a different question from the rest of the crate. Everywhere else

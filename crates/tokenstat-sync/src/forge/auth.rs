@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! GitHub App authorization and local credential discovery.
 
 use std::collections::HashMap;

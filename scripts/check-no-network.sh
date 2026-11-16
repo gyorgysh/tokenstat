@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # Fail if a crate that must not reach the network has grown a way to.
 #

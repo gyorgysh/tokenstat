@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # The Windows zip runs with nothing installed.
 #

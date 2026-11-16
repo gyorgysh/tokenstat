@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Generate and install the scheduler entry that keeps the archive current.
 //!
 //! This matters more than it looks. Claude Code deletes its transcripts after

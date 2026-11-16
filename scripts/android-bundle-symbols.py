@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Verify embedded Rust symbols and extract a Play-ready native symbols ZIP."""
 import sys
 import zipfile

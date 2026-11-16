@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Antigravity (Google) sync.
 //!
 //! Three layers, kept separate on purpose:

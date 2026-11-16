@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! The process-wide session behind the C ABI.
 //!
 //! The only thing this module adds to [`tokenstat_host::dispatch`] is somewhere

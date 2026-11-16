@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Self-update from GitHub Releases.
 //!
 //! Downloads the matching platform archive and verifies SHA-256 against the

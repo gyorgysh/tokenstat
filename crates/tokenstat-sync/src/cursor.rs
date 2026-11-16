@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Cursor remote usage fetch.
 //!
 //! Preferred path: the newest unexpired Bearer JWT on this machine, from the

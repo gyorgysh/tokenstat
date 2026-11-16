@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Fixed GraphQL documents and their deliberately narrow decoders.
 
 use serde::Deserialize;

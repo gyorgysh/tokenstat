@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Local SQLite archive.
 //!
 //! This is an archive, not a cache. Claude Code deletes transcripts after

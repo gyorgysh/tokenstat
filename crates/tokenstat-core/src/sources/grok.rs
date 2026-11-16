@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Grok CLI unified log reader.
 //!
 //! Layout on disk:

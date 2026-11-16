@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # A bridge model spells its ids the way the host does.
 #

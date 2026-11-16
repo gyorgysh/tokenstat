@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! OpenClaw session reader.
 //!
 //! Layout on disk:

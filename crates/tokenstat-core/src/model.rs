@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! The normalized schema every source is mapped onto.
 //!
 //! Two design rules carry most of the weight here, and both are enforced by the

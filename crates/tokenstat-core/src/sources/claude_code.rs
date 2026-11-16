@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Claude Code session log reader.
 //!
 //! Layout on disk:

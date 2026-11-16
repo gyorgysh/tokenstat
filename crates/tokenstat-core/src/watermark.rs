@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Per-file scan state, so a rescan reads only what changed.
 //!
 //! A full scan here walks 4,850 files and 1.2 GB. That is fast enough to feel

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 # The new chat page's surface is a Metal fragment shader, so the app bundle
 # carries a compiled default.metallib and every build of it needs the `metal`
 # compiler. Xcode 26 moved that compiler out of the stock install into a

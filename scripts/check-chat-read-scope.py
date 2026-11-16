@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Exercise production Bridge chat dispatch across same-account login retirement."""
 from pathlib import Path
 import subprocess

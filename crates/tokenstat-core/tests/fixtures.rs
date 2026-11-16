@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Fixture based tests, plus the guard that keeps fixtures safe to publish.
 //!
 //! The guard is the important half. Fixtures are generated from real session

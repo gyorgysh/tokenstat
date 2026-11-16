@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 # Every font in the app comes from the type scale, not from the system.
 #
 # The app is drawn in Manrope and JetBrains Mono, bundled and registered at

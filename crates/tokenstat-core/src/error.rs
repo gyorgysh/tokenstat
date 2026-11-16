@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Error and warning types.
 //!
 //! A parser meeting an unfamiliar line records a [`Warning`] and keeps going.

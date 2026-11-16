@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! This executable has one test so environment changes cannot race other tests.
 use std::fs;
 

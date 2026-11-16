@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+#
 # Install the tokenstat host daemon as a per-user scheduled task.
 #
 # A user task, not a Windows Service. Always-on host decides whether it

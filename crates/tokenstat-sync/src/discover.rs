@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Local vendor credential discovery.
 //!
 //! Privacy boundary: tokens stay on this machine and are never part of a

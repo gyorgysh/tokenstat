@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
     SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-    Source-available for review, NOT open source. See LICENSE.
+    Source-available, not open source. See LICENSE for permissions and restrictions.
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>

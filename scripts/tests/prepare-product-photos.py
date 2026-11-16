@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Prepare local marketing conversations; preserve real transcripts and back up titles.
 
 Run explicitly to rename existing chats and add inert, synthetic examples.

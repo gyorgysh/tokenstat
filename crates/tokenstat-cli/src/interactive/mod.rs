@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Full-screen interactive client.
 //!
 //! Takes over the terminal (alternate screen, raw mode) the way agent CLIs do.

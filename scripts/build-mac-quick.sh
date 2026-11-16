@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # Fast local macOS build for testing the GUI with the host daemon.
 # Use --build-only to compile in a separate directory without changing or

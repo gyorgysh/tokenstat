@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Sync bearer token storage for tokenstat.ai.
 //!
 //! Entries are keyed by host origin so sandbox and prod never share a token.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #
 # Wrap Tokenstat.app in a disk image with an Applications shortcut beside it.
 #

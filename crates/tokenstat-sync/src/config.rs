@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Local config for machine id, project salt, preferred sync host, and cursors.
 //!
 //! Sync bearer tokens stay in the OS keychain. The project HMAC salt is a local

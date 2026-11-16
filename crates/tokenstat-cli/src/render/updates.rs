@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
 use anstream::println;
 use anyhow::{Context, Result};
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
 //! Git commands that change something.
 //!
 //! Deliberately a separate module from [`crate::git`], which stays read-only.
