@@ -5,7 +5,7 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
-## [1.21.0] - 2026-11-18
+## [1.21.0]
 
 ### Fixed
 
