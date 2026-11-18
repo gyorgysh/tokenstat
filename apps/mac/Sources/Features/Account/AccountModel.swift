@@ -45,7 +45,6 @@ final class AccountModel {
     var limitsSyncEnabled: Bool { PlanLimitsStore.shared.enabled }
     /// Sources the user turned off. Still shown, not posted.
     var limitsSkip: [String] { PlanLimitsStore.shared.skip }
-    /// Last vendor readings this Mac has, for the Plan limits card.
     var limitsProviders: [ProviderLimits] { PlanLimits.visible(PlanLimitsStore.shared.providers) }
     var isLoadingLimits = false
     #if os(macOS)
@@ -674,7 +673,6 @@ final class AccountModel {
     }
 }
 
-/// Open a URL in the user's browser.
 private func openInBrowser(_ raw: String) {
     guard let url = URL(string: raw) else { return }
     #if os(macOS)

@@ -188,9 +188,6 @@ struct HomeView: View {
         }
     }
 
-    /// One figure in its own panel, the shape the phone's tiles use. Built
-    /// from concrete views rather than the generic card: three cards sharing
-    /// one expression overloaded this toolchain's checker.
     private func figurePanel(title: String, value: String, note: String?) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .center) {
@@ -260,10 +257,6 @@ struct HomeView: View {
         }
     }
 
-    /// Whether the archive has yet to fill the profile streaks and heatmap.
-    ///
-    /// Per-section, not a full-window veil: plan panels have their own
-    /// placeholder and load on a separate task.
     private var isWarming: Bool {
         model.isLoading && model.calendar == nil && model.errorMessage == nil
     }
@@ -307,7 +300,6 @@ struct HomeView: View {
         .animation(.easeOut(duration: 0.18), value: panels.count)
     }
 
-    /// The panels dealt into rows of as many as the width fits.
     private func rows(for width: CGFloat) -> [[HomePanel]] {
         let all = panels
         let count = columnCount(for: width)
@@ -490,8 +482,6 @@ struct HomeView: View {
         .transition(.opacity)
     }
 
-    /// Home's own name for the shared placeholder bar, so the call sites below
-    /// read the way they did before it moved into `Skeleton`.
     private func bar(width: CGFloat?, height: CGFloat, phase: Double = 0) -> some View {
         Skeleton.Bar(width: width, height: height, phase: phase)
     }

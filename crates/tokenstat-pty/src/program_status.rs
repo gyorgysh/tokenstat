@@ -507,7 +507,6 @@ mod tests {
             "state=blocked:kind=permission:msg=U2Vjb25k:progress=50",
         );
         assert_eq!(t.snapshot().unwrap().revision, second);
-        // Text is not present in the structured snapshot.
         assert_eq!(t.snapshot().unwrap().kind, Some(Kind::Permission));
     }
 

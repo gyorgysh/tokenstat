@@ -15,7 +15,6 @@ enum ChatDraftTransition: Equatable {
     case adopt(WorkReference)
     /// Another conversation. Its own words go on screen, and nothing else.
     case swap(WorkReference?)
-    /// Nothing the composer needs to act on.
     case keep
 
     static func resolve(

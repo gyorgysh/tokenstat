@@ -24,9 +24,7 @@ use serde::Deserialize;
 use crate::error::CoreError;
 use crate::pricing::{Rates, lookup_keys};
 
-/// Where the trimmed catalog snapshot lives inside the data directory.
 const CATALOG_FILE: &str = "current.json";
-/// Where the curated subscription plans snapshot lives.
 const PLANS_FILE: &str = "plans.json";
 
 /// Rates for one provider's offer of a model, in USD per million tokens.
@@ -576,7 +574,6 @@ mod tests {
     #[test]
     fn peels_the_same_suffixes_the_price_book_peels() {
         let c = catalog();
-        // Date suffix, vendor prefix, and a capability suffix all resolve.
         assert_eq!(
             c.get("claude-opus-5-20260723").unwrap().id,
             "anthropic/claude-opus-5"

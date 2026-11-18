@@ -286,10 +286,8 @@ final class Notified: @unchecked Sendable {
         // Still unknown, still the same conversation: leave the composer alone.
         assert(ChatDraftTransition.resolve(incoming: "one", reference: nil,
             current: "one", currentReference: nil) == .keep)
-        // A conversation whose words are already on screen is not reloaded.
         assert(ChatDraftTransition.resolve(incoming: "one", reference: one,
             current: "one", currentReference: one) == .keep)
-        // No conversation before and none now is not a change.
         assert(ChatDraftTransition.resolve(incoming: nil, reference: nil,
             current: nil, currentReference: nil) == .keep)
         // Deleting a selected chat detaches its durable reference before

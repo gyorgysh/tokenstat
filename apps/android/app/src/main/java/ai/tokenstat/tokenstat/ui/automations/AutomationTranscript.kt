@@ -12,7 +12,6 @@ internal sealed interface RunTranscriptBlock {
 /// flattened NDJSON into paragraphs, so this only reads their first lines.
 /// Port of TranscriptView.swift `parse`.
 internal object RunTranscriptParser {
-    /// Verbs the host writes as the first token of a tool paragraph.
     private val verbs = setOf(
         "Read", "Write", "Edit", "Shell", "Grep", "Glob", "Find", "Search",
         "Bash", "Task", "Subagent", "NotebookEdit", "WebFetch", "WebSearch",

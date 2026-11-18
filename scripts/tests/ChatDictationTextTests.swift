@@ -20,7 +20,6 @@ struct ChatDictationTextTests {
         var revised = ChatDictationText(draft: "Note:")
         precondition(revised.apply("there", to: "Note:") == "Note: there")
         precondition(revised.apply("their code", to: "Note: there") == "Note: their code")
-        // A reading that comes back empty restores the draft as typed.
         precondition(revised.apply("", to: "Note: their code") == "Note:")
 
         // A hand edit in between stops dictation rather than overwriting it.

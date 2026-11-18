@@ -93,7 +93,6 @@ internal static class ShellChromeSmoke
             if (Math.Abs(empty.ActualHeight - DetailBar.Height) > 0.5)
                 throw new Exception("Empty chrome does not retain the shared 40px baseline");
             host.Children.Remove(empty);
-            // Rebuilding an unmounted toolbar must release logical parents too.
             host.Children.Remove(bar);
             var rebuilt = DetailBar.View(new List<UIElement> { sidebar, scope }, trailing: new List<UIElement> { project, sort, refresh, inspector });
             rebuilt.Width = 1000;
@@ -161,7 +160,6 @@ internal static class ShellChromeSmoke
             mounted.Add(navigation);
             host.UpdateLayout();
             await Task.Delay(50);
-            // History arrives after the folder has already been mounted.
             projectRow.MenuItems.Add(footer);
             SidebarChrome.ExpandNewHistory(projectRow, hadChildren: false, paneOpen: true);
             SidebarChrome.AlignProject(projectRow);

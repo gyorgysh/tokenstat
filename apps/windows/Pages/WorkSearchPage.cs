@@ -567,9 +567,6 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// Nothing typed yet: recent searches, or what the field can find.
-    /// </summary>
     private void ShowRecent()
     {
         _results.Children.Clear();

@@ -22,8 +22,6 @@
 #     alert, a toolbar), add it to ALLOWED here rather than working around
 #     the guard.
 #
-# The action-icon guard is the precedent. A convention nobody can enforce by
-# remembering is a convention that comes back.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 exec python3 - "$@" <<'PY'
@@ -33,7 +31,6 @@ import sys
 
 ROOT = "apps/mac/Sources"
 
-# (path suffix, snippet) pairs that are allowed to say what they say.
 ALLOWED = [
     # A harness names its own colour and the app draws it. This is a vendor's
     # blue, not a control that forgot the accent.

@@ -2,12 +2,6 @@
 
 import SwiftUI
 
-/// One file the agent changed, named after the file rather than after the tool.
-///
-/// A search-replace used to draw twice: a generic Edit tool row and a second
-/// card with the same patch. This is the one card. The basename leads, a later
-/// change of the same file in the same turn is numbered, and the full path
-/// stays a caption so two edits of WORKLOG.md cannot be mistaken for twins.
 struct ChatFileEditRow: View {
     let state: ChatEditState
     /// Whether this row carries the transcript's spinner. See
@@ -18,7 +12,6 @@ struct ChatFileEditRow: View {
     /// small one. A hand toggle still wins.
     var expandsOutput: Bool = false
     var compact: Bool = false
-    /// A failed edit keeps the chat's density, marked rather than boxed.
     private var usesCompactStyle: Bool { compact }
     #if os(macOS)
     private static let nameFont = Theme.callout.weight(.semibold)

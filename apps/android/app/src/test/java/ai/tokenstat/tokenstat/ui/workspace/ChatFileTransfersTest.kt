@@ -210,7 +210,6 @@ class ChatFileTransfersTest {
                     put("mediaType", params["mediaType"]!!)
                     put("size", 1000)
                 }
-                // All bytes already reached the host; only finish is pending.
                 buildJsonObject { put("transferId", transfer); put("offset", 1000) }
             }
             "chat.fileUploadFinish" -> uploads.getValue(params["transferId"]!!.jsonPrimitive.content)

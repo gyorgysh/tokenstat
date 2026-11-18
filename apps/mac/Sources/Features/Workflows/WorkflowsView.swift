@@ -89,9 +89,6 @@ struct WorkflowsView: View {
             DetailChromeBar(scope: scopeChip) {
                 EmptyView()
             }
-            // Search on the left, a blank canvas on the right: the same row
-            // Automations and Tasks have. The intro and the count tiles that
-            // used to stand here said what the tab already says.
             HStack(spacing: Theme.Space.s) {
                 SearchField(text: $search, prompt: L10n.text("apple.workflowsview.search_workflows.e827cf3e"))
                     .frame(maxWidth: 260)
@@ -163,7 +160,6 @@ struct WorkflowsView: View {
         designWorkspaceID = model.scope ?? folders.first?.id ?? ""
     }
 
-    /// The folder this board is scoped to, named on the chrome bar.
     private var scopeChip: ScopeChip? {
         guard let id = model.scope else { return nil }
         guard let folder = folders.first(where: { $0.id == id }) else { return nil }
@@ -202,7 +198,6 @@ struct WorkflowsView: View {
         }
     }
 
-    /// The examples, behind a disclosure that remembers itself.
     @ViewBuilder
     private var examplesSection: some View {
         Button {
@@ -229,11 +224,6 @@ struct WorkflowsView: View {
         }
     }
 
-    /// The manual path, for somebody who already knows the shape they want.
-    ///
-    /// A blank draft used to be one unlabelled button in the header, which is
-    /// no way to find the half of this feature that does not involve a model.
-    /// It says what you get before you press it.
     private var manualCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(L10n.text("apple.workflowsview.build_it_yourself.72369f88"))
@@ -460,13 +450,11 @@ struct WorkflowsView: View {
         .onTapGesture { model.selectRun(run) }
     }
 
-    /// Seconds a run took, or has taken so far.
     private func seconds(of run: WorkflowRunRecord) -> Double {
         guard let ended = run.endedAtMs else { return 0 }
         return max(0, (Double(ended) - Double(run.startedAtMs)) / 1000)
     }
 
-    /// Scale for the duration bars, from the runs actually on screen.
     private var longestRunSeconds: Double {
         model.scopedRuns.prefix(6).map { seconds(of: $0) }.max() ?? 0
     }
@@ -476,7 +464,6 @@ struct WorkflowsView: View {
     }
 }
 
-/// One saved graph in the library.
 private struct WorkflowRow: View {
     let graph: WorkflowGraph
     /// A narrow window. The name and the state stay, the detail beside them
@@ -484,7 +471,6 @@ private struct WorkflowRow: View {
     /// can use.
     var compact: Bool = false
     let last: WorkflowRunRecord?
-    /// Newest first, as the model keeps them.
     let history: [WorkflowRunRecord]
     let folder: WorkspaceFolder?
     let isSelected: Bool
@@ -545,7 +531,6 @@ private struct WorkflowRow: View {
         .background(isSelected ? Theme.accentSoft.opacity(0.5) : .clear)
     }
 
-    /// The run whose progress the strip should show, if one is in flight.
     private var live: WorkflowRunRecord? {
         guard let last, last.isLive else { return nil }
         return last
@@ -645,7 +630,6 @@ struct WorkflowOutline: View {
     }
 }
 
-/// Confirm the starting prompt and the workspace this run should use.
 struct RunWorkflowSheet: View {
     @Bindable var model: WorkflowsModel
     let graph: WorkflowGraph

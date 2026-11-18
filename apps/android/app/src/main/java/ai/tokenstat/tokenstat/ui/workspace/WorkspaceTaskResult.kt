@@ -75,15 +75,11 @@ fun TaskResultDialog(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        // A sheet with a surface under it. Without one the title drew over
-        // the dimmed tasks behind and the rows floated as loose cards.
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = LocalTsColors.current.background,
             tonalElevation = 0.dp,
             shadowElevation = 12.dp,
-            // Hug the content: this dialog is a fixed few rows, not a list,
-            // so a tall sheet would be mostly empty surface.
             modifier = Modifier.fillMaxWidth(0.94f),
         ) {
         Column(

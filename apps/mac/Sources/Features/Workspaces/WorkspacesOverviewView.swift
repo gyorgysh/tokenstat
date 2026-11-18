@@ -31,7 +31,6 @@ struct WorkspacesOverviewView: View {
     var onOpenFolder: (String) -> Void
     var onAdd: () -> Void
 
-    /// Which machine's folders are showing. Nil is all of them.
     @State private var scope: String?
     @State private var search = ""
     @State private var alphabetical = false
@@ -268,8 +267,6 @@ struct WorkspacesOverviewView: View {
         .accessibilityLabel("\(folder.name), \(machineLine(for: folder) ?? L10n.text("apple.workspacesoverviewview.folder.034a0062"))")
     }
 
-    /// Which teams can open this folder, in the accent the Teams screens
-    /// use, so a shared folder is told apart at a glance.
     private func teamBadges(_ folder: WorkspaceFolder) -> some View {
         TeamFolderBadges(names: sharedWith(folder))
     }

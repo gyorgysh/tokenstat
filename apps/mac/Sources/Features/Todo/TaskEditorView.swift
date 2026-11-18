@@ -229,7 +229,6 @@ struct TaskEditorView: View {
         .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(!session.canStop)
     }
 
-    /// Keep related actions on one row when they fit, then stack them.
     private func wrappingFooter<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: Theme.Space.s) { content() }

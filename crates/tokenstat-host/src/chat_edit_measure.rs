@@ -56,7 +56,6 @@ pub(crate) struct EditMeasure {
     known: HashMap<PathBuf, Contents>,
     root: PathBuf,
     index: Option<tokenstat_workspace::git::IndexSnapshot>,
-    /// Edits started and not yet ended: their call id and the files named.
     open: HashMap<String, Vec<String>>,
 }
 
@@ -138,7 +137,6 @@ impl EditMeasure {
                 },
             };
             let Some(after) = read(&path) else {
-                // Too large or not text now. What it held is unknown again.
                 self.known.insert(path, Contents::Unknown);
                 continue;
             };
@@ -212,7 +210,6 @@ fn reported_paths(input: &Value) -> Option<Vec<String>> {
     (!paths.is_empty()).then_some(paths)
 }
 
-/// `None` when the file cannot be counted: too large, not UTF-8, or binary.
 fn read(path: &Path) -> Option<Contents> {
     match std::fs::metadata(path) {
         Ok(meta) if !meta.is_file() || meta.len() > MAX_BYTES as u64 => return None,
@@ -529,7 +526,6 @@ mod tests {
         std::fs::write(&clean, "a\nb\n").unwrap();
         std::fs::write(&dirty, "a\nb\n").unwrap();
         git(&["add", "."]);
-        // Changed before the turn: its uncommitted lines are not this turn's.
         std::fs::write(&dirty, "a\nb\nmine\n").unwrap();
 
         let mut measure = EditMeasure::start(dir.path());
@@ -548,14 +544,12 @@ mod tests {
             "after its end"
         );
 
-        // A second edit of the same file counts from where the first left it.
         std::fs::write(&clean, "a\nB\nc\n").unwrap();
         assert_eq!(
             edit_counts(&measure.observe(vec![start("e3", &clean), end("e3")])),
             vec![(1, 0)]
         );
 
-        // A new file is all added. A failed edit is not measured.
         let fresh = dir.path().join("new.txt");
         std::fs::write(&fresh, "x\ny\nz\n").unwrap();
         assert_eq!(
@@ -727,7 +721,6 @@ mod tests {
         let mut measure = EditMeasure::start(dir.path());
         std::fs::write(&file, "text\n").unwrap();
         assert!(edit_counts(&measure.observe(vec![start("e1", &file), end("e1")])).is_empty());
-        // Once text is known, a later change can be counted from it.
         std::fs::write(&file, "text\nmore\n").unwrap();
         assert_eq!(
             edit_counts(&measure.observe(vec![start("e2", &file), end("e2")])),

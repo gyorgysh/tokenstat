@@ -77,7 +77,6 @@ enum WorkflowTouchViewport {
         return Fit(zoom: zoom, pan: pan)
     }
 
-    /// Viewport point of a node top-left under the current pan/zoom.
     static func viewportPoint(for origin: CGPoint, pan: CGSize, zoom: CGFloat) -> CGPoint {
         CGPoint(x: origin.x * zoom + pan.width, y: origin.y * zoom + pan.height)
     }

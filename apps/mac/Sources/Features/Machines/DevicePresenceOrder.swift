@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// A deterministic presence order, independent of device type or spend.
 struct DevicePresenceOrder: Comparable {
     let isCurrent: Bool
     let online: Bool

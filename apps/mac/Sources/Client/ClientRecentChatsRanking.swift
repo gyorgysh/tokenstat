@@ -2,12 +2,6 @@
 
 import Foundation
 
-/// How the phone's Recents row is chosen.
-///
-/// Unread and approvals used to rank above recency, then the list was cut to
-/// five. A conversation you just left disappeared under a pile of older
-/// unread replies. The three newest by time stay on top. Five more follow,
-/// ranked by what needs a look.
 enum ClientRecentChatsRanking {
     static let recentByTime = 3
     static let moreByPriority = 5

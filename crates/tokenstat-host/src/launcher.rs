@@ -1506,7 +1506,6 @@ pub(crate) fn search_path_var() -> String {
     search_path().join(&sep)
 }
 
-/// First executable match for a bare command name on the search path.
 fn resolve_on_path(command: &str, path: &[String]) -> Option<String> {
     let candidates = if absolute_command(command) {
         vec![Path::new(command).to_path_buf()]
@@ -1793,8 +1792,6 @@ mod tests {
         }
     }
 
-    /// The shell is in the catalog and is not an agent. Offering it a sign-in
-    /// would be offering to log in to a terminal.
     #[test]
     fn the_shell_has_no_sign_in() {
         assert!(crate::agent_readiness::sign_in("shell").is_none());
@@ -1824,7 +1821,6 @@ mod tests {
     #[cfg(unix)]
     use std::path::PathBuf;
 
-    /// A `$HOME` with `<dir>/<command>` in it, executable.
     #[cfg(unix)]
     fn home_with(dir: &str, command: &str) -> PathBuf {
         let home = std::env::temp_dir().join(format!("tokenstat-launcher-{dir}-{command}"));
@@ -2048,8 +2044,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// A profile with no install directory of its own is unchanged: absent
-    /// from the PATH means absent.
     #[test]
     fn a_profile_without_an_install_directory_still_needs_the_path() {
         let home = std::env::temp_dir();

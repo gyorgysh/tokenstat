@@ -256,9 +256,6 @@ struct ClientDevicesView: View {
     }
 
     private var header: some View {
-        // Title + plan fill. The spend window used to sit under the bar as
-        // "Share of all time…", which repeated what every host figure already
-        // means and crowded the list.
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .center, spacing: Theme.Space.s) {
                 ClientSectionTitle(title: L10n.text("common.devices"), mark: "mark_device")

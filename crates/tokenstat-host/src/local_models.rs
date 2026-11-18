@@ -68,7 +68,6 @@ const PROVIDERS: &[ProviderSpec] = &[
     },
 ];
 
-/// The spec for a provider id, or `None` when nothing here serves it.
 fn spec(provider: &str) -> Option<&'static ProviderSpec> {
     PROVIDERS.iter().find(|spec| spec.id == provider)
 }

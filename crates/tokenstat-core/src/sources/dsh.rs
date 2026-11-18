@@ -288,7 +288,6 @@ pub fn parse_text(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
     out
 }
 
-/// The session id, which is the directory the transcript sits in.
 fn session_id(path: &Path) -> String {
     path.parent()
         .and_then(|p| p.file_name())

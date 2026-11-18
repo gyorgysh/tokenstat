@@ -17,7 +17,6 @@ struct ChatTranscriptFoldTests {
         precondition(condition, message)
     }
 
-    // MARK: Rows
 
     static func user(_ id: String) -> ChatDisplayItem { .init(id: id, kind: .user("q")) }
     static func say(_ id: String) -> ChatDisplayItem { .init(id: id, kind: .assistant("a", backend: nil)) }
@@ -60,7 +59,6 @@ struct ChatTranscriptFoldTests {
         ChatTranscriptFold.fold(rows, detail: detail, running: running, isOpen: isOpen)
     }
 
-    // MARK: Tests
 
     static func main() {
         detailedIsTheIdentity()

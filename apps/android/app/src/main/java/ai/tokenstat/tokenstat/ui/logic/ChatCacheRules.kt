@@ -6,21 +6,16 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 
-/// When a message is about to make the agent read a whole conversation again.
-/// Mirrors the Mac's `ChatPromptCacheRule`.
-///
 /// The provider caches a conversation for one model, for a few minutes or an
 /// hour after the last turn. The host records the size, model and lifetime on
 /// the conversation as `promptCache`. No percentage of a plan is shown:
 /// nobody publishes how tokens map onto one.
 object ChatCacheRules {
-    /// Below this a full read is cheap, and a question is noise.
     const val MINIMUM_TOKENS = 50_000L
 
     private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.number(key: String) = (this[key] as? JsonPrimitive)?.longOrNull
 
-    /// The record, when it is this agent's and big enough to matter.
     fun cache(chat: JsonObject?): JsonObject? {
         val cache = chat?.get("promptCache") as? JsonObject ?: return null
         if (cache.text("backend") != chat.text("backend")) return null
@@ -49,7 +44,6 @@ object ChatCacheRules {
     fun cachedModel(chat: JsonObject?): String? =
         cache(chat)?.let { it.text("model")?.takeIf(String::isNotBlank) ?: it.text("selection") }
 
-    /// Days and hours, or hours and minutes, like "1d 17h".
     fun duration(milliseconds: Long): String {
         val minutes = maxOf(0, milliseconds) / 60_000
         val hours = minutes / 60
@@ -61,7 +55,6 @@ object ChatCacheRules {
         }
     }
 
-    /// "435.4k", the way the usage screens count tokens.
     fun tokenCount(count: Long): String = when {
         count >= 1_000_000 -> String.format(java.util.Locale.ROOT, "%.1fM", count / 1_000_000.0)
         count >= 1_000 -> String.format(java.util.Locale.ROOT, "%.1fk", count / 1_000.0)

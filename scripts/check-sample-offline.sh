@@ -9,7 +9,6 @@
 # being a sample: it starts needing the thing it exists to stand in for, and it
 # gains a way to write somewhere on somebody's behalf.
 #
-# So this is a rule rather than a habit. Add a call here and CI says no.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +17,6 @@ files=(
   "$root/apps/mac/Sources/Client/ClientSampleWorkspace.swift"
 )
 
-# Anything that talks to the host, a peer, the account or the network.
 forbidden='Bridge\.|ClientRemote\.|URLSession|AccountModel|SSHLibraryModel|ChatModel|\.write\(|FileManager'
 
 status=0

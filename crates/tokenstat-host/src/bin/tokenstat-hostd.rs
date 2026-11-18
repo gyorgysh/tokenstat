@@ -438,7 +438,6 @@ fn run_muse_post_hook() -> Result<(), String> {
     Ok(())
 }
 
-/// A reminder observer, or any event that is not the model step this note rides.
 fn muse_skips_note(input: &Value) -> bool {
     if let Some(name) = input.get("hook_event_name").and_then(Value::as_str)
         && name != "PostLLMCall"
@@ -938,8 +937,6 @@ mod tests {
             &json!({"tool_name":"Bash", "tool_input":{"command":"git status --short"}}),
         );
         assert_eq!(verb, "Bash");
-        // The card shows the thing being decided, not the envelope it came
-        // in. The verb has its own chip beside it.
         assert_eq!(preview, "git status --short");
         assert_eq!(prefix.as_deref(), Some("git status"));
     }
@@ -1074,7 +1071,6 @@ mod tests {
                 .as_deref(),
             Some("raw output")
         );
-        // Existing hosts/backends keep their established field precedence.
         assert_eq!(
             hook_result(
                 "claude",
@@ -1332,7 +1328,6 @@ mod tests {
         })));
     }
 
-    /// A refusal has to tell the model to stop, or it burns the turn retrying.
     #[test]
     fn a_refusal_tells_the_model_not_to_retry() {
         let dir = tempfile::tempdir().unwrap();

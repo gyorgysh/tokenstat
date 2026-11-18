@@ -48,7 +48,6 @@ public sealed partial class MainWindow : Window
     /// detail chrome, which carries the sidebar and inspector marks.
     /// </summary>
     private readonly Grid _bodyGrid = new();
-    /// <summary>The slot the toolbar rebuilds into on navigation and theme change.</summary>
     private readonly Border _toolbarSlot = new();
     private readonly InspectorHost _inspectorHost = new();
     /// <summary>
@@ -72,14 +71,10 @@ public sealed partial class MainWindow : Window
         // blocks the view switch, filter, menu and add buttons it now holds.
         IsEnabled = true,
     };
-    /// <summary>Filter over repository and chat names in the Repositories section.</summary>
     private string _projectsFilter = "";
-    /// <summary>Whether the filter box is open. It stays shut until asked for.</summary>
     private bool _showingProjectsFilter;
     private TextBox? _projectsFilterBox;
-    /// <summary>Chats the chat list draws before Show more. Every launch starts at one page.</summary>
     private int _chatListLimit = SidebarProjectsLayout.ChatPageSize;
-    /// <summary>Day headings folded in the chat list, by <see cref="SidebarChatDay.Id"/>.</summary>
     private readonly HashSet<string> _collapsedChatDays = new(StringComparer.Ordinal);
     private const string ChatDayPrefix = "wschatday:";
     private const string ChatPagePrefix = "wschatpage:";
@@ -179,7 +174,6 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) => resizeSettled.Stop();
 
-        // Every shell surface uses the same opaque theme on Windows.
         RootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(RailWidth) });
         RootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumnSpan(AppTitleBar, 2);
@@ -235,7 +229,6 @@ public sealed partial class MainWindow : Window
         {
             var button = SidebarChrome.RailButton(RailIcon(place), RailLabel(place), (_, _) =>
             {
-                // Workflows share the Automations place; returning preserves that choice.
                 var tag = place switch
                 {
                     RailPlace.Automations => _automationRoute,
@@ -397,7 +390,6 @@ public sealed partial class MainWindow : Window
                 var workbench = WorkspaceTabs(workspaceId);
                 var liveTag = LiveRoute.Join(SidebarLive.ChatPrefix, workspaceId, chatId);
                 if (FindNavItem(liveTag) is not null) { _lastNavTag = liveTag; RestoreSelection(liveTag); }
-                // The Chat tab may still be waiting for the strip to load.
                 workbench.WhenLoaded(() => { if (workbench.ActivePage is ChatPage page) _ = page.RevealAsync(chatId); });
             });
         };
@@ -432,11 +424,8 @@ public sealed partial class MainWindow : Window
             _nav.SelectedItem = first;
         }
 
-        // First frame is the brand on paper, before the helper has answered.
         ShowHostSplash(null);
         _ = BootAsync();
-        // Live sidebar rows, like the Mac watcher: sessions and chats every
-        // ten seconds, counts and the account footer every minute.
         _sidebarPoll = DispatcherQueue.CreateTimer();
         _sidebarPoll.Interval = TimeSpan.FromSeconds(10);
         _sidebarPoll.Tick += (_, _) =>
@@ -633,7 +622,6 @@ public sealed partial class MainWindow : Window
             {
                 RebuildFolderItems();
                 ResolveDesktopActions();
-                // New Chat may have opened before the folders arrived.
                 if (_newChatPage?.IsLoaded == true) _newChatPage.RefreshRepositories();
             });
             _ = RemoteWorkspaces.SweepAsync();
@@ -680,8 +668,6 @@ public sealed partial class MainWindow : Window
         {
             _nav.MenuItems.Add(item);
         }
-        // The chat view lists chats in place of folders. Its rows are built
-        // with the live data, in RebuildSidebarLiveCore.
         var byChat = SidebarPreferences.Shared.ProjectsDisplay == SidebarProjectsDisplay.ByChat;
         var sort = SidebarPreferences.Shared.ProjectsSort;
         foreach (var folder in byChat ? new List<JsonNode?>() : OrderedLocalFolders(sort))
@@ -744,13 +730,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>This PC's folders in the chosen sort. Manual keeps the saved order.</summary>
     private List<JsonNode?> OrderedLocalFolders(SidebarProjectsSort sort) =>
         SidebarProjectsLayout.OrderFolders(_localFolders.ToList(), sort,
             folder => Format.Text(folder, "name", Format.Text(folder, "id")),
             folder => FolderActivity(Format.Text(folder, "id")));
 
-    /// <summary>The newest chat activity in a folder, for the Recent sort.</summary>
     private long FolderActivity(string folderId)
     {
         long newest = 0;
@@ -763,7 +747,6 @@ public sealed partial class MainWindow : Window
         return newest;
     }
 
-    /// <summary>Whether a folder row survives the sidebar filter.</summary>
     private bool FolderPassesFilter(string folderId, string name, string machine) =>
         SidebarProjectsLayout.FolderMatches(_projectsFilter, name, machine,
             _liveChats.Where(chat => chat is not null && Format.Text(chat, "workspaceId") == folderId).Select(chat => chat!));
@@ -858,11 +841,8 @@ public sealed partial class MainWindow : Window
         more.Padding = new Thickness(0);
         if (!remote)
         {
-            // The Mac draws a plain link here. Windows' Connect is the Wifi
-            // glyph for joining devices, so borrow Pair's link instead.
             var share = Buttons.ToolbarIcon(ActionIcon.Pair, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), (_, _) => OpenTeamFolder(id, name, path));
             share.Width = share.Height = 22;
-            // Hover-only like the Mac, shared or not: it takes the counts' seat.
             SidebarChrome.RevealActions(parent, share, compose, more);
             parent.Content = SidebarChrome.ProjectContent(parent, label, remote, shared, share, compose, more);
         }
@@ -904,8 +884,6 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(count, 1);
             controls.Children.Add(count);
         }
-        // Touch-sized like the Mac heading: a view switch, the filter, the
-        // section menu, then the add control.
         var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         if (hasFolders)
         {
@@ -933,8 +911,6 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            // A folder with a plus, not a bare plus: in the folder view this
-            // only ever adds a repository.
             var add = HeaderIcon(Buttons.ToolbarIcon(ActionIcon.Reveal, L10n.Text("common.add_project"), async (_, _) => await AddWorkspaceAsync()));
             add.Content = new FontIcon { Glyph = "\uE8F4", FontSize = 14 };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "sidebar.addProject");
@@ -956,7 +932,6 @@ public sealed partial class MainWindow : Window
         _workspacesHeader.Content = header;
     }
 
-    /// <summary>A heading control at the sidebar's touch target.</summary>
     private static Button HeaderIcon(Button button)
     {
         button.Width = button.Height = 28;
@@ -1150,8 +1125,6 @@ public sealed partial class MainWindow : Window
                         || tag.StartsWith("machine:", StringComparison.Ordinal) || tag.StartsWith("wschat", StringComparison.Ordinal)
                         || tag is "workspaces:add" or "workspaces:empty")) continue;
                     var shown = expanded;
-                    // The filter hides folders with no matching name or chat.
-                    // A machine stays while any of its folders does.
                     if (shown && _projectsFilter.Trim().Length > 0)
                     {
                         if (tag.StartsWith("ws:", StringComparison.Ordinal) && tag.EndsWith(":Launcher", StringComparison.Ordinal))
@@ -1282,10 +1255,6 @@ public sealed partial class MainWindow : Window
 
     private void StretchNavigationContent() => NativeContentLayout.Stretch(_nav, _contentHost);
 
-    /// <summary>
-    /// Mount a page with the smooth arrival. Every navigation goes through
-    /// here so content lands the same way on every screen.
-    /// </summary>
     private void SetContent(Page page, bool preserveSelection = false)
     {
         if (!preserveSelection)
@@ -1474,8 +1443,6 @@ public sealed partial class MainWindow : Window
         if (content is IInspectorContent inspector && inspector.Inspector is not null
             && _inspectorHost.RouteAllowsInspector)
         {
-            // Last, nearest the edge it opens, like the Mac: the toggle is the
-            // control beside the column it controls.
             bool open = _inspectorHost.IsInspectorVisible;
             trailing.Add(Buttons.ToolbarIcon(
                 ActionIcon.Collapse,
@@ -1609,8 +1576,6 @@ public sealed partial class MainWindow : Window
         if (tag.StartsWith(SidebarLive.ChatPrefix, StringComparison.Ordinal)
             && SidebarLive.TrySplit(tag, SidebarLive.ChatPrefix, out var chatFolder, out var chatId))
         {
-            // Through the conversation opener, which selects the Chat row and
-            // reveals the thread once its list loads.
             AppServices.OpenConversation?.Invoke(chatFolder, chatId);
             return;
         }
@@ -1690,8 +1655,6 @@ public sealed partial class MainWindow : Window
         }
         SidebarPreferences.Shared.RememberExpansion("history:" + folder, _liveChatExpanded.Contains(folder));
         RebuildSidebarLive();
-        // An expander changes the list, not the screen: the selection goes
-        // back where it was and the content stays put.
         _suppressNav = true;
         if (_lastNavTag is not null && FindNavItem(_lastNavTag) is NavigationViewItem back)
         {
@@ -1758,7 +1721,6 @@ public sealed partial class MainWindow : Window
             SetContent(Ssh(SSHSection.Hosts, tag["sshterm:".Length..]), preserveSelection: true);
             return;
         }
-        // A starred server with no shell open: one click asks to connect.
         if (tag.StartsWith("sshfav:", StringComparison.Ordinal))
         {
             var page = Ssh(SSHSection.Hosts);
@@ -1835,7 +1797,6 @@ public sealed partial class MainWindow : Window
     // global navigation leaves Notes, as project workbenches already do.
     private NotesPage? _globalNotesPage;
     private SshPage? _sshPage;
-    /// <summary>Starred servers shown in the sidebar, by id, for the click that connects.</summary>
     private Dictionary<string, JsonNode> _starredHosts = new();
     private SshPage Ssh(SSHSection section, string? sessionId = null)
     {
@@ -1890,10 +1851,6 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    /// <summary>
-    /// The add flow from the sidebar row and the overview button. A new
-    /// folder selects itself, so what was just made is what is on screen.
-    /// </summary>
     private async Task AddWorkspaceAsync()
     {
         var owner = _frame.Content as UIElement ?? (UIElement)_frame;
@@ -1936,11 +1893,6 @@ public sealed partial class MainWindow : Window
         RefreshUpdateBadge();
     }
 
-    /// <summary>
-    /// Every registered folder as cards, the first row under Workspaces. Each
-    /// card opens that folder, selecting its sidebar row so the pane and the
-    /// sidebar agree.
-    /// </summary>
     private Page WorkspacesOverviewPage()
     {
         var root = new StackPanel { Spacing = Theme.SpaceL };
@@ -2102,10 +2054,6 @@ public sealed partial class MainWindow : Window
         return open;
     }
 
-    /// <summary>
-    /// One folder's commit history, through the shared history card. The diff
-    /// opener matches the Changes screen, so a file reads the same from both.
-    /// </summary>
     private static Page WorkspaceHistoryPage(string id) => new HistoryPage(id);
 
     private sealed class HistoryPage : Page, IToolbarItems
@@ -2530,7 +2478,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Puts the selection back on a row a rebuild replaced, without navigating.</summary>
     private void KeepSelectedRow(string? selectedTag)
     {
         if (selectedTag is not null
@@ -2619,7 +2566,6 @@ public sealed partial class MainWindow : Window
         ApplySidebarSectionLayout();
     }
 
-    /// <summary>A day heading in the chat list. Clicking folds its chats.</summary>
     private static NavigationViewItem ChatDayRow(SidebarChatDay day, bool collapsed)
     {
         var title = day.Kind switch
@@ -2628,7 +2574,6 @@ public sealed partial class MainWindow : Window
             SidebarChatDayKind.Today => L10n.Text("common.today"),
             SidebarChatDayKind.Yesterday => L10n.Text("common.yesterday"),
             SidebarChatDayKind.Older => L10n.Text("common.sidebar.older"),
-            // A date reads better than a weekday nobody remembers.
             _ => day.Date.ToString("MMM d", System.Globalization.CultureInfo.CurrentUICulture),
         };
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 6, 0, 0) };
@@ -2655,10 +2600,6 @@ public sealed partial class MainWindow : Window
         return parent.MenuItems.Count - 1;
     }
 
-    /// <summary>
-    /// One profile row with Account and About in its menu. Signed out,
-    /// the same row leads with Sign in.
-    /// </summary>
     private void RefreshAccountFooter()
     {
         var account = _liveAccount;
@@ -2711,8 +2652,6 @@ public sealed partial class MainWindow : Window
         UIElement identity;
         if (!expanded)
         {
-            // The rail owns the one avatar; the open sidebar carries labels
-            // beside it, rather than repeating the portrait in both columns.
             avatar = ProfileHoverRing.Wrap(Marks.Avatar(url: Format.Text(account, "avatar"), name: name,
                 handle: Format.Text(account, "handle"), size: 28), 28);
             var portrait = new Grid { Width = 36, Height = 36 };
@@ -2766,8 +2705,6 @@ public sealed partial class MainWindow : Window
         var checkUpdate = new MenuFlyoutItem { Text = L10n.Text("windows.accountpage.check_for_updates") };
         checkUpdate.Click += async (_, _) =>
         {
-            // The open sidebar shows the answer in its update card. The rail
-            // has no room for one, so it opens the account page instead.
             if (!_nav.IsPaneOpen) NavigateTo("global:" + GlobalSection.Account);
             await AppServices.Update.CheckNowAsync();
         };

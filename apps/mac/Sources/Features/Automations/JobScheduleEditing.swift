@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// Labels shared by automation and workflow schedule pickers.
 enum JobScheduleCopy {
     static let weekdayNames = [
         L10n.text("apple.jobscheduleediting.monday.6a00dfc1"), L10n.text("apple.jobscheduleediting.tuesday.7d8af1de"), L10n.text("apple.jobscheduleediting.wednesday.c0a6cc82"), L10n.text("apple.jobscheduleediting.thursday.fc266206"), L10n.text("apple.jobscheduleediting.friday.e21f3f37"), L10n.text("apple.jobscheduleediting.saturday.dbe35c73"), L10n.text("apple.jobscheduleediting.sunday.873fef76"),

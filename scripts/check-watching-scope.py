@@ -18,7 +18,6 @@ methods = '\n'.join(method(s) for s in ['    private struct ChatReadOwner:', '  
 heartbeat = (root / 'apps/mac/Sources/App/WatchingHeartbeat.swift').read_text()
 assert 'scope: WorkSessionContext.shared.scope' in heartbeat
 assert 'let owner = WorkSessionContext.shared.scope' in heartbeat
-# Renewing, hiding the window and leaving the route all retain their captured owner.
 assert heartbeat.count('expectedScope: owner') == 3
 assert 'WorkSessionContext.shared.scope == owner' in heartbeat
 swift = r'''import Foundation

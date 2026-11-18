@@ -351,7 +351,6 @@ pub(crate) mod stream_tests {
             parser.push_events((record.to_string() + "\n").as_bytes());
         }
         assert!(parser.take_limit().is_none());
-        // A rejected window alone does not end the turn. Only the refusal does.
         let mut parser = Parser::new("claude");
         let rejected = json!({"type":"rate_limit_event","rate_limit_info":{"resetsAt":reset,
             "status":"rejected"}});

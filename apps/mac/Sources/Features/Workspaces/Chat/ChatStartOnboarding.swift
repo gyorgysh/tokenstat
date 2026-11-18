@@ -89,7 +89,6 @@ private struct ChatStartStarterStyle: ButtonStyle {
     }
 }
 
-/// Wraps its children onto as many centred lines as the width needs.
 private struct FlowRow: Layout {
     var spacing: CGFloat = 8
 

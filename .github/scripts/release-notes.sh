@@ -25,8 +25,6 @@ notes="$(
   exit 1
 }
 
-# The emptiness test strips whitespace, so a section holding nothing but blank
-# lines fails as loudly as one that is missing.
 if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
   echo "CHANGELOG.md section for ${version} is empty." >&2
   exit 1

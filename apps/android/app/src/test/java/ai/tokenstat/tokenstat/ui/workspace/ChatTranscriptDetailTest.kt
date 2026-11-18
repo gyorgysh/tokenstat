@@ -141,7 +141,6 @@ class ChatTranscriptDetailTest {
         }
         val minimal = fold(rows, ChatDetail.Minimal)
         assertEquals(listOf("u1", "g:t1", "p1", "g:t2", "h1", "f1", "x1"), ids(minimal))
-        // Failed steps fold with the rest, and the line counts them.
         assertEquals(2, group(minimal, "g:t2")!!.failures)
         assertEquals(0, group(minimal, "g:t1")!!.failures)
     }
@@ -149,7 +148,6 @@ class ChatTranscriptDetailTest {
     @Test
     fun compactKeepsUsageWhenThereIsNoWork() {
         assertEquals(listOf("u1", "a1", "x1"), ids(fold(listOf(user("u1"), say("a1"), usage("x1", 0.5)), ChatDetail.Minimal)))
-        // Nothing spent, because a plan covers it, keeps the token counts.
         assertEquals(
             listOf("u1", "g:t1", "a1", "x1"),
             ids(fold(listOf(user("u1"), tool("t1", "Read"), say("a1"), usage("x1", 0.0)), ChatDetail.Minimal)),
@@ -303,7 +301,6 @@ class ChatTranscriptDetailTest {
         assertEquals("src/a.kt", edited.subject)
         assertEquals(6L, edited.added)
         assertEquals(ChatStepGroup.Style.Explored, group(out, "g:t4")!!.style)
-        // A failed step is a line too, marked on the line itself.
         assertEquals("g:t5", stepGroupOwner("t5", out))
         assertEquals(1, group(out, "g:t5")!!.failures)
         assertEquals("a.kt", shortStepSubject("Edit", "src/a.kt"))

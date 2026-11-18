@@ -97,7 +97,6 @@ private val cellCorner = 3.dp
 private val gutterWidth = 16.dp
 private val monthRowHeight = 13.dp
 
-/// A day cell under the finger, with the square it was drawn in.
 private data class FocusCell(val col: Int, val row: Int, val day: JsonObject)
 
 /// `YYYY-MM-DD` as a person reads it. "11 August", with the year only when it
@@ -156,7 +155,6 @@ fun YearHeatmap(
     val gridWidthDp = (cellSize + cellGap) * weeks - cellGap
     val scroll = rememberScrollState()
 
-    // The activity ramp, with a quiet day that can actually be seen.
     val heat = remember(colors) { phoneHeat(colors) }
 
     // Shades for cells whose host never sent a level. The grid's own values
@@ -266,8 +264,6 @@ fun YearHeatmap(
                 horizontalArrangement = if (fits) Arrangement.Center else Arrangement.Start,
                 verticalAlignment = Alignment.Top,
             ) {
-                // Monday, Wednesday, Friday only. Seven letters at this size
-                // is a column of noise beside the thing it labels.
                 Column(
                     Modifier.width(gutterWidth),
                     verticalArrangement = Arrangement.spacedBy(cellGap),
@@ -359,8 +355,6 @@ fun YearHeatmap(
                                     if (wandered) return@awaitEachGesture
                                     val lifted = liftedAt
                                     if (lifted != null) {
-                                        // A quick tap opens the day it
-                                        // landed on.
                                         hit(lifted.x, lifted.y)?.let { onSelectDay(it.day) }
                                     } else {
                                         // Held past 200ms: scrub until the
@@ -421,7 +415,6 @@ fun YearHeatmap(
                                 )
                             }
                         }
-                        // The square under the finger, ringed in the accent.
                         focus?.let { (col, rowIdx, _) ->
                             val inset = with(density) { 2.dp.toPx() }
                             drawRoundRect(
@@ -633,8 +626,6 @@ private fun DayDetailHeader(day: JsonObject, detail: JsonObject?) {
     }
 }
 
-/// One `model x harness` slice of the day: the harness mark, the model and
-/// harness names, and the compact token count.
 @Composable
 private fun DayPartRow(row: JsonObject) {
     val colors = LocalTsColors.current

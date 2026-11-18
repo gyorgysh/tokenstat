@@ -832,8 +832,6 @@ mod tests {
         assert_eq!(Reason::for_exit("ok", Some(0)), Reason::RunFinished);
         assert_eq!(Reason::for_exit("ok", Some(1)), Reason::RunFailed);
         assert_eq!(Reason::for_exit("error", None), Reason::RunFailed);
-        // A run that was stopped by hand did not fail, and telling somebody
-        // their run failed when they stopped it is worse than saying nothing.
         assert_eq!(Reason::for_exit("stopped", None), Reason::RunFinished);
     }
 

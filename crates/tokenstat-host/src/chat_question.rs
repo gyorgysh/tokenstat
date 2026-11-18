@@ -248,7 +248,6 @@ fn close_on_line(line: &str) -> Option<(usize, usize)> {
         };
         return Some((0, after));
     }
-    // JSON (or other body) with closing ticks on the same line.
     trailing_close(line)
 }
 
@@ -524,8 +523,6 @@ mod tests {
 
     #[test]
     fn a_second_question_glued_to_the_closing_fence_is_still_read() {
-        // The next block's opening fence starts on the previous block's
-        // closing line, so that line begins with six backticks.
         let text = format!(
             "```{FENCE}\n{{\"question\":\"First?\"}}\n``````{FENCE}\n{{\"question\":\"Second?\"}}\n```\n"
         );

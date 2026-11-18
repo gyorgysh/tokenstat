@@ -78,7 +78,6 @@ pub(crate) fn read(force: bool) -> ProviderLimits {
         .get(SOURCE)
         .map_or(0, |r| r.observed_at_ms);
     if reading.observed_at_ms < remembered {
-        // The general cache holds something newer, and fills it in.
         return failure;
     }
     if age(&reading, now) >= claude_feed::CURRENT_FOR_MS {
@@ -490,7 +489,6 @@ mod json_text {
         i
     }
 
-    /// Index just past the string that opens at `i`.
     fn skip_string(b: &[u8], mut i: usize) -> Result<usize, String> {
         i += 1;
         while i < b.len() {

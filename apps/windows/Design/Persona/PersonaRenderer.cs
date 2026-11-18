@@ -86,7 +86,6 @@ internal static class PersonaRenderer
             for (int i = firstFaceElement; i < canvas.Count; i++)
             {
                 var path = canvas[i];
-                // Transform the face geometry, keeping its body clip fixed.
                 canvas.TransformFace(i, transform);
                 path.Opacity *= Math.Min(1, facing * 4);
             }
@@ -138,8 +137,6 @@ internal static class PersonaRenderer
     private static void DrawShadow(
         PersonaScene canvas, PRect bounds, double width, double height, double unit, Color hue)
     {
-        // Contact shadow: it shrinks and fades as the body leaves the ground,
-        // which is most of what sells a jump as a jump.
         double air = Math.Max(0, PersonaStage.Floor - bounds.MaxY);
         double closeness = Math.Max(0.30, 1 - air * 2.6);
         double w = bounds.Width * width * 0.80 * closeness;
@@ -209,8 +206,6 @@ internal static class PersonaRenderer
         // thin means round eyes closer together.
         double aspect = Math.Clamp(bounds.Height / Math.Max(bounds.Width, 1e-4), 0.45, 1.7);
 
-        // Lean, taken from where the crown sits relative to the middle. The
-        // face tilts with the body for free, in every mood.
         double tilt = Math.Clamp(Math.Atan2(crown.X - centroid.X, Math.Max(centroid.Y - crown.Y, 1e-4)) * 0.25, -0.12, 0.12);
 
         double heightPoints = bounds.Height * height;
@@ -318,7 +313,6 @@ internal static class PersonaRenderer
             PenLineCap.Round, PenLineJoin.Round, clip);
     }
 
-    /// <summary>Two soft patches on the cheeks, drawn under the eyes and outside them.</summary>
     private static void DrawBlush(
         PersonaScene canvas, Func<double, double, PPoint> place, double anchorHeight,
         double radius, double spread, double unit, double amount, Geometry clip)

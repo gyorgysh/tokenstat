@@ -312,8 +312,6 @@ internal sealed class HeatmapView : StackPanel
         };
         canvas.Children.Add(_hoverRing);
 
-        // One transparent hit layer over the canvas. It maps a pointer point
-        // back to a cell with the same packing math the squares use.
         _hitRect = new Button
         {
             Width = contentWidth,
@@ -657,10 +655,6 @@ internal sealed class HeatmapView : StackPanel
     private static double Quantised(double length) =>
         Math.Round(length / QuantiseStep, MidpointRounding.AwayFromZero) * QuantiseStep;
 
-    /// <summary>
-    /// Only alternate rows are labelled, so the gutter stays quiet. Same choice
-    /// the CLI makes.
-    /// </summary>
     private static string RowLabel(int row) => row switch
     {
         0 => L10n.Text("windows.heatmap.mon.f40d7f51"),

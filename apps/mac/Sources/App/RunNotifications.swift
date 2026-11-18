@@ -56,7 +56,6 @@ final class NotificationOpen {
     }
 
     private(set) var request: Request?
-    /// When an unresolved tap stops being worth chasing.
     private var deadline: Date = .distantPast
 
     /// How long a tap is retried before the app gives up and lands on a
@@ -348,7 +347,6 @@ final class RunNotifications {
         case workflows
     }
 
-    /// Run id to the status it last had, per feed. The whole state this needs.
     private var lastStatus: [Feed: [String: String]] = [:]
     /// Feeds that have been read once. Before that, everything is history, and
     /// it is per feed for the same reason the statuses are.
@@ -392,8 +390,6 @@ final class RunNotifications {
             .authorizationStatus
     }
 
-    /// A helpful sentence for the settings row, or nil when there is nothing
-    /// to say beyond the switch.
     var authorizationNote: String? {
         guard isOn else { return nil }
         switch authorization {
@@ -678,7 +674,6 @@ final class PushRegistrar {
     /// The last thing that went wrong, for the settings row. Registration is
     /// silent when it works and a person needs to know when it does not.
     private(set) var errorMessage: String?
-    /// Whether a token has reached the account this launch.
     private(set) var isRegistered = false
     private(set) var isWorking = false
     private let operations = PushRegistrationQueue()

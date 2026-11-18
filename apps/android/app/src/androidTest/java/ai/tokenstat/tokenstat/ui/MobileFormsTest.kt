@@ -81,7 +81,6 @@ class MobileFormsTest {
         val bounds = compose.onNodeWithTag("modal-screen").fetchSemanticsNode().boundsInRoot
         assertEquals(bitmap.width.toFloat(), bounds.width, 1f)
         assertTrue("Modal should fill the phone, ${bounds.height}/${bitmap.height}", bounds.height >= bitmap.height * 0.98f)
-        // The lower body must cover the underlying danger-colored page with an opaque surface.
         assertEquals(colors.background.toArgb(), bitmap.getPixel(bitmap.width - 2, bitmap.height * 3 / 4))
         compose.onNodeWithContentDescription(text("common.close")).assertIsDisplayed()
     }

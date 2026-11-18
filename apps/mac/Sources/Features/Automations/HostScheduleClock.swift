@@ -71,7 +71,6 @@ enum HostScheduleClock {
         clockOwnership(hostName: hostName, timezone: timezone, subject: L10n.text("apple.hostscheduleclock.this_time_is.e63a9d6e"))
     }
 
-    /// Same ownership sentence for a list of run times.
     static func timesCaption(hostName: String, timezone: String?) -> String {
         clockOwnership(hostName: hostName, timezone: timezone, subject: L10n.text("apple.hostscheduleclock.times_are.e9a3f2bc"))
     }

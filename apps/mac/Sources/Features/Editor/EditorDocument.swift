@@ -61,7 +61,6 @@ final class EditorDocument: Identifiable {
         self.savedText = content
     }
 
-    /// The text view reporting an edit.
     func setText(_ next: String) {
         guard next != text else { return }
         text = next

@@ -10,7 +10,6 @@ final class ClientSetupCoordinator {
     private(set) var savedDraft: ClientSetupDraft?
     private(set) var working = false
     private(set) var preparation: UUID?
-    /// What went wrong, and the one thing to do about it.
     var failure: ClientSetupFailure?
 
     @ObservationIgnored private let store: ClientSetupStore

@@ -349,7 +349,6 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
     Ok(())
 }
 
-/// One scheduler unit as JSON: what would run, with what args, how often.
 fn unit_json(unit: crate::schedule::Unit, interval_secs: u64) -> String {
     let args: Vec<String> = unit.args().iter().map(|a| json_string(a)).collect();
     format!(
@@ -360,7 +359,6 @@ fn unit_json(unit: crate::schedule::Unit, interval_secs: u64) -> String {
     )
 }
 
-/// The result of installing one unit as JSON, or `null` when untouched.
 fn install_report_json(report: &Option<crate::schedule::InstallReport>) -> String {
     match report {
         Some(rep) => {

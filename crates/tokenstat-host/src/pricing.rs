@@ -228,9 +228,6 @@ mod tests {
             "seeding must leave the session priced, not just the disk"
         );
 
-        // A fetched book is always newer than one a bundle carries, so a
-        // second launch must leave it alone. This is the whole reason seeding
-        // is safe to call unconditionally.
         std::fs::write(&book, SNAPSHOT.replace("2026-08-01", "2026-09-09").as_str()).unwrap();
         let again = seed_into(&mut session, &bundled, &book).expect("seed again");
         assert!(!again.adopted, "an existing book must not be replaced");

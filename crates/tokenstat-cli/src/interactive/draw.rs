@@ -253,7 +253,6 @@ pub(super) fn draw_suggestions_overlay(f: &mut Frame<'_>, body: Rect, app: &App)
     );
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    // Top rule, then command rows. Selected row is bright; others are muted.
     lines.push(Line::from(Span::styled(
         "─".repeat(area.width as usize),
         Style::default().fg(MUTED),

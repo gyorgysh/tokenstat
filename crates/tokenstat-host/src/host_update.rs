@@ -80,7 +80,6 @@ const FIRST_CHECK_AFTER: Duration = Duration::from_secs(5 * 60);
 #[cfg(not(test))]
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// How often a pending restart is retried while work is in flight.
 #[cfg(not(test))]
 const RESTART_RETRY_EVERY: Duration = Duration::from_secs(10 * 60);
 

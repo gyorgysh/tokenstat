@@ -63,8 +63,6 @@ internal static class Chrome
         }
         else
         {
-            // The Mac card accessory: a trailing action in the header row,
-            // like the ranking cards' View all, rather than below the body.
             var head = new Grid { ColumnSpacing = Theme.SpaceM };
             head.ColumnDefinitions.Add(new ColumnDefinition
             {
@@ -863,12 +861,6 @@ internal static class Chrome
         return grid;
     }
 
-    /// <summary>
-    /// Concurrency as places at a table, filled by what is running now.
-    /// Mirrors the Apple SlotGauge: past twelve the count is words, not
-    /// shapes, and zero concurrent means no cap on the host, which has no
-    /// shape at all, so it says so in words.
-    /// </summary>
     public static StackPanel SlotGauge(int filled, int total, bool uncapped = false, double tile = 10)
     {
         var row = new StackPanel

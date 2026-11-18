@@ -219,7 +219,6 @@ struct PasswordParams {
     /// Only set when resetting a forgotten password.
     #[serde(default)]
     recovery: String,
-    /// The replacement, when changing or resetting.
     #[serde(default)]
     new_password: String,
     #[serde(default)]
@@ -1902,8 +1901,6 @@ mod tests {
     #[test]
     fn a_recovery_code_is_one_copyable_line_and_round_trips() {
         let recovery = generate_recovery();
-        // One line, not 24 words. Somebody has to be able to copy this in one
-        // go, or photograph it.
         assert!(!recovery.contains(' '), "{recovery}");
         assert_eq!(
             recovery.chars().filter(char::is_ascii_alphanumeric).count(),
@@ -1957,8 +1954,6 @@ mod tests {
 
     #[test]
     fn a_vault_deleted_elsewhere_stops_existing_here() {
-        // The account answered and has no vault. A local leftover from the one
-        // that used to be there does not keep it alive.
         assert!(!vault_exists(false, false, SCHEMA));
     }
 
@@ -2471,7 +2466,6 @@ mod tests {
             )
             .is_err()
         );
-        // Neither can an unrelated account silently adopt that ambiguous cache.
         assert!(
             cache_remote_at(
                 &b,

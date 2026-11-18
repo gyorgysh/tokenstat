@@ -54,7 +54,6 @@ sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 if [ -z "$sdk" ] && [ -f "$ROOT/apps/android/local.properties" ]; then
     sdk="$(sed -n 's/^sdk\.dir=//p' "$ROOT/apps/android/local.properties")"
 fi
-# Prefer the build tools for our compile SDK; allow an explicit override.
 build_tools="${TOKENSTAT_ANDROID_BUILD_TOOLS:-$sdk/build-tools/36.0.0}"
 for tool in apksigner zipalign; do
     if [ ! -x "$build_tools/$tool" ]; then

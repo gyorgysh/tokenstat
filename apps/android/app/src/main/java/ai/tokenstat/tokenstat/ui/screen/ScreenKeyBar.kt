@@ -114,8 +114,6 @@ fun ScreenKeyBar(
             }
             ScreenKeyRule()
             SPECIALS.forEach { special ->
-                // An arrow is its own word. The rest carry theirs, because
-                // "esc" and "tab" have no glyph anybody would read faster.
                 ScreenKeyCap(
                     label = special.label,
                     icon = special.icon,

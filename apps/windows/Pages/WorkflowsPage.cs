@@ -72,8 +72,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             _query = text ?? "";
             RenderList();
         });
-        // Full width, like the Mac search box: a capped field stops halfway
-        // across its column and leaves dead background beside itself.
         _searchBox.HorizontalAlignment = HorizontalAlignment.Stretch;
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_searchBox);

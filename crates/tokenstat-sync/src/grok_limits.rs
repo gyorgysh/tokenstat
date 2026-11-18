@@ -59,7 +59,6 @@ struct BillingResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BillingConfig {
-    /// Monthly shape.
     #[serde(default)]
     monthly_limit: Option<Credits>,
     #[serde(default)]
@@ -318,8 +317,6 @@ mod tests {
 
     #[test]
     fn an_account_with_no_monthly_allowance_reports_no_monthly_window() {
-        // Dividing by it would be a percentage of nothing, which renders as
-        // either 0% or infinity and means neither.
         let config: BillingConfig =
             serde_json::from_str(r#"{"monthlyLimit": {"val": 0}, "used": {"val": 12}}"#).unwrap();
         assert!(monthly_window(&config).is_none());

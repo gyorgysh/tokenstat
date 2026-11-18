@@ -235,8 +235,6 @@ private fun ChatPendingSheet(
     }
 }
 
-/// One queued message: its text, what state it is in, and the three things
-/// that can be done to it. Port of `ChatQueueRow`.
 @Composable
 private fun ChatQueueRow(
     item: QueuedMessage,

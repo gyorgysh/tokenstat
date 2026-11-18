@@ -585,7 +585,6 @@ struct ClientRootView: View {
         navigation.restoredRoute = WorkMobileRoute(scope: scope, tab: "workspaces", reference: reference, section: target.section?.rawValue ?? "sessions")
     }
 
-    /// New chat had nothing to run on and said so on its way out.
     private func openPendingNewChatRequest() {
         guard let request = navigation.pendingNewChatRequest else { return }
         navigation.pendingNewChatRequest = nil
@@ -662,24 +661,6 @@ struct ClientRootView: View {
     }
 }
 
-/// The four destinations the client has.
-///
-/// Account is not among them on purpose. It lives behind the avatar in the top
-/// bar, which is where a thumb already goes looking for it, and that keeps a
-/// tab for something a person actually opens the app to see.
-///
-/// **Limits used to have a tab and gave it up.** The phone exists to answer two
-/// questions, spend and what is left, and both belong on the screen that opens.
-/// A tab for the second one meant somebody had to know it was there. It is a
-/// card on Home now, which is also what the original plan said before the tab
-/// bar tempted it out.
-///
-/// What took the free slot is **Workspaces**, which is the machine plane's front
-/// door: folders on a machine that is awake, and later the sessions running in
-/// them. That is the thing this app cannot do yet and the thing people will open
-/// it hoping to find, so it gets a place rather than being buried under
-/// Machines. Machines stays: a device is not a folder, and the account's tier,
-/// its reach and its last-seen times belong to devices.
 enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     case home
     case workspaces
@@ -913,7 +894,6 @@ final class ClientSessionModels {
         return fresh
     }
 
-    /// Drop everything on sign-out, as unmounting the layouts used to.
     func reset() {
         current?.deactivate()
         scope = nil
@@ -923,7 +903,6 @@ final class ClientSessionModels {
 }
 
 private extension View {
-    /// The screens that read their model from the environment.
     func sessionScreens(_ models: ClientSessionModels.Models) -> some View {
         environment(models.home)
             .environment(models.insights)

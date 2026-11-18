@@ -98,7 +98,6 @@ struct WorkspaceInspector: View {
         nonmutating set { model.chatInspectorShowsSettings = newValue }
     }
     #if os(macOS)
-    /// After Auto commit starts, open that job on the Automations screen.
     var onOpenAutomation: ((String, String?) -> Void)? = nil
     var onReviewWorkingTree: ((String?) -> Void)? = nil
     #endif
@@ -342,8 +341,6 @@ struct WorkspaceHistoryView: View {
     }
 }
 
-/// One commit: subject, then who and when, with a mark for anything that has
-/// not left this machine yet.
 private struct CommitRow: View {
     let commit: Commit
     /// Account picture for a commit of yours, or the author's public forge

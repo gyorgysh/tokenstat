@@ -49,8 +49,6 @@ struct ChatStepGroupRow: View {
         .animation(smoothStreaming && !reduceMotion ? .easeOut(duration: 0.18) : nil, value: group.running)
     }
 
-    /// Compact: the verb, what it acted on and the lines it changed, in one
-    /// quiet line. The spinner stands in front while the step runs.
     private var plainLine: some View {
         Button(action: toggle) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -97,8 +95,6 @@ struct ChatStepGroupRow: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// The file or command after the verb, or the counts for a run of
-    /// several reads and searches.
     private var plainSubject: String? {
         switch group.style {
         case .step, .explored:
@@ -211,7 +207,6 @@ struct ChatStepGroupRow: View {
         }
     }
 
-    /// A quiet red count of failed steps. A lone step just says Failed.
     @ViewBuilder
     private func failureMark(font: Font) -> some View {
         if group.failures > 0, !group.running {
@@ -238,7 +233,6 @@ struct ChatStepGroupRow: View {
         }
     }
 
-    /// What the line is, in a few words. A running line names the step.
     private var title: String {
         switch group.style {
         case .work:
@@ -257,8 +251,6 @@ struct ChatStepGroupRow: View {
         }
     }
 
-    /// The counts after the title: steps and files for work, what was looked
-    /// at for a run of reads, the first line for a thought.
     private var summary: String? {
         switch group.style {
         case .work:

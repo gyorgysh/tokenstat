@@ -388,7 +388,6 @@ try {
                     const after = await page.locator("#plot").boundingBox();
                     assert.ok(after.height > before.height);
                     await page.locator("#expand").click();
-                    // All exports must complete through the same narrow bridge used by native clients.
                     await page.evaluate(() => {
                         window.exports = [];
                         window.chrome = {
@@ -423,7 +422,6 @@ try {
                         if (format === "json")
                             assert.equal(JSON.parse(item.content).type, "bar");
                     }
-                    // Large data stays bounded, paginates exactly, and reset restores hidden series and zoom.
                     const large = {
                         version: 1,
                         type: "bar",
@@ -558,7 +556,6 @@ try {
                             );
                         }),
                     );
-                    // Select actual SVG geometry with a pointer/touch, including the treemap's virtual root.
                     for (const type of ["bar", "pie", "treemap", "radar"]) {
                         const spec = examples.find(
                             (item) => item.type === type,

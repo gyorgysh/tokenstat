@@ -15,7 +15,6 @@ use crate::sources::{
 use crate::store::Store;
 use crate::watermark;
 
-/// Result of considering one file during a scan.
 struct FileOutcome {
     parsed: Parsed,
     /// False when the file was skipped because nothing had changed.
@@ -781,7 +780,6 @@ fn absorb(
     }
 }
 
-/// Read one text shard incrementally and hand its new content to a parser.
 fn read_shard(
     path: &std::path::Path,
     marks: &std::collections::HashMap<String, watermark::Watermark>,
@@ -859,7 +857,6 @@ fn read_shard(
             .to_vec();
         (contents, head)
     } else {
-        // Keep the prior head signature on pure appends (prefix unchanged).
         let head = {
             let mut h = vec![0u8; previous.map(|w| w.sig_len as usize).unwrap_or(0)];
             if let Err(e) = file
@@ -1140,7 +1137,6 @@ fn now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
 
-/// One day of vendor-reported tokens, by model.
 type DailyModelTokens = (String, std::collections::BTreeMap<String, u64>);
 
 /// The per-day model tokens the archive has ever seen, newest reading winning.
@@ -1315,7 +1311,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A store with no sidecars is still readable, and reads as itself.
     #[test]
     fn a_database_without_sidecars_is_its_own_size() {
         let dir = std::env::temp_dir().join(format!("tokenstat-plainmark-{}", std::process::id()));

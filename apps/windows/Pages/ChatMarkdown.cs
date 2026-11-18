@@ -51,7 +51,6 @@ internal sealed class ChatMarkdown(bool allowDesktopActions)
         }
         catch
         {
-            // A reply that cannot be parsed is still a reply.
             return Plain(text);
         }
         var body = Blocks(document, codeBlock);
@@ -125,8 +124,6 @@ internal sealed class ChatMarkdown(bool allowDesktopActions)
         };
         if (leaf is HeadingBlock heading)
         {
-            // The Mac chat's compact scale: a heading in a reply is a label,
-            // not a page title.
             text.FontSize = heading.Level switch { 1 => 18, 2 => 16, _ => 15 };
             text.FontWeight = FontWeights.SemiBold;
             text.Margin = new Thickness(0, 4, 0, 0);
@@ -161,7 +158,6 @@ internal sealed class ChatMarkdown(bool allowDesktopActions)
         return items;
     }
 
-    /// <summary>A pipe table as a grid: a tinted header row and hairlines between rows.</summary>
     private UIElement TableGrid(Table table, Func<string, UIElement> codeBlock)
     {
         var grid = new Grid();

@@ -238,8 +238,6 @@ private struct ChatRoutingSheet: View {
         return policy.routes.firstIndex(of: preferred) ?? -2
     }
 
-    /// What the host returns to: the pin, else the agent last chosen by hand,
-    /// else the agent this chat is on now.
     private var effectivePreferred: ChatRouteDestination {
         policy.preferred
             ?? model.selected?.routing?.preferred

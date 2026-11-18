@@ -53,10 +53,6 @@ struct ClientHostWorkspacesView: View {
         @Bindable var model = model
         return ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                // What the machine is doing, at the top of the screen that
-                // opens it. This used to exist only on the Devices page, so the
-                // two things people most want from another computer were behind
-                // a tab nobody visits for that reason.
                 ClientHostHeader(
                     name: hostName,
                     peerKey: peerKey,
@@ -68,10 +64,6 @@ struct ClientHostWorkspacesView: View {
                     showsOpenWork: false
                 )
 
-                // When content is already visible, keep an unobtrusive error
-                // above it. With no content, the recovery card below is the
-                // whole answer; a banner plus an empty state used to repeat
-                // the same failure without clarifying what to do on the Mac.
                 if let message = model.errorMessage,
                    !model.folders.isEmpty || !model.sessions.isEmpty {
                     ClientErrorCard(message: message) {

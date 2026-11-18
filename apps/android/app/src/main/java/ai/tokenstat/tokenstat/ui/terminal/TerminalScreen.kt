@@ -112,11 +112,8 @@ fun TerminalScreen(
     onClose: () -> Unit,
     onSessionOpened: (String) -> Unit = {},
 ) {
-    // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
-    // Back is Done: it stops showing the session without stopping the
-    // process. Ending it is the Close button, which asks first.
     BackHandler { onClose() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -508,11 +505,8 @@ fun SshTerminalScreen(
     onStartupSent: () -> Unit = {},
     onEnded: () -> Unit = {},
 ) {
-    // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
-    // Back is Done: it stops showing the session without stopping the
-    // process. Ending it is the Close button, which asks first.
     BackHandler { onClose() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -588,7 +582,6 @@ fun SshTerminalScreen(
                     Icon(ActionIcon.Docs.vector, L10n.text("common.session_identity.title"))
                 }
                 TextButton(onClick = { confirmEnd = true }) { Text(L10n.text("android.terminalscreen.end_session.f00b921f")) }
-                // Done leaves it running, which is why it is not Close.
                 TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
             },
         )
@@ -748,8 +741,6 @@ fun SshTerminalScreen(
     }
 }
 
-/// Saved commands as one key. Nothing when there is nothing to offer,
-/// because a menu that opens on an empty list is a key that does nothing.
 @Composable
 private fun SnippetKey(
     snippets: kotlinx.serialization.json.JsonArray,
@@ -1427,8 +1418,6 @@ fun TerminalKeys(
     }
 }
 
-/// A keycap whose face is a glyph. The keyboard toggle is the only one: every
-/// other key on this bar sends a byte whose name is the thing to draw.
 @Composable
 private fun IconKeyCap(
     icon: ImageVector,
@@ -1436,8 +1425,6 @@ private fun IconKeyCap(
     colors: TsColors,
     onClick: () -> Unit,
 ) {
-    // The same cap as every other key. A bare glyph in a row of keycaps reads
-    // as a label rather than as something to press.
     Icon(
         icon,
         label,

@@ -25,8 +25,6 @@ final class PinnedWorkStore {
         /// path or command: labels come from the same safe surfaces as
         /// recent places.
         var label: String
-        /// The workspace the work belongs to, for the subtitle and for
-        /// opening the row. A folder pin repeats its own name here.
         var folderName: String
         var pinnedAt: Date
 

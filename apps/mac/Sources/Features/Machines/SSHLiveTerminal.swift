@@ -93,7 +93,6 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// older one is thrown away rather than shown under a line that has moved
     /// on.
     @ObservationIgnored private var suggestGeneration = 0
-    /// What the host is offering for the line as it stands.
     private(set) var suggestions: [SSHSuggestion] = []
     /// The line the rows on screen answer. Typing does not clear them, so
     /// what a row replaces is measured from here rather than from the row.
@@ -531,7 +530,6 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         placePalette()
     }
 
-    /// Type whichever row the keyboard is on.
     func acceptHighlighted() {
         guard let index = highlighted, index < suggestions.count else { return }
         accept(suggestions[index])
@@ -1137,7 +1135,6 @@ struct SSHLiveTerminalScreen: View {
     /// Saved snippets, so the bar can offer them. Nil where the screen was
     /// opened without a library beside it.
     var library: SSHLibraryModel?
-    /// Open another shell on the same server.
     var onNewSession: (() -> Void)?
 
     @State private var asking: SSHSnippet?

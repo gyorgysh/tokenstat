@@ -488,7 +488,6 @@ internal static class AppInstaller
             }
             catch
             {
-                // Extra nested copy is waste, not a failed update.
             }
         }
     }

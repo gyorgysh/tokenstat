@@ -31,7 +31,6 @@ final class ClientInsightsModel {
         /// and "Filter models" reads as a description of the field.
         var plural: String { label.lowercased() }
 
-        /// What the host calls it.
         var wire: String { rawValue }
 
         /// A row's key as a person reads it. A harness id is a slug, and a day

@@ -35,263 +35,8 @@ settings:
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/Tokenstat-Bridging-Header.h
     MARKETING_VERSION: "1.20.0"
-    # The build number, and it counts releases: one higher on every tagged
-    # version, never reused, never reset by a marketing version change. It sat
-    # at "2" through fourteen releases, which the App Store will not take (a
-    # build number must rise for each upload) and which makes two different
-    # builds indistinguishable in a crash report. v0.3.0 was the fifteenth
-    # release, so v0.3.1 is 16 and v0.3.2 is 17.
-    #
-    # **Every upload spends one, not every release.** A build number that has
-    # reached App Store Connect can never be reused, even by a build that was
-    # rejected during processing, so a second TestFlight upload of the same
-    # marketing version needs the next number. 17 went up as 0.3.2 and 18 is
-    # the same 0.3.2 with the orientation keys, and 19 is 0.3.3. Bump on each
-    # upload, and bump alongside MARKETING_VERSION in the same commit on each
-    # release.
-    #
-    # 44 to 47 have been uploaded as 0.6.9 on TestFlight. This cut is 48, still
-    # 0.6.9: the vault opened by a password, one screen session per peer, and
-    # the reconnect loop. Marketing stays where it is because this is a
-    # TestFlight build, not a release, and a version number spent here is a
-    # version number the next release cannot use.
-    # 49 is the same 0.6.9 with the workspaces host readings, the relay
-    # mid-message fix, and the machine record republished for the vault.
-    # 50 carries the legend empty states, the plan upgrade path, and the
-    # screen/vault fixes accumulated since build 49.
-    # 51 is the SSH work: the vault merge by age, the way out of a vault
-    # nobody can open, SSH tabs and splits over a real session model, live
-    # sessions in the sidebar, connect without a context menu, the phone's
-    # key bar and snippets, precision pointer control on the screen viewer,
-    # and the review sign-in flag.
-    # 52 carries the SSH follow-up review fixes: server-row menu polish,
-    # themed prompts, snippet targeting safety, fingerprint persistence
-    # recovery, and view-only zoom panning.
-    # 53 is the SSH design pass: sheets and form controls on the app's own
-    # surface, branded segmented tabs, the library given a phone's
-    # proportions, snippets that actually run and a run-on-connect flag that
-    # finally does something, progress and a working Cancel on every editor,
-    # full screen on the remote viewer, and the keychain entitlement the key
-    # generator needs.
-    # 54 is the terminal that erases, the desktop stream at a third of the
-    # bandwidth, full screen that hides everything it said it would, the
-    # inspector that no longer takes the window apart, and the first build
-    # that tells the relay what a channel is for so a screen session can be
-    # metered and capped.
-    # 54 went up and is on TestFlight.
-    # 55 is the control-mode and typography cut: screen input delivered as a
-    # batch at pointer rate rather than one event per poll, capture at 60 fps
-    # while somebody is driving, local echo on SSH so a typed character does
-    # not wait for a round trip, the key row reachable without leaving full
-    # screen, long press on keys and snippets, the vault row settled while the
-    # account is asked, the process's own open-file limit raised, idle peer
-    # connections closed on a timer, and the whole app drawn in Manrope and
-    # JetBrains Mono.
-    #
-    # Worth knowing for the next upload: the builds list lags behind a
-    # successful upload by minutes. Reading it too soon and finding nothing
-    # looks exactly like a failed upload, and a retry then answers DUPLICATE,
-    # which looks like confirmation. It is not. Give it a few minutes before
-    # concluding anything.
-    # 55 went up with v0.6.9 and is on TestFlight. 56 to 59 all went up as
-    # 0.7.1 and are all spent: 56 carried the per-device workspace grant, 57 the
-    # fixes to how a request arrives, 58 the waiting card and Chat on the phone,
-    # 59 the local network permission and connecting when the answer lands.
-    # 60 is 0.7.2, the getting-started rail and the Mac's own sign-in sheet.
-    # 61 is 0.7.2 with the App Store subscription and privacy metadata clarified.
-    # 62 is 0.7.3, the GitHub pull-request connection for a workspace.
-    # 63 is 0.7.3 on TestFlight: personas, chat motion, and the themed
-    # sheets accumulated since 62. 64 is the first local production-candidate
-    # upload. 65 adds recent mobile chats.
-    # 66 is spent without a record here: App Store Connect already held it and
-    # refused the second upload with previousBundleVersion 66. Read Apple's
-    # answer, not this comment, when a number looks free and is not.
-    # 67 is 0.7.3 on TestFlight: Kimi Code and Qwen Code read and on the
-    # launcher, the phone's per-host auto-connect, Antigravity under one name,
-    # and the chat, pull-request and terminal scrolling work.
-    # 68 is the same 0.7.3 with the transcript's tool rows given an identity
-    # each, so an Antigravity turn stops leaving a blank stretch where the
-    # tools it ran should be. v0.7.3 was retagged onto it, which the version
-    # number can afford because the cancelled release run published nothing.
-    # 69 is 0.8.0, which is this same work under a version that can still be
-    # tagged. 0.7.3 published a GitHub Release, and deleting it did not give
-    # the tag name back: GitHub refuses `refs/tags/v0.7.3` with "creations
-    # being restricted" while accepting every other name, with no ruleset on
-    # the repository. A published tag name is gone for good, so the rule is
-    # not "a released version is spent", it is "a tagged one is".
-    # 70 is 0.8.0 with the iPad fixes: the folder tree connecting on its own
-    # from the sidebar, a conversation opening in place so it stops covering
-    # the page picked after it, pull requests carrying a bar like every other
-    # section, and the detail column sized on the first pass instead of a pass
-    # late. Also the review exception needing the review machine and not only
-    # the account id. 69 never went up.
-    # 70 went up.
-    # 71 is 0.8.1, the PATH hotfix.
-    # 71 went up.
-    # 72 is 0.8.2.
-    # 73 is 0.8.3.
-    # 74 is the same 0.8.3 with the transcript hang fixes: follow that locks
-    # on send, a bounded row window, single-text diffs, quiet scrolling, and
-    # todo cards that read instead of pasting JSON.
-    # 75 is 0.8.4: chat files, account panes, tokenstat cache, biometric vault.
-    # 76 is the same 0.8.4 with the phone fixes: the composer, attachment cards
-    # that open, the agent picker staying open, and deletion out of Legal.
-    # 77 is the same 0.8.4 with local traffic, Win/Android relay usage, and the
-    # remote cooldown, Home, and iPad review fixes.
-    # 77 went up.
-    # 78 is 0.9.0: chat files open on the phone, and Workspaces plus the
-    # device page show whether this phone reached the computer directly or
-    # through the encrypted relay.
-    # 78 went up.
-    # 79 is the same 0.9.0 with the review fixes: relay figures in one unit
-    # everywhere, a refused host that backs off, fewer relay round trips, and
-    # a file the host refuses for good saying so.
-    # 79 went up.
-    # 80 is the same 0.9.0 with the vault sheet opening straight into Face ID
-    # or Touch ID, and one hide-keyboard control in the phone composer.
-    # 80 went up.
-    # 81 is the same 0.9.0 with a chat window that slides instead of growing,
-    # +/− on the right of edit rows, last-sync on one row, and initials
-    # when the account has no photo.
-    # 81 went up.
-    # 82 is 1.0.0: the phone and iPad hide the tab bar while a chat is open,
-    # a folder has History, and grok in Plan can spawn a subagent.
-    # 82 went up.
-    # 83 is the same 1.0.0: the tab bar actually leaves the screen, Notifications
-    # first on this device, and tapping a finished-turn notification opens
-    # that conversation.
-    # 83 went up.
-    # 84 is the same 1.0.0: tapping a chat notification finishes on the
-    # main thread, so the app no longer closes, and a missing host or empty
-    # recents lands on Workspaces.
-    # 84 went up.
-    # 85 is the same 1.0.0: composer blur, queued send, file-edit cards,
-    # Sessions branch and bypass, a notification tap prefers a live
-    # terminal, keyboard snap after send, Jump to latest larger, and
-    # Back from chat restores the tab bar.
-    # 85 went up.
-    # 86 is the same 1.0.0: composer glass covers the home-indicator edge,
-    # and Stop stays a small glyph instead of a glass circle that widened
-    # the bar.
-    # 86 went up.
-    # 87 is the same 1.0.0: Following uses theme colours, the send queue
-    # names the current turn, two or more waiting messages open from
-    # View pending, a tap for the open chat stays on that window, and
-    # the end-to-end note is a glass divider.
-    # 0.9.1 closes the delta since 0.9.0: 1.0.0 was never tagged, so the
-    # TestFlight builds 82-87 above all ship as 0.9.1.
-    # 88 went up as 1.0.0 on App Store Connect. Git stays 0.9.1.
-    # 0.9.2 fixes the tool that never ended, the transcript that stopped
-    # responding behind it, and the second cause of the notification crash.
-    # 89 went up as 1.0.0 on App Store Connect. Git stayed 0.9.2 for it.
-    # 1.0.0 is the remote expansion: a phone can set up a server.
-    # 90 went up as 1.0.1. Git stays 1.0.0.
-    # 91 went up as 1.0.1. Git stays 1.0.0.
-    # 92 went up as 1.0.1. Git stays 1.0.0.
-    # 93 went up as 1.0.1 with the history release tags. Git stays 1.0.0.
-    # 94 went up as 1.0.1 with the sample trim, the Customize Home colors,
-    # and the connect mark. Git stays 1.0.0.
-    # 95 went up as 1.0.1 with the handle-less setup, the silent doors,
-    # and the relay metered by purpose. Git stays 1.0.0.
-    # 96 went up as 1.0.1 with the Windows build fixes and the meter
-    # reporting an unreachable transcript as an error instead of a zero.
-    # 97 went up as 1.0.1 with the setup fixes: install retries over a
-    # stale pairing file, and the finish step trusts the new machine.
-    # 98 went up as 1.0.1 with the chat, setup, and home fixes.
-    # 99 went up as 1.0.1 with the remote folder fixes.
-    # 101 went up as 1.0.1 with the iPad sidebar brand placement: avatar and
-    # wordmark in one toolbar row, windowed and fullscreen alike. 100 was
-    # never uploaded.
-    # 101 is spent. 102 was reserved for 1.0.2 and not uploaded.
-    # 103 goes up as 1.0.3.
-    # 106 is reserved for 1.0.4.
-    # 107 went up as 1.0.5 on TestFlight.
-    # 108 went up as 1.0.5 on TestFlight.
-    # 109 went up as 1.0.5 on TestFlight.
-    # 110 to 112 went up as 1.0.5 on TestFlight.
-    # 113 goes up as 1.0.6.
-    # 114 goes up as 1.0.7.
-    # 115 goes up as 1.0.8.
-    # 118 identifies the 1.1.0 preview across the native apps.
-    # 119 was uploaded as 1.1.0 to App Store Connect.
-    # 120 carries the mobile navigation, diff performance and terminal fixes.
-    # 123 carries the review fixes for notes, chat delivery, browser history
-    # and Muse usage recovery.
-    # 123 was uploaded as 1.1.0. 124 restores iOS chat actions and wrapped diffs.
-    # 125 adds list-row chat deletion and fills the native iOS diff viewport.
-    # 125 was uploaded as 1.1.0. 126 is the October 3 release, including the
-    # final chat, project and remote access fixes.
-    # 127 is 1.1.1. 128 completes chat review and pull request controls.
-    # 129 is 1.2.0, including chat detail, full Changes review and edit counts.
-    # 129 went up. 130 adds per-conversation Codex and Claude fast mode.
-    # 130 was uploaded as 1.2.0. 131 carries the Cursor authentication review
-    # fixes, Muse recovery and the dated October 5 release notes.
-    # 131 was uploaded as 1.2.0. 132 accompanies the Android host capability
-    # lookup fix. No Apple upload is part of this build update.
-    # 133 carries Android full-screen Git/vault forms and SSH empty states.
-    # 134 carries the Android Git/vault review fixes.
-    # 135 is 1.3.0: configurable widgets, Siri actions and paired Watch approvals.
-    # 137 adds glass/black widget styles, tints and branded Lock Screen launchers.
-    # 138 adds reviewed iPhone Live Activities and Android system project integrations.
-    # 143 finalizes 1.3.0 with Grok fast mode, reliable Live Activities and
-    # graceful Codex cancellation; Apple and Android use the same build number.
-    # 144 was uploaded before the final Watch refresh and approval-list fixes.
-    # 145 includes those fixes for TestFlight device testing.
-    # 147 is 1.4.0 with retained mobile workspaces and chat recovery.
-    # 149 separates mobile composers and moves Layout below Notifications.
-    # 150 is 1.4.1: Windows updates, sharp icons, and author pictures in history.
-    # 151 uploads 1.5.0 routing, file transfers and chat recovery to TestFlight.
-    # 152 was uploaded as 1.6.0; 153 includes the 1.6.1 mobile and network fixes.
-    # 154 is 1.6.2 with desktop chat loading and conversation navigation fixes.
-    # 155 is 1.6.3 with program status and the combined work Live Activity.
-    # 156 was reserved for the unreleased 1.6.4 update.
-    # 157 is the 1.7.0 chat, repository and session experience preview.
-    # 158 was uploaded for 1.7.0 device testing.
-    # 159 retries unaccepted steering messages after checking the current turn.
-    # 160 is 1.7.0 with the mobile new chat page: a floor instead of frosted
-    # glass, a keyboard the page gives way to, and an answer when the account
-    # has no computer on it. It went up to TestFlight.
-    # 161 is the same 1.7.0 with the Android new chat page settled under a
-    # keyboard. Apple has seen 160, so the Android bundle that ships beside
-    # it takes the next number rather than carrying a spent one.
-    # 162 adds the window telling the system to resize for a keyboard rather
-    # than pan the whole window, and says why Send cannot fire. One number per
-    # bundle, so 161's does not describe two different builds.
-    # 163 adds OpenCode v2 compatibility while retaining installed v1 agents.
-    # 164 prepares 1.7.2 with first-message attachment recovery and the prism send transition.
-    # 165 updates iOS login hint placement and makes the demo shortcut a toggle.
-    # 166 prepares 1.7.3 with the redesigned Mac installer disk image.
-    # 167 prepares 1.7.4 with the macOS simulator inspector.
-    # 168 went up to TestFlight as 1.7.4. The login screen says to tap the logo 10 times to enable developer mode.
-    # 169 went up to TestFlight as 1.7.5, with the certificate trust fix.
-    # 170 continues 1.8.0. 168 and 169 are spent.
-    # 199 went up to TestFlight as 1.8.0 with the Teams layout redesign.
-    # 200 went up to TestFlight as 1.8.0 with Teams on every signed-in device.
-    # 201 went up to TestFlight as 1.8.0 with Team as a root tab on the phone,
-    # the new chat prism held on its card, and precise connection failures.
-    # 202 went up to TestFlight as 1.8.0 naming why a device did not turn
-    # Teams on by itself.
-    # 203 went up to TestFlight as 1.8.0 with teammate agent runs behind the
-    # sharer's approval, stop sharing, routing on Claude session limits and
-    # the new chat grid.
-    # 204 is 1.8.0 without free trials, with the grid behind sign-in and the
-    # Patron card describing what it adds.
-    # 205 includes the Plus, Pro and Elite display names.
-    # 206 begins 1.9.0. 207 includes the mobile chat and pull review,
-    # Android phone parity and the combined host access prompt. 208 follows up
-    # with compact iPhone browser presentation. 209 includes account-scoped
-    # mobile reconnect choices and the latest shared client fixes. 210 brings
-    # the saved host connection forward to Home on iOS. 211 includes the
-    # multi-computer release polish and reviewed Git pull progress.
-    # 212 is spent on the 1.9.0 relay tint fix. 213 went up as 1.10.0.
-    # 214 is 1.10.0 again, with the 3D model drag and access card fixes.
-    # 215 is 1.11.0.
-    # 229 was uploaded as 1.14.0; 230 was reserved for local 1.15.0 work.
-    # 231 was uploaded as 1.15.0; 232 includes manual chat controls and Back.
-    # 234 is reserved for 1.16.0; 235 went up as 1.17.0.
-    # 236 went up as 1.17.0 again, with chat dictation. 237 is for 1.18.0.
-    # 238 is reserved for 1.19.0.
-    # 239 is 1.20.0.
+    # App Store Connect consumes a build number on every upload, even for the
+    # same marketing version. Its builds list can lag a successful upload.
     CURRENT_PROJECT_VERSION: "239"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
@@ -372,8 +117,6 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           cp "$SRCROOT/Resources/THIRD_PARTY_NOTICES.md" "$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/THIRD_PARTY_NOTICES.md"
-      # Same reason as the notices above: generated during this build, so the
-      # resource phase never saw it.
       - name: Bundle price book seed
         basedOnDependencyAnalysis: false
         script: |
@@ -409,8 +152,6 @@ targets:
       # binary and there is nothing to copy into the bundle.
       - framework: Vendor/TokenstatFFI.xcframework
         embed: false
-      # The terminal view. Resolved through Swift Package Manager; the package
-      # declaration is under `packages:` at the top of this file.
       - package: SwiftTerm
       - target: TokenstatWidgets
         embed: true
@@ -422,12 +163,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Entitlements/macOS.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.tokenstat
         PRODUCT_NAME: Tokenstat
-        # Synthesized from the INFOPLIST_KEY_* settings below, so there is no
-        # Info.plist to keep in sync by hand.
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: tokenstat
         INFOPLIST_KEY_NSHumanReadableCopyright: "© pueev OÜ. All rights reserved."
-        # No sandbox. See CODE_SIGN_IDENTITY above for why.
         ENABLE_APP_SANDBOX: NO
         # On, because notarization requires it. It is not the sandbox: the app
         # still spawns agent CLIs and reads the folders the user registered.
@@ -450,17 +188,12 @@ targets:
         # Cleartext HTTP to 127.0.0.1 for the remote port proxy browser. Without
         # this WKWebView paints a white page for every Browse port URL.
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
-        # Reaching another of your machines across the room, rather than around
-        # the world through the relay.
-        #
         # Without this key iOS does not ask, it simply refuses: every dial to a
         # LAN address fails and every session falls back to the relay, which is
         # slower, metered, and pueev's to pay for. There is no error to see,
         # which is why this was invisible until somebody watched a desktop on
         # their own Wi-Fi and got relay quality.
         #
-        # The sentence is what the system prompt shows, so it says what the
-        # permission buys rather than naming an API.
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "tokenstat connects straight to your other computers when they are on the same network, which is faster than going through the internet."
 
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
@@ -470,8 +203,6 @@ targets:
         # not own: focus rings, sidebar selection, text selection. A
         # `.tint` at the root cannot reach those.
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-      # Push notifications, iOS and iPadOS only.
-      #
       # Scoped by SDK on purpose. The Mac notifies itself locally, which needs
       # no entitlement, and putting `aps-environment` on the macOS build would
       # unnecessarily require push authorization in the Mac profile.

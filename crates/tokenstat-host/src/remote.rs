@@ -63,8 +63,6 @@ use tokenstat_remote::tunnel::ChannelPurpose;
 /// and far below anything that hurts.
 const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 
-// MARK: - Settings
-
 /// What the user chose about remote reach. Persisted, because a daemon under
 /// launchd restarts and must come back the way they left it, not the way it
 /// ships.
@@ -538,7 +536,6 @@ fn held_credential() -> &'static Mutex<Option<HeldCredential>> {
     HELD.get_or_init(|| Mutex::new(None))
 }
 
-/// Mint again once a credential is inside this much of its expiry.
 const CREDENTIAL_REFRESH_MARGIN: Duration = Duration::from_secs(600);
 
 /// The HELLO credential, minting one only when there is a reason to.
@@ -574,7 +571,6 @@ fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
     crate::account_session::with_snapshot(Some(owner), mint_hello_token)
 }
 
-/// Seconds of wall clock between now and `at_ms`, or `None` once it is past.
 fn seconds_left(at_ms: i64) -> Option<u64> {
     let left_ms = at_ms - jiff::Timestamp::now().as_millisecond();
     (left_ms > 0).then_some((left_ms / 1000) as u64)
@@ -1251,7 +1247,6 @@ fn serve_peer(
     // is a request and the connection joins the request/response loop.
     let first = match connection.receive(MAX_MESSAGE) {
         Ok(bytes) => bytes,
-        // Includes the ordinary case of the peer hanging up.
         Err(_) => return,
     };
     // Only a build that can own a terminal can hand one over. Without
@@ -1335,8 +1330,6 @@ fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str, route: Route
     })
 }
 
-// MARK: - Reaching another machine
-
 /// Connections held open per peer, keyed by public key hex and the purpose
 /// they were dialled for.
 ///
@@ -1376,7 +1369,6 @@ fn pool() -> &'static Mutex<PeerPool> {
     pool
 }
 
-/// How often the reaper wakes to close pooled connections nobody is using.
 const REAP_INTERVAL: Duration = Duration::from_secs(15);
 
 /// A connection waiting to be used again, and when it stopped being used.
@@ -1478,7 +1470,6 @@ pub fn connection_counts() -> (usize, usize) {
     (LIVE_TOTAL.load(Ordering::Relaxed), idle)
 }
 
-/// Last known route per peer, for Account and `remote.status`.
 fn last_routes() -> &'static Mutex<HashMap<String, Route>> {
     static ROUTES: OnceLock<Mutex<HashMap<String, Route>>> = OnceLock::new();
     ROUTES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -2114,7 +2105,6 @@ fn last_candidate_refresh() -> &'static Mutex<HashMap<String, i64>> {
     STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Claim the next probe for this peer, or say another one is recent enough.
 fn claim_candidate_refresh(peer_hex: &str) -> bool {
     let now = jiff::Timestamp::now().as_millisecond();
     let Ok(mut asked) = last_candidate_refresh().lock() else {
@@ -2333,13 +2323,11 @@ impl DirectMiss {
     }
 }
 
-/// Peers whose remembered direct address did not answer, and when.
 fn direct_misses() -> &'static Mutex<HashMap<String, DirectMiss>> {
     static STATE: OnceLock<Mutex<HashMap<String, DirectMiss>>> = OnceLock::new();
     STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Whether the direct address is worth a try right now.
 fn direct_is_worth_trying(peer_hex: &str) -> bool {
     direct_retry_ready(peer_hex, true)
 }
@@ -2731,9 +2719,6 @@ impl PeerDialContext {
         peer_hex: &str,
         refresh: bool,
     ) -> Result<tokenstat_remote::Connection, String> {
-        // Discovery can use the hosted service even when the payload later goes
-        // direct: ask the peer for current listen addresses, try those, then the
-        // relay. Screen used to be the only caller that did this.
         if refresh {
             refresh_peer_candidate_list(peer_hex);
         } else {
@@ -2848,7 +2833,6 @@ fn settings() -> RemoteSettings {
     load_settings()
 }
 
-/// Whether the multiplexed tunnel socket is up right now.
 #[cfg(feature = "local-host")]
 fn tunnel_is_connected() -> bool {
     tunnel_lifecycle::state().is_ok_and(|state| state.connected)
@@ -3061,7 +3045,6 @@ fn refuses_redial(method: &str) -> bool {
     )
 }
 
-/// How long the retry ladder in `tunnel_dial` keeps trying. See there.
 const DIAL_BUDGET: Duration = Duration::from_secs(12);
 
 /// How long to wait before dialling again, or `None` to give up.
@@ -3218,7 +3201,6 @@ fn checkin(peer: &str, purpose: ChannelPurpose, connection: tokenstat_remote::Co
 fn reap(map: &mut HashMap<(String, ChannelPurpose), Vec<Idle>>) {
     let now = Instant::now();
     for idle in map.values_mut() {
-        // Dropping the connection closes it.
         idle.retain(|held| now.duration_since(held.since) < POOL_IDLE_TIMEOUT);
     }
     map.retain(|_, idle| !idle.is_empty());
@@ -3233,8 +3215,6 @@ fn parse_params(params: &str) -> Value {
     }
     serde_json::from_str(trimmed).unwrap_or_else(|_| json!({}))
 }
-
-// MARK: - Dispatch methods
 
 /// Answer a `remote.*` method, or `None` when it is not one.
 ///
@@ -3321,8 +3301,6 @@ fn nudge(params: &str) -> Result<Value, String> {
     begin_absence_grace();
     #[cfg(feature = "local-host")]
     direct_reach::nudge();
-    // Client builds have no pty list cache. The stream stack that owns it
-    // is compiled out with `local-host`.
     #[cfg(feature = "local-host")]
     crate::remote_stream::invalidate_all_pty_lists();
     // A plan refusal is off the retry loop on purpose. Foreground, wake and
@@ -4418,8 +4396,6 @@ mod tests {
         let (token, expires) = mint_hello_token_impl(
             "m_0123456789abcdef",
             &test_identity(),
-            // Not the first mint of a process: the account already knows the
-            // machine, so registration is best-effort.
             false,
             |_, _, _| Err("the register route 500'd".into()),
             |_| Ok(test_token()),
@@ -4587,8 +4563,6 @@ mod tests {
         );
     }
 
-    /// A confirmed absence stops suppressing once its wait is served, so a
-    /// machine that came back is found again without anybody nudging.
     #[test]
     fn an_absence_expires() {
         let long_ago = jiff::Timestamp::now().as_millisecond() - UNREACHABLE_CEILING_MS - 1;
@@ -4717,8 +4691,6 @@ mod tests {
             dial_retry_pause("tunnel not connected", 0),
             Some(Duration::from_millis(200))
         );
-        // Nothing is retried past the ladder, and a refusal that means what it
-        // says is not retried at all.
         assert_eq!(
             dial_retry_pause("channel error: screen_already_open", 2),
             None
@@ -5170,8 +5142,6 @@ mod tests {
         );
         live().lock().expect("live map").remove("aa");
         remember_route("aa", Route::Relay);
-        // A remembered route without a live or idle connection stays off the
-        // list, so Account cannot invent a connected peer after hang-up.
         let idle_only = traffic_json();
         assert!(
             idle_only["peers"]

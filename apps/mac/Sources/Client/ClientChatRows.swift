@@ -38,7 +38,6 @@ struct ClientChatEventRow: View {
     /// Opens or folds a step group, by the group's row id.
     var toggleGroup: (String) -> Void = { _ in }
     var onToggleOutput: () -> Void = {}
-    /// Answers one of the agent's questions.
     var answerQuestion: (ChatQuestion, String) -> Void = { _, _ in }
     /// This row's question is on its way to the host.
     var answeringQuestion = false

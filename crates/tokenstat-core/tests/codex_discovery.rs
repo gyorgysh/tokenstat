@@ -61,7 +61,6 @@ fn scans_private_homes_with_repeats_copies_and_appended_usage() {
     assert_eq!(scan::scan(&mut store, &tz).unwrap().files_read, 0);
     assert_eq!(store.events(&Query::default()).unwrap().len(), 3);
 
-    // Growing a private rollout is noticed by the ordinary scheduled scan.
     let mut updated = rollout("private", 100);
     updated.push_str(r#"{"type":"event_msg","timestamp":"2026-10-11T10:01:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"output_tokens":5},"total_token_usage":{"input_tokens":150,"output_tokens":10}}}}
 "#);

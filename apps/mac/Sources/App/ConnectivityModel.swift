@@ -11,7 +11,6 @@ extension Notification.Name {
     /// waiting on the internet refreshes now instead of on the next retry
     /// tick.
     static let connectivityRestored = Notification.Name("tokenstat.connectivityRestored")
-    /// The network state changed in either direction.
     static let connectivityChanged = Notification.Name("tokenstat.connectivityChanged")
 }
 
@@ -74,7 +73,6 @@ final class ConnectivityModel {
     /// internet comes back, so the next stretch shows again.
     private(set) var offlineDismissed = false
 
-    /// How long an offline stretch waits between egress probes.
     static let retryInterval: Duration = .seconds(30)
 
     var isOnline: Bool { status == .online }

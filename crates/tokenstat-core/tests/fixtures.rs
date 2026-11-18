@@ -253,7 +253,6 @@ fn committed_fixtures_use_only_allowlisted_keys() {
     }
 }
 
-/// Parse every fixture in a directory the way a scan would.
 fn parse_dir(dir: &Path) -> Vec<tokenstat_core::UsageEvent> {
     let mut events = Vec::new();
     for path in walkdir::WalkDir::new(dir)

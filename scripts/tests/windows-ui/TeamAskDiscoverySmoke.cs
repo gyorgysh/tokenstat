@@ -75,7 +75,7 @@ internal static class TeamAskDiscoverySmoke
             await Click("common.teams.retry_same_ask");
             await Wait(() => storage.Load(target)?.Record.Fence is not null, "Retry lost the original running fence");
             await Click("common.teams.stop_agent"); await Wait(() => stops == 1, "Recovered Stop was not sent");
-            await Click("common.refresh", last: true); // The list refresh reloads the saved row without sending.
+            await Click("common.refresh", last: true);
             await Wait(() => Descendants(page).OfType<Button>().Any(b => AutomationProperties.GetName(b) == L10n.Text("common.teams.recover_ask") && b.Visibility == Visibility.Visible), "List refresh did not retain the running request");
             await Click("common.teams.recover_ask");
             await Wait(() => Descendants(page).OfType<Button>().Any(b => AutomationProperties.GetName(b) == L10n.Text("common.teams.stop_agent") && b.Visibility == Visibility.Visible), "Reopened recovery lost Stop");

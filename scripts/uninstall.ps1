@@ -103,7 +103,6 @@ if (Test-Path -LiteralPath $CliPath -PathType Leaf) {
   Say "no CLI binary at $CliPath"
 }
 
-# User PATH entry pointing at the install dir (harmless if left).
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -and ($userPath -split ";" | Where-Object { $_ -eq $BinDir })) {
   if ($AutoYes -or (Confirm-No "Remove $BinDir from your user PATH?")) {
@@ -131,7 +130,6 @@ if ($Purge) {
     } else {
       if (Test-Path -LiteralPath $DataDir) {
         Remove-Item -LiteralPath $DataDir -Recurse -Force -ErrorAction SilentlyContinue
-        # Parent tokenstat\tokenstat may be empty now; remove empty parents carefully.
         $parent = Split-Path $DataDir -Parent
         if ((Test-Path $parent) -and -not (Get-ChildItem -Force $parent -ErrorAction SilentlyContinue)) {
           Remove-Item -LiteralPath $parent -Force -ErrorAction SilentlyContinue

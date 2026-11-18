@@ -131,7 +131,6 @@ internal sealed class AboutPage : Page
         };
     }
 
-    /// <summary>Credit line, name, and what the author does.</summary>
     private static UIElement Author()
     {
         var credit = new StackPanel { Spacing = 1 };
@@ -155,7 +154,6 @@ internal sealed class AboutPage : Page
         return credit;
     }
 
-    /// <summary>Mail, the product site, and the source, separated by hairlines.</summary>
     private static UIElement Links()
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
@@ -195,7 +193,6 @@ internal sealed class AboutPage : Page
         }
         catch
         {
-            // Ignore.
         }
     }
 }

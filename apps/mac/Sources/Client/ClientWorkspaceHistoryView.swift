@@ -152,7 +152,6 @@ struct ClientWorkspaceHistoryView: View {
     }
 }
 
-/// One commit: subject, then who and when.
 private struct ClientCommitRow: View {
     let commit: Commit
     var avatar: String?

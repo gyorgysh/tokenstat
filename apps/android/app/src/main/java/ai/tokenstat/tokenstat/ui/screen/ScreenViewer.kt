@@ -111,7 +111,6 @@ fun ScreenViewerScreen(
     onPlans: () -> Unit,
     onClose: () -> Unit,
 ) {
-    // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
     val colors = LocalTsColors.current
@@ -296,9 +295,6 @@ fun ScreenViewerScreen(
                 title = {
                     Column {
                         Text(hostLabel, style = TsType.headline, maxLines = 1)
-                        // Worth a line in portrait, not worth one sideways:
-                        // every line there is picture somebody rotated the
-                        // device to see.
                         if (!landscape) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -639,8 +635,6 @@ private fun ScreenKeyBarHandle(revealed: Boolean, onRevealed: (Boolean) -> Unit)
     }
 }
 
-/// Cover over the black backing until a picture is on it, or until the session
-/// has said why there will not be one.
 @Composable
 private fun ScreenOverlay(
     session: ScreenViewerModel,
@@ -883,7 +877,6 @@ private class AndroidScreenClipboard(context: Context) : ScreenClipboard {
     }
 }
 
-/// What a document picker handed back, as a name and a way to open it twice.
 private fun fileSource(context: Context, uri: Uri): ScreenFileSource {
     val resolver = context.contentResolver
     val name = runCatching {

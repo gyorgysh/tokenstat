@@ -193,10 +193,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.100.0
-          # Universal, so one download runs on both kinds of Mac.
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      # Restore only, for the reason above the build matrix's cache step.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: mac-app

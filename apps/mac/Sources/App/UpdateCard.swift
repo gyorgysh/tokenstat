@@ -113,7 +113,6 @@ struct UpdateCard: View {
         .padding(.bottom, Theme.Space.s)
     }
 
-    /// A non-interactive confirmation row, for states that have no action.
     private func status(
         title: String,
         subtitle: String,

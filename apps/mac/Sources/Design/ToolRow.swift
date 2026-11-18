@@ -296,14 +296,6 @@ struct ToolRow: View {
     }
 }
 
-/// +/− counts for an edit, as one trailing cluster.
-///
-/// A path of varying width used to sit them after the name, so a short
-/// target left them mid-row and a long one shoved them against the
-/// button. `fixedSize` keeps the pair off the path's leftover space.
-///
-/// A side with nothing in it is left out, so a new file reads "+22" rather
-/// than "+22 −0".
 struct DiffStat: View {
     var added: Int
     var removed: Int

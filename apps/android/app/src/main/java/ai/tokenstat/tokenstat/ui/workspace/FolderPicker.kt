@@ -81,7 +81,6 @@ fun FolderPickerScreen(
     onAdded: (JsonObject) -> Unit,
     onPickedPath: ((String) -> Unit)? = null,
 ) {
-    // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
     // A pushed screen owns the system back. Without it the gesture falls

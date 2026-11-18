@@ -760,7 +760,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private const double LauncherColumnWidth = 620;
 
-    /// <summary>The Mac grid: tiles 150 to 200 wide, three to a row in the column.</summary>
     private const double LauncherTileMinWidth = 150;
 
     private async Task LoadLauncherAsync()
@@ -808,8 +807,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         });
         column.Children.Add(LauncherHeading(L10n.Text("common.open")));
         var links = new FlowPanel { MinimumItemWidth = LauncherTileMinWidth, Spacing = Theme.SpaceM };
-        // Every section of the project, because the sidebar lists only what
-        // is running and the chats; this page is where the rest open.
         foreach (var section in new[]
         {
             WorkspaceSection.Chat, WorkspaceSection.Files, WorkspaceSection.Browser,
@@ -827,7 +824,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         column.Children.Add(links);
     }
 
-    /// <summary>A small caption over a group of tiles, like the Mac launcher.</summary>
     private static TextBlock LauncherHeading(string title) => new()
     {
         Text = title,
@@ -837,10 +833,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         Margin = new Thickness(0, 4, 0, 0),
     };
 
-    /// <summary>
-    /// A tile's face: the mark in a 34 high slot, then one line of label. The
-    /// slot is fixed so a glyph and a brand mark sit on the same baseline.
-    /// </summary>
     private static StackPanel TileBody(UIElement mark, string label, double markOpacity = 1)
     {
         var slot = new Grid { Height = 34, Opacity = markOpacity };
@@ -864,10 +856,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         return body;
     }
 
-    /// <summary>
-    /// The Mac tile: panel fill, hairline, card radius, 12 above and below.
-    /// It stretches to its row, so a row of tiles is one height.
-    /// </summary>
     private static Button LauncherTile(UIElement body) => new()
     {
         Content = body,

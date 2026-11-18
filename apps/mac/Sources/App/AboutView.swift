@@ -86,7 +86,6 @@ struct AboutView: View {
         }
     }
 
-    /// Mail, the product site, and the source, separated by hairlines.
     private var links: some View {
         HStack(spacing: Theme.Space.s) {
             linkItem(L10n.text("apple.aboutview.contact.2b5c3d26"), symbol: "envelope", destination: AppInfo.Author.email)

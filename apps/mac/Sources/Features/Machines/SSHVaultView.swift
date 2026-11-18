@@ -172,12 +172,6 @@ final class SSHVaultModel {
 
 }
 
-/// The vault, as one quiet line above the host list.
-///
-/// It used to be three buttons in a row, two of them destructive, at the top of
-/// a screen people open to add a server. A shield, a count and a chevron says
-/// the same thing, and the actions live one click away where each of them has
-/// room for the sentence it needs.
 struct SSHVaultRow: View {
     @Bindable var vault: SSHVaultModel
     let canWrite: Bool
@@ -193,16 +187,6 @@ struct SSHVaultRow: View {
                     .foregroundStyle(vault.unconfirmedRecovery ? Theme.warning : Color.primary)
                     .lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
-                // The count at the trailing edge, and a wireframe in its place
-                // until the account has answered.
-                //
-                // It used to be the tail of the label, which meant the row
-                // read "Encrypted vault · not set up" for as long as the call
-                // took and then rewrote itself into "· 3 records": a sentence
-                // that was wrong first and jumped when it stopped being wrong.
-                // A placeholder of about the right width says the same thing
-                // honestly and does not move the rest of the row when the real
-                // answer lands.
                 if vault.status == nil {
                     Skeleton.Bar(width: 62, height: 10)
                 } else if let detail {

@@ -316,8 +316,6 @@ struct ChatComposer: View {
         .fixedSize()
     }
 
-    /// Idle keeps the ordinary border. A running turn picks up a quiet accent
-    /// stroke so the composer itself says the chat is busy.
     private var wellStroke: Color {
         if model.landingDraft != nil { return .clear }
         return running ? Theme.accent.opacity(0.45) : Theme.border

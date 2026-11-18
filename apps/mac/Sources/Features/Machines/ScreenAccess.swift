@@ -116,7 +116,6 @@ final class ScreenAccess {
     private var askedScreenRecording = false
     private var askedAccessibility = false
 
-    /// Ask for Screen Recording.
     func requestScreenRecording() -> Ask {
         if CGPreflightScreenCaptureAccess() {
             screenRecording = true

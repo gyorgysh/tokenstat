@@ -540,7 +540,6 @@ pub fn choose_schema_v(min_v: u32, max_v: u32) -> Result<u32, CoreError> {
     if max_v < min_v {
         return Err(CoreError::UnsupportedSyncSchemaRange { min_v, max_v });
     }
-    // Highest version we speak that the server still accepts.
     let chosen = SYNC_SCHEMA_VERSION.min(max_v);
     if chosen < min_v {
         return Err(CoreError::UnsupportedSyncSchemaRange { min_v, max_v });

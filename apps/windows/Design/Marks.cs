@@ -72,8 +72,6 @@ internal static class Marks
     public static FrameworkElement LogoMark(double size = 18, bool animated = false, bool loops = true)
     {
         double unit = size / 42;
-        // Bar tops and heights in artboard units, from Marks.swift. Colours are
-        // the dark-context ramp the favicon badge uses.
         double[] tops = [34, 22, 10];
         double[] heights = [18, 30, 42];
         Color[] fills = [Theme.Hex(0xC3B0FFu), Theme.Hex(0x8B5CF6u), Theme.Hex(0xE879F9u)];
@@ -92,8 +90,6 @@ internal static class Marks
                 RadiusX = 3.5 * unit,
                 RadiusY = 3.5 * unit,
                 Fill = Theme.Brush(fills[i]),
-                // Anchored at the foot, so a bar grows out of the shared
-                // baseline rather than shrinking in place.
                 RenderTransform = new ScaleTransform { ScaleY = moves ? 0.35 : 1 },
                 RenderTransformOrigin = new Point(0.5, 1.0),
             };
@@ -174,8 +170,6 @@ internal static class Marks
         {
             var mark = LogoMark(size);
             Grid.SetColumn(mark, 0);
-            // The website leaves a deliberate breath between the bars and the
-            // word. A half-mark gap read as compressed.
             mark.Margin = new Thickness(0, 0, size * 0.75, 0);
             mark.VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(mark);
@@ -381,8 +375,6 @@ internal static class Marks
             Data = data,
             Fill = new LinearGradientBrush
             {
-                // The logo's own two strongest bars, so a badge beside a name
-                // belongs to the same brand as the mark in the corner.
                 StartPoint = new Point(0.5, 0),
                 EndPoint = new Point(0.5, 1),
                 GradientStops =
@@ -410,14 +402,11 @@ internal static class Marks
         bool pulsing = false;
         void OnRefresh()
         {
-            // Raised on the UI thread by whoever handled the gesture.
             if (pulsing || !AnimationsEnabled())
             {
                 return;
             }
             pulsing = true;
-            // 260ms dip on a 70ms stagger, then back up. Matches the Mac
-            // pulse animation values; the whole dip lasts about 600ms.
             var board = new Storyboard();
             foreach (var (bar, index) in bars.Select((bar, index) => (bar, index)))
             {
@@ -531,10 +520,6 @@ internal static class Marks
         }
     }
 
-    /// <summary>
-    /// Legend crown with the bar under it, in the website's 24 unit square.
-    /// Transcribed from the SVG via Marks.swift, points absolute.
-    /// </summary>
     private static PathGeometry Crown(double size)
     {
         double u = size / 24;
@@ -567,9 +552,6 @@ internal static class Marks
         return new PathGeometry { Figures = { band, bar } };
     }
 
-    /// <summary>
-    /// Supporter star, in the website's 24 unit square.
-    /// </summary>
     private static PathGeometry SupporterStar(double size)
     {
         double u = size / 24;

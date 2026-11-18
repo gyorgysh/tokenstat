@@ -215,7 +215,6 @@ class SetupConnectState {
             val id = saved.sshString("id") ?: host.sshString("id").orEmpty()
             pickedHostId = id
             trusted = true
-            // The next step reads the record just written, with its id.
             libraryHosts = (libraryHosts.orEmpty().filterNot { it.sshString("id") == id }) + saved
         }
     }
@@ -353,7 +352,6 @@ class SetupConnectState {
             val deadline = System.currentTimeMillis() + 180_000
             while (System.currentTimeMillis() < deadline) {
                 coroutineContext.ensureActive()
-                // A fresh response, not the app's retained snapshot.
                 val fresh = model.core("account.status").jsonObject
                 coroutineContext.ensureActive()
                 val machines = (fresh["machines"] as? JsonArray).orEmpty()

@@ -36,14 +36,9 @@ enum DebugUIHooks {
     static let window = Notification.Name("ai.tokenstat.debug.window")
     static let appearance = Notification.Name("ai.tokenstat.debug.appearance")
     static let key = Notification.Name("ai.tokenstat.debug.key")
-    /// The route hook, relayed in process. The shell owns navigation, so it
-    /// is the one that listens.
     static let routeRequested = Notification.Name("ai.tokenstat.debug.routeRequested")
-    /// Any other key, relayed in process for a screen to act on.
     static let keyRequested = Notification.Name("ai.tokenstat.debug.keyRequested")
 
-    /// Set by `TOKENSTAT_PRINT_CHANGES`: views that opt in print what made
-    /// their body run again.
     static let printsChanges = ProcessInfo.processInfo.environment["TOKENSTAT_PRINT_CHANGES"] != nil
 
     @MainActor

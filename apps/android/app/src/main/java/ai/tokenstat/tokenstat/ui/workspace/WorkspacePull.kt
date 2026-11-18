@@ -123,7 +123,6 @@ internal fun PullSheet(
                 gitFormRequest(request, "workspace.pullReview", buildJsonObject { put("id", workspace) }).gitFormObject()
             }.onSuccess {
                 review = it
-                // The fetch moved ahead and behind, so the folder's numbers move too.
                 onPulled()
             }.onFailure {
                 if (it is kotlinx.coroutines.CancellationException) throw it

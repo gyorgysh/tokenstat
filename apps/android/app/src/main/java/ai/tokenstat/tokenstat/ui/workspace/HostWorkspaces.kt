@@ -443,8 +443,6 @@ fun HostCard(
                 if (online == false && !connected) {
                     Text(L10n.text("common.offline"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                 } else if (connected) {
-                    // Soft accent, like iOS `.bordered`: the card already
-                    // says connected three ways, the button need not shout.
                     TsAccentButton(
                         label = L10n.text("common.disconnect"),
                         icon = ActionIcon.Disconnect.vector,
@@ -734,8 +732,6 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
     }
 }
 
-/// Shared leading tile size for folder and session rows. Port of
-/// `ClientRowMark`.
 private const val ROW_MARK = 26
 
 /// A path shortened in the middle, the way the Apple rows truncate one:
@@ -984,8 +980,6 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    // The same branch the Mac sidebar draws. Without it the
-                    // branch is a bare word in a line of numbers.
                     if (git?.bol("isRepo") == true && !git.str("branch").isNullOrEmpty()) {
                         Icon(
                             Icons.Default.AccountTree,

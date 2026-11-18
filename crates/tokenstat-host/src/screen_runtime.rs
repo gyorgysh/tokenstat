@@ -523,8 +523,6 @@ mod tests {
             crate::remote::Route::Relay,
         )
         .unwrap();
-        // The replacement works and the original is gone, so the peer is not
-        // being shown the same desktop twice.
         assert!(queue_input(&second.id, br#"{"type":"display","id":1}"#.to_vec()).is_ok());
         assert!(
             queue_input(&first.id, br#"{"type":"display","id":1}"#.to_vec()).is_err(),

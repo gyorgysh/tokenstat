@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun HarnessMark(id: String, size: Dp = 26.dp) {
     val colors = LocalTsColors.current
-    // Estimate / rollup rows belong to the same brand as the live source.
     val canonical = when (val c = harnessCanonicalID(id)) {
         "claude_code_estimate", "claude_code_rollup" -> "claude_code"
         else -> c

@@ -103,7 +103,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             Grid.SetRow(treeList, 3);
             files.Children.Add(_pageStatus);
             FileTree = files;
-            // The workbench mounts FileTree here when the Files tab is selected.
         }
         RenderInspector();
         _tabs.TabCloseRequested += async (_, args) =>
@@ -1048,10 +1047,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             }
         }
 
-        /// <summary>
-        /// Choose a copy after a conflict. Reloading adopts the host and
-        /// clears the draft; keeping writes the draft through explicitly.
-        /// </summary>
         private async Task ResolveConflictAsync(bool keepMine)
         {
             var host = ConflictHost;

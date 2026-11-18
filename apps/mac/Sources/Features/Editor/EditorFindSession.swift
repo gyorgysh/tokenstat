@@ -36,7 +36,6 @@ final class EditorFindSession {
     var replacing = false
     /// The text view is inside a live composition. Replacements wait.
     var composing = false
-    /// The buffer as `refresh` last saw it: what a query keystroke searches.
     private var lastText = ""
 
     private(set) var matches: [NSRange] = []

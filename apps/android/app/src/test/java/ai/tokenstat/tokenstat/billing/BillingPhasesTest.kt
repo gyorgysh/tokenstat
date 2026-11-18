@@ -39,7 +39,6 @@ class BillingPhasesTest {
         assertEquals("year", intervalOfBasePlan("yearly", "P1Y"))
         assertEquals("month", intervalOfBasePlan("monthly", "P1M"))
         assertEquals("month", intervalOfBasePlan("monthly", "P6M"))
-        // A misnamed id loses to a readable period, whichever way round.
         assertEquals("year", intervalOfBasePlan("monthly", "P1Y"))
         assertEquals("month", intervalOfBasePlan("annual", "P1M"))
     }

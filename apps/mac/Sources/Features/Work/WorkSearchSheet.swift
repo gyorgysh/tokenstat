@@ -373,7 +373,6 @@ struct WorkSearchSheet: View {
             && !(model.history.payload.queries.isEmpty && model.recentDestinations.isEmpty)
     }
 
-    /// What the field can find, before anything has been typed into it.
     private var openingMessage: String {
         let live = model.liveMachines.isEmpty
             ? ""

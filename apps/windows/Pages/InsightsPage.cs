@@ -95,9 +95,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private bool _fetching;
     private bool _showingLoadingStatus;
 
-    /// <summary>Rows drawn before the reveal button, same as the Mac table.</summary>
     private const int FirstPage = 50;
-    /// <summary>Rows added per press of the reveal button.</summary>
     private const int PageStep = 30;
 
     private static readonly List<(string Value, string Label, ActionIcon? Glyph)> LocalTabs =
@@ -674,8 +672,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _accountResults.Children.Add(AccountTokenChart(filtered));
         }
-        // A share bar needs something to be a share of, and the largest shown
-        // row is a steadier reference than the total.
         long peak = 1;
         foreach (var row in filtered)
         {
@@ -901,9 +897,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         _root.Children.Add(BreakdownTable(title, TabRows(_tab), showsValue, monospaced, isHarness));
     }
 
-    /// <summary>
-    /// The pinned day as a chip: the date, what it means, and the way out.
-    /// </summary>
     private UIElement FocusChip()
     {
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
@@ -1000,10 +993,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
     }
 
-    /// <summary>
-    /// The four headline tiles: tokens, list-rate value, sessions, active
-    /// days. Four across on a wide pane, two across, then one, like the Mac.
-    /// </summary>
     private UIElement MetricTiles(JsonNode? totals)
     {
         var counters = totals?["counters"];
@@ -1153,7 +1142,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 DateTimeStyles.None, out var parsedDay) ? parsedDay.DayNumber : null;
             if (day is int current && previousDay is int previous && current - previous > 1)
             {
-                // A weighted spacer preserves missing days without adding fake records.
                 plot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(current - previous - 1, GridUnitType.Star) });
                 column++;
             }
@@ -1232,10 +1220,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         return 0;
     }
 
-    /// <summary>
-    /// A ranked top six with progress bars, plus a View all button that opens
-    /// the full breakdown. Tapping a row opens the tab with that row selected.
-    /// </summary>
     private FrameworkElement RankingCard(
         string title, JsonArray rows, bool isHarness, bool showsValue, string tab)
     {
@@ -2037,10 +2021,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         return string.IsNullOrEmpty(key) ? "unknown" : key;
     }
 
-    /// <summary>
-    /// Display name for a harness, the agent CLI that produced the events.
-    /// Same spelling tokenstat.ai uses, same as the Home page.
-    /// </summary>
     private static string HarnessName(string id)
     {
         if (id == "opencode2")

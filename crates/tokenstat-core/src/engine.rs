@@ -362,8 +362,6 @@ mod tests {
             .priced_report(GroupBy::Day, &Query::default(), &prices)
             .unwrap();
 
-        // A day key cannot be looked up as a model, so this figure can only
-        // come from splitting the bucket by model first.
         assert_eq!(rows.len(), 1);
         assert!((rows[0].value.dollars() - 30.0).abs() < 0.001);
         assert!(rows[0].is_complete());
@@ -437,7 +435,6 @@ mod tests {
     fn sessions_are_not_double_counted_across_models() {
         let mut e = engine();
         let tz = jiff::tz::TimeZone::UTC;
-        // One session, two models. Summing the model split would report two.
         e.store_mut()
             .insert_events(
                 &[
@@ -483,7 +480,6 @@ mod tests {
         assert!(!rows[0].is_complete());
         assert_eq!(rows[0].unpriced_models, vec!["totally-unknown-model"]);
         assert!((rows[0].value.dollars() - 30.0).abs() < 0.001);
-        // Tokens are still fully counted, only the money is partial.
         assert_eq!(rows[0].counters.output, Some(2_000_000));
     }
 

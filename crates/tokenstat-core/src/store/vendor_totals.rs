@@ -254,7 +254,6 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(total(&store, SourceId::Cursor), 800);
-        // A later request import shrinks the day back to the remainder.
         store
             .insert_events(&[request("r", NOV_10 + 4 * 3_600_000, 800)], &tz)
             .unwrap();

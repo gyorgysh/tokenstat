@@ -538,7 +538,6 @@ private fun EditorPane(
                 value = TextFieldValue(annotated, field.selection, field.composition),
                 onValueChange = { next ->
                     var text = next.text
-                    // Tab inserts the language indent, not a raw tab.
                     if (text.contains('\t') && !tab.text.contains('\t')) {
                         text = text.replace("\t", tab.rules.indentUnit)
                     }
@@ -586,7 +585,6 @@ private fun buildAnnotated(
             val clamped = span.clamped(text.length) ?: return@forEach
             addStyle(SpanStyle(color = colors.syntax(clamped.kind)), clamped.start, clamped.start + clamped.length)
         }
-        // Match tint sits over syntax colour: what is found is what stands out.
         find.snapshot().forEach { range ->
             val from = range.first.coerceIn(0, text.length)
             val to = (range.last + 1).coerceIn(0, text.length)
@@ -679,8 +677,6 @@ private fun EditorFindBar(
     }
 }
 
-/// The host file moved while the draft was dirty. Saving stays off until
-/// the person chooses a copy. Port of `EditorConflictCard`.
 @Composable
 private fun EditorConflictCard(
     mineLines: Int,
@@ -713,8 +709,6 @@ private fun EditorConflictCard(
     }
 }
 
-/// Line numbers with change marks. Added lines carry the diff colour in
-/// the marker lane, so the gutter and the Changes panel cannot disagree.
 @Composable
 private fun EditorGutter(
     starts: List<Int>,

@@ -19,7 +19,6 @@ internal sealed class ChatToolCalls
         {
             if (index < 0 || index >= items.Count) continue;
             var tool = items[index];
-            // An edit merged into its call's row is still that call.
             if (tool.Kind is not (ChatPage.ItemKind.Tool or ChatPage.ItemKind.Edit) || !tool.Running) continue;
             tool.Running = false;
             tool.Failed = failed;

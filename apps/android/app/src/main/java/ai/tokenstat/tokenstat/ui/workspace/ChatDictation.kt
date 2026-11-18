@@ -494,8 +494,6 @@ private fun DictationClock(startedAt: Long) {
     Text("%d:%02d".format(seconds / 60, seconds % 60), style = TsType.mono(12), color = LocalTsColors.current.textSecondary)
 }
 
-/// Bars scrolling in from the right, one per slice of audio. Quiet reads as
-/// a row of dots, speech as a band that rises and falls with the voice.
 @Composable
 private fun ChatDictationWaveform(levels: List<Float>, live: Boolean) {
     val accent = LocalTsColors.current.accent
@@ -506,7 +504,6 @@ private fun ChatDictationWaveform(levels: List<Float>, live: Boolean) {
         val shown = levels.takeLast(fit)
         var x = size.width - shown.size * (bar + gap) + gap
         shown.forEachIndexed { index, level ->
-            // A little gain so ordinary speech fills the band.
             val lifted = (level.toDouble().pow(1.4) * 1.6).coerceAtMost(1.0).toFloat()
             val height = maxOf(bar, lifted * size.height)
             val age = index.toFloat() / maxOf(shown.size - 1, 1)
@@ -521,8 +518,6 @@ private fun ChatDictationWaveform(levels: List<Float>, live: Boolean) {
     }
 }
 
-/// Automatic, the phone's own languages, then every other one the recognizer
-/// knows. Port of `ChatDictationLanguages`.
 @Composable
 private fun ChatDictationLanguages(dictation: ChatDictation, expanded: Boolean, onDismiss: () -> Unit) {
     val colors = LocalTsColors.current

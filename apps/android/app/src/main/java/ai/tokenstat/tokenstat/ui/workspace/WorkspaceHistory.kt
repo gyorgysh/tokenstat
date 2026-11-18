@@ -214,7 +214,6 @@ private fun CommitRow(commit: JsonObject, onOpen: () -> Unit) {
     }
 }
 
-/// One commit as a full page: what it says, then every file it changed.
 @Composable
 private fun CommitDetailPage(
     model: AppViewModel,

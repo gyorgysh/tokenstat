@@ -104,7 +104,6 @@ class LimitsWidgetProvider : UsageWidgetProvider() {
                     val readingY = y + if (rowHeight < 44) 24 else 26
                     val barY = y + if (rowHeight < 44) 30 else 33
                     text(window?.compactLabel ?: context.getString(R.string.widget_no_reading), x + 2, readingY, (cellWidth - 36).coerceAtLeast(15f), 11f, muted)
-                    // Right-align the percentage without relying on the widget's layout direction.
                     paint.textAlign = Paint.Align.RIGHT; paint.color = ink; paint.textSize = 12f * context.resources.configuration.fontScale
                     paint.textSize *= (32f / paint.measureText(percent).coerceAtLeast(1f)).coerceAtMost(1f)
                     canvas.drawText(percent, x + cellWidth - 2, readingY, paint)

@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Launch animation: the bars rise from the baseline one after another,
-     the same 0.14s stagger as the in-app logo loop. Total under a second,
-     after which the splash holds the risen mark until the first frame. -->
 <animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     tools:ignore="UnusedResources"

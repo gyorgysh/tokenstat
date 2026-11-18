@@ -71,7 +71,6 @@ internal static class ActionIconGlyph
         // Certified actions. The Mac draws a seal, Windows a filled circle
         // check, one step stronger than the outline Commit and Allow carry.
         ActionIcon.Claim or ActionIcon.Approve => Glyph(0xEC61), // CompletedSolid
-        // Circled checks. The Mac draws checkmark.circle for both.
         ActionIcon.Commit or ActionIcon.Allow => Glyph(0xE930), // Completed
         ActionIcon.Save or ActionIcon.CurrentPlan or ActionIcon.Done => Sigil(FluentSymbol.Accept),
         ActionIcon.Create => Sigil(FluentSymbol.Add),
@@ -79,34 +78,23 @@ internal static class ActionIconGlyph
         ActionIcon.Copy => Sigil(FluentSymbol.Copy),
         ActionIcon.Download => Sigil(FluentSymbol.Download),
         ActionIcon.SignIn or ActionIcon.Account or ActionIcon.Profile => Sigil(FluentSymbol.Contact),
-        // Logging out ends the session, so the power mark. The Mac draws a
-        // figure walking out of a door, which Segoe has no version of.
         ActionIcon.SignOut => Glyph(0xE7E8), // PowerButton
         ActionIcon.Settings => Sigil(FluentSymbol.Setting),
         ActionIcon.Security => Sigil(FluentSymbol.Permissions),
         ActionIcon.Edit => Sigil(FluentSymbol.Edit),
         ActionIcon.Plans => Sigil(FluentSymbol.Favorite),
         ActionIcon.Billing => Sigil(FluentSymbol.Shop),
-        // A shelf of apps for one store, a play frame for the other. The Mac
-        // draws the share arrow and a play rectangle.
         ActionIcon.AppStore => Glyph(0xE71D), // AllApps
         ActionIcon.PlayStore => Sigil(FluentSymbol.Video),
-        // The repeating cycle. Refresh keeps the single arrow.
         ActionIcon.AutoRenew => Glyph(0xE8EE), // RepeatAll
-        // Plain down arrows. The Mac groups these two as arrow.down.
         ActionIcon.Latest or ActionIcon.Downgrade => Glyph(0xE74B), // Down
         ActionIcon.CancelPlan or ActionIcon.Dismiss => Sigil(FluentSymbol.Cancel),
-        // A token pairs an account, so it shares the link with Pair. The Mac
-        // groups both as one key, which Segoe has no version of.
         ActionIcon.Token or ActionIcon.Pair => Sigil(FluentSymbol.Link),
         ActionIcon.Preview or ActionIcon.Visibility => Sigil(FluentSymbol.View),
         ActionIcon.Theme => Sigil(FluentSymbol.Highlight),
         ActionIcon.Layout => Glyph(0xECA5), // Tiles
         ActionIcon.Sidebar => Pane(true),
-        // Link went to Token and Pair, so connecting reads as joining the
-        // network. The Mac draws a plain link here.
         ActionIcon.Connect => Glyph(0xE701), // Wifi
-        // Circled crosses. The Mac draws xmark.circle for both.
         ActionIcon.Disconnect or ActionIcon.Deny => Glyph(0xE894), // Clear
         ActionIcon.Refresh => Sigil(FluentSymbol.Refresh),
         ActionIcon.Revoke => Glyph(0xE738), // Remove
@@ -114,7 +102,6 @@ internal static class ActionIconGlyph
         ActionIcon.Computer => Glyph(0xE770), // Monitor
         ActionIcon.Run => Sigil(FluentSymbol.Play),
         ActionIcon.Stop => Sigil(FluentSymbol.Stop),
-        // The clock with an arrow. Scheduled keeps the plain clock.
         ActionIcon.History => Glyph(0xE81C), // History
         ActionIcon.Scheduled => Sigil(FluentSymbol.Clock),
         ActionIcon.Move => Glyph(0xE8AD), // Go

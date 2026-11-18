@@ -397,7 +397,6 @@ fn trim_aliases(id: &str, aliases: Vec<String>) -> Vec<String> {
 fn canonical_offer<'a>(offers: &'a [WireOffer], vendor: &str) -> Option<&'a WireOffer> {
     let priced = |o: &&WireOffer| o.input.is_some() || o.output.is_some();
     for source in OFFER_PREFERENCE {
-        // Within a feed, the model's own vendor beats a reseller on it.
         let mut same_source = offers.iter().filter(|o| o.source == source).filter(priced);
         let from_vendor = same_source.clone().find(|o| {
             o.provider
@@ -525,8 +524,6 @@ mod tests {
         assert_eq!(rates.src, "litellm");
         assert_eq!(rates.input, 5.0);
         assert_eq!(rates.cw1h, 10.0);
-        // The cheapest offer is a $1 reseller. It is kept as context only, and
-        // must not be what the model prices at.
         assert_eq!(t.models[0].cheapest.as_ref().unwrap().input, 1.0);
     }
 

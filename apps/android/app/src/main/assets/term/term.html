@@ -19,10 +19,6 @@
 <script src="xterm-fit.js"></script>
 <script src="term-scroll.js"></script>
 <script>
-  // The terminal palette is TerminalPalette (Design/TerminalPalette.swift):
-  // dark 0x0A0A0B / 0xDCDCE0, light 0xF7F7F8 / 0x1C1C1F, caret is the brand
-  // accent, selection is accentSoft. The face is JetBrains Mono, the same
-  // variable face the native UI reads character by character.
   var DARK = {
     background: "#0A0A0B",
     foreground: "#DCDCE0",
@@ -56,9 +52,6 @@
     if (window.TermBridge && TermBridge.onReadingChanged) TermBridge.onReadingChanged(reading);
   });
 
-  // Paint for the system appearance, the way the Apple client repaints its
-  // terminal view. Kotlin calls this once the page loads and again when the
-  // appearance changes.
   function termSetTheme(dark) {
     // The DOM first: even if the emulator object is gone, the page behind
     // it is the right colour instead of the CSS fallback.
@@ -122,8 +115,6 @@
     }
   });
 
-  // A selection in the emulator leaves the emulator for the system clipboard,
-  // the same direction the Apple client's clipboardCopy delegate carries it.
   term.onSelectionChange(function () {
     if (window.TermBridge) {
       var text = term.getSelection();
@@ -257,8 +248,6 @@
     scroll.write(bytes, pushSize);
   }
 
-  // The belt to the observers' braces: a device that reports no size for a
-  // moment gets a few more chances before the terminal is left as it is.
   termFit();
   [50, 200, 600, 1500].forEach(function (delay) { setTimeout(termFit, delay); });
 </script>

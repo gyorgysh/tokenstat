@@ -61,8 +61,6 @@ struct ClientWorkflowBoard: View {
     }
 }
 
-/// One step on the board. Mark, title, subtitle, and the live tint if a run
-/// is sitting on it.
 private struct ClientWorkflowBoardCard: View {
     let node: WorkflowNode
     var step: WorkflowStep?

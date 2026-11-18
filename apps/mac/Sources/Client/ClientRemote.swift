@@ -335,7 +335,6 @@ enum ClientRemote {
         )
     }
 
-    /// Move a card between columns, including into the archive.
     static func todoMove(peer: String, id: String, column: String) async throws -> TodoCard {
         try await Bridge.onPeer(
             peer,
@@ -733,7 +732,6 @@ enum ClientRemote {
 /// is waiting for something that is already gone.
 enum ClientAccessWatch {
     static let interval: Duration = .seconds(5)
-    /// Fifteen minutes at the interval above.
     static let attempts = 180
 }
 

@@ -200,7 +200,6 @@ mod tests {
             std::fs::write(slot(&db, n), format!("gen{n}")).unwrap();
         }
         rotate(&db, 3).unwrap();
-        // gen2 was the oldest of three and is gone, the rest moved up one.
         assert!(
             !slot(&db, 0).exists(),
             "slot 0 is left free for the new copy"

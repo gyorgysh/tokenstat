@@ -145,8 +145,6 @@ fn fold(events: &[Value]) -> Folded {
 
 pub(crate) fn is_shell(verb: &str) -> bool {
     let verb = verb.to_ascii_lowercase();
-    // Substring match for the compound names (`run_terminal_command`,
-    // `shell_exec`): the shell word can sit anywhere in them.
     if verb.contains("bash")
         || verb.contains("shell")
         || verb.contains("command")
@@ -500,8 +498,6 @@ mod tests {
         assert!(text.contains("/repo"));
     }
 
-    /// Streamed deltas are one reply, and only the newest one is where the
-    /// conversation was actually left.
     #[test]
     fn only_the_latest_reply_is_where_it_was_left() {
         let text = brief(&timeline(), "/repo", BUDGET);
@@ -517,8 +513,6 @@ mod tests {
         assert!(brief(&agent_only, "/repo", BUDGET).is_empty());
     }
 
-    /// An agent handed a silently truncated history describes a conversation
-    /// it was only shown the end of. Say what was dropped.
     #[test]
     fn a_trimmed_handover_admits_what_it_dropped() {
         let events: Vec<Value> = (0..200)

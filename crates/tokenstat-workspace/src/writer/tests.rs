@@ -44,7 +44,6 @@ fn recovery_is_scoped_to_the_run_and_completion_clears_only_its_exact_id() {
     duplicate.clear_completed_run(&id).unwrap();
     unrelated.clear_completed_run(&other_id).unwrap();
     Lease::at(&folder, &root).unwrap().ensure_current().unwrap();
-    // Clearing a claim that is already gone changes nothing.
     claim::clear_orphaned_run_at(&id, &root).unwrap();
     let other = temp.path().join("independent");
     std::fs::create_dir(&other).unwrap();

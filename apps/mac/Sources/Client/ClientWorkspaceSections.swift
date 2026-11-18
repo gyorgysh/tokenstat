@@ -49,7 +49,6 @@ struct ClientWorkspaceDetailView: View {
     }
 
 
-    /// The folder to draw: the fresh read when there is one.
     private var current: WorkspaceFolder {
         guard var merged = live else { return folder }
         merged.id = folder.id
@@ -731,11 +730,6 @@ struct ClientWorkspaceChangesView: View {
 
 }
 
-/// The branch this folder is on, and the way to switch it.
-///
-/// One selector per folder, drawn in the folder header: the same line that
-/// used to show the branch as plain text. A plain folder keeps its plain
-/// line. Same control the Mac workspace header carries.
 struct ClientFolderBranchRow: View {
     let peer: String
     let workspaceID: String
@@ -974,8 +968,6 @@ struct ClientJobRow: View {
 /// next move.
 struct ClientSectionEmpty: View {
     let text: String
-    /// The picture. Nil falls back to the kind's mark, which is what an
-    /// incidental empty state inside a detail screen wants.
     var art: EmptyArtKind?
     var message: String?
     var actionTitle: String?
@@ -1013,9 +1005,6 @@ struct ClientCardList<Content: View>: View {
     let isLoaded: Bool
     let isEmpty: Bool
     let emptyText: String
-    /// What the empty screen draws, and what it offers. Every section passes
-    /// one: a folder with no jobs deserves the same care as a folder with no
-    /// activity, which is the surface these three used to be the exception to.
     var emptyArt: EmptyArtKind? = nil
     var emptyMessage: String? = nil
     var emptyActionTitle: String? = nil
@@ -1139,9 +1128,6 @@ struct ClientSectionList<Content: View>: View {
     let isLoaded: Bool
     let isEmpty: Bool
     let emptyText: String
-    /// What the empty screen draws, and what it offers. Every section passes
-    /// one: a folder with no jobs deserves the same care as a folder with no
-    /// activity, which is the surface these three used to be the exception to.
     var emptyArt: EmptyArtKind? = nil
     var emptyMessage: String? = nil
     var emptyActionTitle: String? = nil
@@ -1151,7 +1137,6 @@ struct ClientSectionList<Content: View>: View {
     let reload: () async -> Void
     @ViewBuilder var content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The first read has been outstanding long enough to say so.
     @State private var waitedTooLong = false
 
     /// The empty screen this list was configured with. One place, so the two

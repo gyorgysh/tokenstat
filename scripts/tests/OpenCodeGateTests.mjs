@@ -35,7 +35,6 @@ try {
   clearTimeout(timeout);
 }
 
-// The v2 package uses the same bounded host protocol with a different plugin API.
 const v2Source = (await readFile(new URL('../cli-bridge/opencode-plugin-v2.js', import.meta.url), 'utf8'))
   .replace('./opencode-plugin.js', `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const { default: v2 } = await import(`data:text/javascript;base64,${Buffer.from(v2Source).toString('base64')}`);

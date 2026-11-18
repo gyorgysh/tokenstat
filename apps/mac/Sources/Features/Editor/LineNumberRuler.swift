@@ -114,7 +114,6 @@ final class LineNumberRuler: NSRulerView {
         }
     }
 
-    /// What the cached line starts were built from and from which text.
     private var cachedText = ""
     private var cachedLength = -1
     private var cachedLineStarts: [Int] = [0]

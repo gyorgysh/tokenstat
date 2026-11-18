@@ -10,7 +10,6 @@
 # on them is wrong rather than missing: alerts, confirmation dialogs, toolbars,
 # swipe actions, and the macOS main menu.
 #
-#   scripts/check-action-icons.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -43,8 +42,6 @@ SKIP_STARTERS = (
 # Buttons whose whole surface is the label (rows, tiles, chips, links).
 # Snippet must uniquely identify that one button, not every Button in the file.
 ALLOWED = [
-    # The shared Team editor receives an ActionIcon-typed parameter. Swift
-    # enforces the glyph even though it is not a case literal at this site.
     ("Features/Teams/TeamEditorSheet.swift", "Button(submitTitle, submitIcon, role:"),
     # An organization card's header row. The organization's own letter mark
     # leads it and the row style adds the chevron, like a sidebar row.
@@ -59,7 +56,6 @@ ALLOWED = [
     # Terminal rows already lead with the harness/terminal mark. Their action
     # also dismisses the explicit info popover before opening the session.
     ("App/RootView.swift", "leadingMark"),
-    # Conversation rows lead with the selected backend's HarnessMark.
     ("App/RootView.swift", "Button(action: select) {"),
     ("App/TokenstatApp.swift", 'Button("About tokenstat")'),
     ("Features/Home/HeatmapView.swift", "onSelect?(item.day)"),
@@ -116,9 +112,7 @@ ALLOWED = [
     # Whole-surface step rows. The kind mark and Then/Else chips are the
     # label, and the trailing chevron is navigation, not a second action.
     ("Features/Workflows/WorkflowStepListView.swift", "path.append(node.id)"),
-    # Kind tiles in the add-step picker, same class as the Mac palette.
     ("Features/Workflows/WorkflowStepListView.swift", "add(choice)"),
-    # Kind tiles in the touch canvas add sheet, same class as the list above.
     ("Features/Workflows/WorkflowTouchCanvas.swift", "add(choice.kind)"),
     # The find bar's text controls. "Replace", "Hide replace", "Replace" and
     # "Replace all" sit in the find bar beside the query they act on, like
@@ -147,11 +141,9 @@ ALLOWED = [
     # Same busy stand-in on the connect sheet: the idle button carries a
     # glyph, and the spinner takes its seat while a probe or connect runs.
     ("Features/Machines/SSHConnectionsView.swift", "ProgressView()"),
-    # A segmented tab. The whole surface is the label, like a sidebar row.
     ("Design/Theme.swift", "withAnimation(.snappy(duration: 0.22)) { selection = option }"),
     ("Client/AvatarButton.swift", "Button(action: action)"),
     ("Client/ClientHostWorkspacesView.swift", "model.open(session, peer: peerKey)"),
-    # The session row already has its terminal/harness mark and disclosure.
     ("Client/ClientWorkspacesView.swift", "model.openSession(session, peer: peer)"),
     # A conversation row: the whole card is the label, and the row already
     # carries the agent's mark. It is a button rather than a NavigationLink
@@ -162,7 +154,6 @@ ALLOWED = [
     # including its existing mark. This wrapper adds ownership, not chrome.
     ("Client/ClientChatLayoutHandoff.swift", "navigation.pushOwned(ClientOwnedPush(id: presentationID,"),
     ("Client/ClientLoginView.swift", "Button(title) {"),
-    # The tappable logo is already the complete glyph and label.
     ("Client/ClientLoginView.swift", "developerUnlock.tap()"),
     ("Client/ClientOnboarding.swift", 'Button("Skip")'),
     # Billing interval is a two-option segmented pill. The text is the whole
@@ -173,11 +164,7 @@ ALLOWED = [
     # site, because one component draws every step.
     ("Design/GettingStartedRail.swift", "Button(title, icon, action: action)"),
     ("Client/ClientSecurityCard.swift", "UIPasteboard.general.string = key"),
-    # A folder row in the host-level chooser sheet. The whole card is the
-    # label, like the folder rows it reuses, and it already ends in a chevron.
     ("Client/ClientRecentChats.swift", "onChoose(folder)"),
-    # A machine row on Home. The whole row is the label and it ends in a
-    # chevron, like the device rows it resembles.
     ("Client/ClientHomeMachinesSection.swift", "navigation.openDevice"),
     # A folder card in the all-folders overview. The whole card is the label
     # and it already carries the archive mark; a second glyph would duplicate it.
@@ -229,7 +216,6 @@ ALLOWED = [
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),
-    # The whole task card opens its editor; a trailing chevron marks navigation.
     ("Client/ClientTaskBoard.swift", "Button { session.editingTask = card } label:"),
     ("Client/ClientTaskBoard.swift", "Button { navigation.presentedTaskBoard = PresentedTaskBoard"),
     # Whole-surface rows into a folder's Changes and History from a task result.
@@ -239,7 +225,6 @@ ALLOWED = [
     # fill, like the Mac workspace inspector, not a second action glyph.
     ("Client/ClientTaskResultView.swift", "inspectorSurface = surface"),
     ("Client/ClientFolderSplit.swift", "section = item"),
-    # A project navigation row, carrying the branch glyph in the shared row.
     ("Client/ClientWorkspaceSections.swift", "symbol: \"arrow.triangle.branch\""),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectGraph"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectRun"),
@@ -262,7 +247,6 @@ ALLOWED = [
     ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
     ("Client/ClientWorkspaceNotesView.swift", "startEditing(note)"),
-    # The note title/preview is the full clickable row; no redundant action glyph.
     ("Features/Todo/NotesView.swift", "model.selectCard(note.id)"),
     # The project tree. Folders and sessions are whole rows: the glyph is
     # inside the label the row draws,
@@ -277,14 +261,7 @@ ALLOWED = [
     # Whole-row launch into the SSH library. The terminal glyph is already
     # inside the label, and a second one on the button would duplicate it.
     ("Features/Machines/MachinesView.swift", "onNavigate?(.ssh)"),
-    # The vault screen's one decision row. The glyph is the `icon` parameter,
-    # typed as ActionIcon, so the compiler already enforces what this script
-    # checks; it just cannot read a glyph it is handed rather than told.
     ("Features/Machines/SSHVaultView.swift", "Button(button, icon, action: perform)"),
-    # The snippet fill-in sheet's one action. The glyph is the `icon`
-    # parameter, typed as ActionIcon, so the compiler already enforces what
-    # this script checks; it just cannot read a glyph handed in rather than
-    # spelled at the call site. Same shape as the vault screen's row above.
     ("Features/Machines/SSHLiveTerminal.swift", "Button(action, icon) {"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
@@ -297,7 +274,6 @@ ALLOWED = [
     # word, like the segmented tabs in Theme.swift. A glyph on Plan would be
     # a second mark next to a control that is already a pill.
     ("Features/Workspaces/Chat/ChatSetupHeader.swift", "selection = option.value"),
-    # Whole-row persona pick. The ActionSeat already carries the glyph.
     ("Features/Workspaces/Chat/PersonaEditor.swift", "draft = persona"),
     # The three arrangements above the section list. A segmented pill whose
     # whole surface is its name, like the billing interval and the composer's

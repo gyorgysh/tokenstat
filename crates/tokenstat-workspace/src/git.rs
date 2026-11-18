@@ -350,7 +350,6 @@ pub(crate) fn parse_diff(raw: &str) -> Vec<DiffHunk> {
             // An empty line in the body is an empty context line: git writes
             // the leading space, but some tools strip trailing whitespace.
             None => (DiffLineKind::Context, ""),
-            // Anything else belongs to a header we are not in a hunk for.
             _ => continue,
         };
 
@@ -1838,8 +1837,6 @@ mod tests {
 
     #[test]
     fn a_plain_folder_is_not_an_error() {
-        // A workspace does not have to be a repository. Reporting that as a
-        // failure would make every scratch folder look broken.
         let dir = std::env::temp_dir();
         let s = status(&dir);
         if !s.is_repo {
@@ -1890,8 +1887,6 @@ mod tests {
         let by_path: std::collections::HashMap<_, _> =
             s.files.iter().map(|f| (f.path.as_str(), f)).collect();
 
-        // The modified file must carry real counts, which only works if the
-        // field count and the numstat join are both right.
         let tracked = by_path.get("tracked.rs").expect("modified file listed");
         assert_eq!(tracked.kind, ChangeKind::Modified);
         assert_eq!(tracked.added, Some(1));
@@ -2099,7 +2094,6 @@ mod tests {
         let kinds: Vec<_> = d.hunks[0].lines.iter().map(|l| l.kind).collect();
         assert_eq!(kinds, vec![DiffLineKind::Added, DiffLineKind::Added]);
 
-        // And a tracked edit still diffs against HEAD.
         std::fs::write(dir.join("seed.txt"), "seed\nmore\n").unwrap();
         let d = diff(&dir, "seed.txt");
         assert!(!d.untracked);
@@ -2231,7 +2225,6 @@ mod tests {
         );
         assert_eq!(detail.added, 2, "one line in each file");
 
-        // The diffs are the point: a commit list nobody can open is a list.
         let a = detail.diffs.iter().find(|d| d.path == "a.txt").unwrap();
         assert!(
             a.hunks[0]
@@ -2351,8 +2344,6 @@ mod tests {
 
     #[test]
     fn a_path_with_spaces_survives() {
-        // The path is the last field and can contain spaces. Splitting the
-        // whole line on whitespace would truncate it.
         let mut s = GitStatus::default();
         parse_porcelain_v2(
             "1 M. N... 100644 100644 100644 aaa bbb docs/my notes.md\n",
@@ -2371,8 +2362,6 @@ mod tests {
         );
         apply_numstat("-\t-\tlogo.png\n", &mut s);
 
-        // A changed binary is not an unchanged one, and an untracked file has
-        // nothing to diff against. Neither is zero.
         assert!(s.files.iter().all(|f| f.added.is_none()));
     }
 

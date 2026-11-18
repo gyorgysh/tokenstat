@@ -64,7 +64,6 @@ final class LauncherVisibility {
 }
 
 extension AgentBackend {
-    /// Workspace launcher tiles that stand for this automation backend.
     var launcherIDs: [String] {
         switch id {
         case "sh": return ["shell"]

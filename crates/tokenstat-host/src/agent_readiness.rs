@@ -906,8 +906,6 @@ mod tests {
         );
     }
 
-    /// A store with no expiry in it is a login, and saying when it runs out is
-    /// not something to invent.
     #[test]
     fn a_store_that_states_no_expiry_reports_none() {
         let home = home_with(".codex/auth.json", r#"{"tokens":{"id_token":"x"}}"#);
@@ -917,7 +915,6 @@ mod tests {
         );
     }
 
-    /// Half a file is not half a login. It is a state to be told about.
     #[test]
     fn an_empty_store_is_not_read_as_signed_out() {
         let home = home_with(".codex/auth.json", "   \n");
@@ -951,8 +948,6 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let moved = elsewhere.path().to_path_buf();
         let env = move |var: &str| (var == "CLAUDE_CONFIG_DIR").then(|| moved.clone());
-        // The home's own file is not consulted once the variable names another
-        // directory, and that directory has no login in it.
         assert_eq!(
             readiness_in("claude_code", true, home.path(), 0, &env).0,
             if cfg!(target_os = "macos") {

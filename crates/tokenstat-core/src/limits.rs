@@ -192,7 +192,6 @@ pub mod cache {
     }
 }
 
-/// Turn a window length in minutes into the name people use for it.
 fn window_label(minutes: u64) -> String {
     match minutes {
         300 => "5-hour".to_string(),
@@ -207,8 +206,6 @@ fn window_label(minutes: u64) -> String {
         m => format!("{m}-minute"),
     }
 }
-
-// MARK: - Codex
 
 #[derive(Debug, Deserialize)]
 struct RolloutLine {
@@ -471,7 +468,6 @@ fn absorb_rollout(scan: &mut CodexLimitScan, path: &Path) {
     }
 }
 
-/// The limits in one rollout file, if it has any.
 #[cfg(test)]
 fn limits_in(file: &Path, now_ms: i64) -> Option<ProviderLimits> {
     let mut scan = CodexLimitScan::default();
@@ -567,7 +563,6 @@ impl CodexLimitScan {
         self.absorb_block(&limits, observed_at_ms);
     }
 
-    /// One block, from a log line or from Codex's own answer.
     fn absorb_block(&mut self, limits: &RateLimits, observed_at_ms: i64) {
         let plan = limits.plan_type();
         if !plan.is_empty() {
@@ -586,7 +581,6 @@ impl CodexLimitScan {
             };
             let minutes = reported.window_minutes.unwrap_or(0);
             let scope = match (limit_name, account_wide) {
-                // The server named the limit, so use its name.
                 ("", true) => CODEX_ACCOUNT_SCOPE.to_string(),
                 // Nothing to distinguish it from yet. `finish` renames these
                 // if an account-wide window turns up beside them.
@@ -1143,8 +1137,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("rollout-test.jsonl");
 
-        // Two blocks: the later one is the answer, and a line without limits in
-        // between must not stop the scan.
         let body = concat!(
             r#"{"timestamp":"2026-07-12T06:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":10.0,"window_minutes":43200,"resets_at":1784460000},"plan_type":"free"}}}"#,
             "\n",
@@ -1160,8 +1152,6 @@ mod tests {
         assert_eq!(found.windows.len(), 1);
         assert_eq!(found.windows[0].percent, 100.0);
         assert_eq!(found.windows[0].label, "monthly");
-        // Seconds, not milliseconds. Treating it as millis would put the reset
-        // in 1970 and the window would read as permanently expired.
         assert_eq!(found.windows[0].resets_at_ms, Some(1_784_460_506_000));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1439,7 +1429,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// One rollout in a temp dir, and the reading taken from it.
     fn reading_from(name: &str, body: &str, now_ms: i64) -> Option<ProviderLimits> {
         let dir =
             std::env::temp_dir().join(format!("tokenstat-codex-{name}-{}", std::process::id()));
@@ -1509,9 +1498,6 @@ mod tests {
 
     #[test]
     fn a_missing_field_costs_only_what_it_says() {
-        // A block with no length, no reset and no plan. The percentage is
-        // still a real reading and is still shown, under a name that does
-        // not claim a length nobody stated.
         let found = reading_from(
             "sparse",
             concat!(
@@ -1638,8 +1624,6 @@ mod tests {
 
     #[test]
     fn no_codex_at_all_says_so_rather_than_reporting_zero() {
-        // The rule everywhere in this project: a number nobody measured is not
-        // zero. An absent Codex must not render as "0% used".
         let out = ProviderLimits::unavailable("codex", "nothing here");
         assert!(out.windows.is_empty());
         assert!(out.note.is_some());

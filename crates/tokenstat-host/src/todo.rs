@@ -793,7 +793,6 @@ mod tests {
         board.create(card("a")).unwrap();
         board.create(card("b")).unwrap();
         board.create(card("c")).unwrap();
-        // Visual [A, B, C]. Drop A before C after A is removed: insert at 1.
         board
             .update(
                 "a",
@@ -850,8 +849,6 @@ mod tests {
             .unwrap();
         assert_eq!(moved.column, "doing");
         let all = board.list_with(false);
-        // Columns sort backlog first, so the card moved to doing sits after the
-        // one still in backlog.
         let pos_b = all.iter().position(|c| c.id == "b").unwrap();
         let pos_a = all.iter().position(|c| c.id == "a").unwrap();
         assert!(pos_b < pos_a);
@@ -974,7 +971,6 @@ mod tests {
         let dir = std::env::temp_dir().join("tokenstat-todo-test4");
         let board = std::sync::Arc::new(Board::at(dir.join("todo.json")));
         board.create(card("a")).unwrap();
-        // Workspace "w" does not exist, so delegation fails with words.
         let err = board.delegate("a").unwrap_err();
         assert!(err.contains("no workspace"), "{err}");
     }

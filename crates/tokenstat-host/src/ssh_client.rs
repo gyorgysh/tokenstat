@@ -28,10 +28,8 @@ const MAX_CLOSED_SESSIONS: usize = 32;
 /// enormous directory costs a few kilobytes here and not a few megabytes.
 const LIST_BYTES: usize = 64 * 1024;
 
-/// How many names are kept out of one listing.
 const LIST_ENTRIES: usize = 2_000;
 
-/// How long a listing may take before it is abandoned.
 const LIST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long a listing stays usable.
@@ -95,7 +93,6 @@ struct LiveSession {
     /// typing into the person's shell: asking the server what is in a
     /// directory must never disturb the line they are in the middle of.
     handle: Arc<client::Handle<HostKeyCheck>>,
-    /// What the far end last said was in a directory, per directory.
     directories: Arc<Mutex<DirCache>>,
     /// Where this session has been and what has been run in it. In memory,
     /// for the life of the session, and never written anywhere.
@@ -496,7 +493,6 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
                 json!({"staged": true, "stageId": stage_id, "path": crate::ssh_provision::CODE_PATH}),
             )
         }
-        // And taken away again, because this product put it there.
         "ssh.provision.clearCode" => {
             #[derive(Deserialize)]
             struct Clear {

@@ -27,7 +27,6 @@ import Foundation
         assert(store.isPinned(first))
         assert(store.pins(in: alice).map(\.label) == ["Launch plan"])
 
-        // Re-pinning updates the label and keeps one row.
         assert(store.pin(first, label: "Launch plan v2", folderName: "Site"))
         assert(store.pins(in: alice).count == 1)
         assert(store.pins(in: alice).first?.label == "Launch plan v2")
@@ -55,14 +54,12 @@ import Foundation
                           label: "Ninth", folderName: "Site"))
         assert(store.pins(in: alice).count == 8)
 
-        // Unpinning frees the shelf.
         store.unpin(first)
         assert(!store.isPinned(first))
         assert(store.pins(in: alice).count == 7)
         assert(store.pin(conversation(alice, host: "mac", folder: "site", id: "ninth"),
                          label: "Ninth", folderName: "Site"))
 
-        // Another account sees none of this.
         assert(store.pins(in: bob).isEmpty)
         assert(!store.isPinned(first))
         assert(store.pin(conversation(bob, host: "mac", folder: "site", id: "c1"),

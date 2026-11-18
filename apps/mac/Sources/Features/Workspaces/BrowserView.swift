@@ -274,8 +274,6 @@ private struct RemoteNavigation: Identifiable {
     let url: URL
 }
 
-/// Whether a URL points at this machine. The browser exists for local dev
-/// servers, so anything else is treated as external and asked about first.
 private func isLoopbackHost(_ url: URL) -> Bool {
     // Missing host is not loopback: fail closed so odd URLs get a confirm.
     guard let host = url.host?.lowercased(), !host.isEmpty else { return false }

@@ -355,7 +355,6 @@ fn truncation_and_missing_initialized_receipts_do_not_create_fresh_acceptances()
             .team_comment(target(&chat, &preview), &actor, &request, || Ok(()))
             .is_err()
     );
-    // Local recovery still clears the canonical sharing marker.
     store
         .clear_sharing(
             &chat.workspace_id,

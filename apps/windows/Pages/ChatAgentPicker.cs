@@ -56,7 +56,6 @@ internal static class ChatAgentPicker
     private static JsonArray? s_limits;
     private static DateTimeOffset s_limitsAt;
 
-    /// <summary>"5h 87% · 7d 60%" on the right of an agent row, each figure in its own severity.</summary>
     private static FrameworkElement? QuotaLine(string backend)
     {
         if (s_limits is null || ChatQuotaData.Read(s_limits, backend) is not { } provider) return null;
@@ -122,8 +121,6 @@ internal static class ChatAgentPicker
             Grid.SetColumn(effortText, 2);
             field.Children.Add(effortText);
         }
-        // This chat's agent has a newer version, from the host's daily check.
-        // Its row in the panel this opens has the update button.
         var behind = Format.Flag(backend, "updateAvailable") && Installed(backend);
         if (behind)
         {
@@ -208,8 +205,6 @@ internal static class ChatAgentPicker
         {
             if (name == ChatAgentSteps.Agent)
             {
-                // Installed agents only, like the Mac. The shell appears only
-                // on the chat that already uses it.
                 var currentId = Format.Text(Chat(), "backend");
                 return source.Backends().Where(item => item is not null
                         && (Format.Text(item, "id") != "sh" || currentId == "sh") && Installed(item))
@@ -246,8 +241,6 @@ internal static class ChatAgentPicker
             {
                 var answered = step;
                 var current = answered == ChatAgentSteps.Agent ? Format.Text(Chat(), "backend") : Format.Text(Chat(), answered);
-                // Picking the row that is already marked moves on without a
-                // write: it is how somebody says "that one is fine".
                 if (value != current)
                 {
                     var patch = new JsonObject { [answered] = value };
@@ -397,8 +390,6 @@ internal static class ChatAgentPicker
                 if (rowBackend is not null && source.UpdateAgent is { } updateAgent
                     && Format.Flag(rowBackend, "updateAvailable") && Installed(rowBackend))
                 {
-                    // Beside the row rather than inside it, so pressing it
-                    // updates the agent instead of choosing it.
                     var latest = Format.Text(rowBackend, "latestVersion");
                     var tip = latest.Length > 0
                         ? L10n.Text("common.agent_updates.update_to", Format.Text(rowBackend, "label", value), latest)

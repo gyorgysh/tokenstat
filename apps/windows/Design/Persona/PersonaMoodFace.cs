@@ -114,7 +114,6 @@ internal static class PersonaMoodFace
                 face.Blinks = false;
                 if (ball.Panic > 0.35)
                 {
-                    // It is going to be fine. It does not know that.
                     face.Openness = 1.12 + ball.Panic * 0.45;
                     face.EyeScale = 1 + ball.Panic * 0.40;
                     face.Brow = -0.4;
@@ -138,8 +137,6 @@ internal static class PersonaMoodFace
 
             case PersonaMood.Waiting:
             {
-                // Big round eyes, but relaxed brows and a tiny smile: eager is
-                // friendlier than an unblinking, alarmed stare.
                 double sigh = PersonaMoodTiming.WaitingSigh(clock);
                 face.Openness = 1.12;
                 face.EyeScale = 1.06;
@@ -195,7 +192,6 @@ internal static class PersonaMoodFace
                 face.Openness = 0.86;
                 face.Squint = 0.22;
                 face.Brow = 0.16;
-                // Eyes up on the body, so they clear the top edge of the paper.
                 face.Lift = 0.07;
                 face.MouthCurve = 0.10;
                 face.MouthWidth = 0.7;
@@ -240,7 +236,6 @@ internal static class PersonaMoodFace
                 }
                 else if (round.Loss > 0.3)
                 {
-                    // Sad, not dead. Half-shut eyes under a heavy brow.
                     face.Openness = 0.55;
                     face.Squint = 0.45;
                 }

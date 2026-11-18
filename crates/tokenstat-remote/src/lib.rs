@@ -952,8 +952,6 @@ fn read_framed(
     Ok(bytes)
 }
 
-// MARK: - Dialling out
-
 /// Connect to a peer and authenticate both ends.
 ///
 /// `expect` is the key this machine pinned for that peer. Passing `None` is
@@ -1093,7 +1091,6 @@ fn handshake_initiator_with_timeout(
 
     let peer = remote_static(&handshake)?;
 
-    // Checked before the connection is handed back, so no caller can forget.
     if let Some(pinned) = expect
         && pinned != peer
     {
@@ -1117,8 +1114,6 @@ fn handshake_initiator_with_timeout(
         relay,
     })
 }
-
-// MARK: - Serving
 
 /// Bind and accept. Nothing is served until a peer is approved.
 pub struct Server {
@@ -1427,8 +1422,6 @@ fn format_epoch(secs: u64) -> String {
     )
 }
 
-// MARK: - Local payload counters
-
 /// Payload bytes moved on authenticated connections since this process started.
 ///
 /// Direct is a TCP socket between two of the user's machines. Relay is the
@@ -1456,8 +1449,6 @@ fn note_payload(relay: bool, n: u64) {
         DIRECT_PAYLOAD.fetch_add(n, Ordering::Relaxed);
     }
 }
-
-// MARK: - Length framing under Noise
 
 /// A 4-byte big-endian length, then that many bytes.
 ///
@@ -1528,8 +1519,6 @@ mod tests {
     fn epoch_formats_as_rfc3339() {
         assert_eq!(format_epoch(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_epoch(1_754_300_000), "2025-08-04T09:33:20Z");
-        // A leap day, because the civil calendar arithmetic is the part that
-        // silently goes wrong.
         assert_eq!(format_epoch(1_709_164_800), "2024-02-29T00:00:00Z");
     }
 

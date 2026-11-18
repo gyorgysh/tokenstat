@@ -96,8 +96,6 @@ final class PersonaEngine {
         dust = Array(repeating: (x: PersonaStage.centreX, age: 10, weight: 0), count: 4)
     }
 
-    /// Kinetic energy, for the lab's readouts and for anything that wants to
-    /// know whether this character has finished reacting.
     var energy: CGFloat { body.energy }
 
     /// Become a different character in the same seat. A reroll in the editor

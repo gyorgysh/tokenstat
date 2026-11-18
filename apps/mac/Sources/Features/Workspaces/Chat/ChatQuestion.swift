@@ -10,7 +10,6 @@ struct ChatQuestion: Equatable, Sendable {
     let question: String
     let options: [String]
     let multiple: Bool
-    /// What the agent goes with if nobody answers.
     let defaultAnswer: String?
     /// The agent stopped for this rather than carrying on with its default.
     let blocking: Bool

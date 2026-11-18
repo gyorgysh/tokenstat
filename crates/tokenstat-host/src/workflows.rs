@@ -25,7 +25,6 @@ use serde_json::{Value, json};
 
 use crate::automations::{self, DEFAULT_BUDGET_SECONDS, ScheduleSpec};
 
-/// How many completed runs to remember.
 const RUNS_KEPT: usize = 100;
 /// Prompt and HTTP body expansion cap, same order as automation transcripts.
 const OUTPUT_CAP: usize = 64 * 1024;
@@ -40,8 +39,6 @@ const MAX_LOOP_TIMES: u32 = 20;
 const TICK: Duration = Duration::from_secs(5);
 const DRAIN_POLL: Duration = Duration::from_millis(40);
 const EXIT_SETTLE: Duration = Duration::from_secs(2);
-
-// MARK: - IR
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -243,8 +240,6 @@ struct RunsFile {
     #[serde(default)]
     runs: Vec<WorkflowRun>,
 }
-
-// MARK: - Store
 
 fn advance_revision(workflow: &mut Workflow) -> Result<(), String> {
     if workflow.revision == u64::MAX {
@@ -1111,8 +1106,6 @@ pub fn start_scheduler() {
     });
 }
 
-// MARK: - Design
-
 /// Ask a cheap installed backend for a workflow JSON draft. Never persists
 /// and never runs what comes back.
 pub fn design(
@@ -1247,8 +1240,6 @@ pub fn parse_workflow_json(text: &str) -> Result<Workflow, String> {
     }
     serde_json::from_str::<Workflow>(&text[start..=end]).map_err(|e| e.to_string())
 }
-
-// MARK: - Validate and walk
 
 pub fn validate(workflow: &Workflow) -> Result<(), String> {
     if workflow.name.trim().is_empty() {
@@ -1477,7 +1468,6 @@ fn unfinished(workflow: &Workflow, run: &WorkflowRun) -> Vec<String> {
         .collect()
 }
 
-/// Put a gate back to waiting after continue failed to persist or spawn.
 fn restore_waiting_gate(run: &mut WorkflowRun, gate_id: &str) {
     run.status = "waiting".into();
     run.current_node_id = Some(gate_id.to_string());
@@ -1578,8 +1568,6 @@ fn node_can_never_run(workflow: &Workflow, run: &WorkflowRun, id: &str) -> bool 
     matches!(classify_incoming(workflow, run, &incoming), Incoming::Dead)
 }
 
-/// A Loop left `running` with no body to re-enter is stuck. Settle it so
-/// Always/Error ports can follow `edge_allows`.
 fn settle_stuck_loops(workflow: &Workflow, run: &mut WorkflowRun) {
     let loop_ids: Vec<String> = workflow
         .nodes
@@ -2351,8 +2339,6 @@ fn run_http(
         Ok(("error".into(), out, Some(i32::from(code))))
     }
 }
-
-// MARK: - Tests
 
 #[cfg(test)]
 mod tests {

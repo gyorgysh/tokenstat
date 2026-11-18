@@ -113,8 +113,6 @@ namespace Microsoft.UI.Xaml.Shapes
         public double Opacity { get; set; }
         public Media.RectangleGeometry? Clip { get; set; }
 
-        // The scene drops fill, stroke, clip, and data through ClearValue.
-        // The turn is stored as null through SetValue on UIElement.
         public void ClearValue(DependencyProperty property)
         {
             if (ReferenceEquals(property, DataProperty)) Data = null;

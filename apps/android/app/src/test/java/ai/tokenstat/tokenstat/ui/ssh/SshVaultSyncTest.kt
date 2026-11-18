@@ -15,7 +15,6 @@ class SshVaultSyncTest {
         assertEquals(VaultVerdict.TAKE_REMOTE, vaultVerdict(10L, 5L))
         assertEquals(VaultVerdict.PUSH_LOCAL, vaultVerdict(5L, 10L))
         assertEquals(VaultVerdict.SAME, vaultVerdict(10L, 10L))
-        // Unstamped rows read as 0 and tie with each other.
         assertEquals(VaultVerdict.SAME, vaultVerdict(0L, 0L))
     }
 

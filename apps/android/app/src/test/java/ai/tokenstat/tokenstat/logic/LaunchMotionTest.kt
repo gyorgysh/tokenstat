@@ -34,8 +34,6 @@ class LaunchMotionTest {
         assertEquals(TabBarVisibility.Step(false, 90f), next(false, 70f, 20f))
         assertEquals(TabBarVisibility.Step(true, 110f), next(false, 90f, 20f))
         assertTrue(next(true, 110f, 20f).minimized)
-        // Scrolling up mid-list holds the pill and drops the travel; only
-        // the top expands.
         assertEquals(TabBarVisibility.Step(true, 0f), next(true, 110f, -20f, atTop = false))
         assertEquals(TabBarVisibility.Step(false, 0f), next(true, 110f, -20f, atTop = true))
         assertEquals(TabBarVisibility.Step(false, 0f), next(false, 90f, -20f))

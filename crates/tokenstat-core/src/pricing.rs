@@ -344,7 +344,6 @@ pub(crate) fn lookup_keys(model: &str) -> Vec<String> {
         push(&mut keys, rest.to_string());
     }
 
-    // Peel agent/speed/thinking suffixes until nothing more matches.
     const SUFFIXES: &[&str] = &[
         "-high-fast",
         "-medium-fast",
@@ -368,7 +367,6 @@ pub(crate) fn lookup_keys(model: &str) -> Vec<String> {
                 push(&mut keys, base.to_string());
             }
         }
-        // Date suffixes like `-20251001`.
         if let Some((base, tail)) = cur.rsplit_once('-')
             && tail.len() == 8
             && tail.chars().all(|c| c.is_ascii_digit())
@@ -609,8 +607,6 @@ mod tests {
 
     #[test]
     fn cursor_router_auto_never_matches_unrelated_router_rows() {
-        // A book row whose stem is "router" must not win over the Composer-floor
-        // estimate after we rename bare default/auto → cursor-router-auto.
         let raw = r#"{
           "effective_from":"2026-01-01",
           "models":[

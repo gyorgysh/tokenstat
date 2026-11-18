@@ -158,7 +158,6 @@ extension View {
         }
     }
 
-    /// Reserve project controls above the content using the local safe area.
     @ViewBuilder
     func clientTopBar<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
         if #available(iOS 26, *) {

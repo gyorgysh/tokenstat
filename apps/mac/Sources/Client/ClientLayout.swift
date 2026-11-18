@@ -235,7 +235,6 @@ struct PointerProbe: UIViewRepresentable {
 }
 
 extension View {
-    /// Install the pointer probe behind this view.
     func clientPointerProbe(_ input: PointerKeyboardModel) -> some View {
         background(
             PointerProbe { input.noteHover() }

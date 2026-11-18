@@ -130,7 +130,6 @@ internal static class SelfInstall
             return false;
         }
 
-        // Clicked from a zip or a download folder: install for this user.
         InstallFromCurrentDirectory();
         LaunchInstalled();
         return true;
@@ -314,7 +313,6 @@ internal static class SelfInstall
                 }
                 catch
                 {
-                    // Best effort.
                 }
             });
         }
@@ -351,7 +349,6 @@ internal static class SelfInstall
             }
             catch
             {
-                // Fall through to schtasks.
             }
         }
         // Without the policy-aware script, never invent a logon trigger on
@@ -547,7 +544,6 @@ internal static class SelfInstall
         }
         catch
         {
-            // Already gone.
         }
     }
 
@@ -606,7 +602,6 @@ internal static class SelfInstall
         }
         catch
         {
-            // Best effort.
         }
     }
 
@@ -644,7 +639,6 @@ internal static class SelfInstall
             }
             catch
             {
-                // Fall through to schtasks.
             }
         }
         try
@@ -653,7 +647,6 @@ internal static class SelfInstall
         }
         catch
         {
-            // Ignore.
         }
     }
 
@@ -686,7 +679,6 @@ internal static class SelfInstall
         }
         catch
         {
-            // Best effort.
         }
     }
 }

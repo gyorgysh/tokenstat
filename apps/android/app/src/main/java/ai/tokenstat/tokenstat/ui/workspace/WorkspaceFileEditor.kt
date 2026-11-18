@@ -87,7 +87,6 @@ fun WorkspaceFileEditorPage(
     onClose: () -> Unit = {},
     onSavedFile: () -> Unit = {},
 ) {
-    // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
     val colors = LocalTsColors.current
@@ -432,8 +431,6 @@ private fun EditorConflictCard(
     }
 }
 
-/// The line under the buffer: unsaved state, save outcome. A failed save is
-/// the loud case and stays until retried or dismissed.
 @Composable
 private fun EditorStatusBar(
     error: String?,

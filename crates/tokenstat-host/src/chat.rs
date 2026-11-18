@@ -35,7 +35,6 @@ mod steering;
 const LEGACY_EVENTS_CAP: u64 = 1024 * 1024;
 #[path = "chat_usage_cache.rs"]
 mod usage_cache;
-/// How many events one page carries when the client does not say.
 const PAGE_EVENTS: usize = 300;
 /// The most a client may ask for in one page. A client that wants more than
 /// this wants the whole archive, which is what the cap exists to prevent.
@@ -483,7 +482,6 @@ enum StoredEvent {
     },
 }
 
-/// One answer riding a parked note, until the agent takes the note.
 struct ParkedAnswer {
     question_id: String,
     /// The words the answer added to the note, so a replaced or restored
@@ -1424,7 +1422,6 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id);
-        // The agent has the note, and every answer riding it.
         self.take_parked_answers(&id);
         let _ = self.mark_last_message(&id, at_ms, "user");
         Ok(Some(note))
@@ -1655,7 +1652,6 @@ impl Store {
         answer
     }
 
-    /// The text of a question in this conversation that nobody has answered.
     fn open_question(&self, id: &str, question_id: &str) -> Result<String, String> {
         let mut asked = None;
         let mut answered = false;
@@ -1774,7 +1770,6 @@ impl Store {
         self.reconcile_parked_answers(id);
     }
 
-    /// Remember an answer riding the parked note until the agent takes it.
     fn park_answer(&self, id: &str, question_id: &str, note: String) {
         let mut parked = self
             .parked_answers
@@ -1792,7 +1787,6 @@ impl Store {
         self.persist_parked_answers(&mut parked);
     }
 
-    /// Forget this conversation's parked answers, because the agent has them.
     fn take_parked_answers(&self, id: &str) -> Vec<ParkedAnswer> {
         let mut parked = self
             .parked_answers
@@ -1810,8 +1804,6 @@ impl Store {
         taken
     }
 
-    /// The words of this conversation's parked answers, to keep beside a
-    /// note that replaces the person's last one.
     fn parked_answer_notes(&self, id: &str) -> Option<String> {
         let parked = self
             .parked_answers
@@ -1978,7 +1970,6 @@ impl Store {
             };
             let mut remaining: HashMap<String, Vec<String>> = HashMap::new();
             for (id, questions) in parked {
-                // A removed conversation has nothing left to reopen.
                 if self.get(&id).is_err() {
                     continue;
                 }
@@ -2546,7 +2537,6 @@ impl Store {
         fork.allowed_tools.clear();
         fork.allowed_shell_prefixes.clear();
         fork.running = false;
-        // A fork starts a new agent session, so nothing of it is cached yet.
         fork.prompt_cache = None;
         let destination = safe_join(&self.root, &fork.id)?;
         fs::create_dir(&destination).map_err(|error| error.to_string())?;
@@ -3656,8 +3646,6 @@ impl Store {
                 .map(str::to_owned);
             Ok(previous.is_none())
         })?;
-        // A chat started to continue another one has nothing of its own yet.
-        // Its first turn is told where the earlier history is instead.
         if previous.is_none()
             && let Some(source) = chat.continued_from.as_deref()
         {
@@ -4277,9 +4265,6 @@ impl Store {
         if let Some(note) = crate::chat_question::native_tool_note(&chat.backend) {
             composed.append_standing(note);
         }
-        // How to keep a plan the chat can show. Every agent writes the block.
-        // An agent that calls a todo tool of its own anyway still reaches the
-        // same card, because the host reads that list too.
         if let Some(plan) = crate::chat_plan::rule(&chat.backend) {
             composed.append_standing(&plan);
         }
@@ -4631,10 +4616,6 @@ impl Store {
                     at_ms: user_at,
                 },
             )?;
-            // What the person attached rides the timeline as its own rows, so a
-            // sent image stays visible instead of vanishing into the turn. The
-            // bytes already live beside the chat; these records are only the
-            // names the rows render and the ids they fetch by.
             debug_assert_eq!(
                 attachment_ids.len(),
                 attachments.len(),
@@ -5772,8 +5753,6 @@ impl Store {
             .map(|workspace| tokenstat_workspace::git::current_branch(&workspace.path))
     }
 
-    /// The turn is over: clear the running bit, and note the branch the
-    /// agent left the folder on, which may be one it just created.
     fn stop_running(
         &self,
         id: &str,
@@ -7047,7 +7026,6 @@ fn draft_prompt(brief: &str, name: Option<&str>) -> String {
     )
 }
 
-/// Parse the agent's reply, then keep a supplied name even if the model ignored it.
 fn finish_draft(reply: &str, fallback_brief: &str, name: Option<&str>) -> Result<Value, String> {
     let mut draft = draft_from_reply(reply, fallback_brief)?;
     if let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) {
@@ -9521,11 +9499,9 @@ mod tests {
     #[test]
     fn live_output_backlogs_make_progress_in_bounded_bursts() {
         assert!(drain_buffered_output(256 * 1024, 1024 * 1024, 256 * 1024));
-        // Ordinary incremental token output keeps its normal batching.
         assert!(!drain_buffered_output(1024, DRAIN_BACKLOG_BYTES - 1, 1024));
         // An empty or failed read must never spin against a stale snapshot.
         assert!(!drain_buffered_output(0, u64::MAX, 0));
-        // Even a continuously growing producer gets only one bounded burst.
         assert!(!drain_buffered_output(
             256 * 1024,
             u64::MAX,
@@ -9654,11 +9630,7 @@ mod tests {
 
     #[test]
     fn a_new_chat_starts_in_execute_and_an_old_record_stays_plan() {
-        // `create` reaches for this when the request names no mode.
         assert_eq!(default_new_chat_mode(), "execute");
-        // A stored record that never had a mode still reads as plan, so no
-        // existing conversation changes underneath anyone. Deserialized for
-        // real, so the test follows the record's own default.
         let old: Result<Conversation, _> = serde_json::from_value(serde_json::json!({
             "id": "chat-old",
             "workspaceId": "workspace-old",
@@ -9901,7 +9873,6 @@ mod tests {
         store.answer_question("chat-test", &question, "B").unwrap();
         assert_eq!(withdrawn(&store, "chat-test", &question), 0);
 
-        // Clearing the note takes the answer with it.
         store.steer_clear("chat-test").unwrap();
         assert_eq!(withdrawn(&store, "chat-test", &question), 1);
         let again = store.answer_question("chat-test", &question, "A").unwrap();
@@ -10203,8 +10174,6 @@ mod tests {
                     },
                 )
                 .unwrap();
-            // The fixture has no workspace, so attempting a new launch would
-            // fail. Only a replay of the question's acceptance can succeed.
             let delivery = store.answer_question("chat-test", &question, "B").unwrap();
             assert_eq!(delivery["delivery"], "sent");
             assert!(parked_note(&store, "chat-test").is_none());
@@ -10277,7 +10246,6 @@ mod tests {
         prepare_live_chat(&store, "chat-test");
         let question = ask(&store, "chat-test", "Pick one?");
         store.set_running("chat-test", false).unwrap();
-        // The launch's message is on the timeline, its answer row is not.
         let note = crate::chat_question::answer_note("Pick one?", "B");
         let user_at = now_ms();
         store
@@ -10639,7 +10607,6 @@ mod tests {
                 .contains("Retries are in place.")
         );
 
-        // Once the new chat has a session of its own it is not told again.
         store
             .set_resume("chat-new", "claude", "session-new")
             .unwrap();
@@ -10678,7 +10645,6 @@ mod tests {
         });
         assert!(kept.resume_tokens.is_empty() && kept.resume_token.is_none());
 
-        // The failure itself also forgets it, so Try again starts fresh.
         store
             .append(
                 "chat-test",
@@ -11407,7 +11373,6 @@ mod tests {
         assert!(matches!(last, StoredEvent::Agent {
             event: Event::Done { ref status, .. }, ..
         } if status == "interrupted"));
-        // Recovery persists once; a second restart adds no duplicate ending.
         let again = Store::load_at(path);
         assert_eq!(
             rows,
@@ -11426,7 +11391,6 @@ mod tests {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert("stuck-finish".into(), "dead-pty".into());
-        // The running-bit write now fails: the index it would update is gone.
         fs::remove_file(store.root.join("conversations.json")).unwrap();
         let cleaned = std::cell::Cell::new(false);
         let result = store.finish_turn(
@@ -11689,7 +11653,6 @@ mod tests {
             let mut chats = store.conversations.lock().unwrap();
             chats[0].last_message_at_ms = Some(3);
             chats[0].last_message_author = Some("user".into());
-            // A setup-only conversation stays out of recents.
             chats[1].updated_at_ms = 99;
             chats[2].last_message_at_ms = Some(5);
             chats[2].last_message_author = Some("agent".into());
@@ -11714,8 +11677,6 @@ mod tests {
         );
         assert!(recent[0].needs_attention);
         assert_eq!(store.recent(1)[0].id, "chat-a1");
-        // A live overview counts every active chat, even setup-only chats and
-        // rows beyond the fifty-entry recents cap. Pending approval is exact.
         {
             let mut chats = store.conversations.lock().unwrap();
             for index in 0..60 {
@@ -12083,8 +12044,6 @@ mod tests {
             )
             .unwrap();
 
-        // Reopen as the next message would after a host restart. The same
-        // native session must be resumed with the newly selected settings.
         let reopened = Store::load_at(path);
         let chat = reopened.get("chat-test").unwrap();
         assert_eq!(chat.model.as_deref(), Some("opus"));
@@ -12280,8 +12239,6 @@ mod tests {
         let mut text = String::new();
         let mut questions = crate::chat_question::Scanner::default();
         let mut plans = crate::chat_plan::Scanner::default();
-        // The second block opens on the first one's closing line, so the
-        // closing fence and the next opening fence share a run of ticks.
         let delta = "Start\n```tokenstat-plan\n{\"steps\":[{\"step\":\"Do\",\"status\":\"pending\"}]}\n``````tokenstat-plan\n{\"steps\":[{\"step\":\"Do\",\"status\":\"completed\"}]}\n```\nEnd";
         store.record_stream_events(
             "chat-test",
@@ -12303,8 +12260,6 @@ mod tests {
             .collect();
         assert_eq!(kinds, ["text", "plan", "text", "plan", "text"]);
         assert_eq!(rows[3]["event"]["steps"][0]["status"], "completed");
-        // The text rows still assemble the whole reply, glue included, so a
-        // client strips it with the same rule the host used to read it.
         let shown: String = rows
             .iter()
             .filter_map(|row| row["event"]["delta"].as_str())
@@ -12800,7 +12755,6 @@ mod tests {
             revision: 3,
             maintenance: false,
         };
-        // The selected model changes after spawn, before the reader runs.
         store
             .edit_conversation(id, |chat| {
                 chat.model = Some("next-model".into());
@@ -13355,7 +13309,6 @@ mod tests {
                 .unwrap()
                 .fast_mode
         );
-        // Explicit unsupported model changes still reset the paid selection.
         store
             .edit_conversation("grok-saved", |chat| {
                 chat.fast_mode = true;
@@ -14373,7 +14326,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(store.work_overview()[0].3, "working");
-        // Even a turn that finished between sampler ticks is retained.
         store.remember_completed_work("completed-overview", 7, "done");
         store.set_running("completed-overview", false).unwrap();
         assert_eq!(store.work_overview()[0].3, "done");
@@ -15132,15 +15084,12 @@ mod tests {
                 },
             )
             .unwrap();
-        // Returns the conversation without reaching the workspace lookup,
-        // which is the first thing a real send needs and does not exist here.
         let chat = store
             .send("chat-receipt", "hello", &[], Some("m-1"), None, None)
             .unwrap();
         assert_eq!(chat.id, "chat-receipt");
         assert!(!store.events_path("chat-receipt").exists());
 
-        // The same name for different words is a mistake, not a repeat.
         let conflict = store
             .send(
                 "chat-receipt",
@@ -15174,8 +15123,6 @@ mod tests {
             .send("chat-running", "hello", &[], None, None, None)
             .unwrap_err();
         assert!(busy.message.contains("already responding"), "{busy}");
-        // With one it is the answer the client was waiting for. The case this
-        // exists for is a send whose reply went missing while its turn ran.
         let key = crate::chat_receipts::key(None, "m-4");
         store
             .write_receipt(
@@ -15407,8 +15354,6 @@ mod tests {
         assert_eq!(store.personas.lock().unwrap().personas, vec![saved.clone()]);
         assert_ne!(saved.seed, 0, "a persona must have a face");
 
-        // A persona brief is standing text, not part of the turn. The
-        // person's message stays exactly what they typed.
         let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
             persona_name: "",
             prompt: "Check this",
@@ -15527,7 +15472,6 @@ mod tests {
         .unwrap();
         assert_eq!(snake["systemPrompt"], "You review.");
 
-        // Unreadable is an error the wizard shows, not a half-built persona.
         assert!(draft_from_reply("I could not do that.", "fallback").is_err());
         assert!(draft_from_reply(r#"{"systemPrompt":"no name"}"#, "fallback").is_err());
     }
@@ -15685,12 +15629,10 @@ mod tests {
             )
             .unwrap();
 
-        // Claude has run and holds its own session, so it needs no summary.
         chat.resume_tokens
             .insert("claude".into(), "session-1".into());
         assert!(store.handover(&chat).unwrap().is_none());
 
-        // Switching to an agent with no session of its own is the whole point.
         chat.backend = "codex".into();
         let handover = store
             .handover(&chat)
@@ -15709,7 +15651,6 @@ mod tests {
         chat.resume_tokens.insert("codex".into(), "thread-1".into());
         assert!(store.handover(&chat).unwrap().is_some());
 
-        // Once Codex has actually answered, its session is current.
         store
             .append(
                 "chat-handoff",
@@ -15724,8 +15665,6 @@ mod tests {
             .unwrap();
         assert!(store.handover(&chat).unwrap().is_none());
 
-        // Switching back to Claude must carry Codex's intervening work even
-        // though Claude also has an older resumable session.
         chat.backend = "claude".into();
         let returned = store
             .handover(&chat)
@@ -15827,14 +15766,12 @@ mod tests {
             .expect("a workspace with no choice recorded gets a starter");
         assert_eq!(store.set_default_persona("workspace-a", "").unwrap(), None);
 
-        // The decision sticks, and nothing is minted to replace it.
         assert_eq!(store.ensure_workspace_persona("workspace-a").unwrap(), None);
         assert_eq!(store.ensure_workspace_persona("workspace-a").unwrap(), None);
         let listed = store.personas("workspace-a").unwrap();
         assert_eq!(listed["defaultId"], "");
         assert_eq!(listed["personas"].as_array().unwrap().len(), 1);
 
-        // And it can be taken back.
         let again = store
             .set_default_persona("workspace-a", &starter.id)
             .unwrap()
@@ -15878,7 +15815,6 @@ mod tests {
             assert!(names.contains(&"Reviewer".to_string()), "{names:?}");
         }
 
-        // And either folder may adopt it as its own default.
         assert_eq!(
             store
                 .set_default_persona("workspace-b", &shared.id)
@@ -15945,13 +15881,9 @@ mod tests {
         chat = store.get("chat-standing").unwrap();
         assert!(!standing_is_due(&chat, &composed.standing_fingerprint));
 
-        // A backend that has not been told yet still needs them, even though
-        // the rules themselves have not changed.
         chat.backend = "cursor".into();
         assert!(standing_is_due(&chat, &composed.standing_fingerprint));
 
-        // Editing the persona changes the rules, so the backend that already
-        // had the old ones is told the new ones.
         chat.backend = "codex".into();
         let edited = crate::chat_turn::compose(crate::chat_turn::Inputs {
             persona_name: "",

@@ -31,7 +31,6 @@ import sys
 
 ROOT = "apps/mac/Sources"
 
-# Types whose `…ID` property is never on the wire, with the reason.
 ALLOWED = {
     # Set by the app after the daemon answers, to record which peer a folder
     # came from. The daemon has no such field and never sends one.

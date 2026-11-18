@@ -23,7 +23,6 @@ struct SSHEditorFooter: View {
     var onCancel: () -> Void
     var onDelete: (() -> Void)?
 
-    /// The sentence for the state the button is in.
     private var busyTitle: String {
         if let workingTitle { return workingTitle }
         switch saveIcon {
@@ -747,13 +746,6 @@ struct SSHSnippetEditor: View {
                     .textFieldStyle(.themed)
                 Text(L10n.text("apple.sshlibraryeditors.command.71316697"))
                     .font(Theme.caption).foregroundStyle(.secondary)
-                // The border used to be drawn over a bare TextEditor, which
-                // themed the outline of the platform's grey slab and left the
-                // slab. ThemedEditor hides that background so the fill is the
-                // app's own panel, like the name field above it.
-                // No infinite maximum. Inside a scroll view an unbounded
-                // height is a request for as much as the content wants, and a
-                // text editor's content grows with what is typed into it.
                 ThemedEditor(text: $draft.snippet.command, minHeight: 140)
                 if placeholders.isEmpty {
                     Text(L10n.text("apple.sshlibraryeditors.wrap_a_value_in_braces_to_be_asked_for_it.76780e5c"))

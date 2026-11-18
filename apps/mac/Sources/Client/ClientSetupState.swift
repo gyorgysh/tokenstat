@@ -187,11 +187,8 @@ struct ClientSetupFailure: Equatable {
     }
 
     var explanation: String
-    /// What happened to the server, when anything did. Silence here means
-    /// nothing on it was touched, which is the answer people want first.
     var changed: String?
     var action: Action
-    /// The words the machine used, kept for somebody who wants them.
     var details: String?
 
     /// Read a failure from whatever was thrown.
@@ -317,7 +314,6 @@ enum SetupStep: Hashable {
     case finish
     /// The project, which is what all of it was for.
     case project
-    /// For somebody who has no machine at all yet.
     case needServer
     /// The install line, for somebody who would rather run it themselves.
     case byHand

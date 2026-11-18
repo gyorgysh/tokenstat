@@ -91,8 +91,6 @@ if grep -rn "MddBootstrap" apps/windows --include='*.cs' --include='*.xaml' --in
     fail=1
 fi
 
-# Comment lines are skipped, so a comment may name the banned API while
-# explaining why it is banned. A real call is never a comment.
 hits=$(grep -rn -e "ApplicationData\.Current" -e "Package\.Current" apps/windows \
     --include='*.cs' --include='*.xaml' --include='*.xaml.cs' \
     | grep -v ':[0-9][0-9]*: *//' || true)

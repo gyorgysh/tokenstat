@@ -163,7 +163,6 @@ struct InsightsView: View {
         model.isLoading && model.totals == nil && model.errorMessage == nil
     }
 
-    /// The overview's layout in grey: the daily chart, then the row of lists.
     private var placeholder: some View {
         // Sharp wireframe of the overview. Real content replaces it with
         // `.smoothIn` when the first report lands; no blur veil.
@@ -236,7 +235,6 @@ struct InsightsView: View {
         }
     }
 
-    /// The grey loading version of the same reflow.
     @ViewBuilder
     private func skeletonTriple(width: CGFloat) -> some View {
         if width >= .threeAcrossWidth {
@@ -283,12 +281,10 @@ private struct BreakdownTable: View {
     /// unresponsive on the Sessions tab. Page it. The first page is deep
     /// enough that models, projects and harnesses never reach the button.
     private static let firstPage = 50
-    /// Rows added per press of the reveal button.
     private static let pageStep = 30
 
     @State private var visible = BreakdownTable.firstPage
 
-    /// The rows actually drawn.
     private var page: ArraySlice<Bucket> { rows.prefix(visible) }
 
     private var hidden: Int { max(0, rows.count - visible) }
@@ -520,12 +516,10 @@ private struct DailyChart: View {
             .map(\.element.key)
     }
 
-    /// `2026-07-29` becomes `07-29`. The year is the same on every bar.
     private func shortDay(_ raw: String) -> String {
         raw.count > 5 ? String(raw.suffix(5)) : raw
     }
 
-    /// The row under the pointer, if any.
     private var hoveredRow: Bucket? {
         guard let selectedDay else { return nil }
         return rows.first { $0.key == selectedDay }
@@ -632,7 +626,6 @@ private struct DailyChart: View {
         }
     }
 
-    /// The data for the day under the pointer, as a floating chip.
     private func hoverSummary(for row: Bucket) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(shortDay(row.key))

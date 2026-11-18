@@ -203,7 +203,6 @@ internal sealed class AppUpdateModel
         }
         catch (Exception ex)
         {
-            // A failed request cannot truthfully report "up to date".
             Current = Stage.Failed;
             Failure = ex.Message;
             Changed?.Invoke();
@@ -364,7 +363,6 @@ internal sealed class AppUpdateModel
         }
         catch
         {
-            // Skipping is a courtesy. The check still runs.
         }
         Current = Stage.Idle;
         Changed?.Invoke();
@@ -395,7 +393,6 @@ internal sealed class AppUpdateModel
         return value.GetValue<string>();
     }
 
-    /// <summary>An optional counter that may be absent. Absent is null, not zero.</summary>
     private static long? OptLong(JsonNode node, string name)
     {
         var value = node[name];

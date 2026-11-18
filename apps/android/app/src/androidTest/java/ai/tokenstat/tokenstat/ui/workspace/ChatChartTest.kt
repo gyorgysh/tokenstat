@@ -61,7 +61,6 @@ class ChatChartTest {
         js("location.href='https://invalid.example/blocked'")
         assertEquals("true", js("location.href==='https://charts.tokenstat.invalid/index.html'"))
         compose.runOnIdle { surface.shutdown() }
-        // Late bridge messages and pending callbacks must be harmless after release.
     }
 
     @Test fun scrollingKeepsLaterChartsAndReleasesOffscreenBrowsers() {

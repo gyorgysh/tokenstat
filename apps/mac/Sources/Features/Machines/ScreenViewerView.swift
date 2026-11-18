@@ -593,8 +593,6 @@ struct ScreenViewerView: View {
     }
 
     #if !os(macOS)
-    /// The row of keys and pointer buttons a touch screen has no other way to
-    /// send.
     private var keyBar: some View {
         ScreenKeyBar(
             modifiers: $heldModifiers,
@@ -985,9 +983,6 @@ private final class ScreenViewerModel {
             return
         }
         state = .connecting
-        // Say why. The reason used to be kept back until the third failure,
-        // so the whole visible story of a session that could not stay up was
-        // "Reconnecting…", which names nothing anybody can act on.
         message = L10n.text("apple.screenviewerview.reconnecting_attempt_0_of_3_1.8f4f26ac", "\(reconnectAttempts)", "\(reason)")
         let delay = reconnectAttempts
         task = Task { [weak self] in
@@ -1005,7 +1000,6 @@ private final class ScreenViewerModel {
             || value.contains("no display") || value.contains("videotoolbox")
     }
 
-    /// Put the pointer at a normalized point on the remote display.
     func move(to point: CGPoint) {
         cursor = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
         send(["type":"move", "x":cursor.x, "y":cursor.y] as [String: Any])

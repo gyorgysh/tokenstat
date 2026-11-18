@@ -7,22 +7,7 @@
 #if os(macOS)
 import SwiftUI
 
-/// The two settings that decide how the next session starts: which model it
-/// talks to, and whether it asks permission.
-///
-/// # Why they live in the chrome
-///
-/// Both used to sit in the middle of the launch surface, which meant they
-/// existed only while a workspace had no session at all. Once anything was
-/// running there was no way to see what the next launch would do, let alone
-/// change it. They belong on the row that is always there, beside the New
-/// session menu they modify.
-///
-/// The stored selection is `provider:model`, per workspace. The provider id
-/// never contains a colon and a model id often does (`llama3.2:latest`), so
-/// the split is at the first one only.
 enum LocalModelSelection {
-    /// The key a picker stores for one model.
     static func key(provider: String, model: String) -> String {
         "\(provider):\(model)"
     }
@@ -78,8 +63,6 @@ struct LocalModelControl: View {
         }
     }
 
-    /// What the button says when nothing is selected, and as the menu's own
-    /// first entry.
     private var defaultLabel: String { L10n.text("apple.launchcontrols.each_tool_s_default.03e1b871") }
 
     private var buttonLabel: String {

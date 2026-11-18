@@ -300,10 +300,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         RenderDetail();
     }
 
-    /// <summary>
-    /// What the list is showing: the folder this screen belongs to, or the
-    /// chip picked on the global one.
-    /// </summary>
     private string ScopePick => _workspaceId ?? _picked;
 
     private string DestinationId()

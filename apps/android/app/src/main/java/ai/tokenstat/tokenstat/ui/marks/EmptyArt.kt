@@ -75,8 +75,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 val scale = 0.92f + 0.08f * progress
                 scaleX = scale
                 scaleY = scale
-                // Around the feet, so the character lifts off the floor
-                // instead of stretching from its middle.
                 transformOrigin = TransformOrigin(0.5f, 1f)
             },
     ) {
@@ -138,8 +136,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(colors.diffRemoved, Offset(size.width * 0.28f, size.height * 0.48f), Offset(size.width * 0.62f, size.height * 0.48f), strokeWidth = 3f)
                 drawLine(accent, Offset(size.width * 0.28f, size.height * 0.66f), Offset(size.width * 0.55f, size.height * 0.66f), strokeWidth = 3f)
             }
-            // A commit list with nothing in it yet: the rail is there, the
-            // newest seat is still an outline.
             EmptyArtKind.History -> {
                 val railX = size.width * 0.18f
                 drawLine(border, Offset(railX, size.height * 0.19f), Offset(railX, size.height * 0.81f), strokeWidth = 3.4f, cap = StrokeCap.Round)
@@ -250,8 +246,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawRoundRect(colors.accentSoft, body, bodySize, CornerRadius(5f, 5f))
                 drawRoundRect(accent, body, bodySize, CornerRadius(5f, 5f), style = stroke)
             }
-            // A display with a scan line: the picture that is missing until
-            // the plan includes the remote screen.
             EmptyArtKind.Screen -> {
                 val frame = Offset(size.width * 0.16f, size.height * 0.15f)
                 val frameSize = Size(size.width * 0.68f, size.height * 0.69f)
@@ -275,12 +269,10 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(accent, Offset(size.width * 0.70f, size.height * 0.63f), Offset(size.width * 0.74f, size.height * 0.59f), strokeWidth = 3.4f, cap = StrokeCap.Round)
                 drawLine(accent, Offset(size.width * 0.67f, size.height * 0.67f), Offset(size.width * 0.71f, size.height * 0.63f), strokeWidth = 3.4f, cap = StrokeCap.Round)
             }
-            EmptyArtKind.Chat -> Unit // Animated above, outside this static illustration canvas.
+            EmptyArtKind.Chat -> Unit
             EmptyArtKind.NoMachine -> serverScene(ServerArtState.Waiting, stroke, colors)
             EmptyArtKind.Provisioning -> serverScene(ServerArtState.Working, stroke, colors)
             EmptyArtKind.ServerReady -> serverScene(ServerArtState.Ready, stroke, colors)
-            // This device reaching a machine: the handshake travels an arc
-            // from the phone to the server, which lights up as it arrives.
             EmptyArtKind.Connect -> {
                 drawRoundRect(border, Offset(size.width * 0.07f, size.height * 0.27f), Size(size.width * 0.17f, size.height * 0.46f), CornerRadius(8f, 8f), style = stroke)
                 drawLine(colors.secondary, Offset(size.width * 0.11f, size.height * 0.48f), Offset(size.width * 0.20f, size.height * 0.48f), strokeWidth = 3.4f, cap = StrokeCap.Round)
@@ -295,7 +287,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawCircle(accent, 3.5f, Offset(size.width * 0.67f, size.height * 0.40f))
                 drawLine(colors.secondary, Offset(size.width * 0.73f, size.height * 0.48f), Offset(size.width * 0.86f, size.height * 0.48f), strokeWidth = 3.4f, cap = StrokeCap.Round)
             }
-            // Door one: the computer, with the download coming down onto it.
             EmptyArtKind.MacDoor -> {
                 sparkle(Offset(size.width * 0.23f, size.height * 0.24f), 11f, accent)
                 sparkle(Offset(size.width * 0.77f, size.height * 0.72f), 7f, accent)
@@ -306,8 +297,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(colors.secondary, Offset(size.width * 0.41f, size.height * 0.52f), Offset(size.width * 0.59f, size.height * 0.52f), strokeWidth = 3.4f, cap = StrokeCap.Round)
                 drawLine(border, Offset(size.width * 0.22f, size.height * 0.76f), Offset(size.width * 0.78f, size.height * 0.76f), strokeWidth = 3.4f, cap = StrokeCap.Round)
             }
-            // Door three: a cloud machine. Servers are read out of the
-            // provider into the rack below, which is what importing means.
             EmptyArtKind.CloudDoor -> {
                 sparkle(Offset(size.width * 0.20f, size.height * 0.24f), 9f, accent)
                 sparkle(Offset(size.width * 0.77f, size.height * 0.76f), 7f, accent)
@@ -327,8 +316,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawCircle(accent, 3.5f, Offset(size.width * 0.33f, size.height * 0.815f))
                 drawLine(colors.secondary, Offset(size.width * 0.40f, size.height * 0.815f), Offset(size.width * 0.64f, size.height * 0.815f), strokeWidth = 3.4f, cap = StrokeCap.Round)
             }
-            // The renting guide: a price tag next to a rack. Renting is the
-            // one setup screen about money, so it is the one that draws it.
             EmptyArtKind.RentServer -> {
                 sparkle(Offset(size.width * 0.19f, size.height * 0.31f), 9f, accent)
                 sparkle(Offset(size.width * 0.78f, size.height * 0.69f), 6f, accent)
@@ -340,8 +327,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                     drawRoundRect(border, Offset(size.width * 0.48f, size.height * (0.32f + i * 0.21f)), Size(size.width * 0.34f, size.height * 0.15f), CornerRadius(5f, 5f), style = stroke)
                 }
             }
-            // The install line, run by hand: a terminal holding a pasted
-            // command with a caret, plus the paste badge.
             EmptyArtKind.ByHand -> {
                 sparkle(Offset(size.width * 0.11f, size.height * 0.21f), 8f, accent)
                 sparkle(Offset(size.width * 0.91f, size.height * 0.83f), 6f, accent)
@@ -376,8 +361,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 }
                 drawLine(border, Offset(size.width * 0.24f, size.height * 0.78f), Offset(size.width * 0.76f, size.height * 0.78f), strokeWidth = 3.4f, cap = StrokeCap.Round)
             }
-            // Getting started: this device ready with its check, the machine
-            // still a quiet outline beside it.
             EmptyArtKind.GetCounting -> {
                 sparkle(Offset(size.width * 0.19f, size.height * 0.26f), 9f, accent)
                 sparkle(Offset(size.width * 0.81f, size.height * 0.71f), 6f, accent)
@@ -393,8 +376,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                     drawCircle(accent.copy(alpha = 0.5f), 3.5f, Offset(size.width * 0.56f, size.height * (0.37f + i * 0.25f)))
                 }
             }
-            // A paid gate: the phone reaches a folder and a lock sits on the
-            // path.
             EmptyArtKind.RemoteGate -> {
                 sparkle(Offset(size.width * 0.16f, size.height * 0.24f), 9f, accent)
                 sparkle(Offset(size.width * 0.84f, size.height * 0.74f), 6f, accent)
@@ -419,7 +400,6 @@ private enum class ServerArtState { Waiting, Working, Ready }
 private fun DrawScope.serverScene(state: ServerArtState, stroke: Stroke, colors: TsColors) {
     val accent = colors.accent
     val border = colors.border
-    // The phone on the left.
     drawRoundRect(border, Offset(size.width * 0.07f, size.height * 0.27f), Size(size.width * 0.17f, size.height * 0.46f), CornerRadius(8f, 8f), style = stroke)
     drawLine(colors.secondary, Offset(size.width * 0.11f, size.height * 0.50f), Offset(size.width * 0.20f, size.height * 0.50f), strokeWidth = 3.4f, cap = StrokeCap.Round)
     // The link is the whole story: nothing, a travelling signal, or settled.
@@ -431,8 +411,6 @@ private fun DrawScope.serverScene(state: ServerArtState, stroke: Stroke, colors:
         drawCircle(color, 3.5f, Offset(size.width * (0.30f + i * 0.05f), size.height * 0.50f))
     }
     repeat(3) { dot(it) }
-    // The rack: three units, with a light on the top one that only comes on
-    // when the machine actually answers.
     val light = when (state) {
         ServerArtState.Waiting -> border
         ServerArtState.Working -> accent.copy(alpha = 0.7f)

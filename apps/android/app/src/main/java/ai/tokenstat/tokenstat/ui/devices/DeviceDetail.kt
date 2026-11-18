@@ -187,8 +187,6 @@ fun DeviceDetailScreen(
                 peer = peer,
                 hostName = currentName,
                 onClose = { folderFlow = FolderFlow.None },
-                // This screen keeps no folder list to refresh: closing is
-                // the whole handling, the way iOS passes `{ _ in }`.
                 onAdded = { folderFlow = FolderFlow.None },
             )
             FolderFlow.Clone -> CloneRepositoryScreen(
@@ -278,8 +276,6 @@ fun DeviceDetailScreen(
     }
 }
 
-/// Which folder flow the detail opened, if any. Both destinations run their
-/// own connection and dismiss themselves.
 private enum class FolderFlow { None, Choose, Clone }
 
 /// This device's share of spend: the figure, the window it covers, and the
@@ -401,7 +397,6 @@ private fun HostHeaderCard(
                 onClick = onOpenWork,
             )
         } else {
-            // Keep an unavailable account in the same panel as the action.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -445,9 +440,6 @@ private fun HostHeaderCard(
     }
 }
 
-/// A caption-sized accent link with its glyph, the reading of a tinted iOS
-/// text button. The glyph and the word stay small, the target around them
-/// does not.
 @Composable
 private fun TextLink(label: String, icon: ActionIcon, onClick: () -> Unit) {
     val colors = LocalTsColors.current
@@ -560,8 +552,6 @@ private fun IdentityCard(
     }
 }
 
-/// A label and its value, stacked so a long value truncates in the middle
-/// rather than pushing the label off. Device ids are long enough.
 @Composable
 private fun DetailLine(label: String, value: String, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
@@ -636,8 +626,6 @@ private fun DeviceActionRow(title: String, subtitle: String, icon: ActionIcon, o
     }
 }
 
-/// The glyph on its tinted tile, port of `ActionSeat`: accent at 12%,
-/// cornered at 28%, the glyph at 44% in the accent.
 @Composable
 private fun ActionSeat(icon: ActionIcon, size: Int = 34) {
     val colors = LocalTsColors.current
@@ -737,8 +725,6 @@ fun DevicesHeader(machineCount: Int, machineLimit: Int?, canRemote: Boolean) {
     }
 }
 
-/// Plan fill as a tint: the accent until the account is nearly full,
-/// warning past four fifths, danger at the limit.
 @Composable
 private fun capacityTint(used: Int, limit: Int?): Color {
     val colors = LocalTsColors.current
@@ -786,9 +772,6 @@ fun HostStatsBar(model: AppViewModel, peer: String) {
     }
 }
 
-/// The readings nested inside the host header: the same cells on the same
-/// panel the action rows sit on, so the rows and the readings above them
-/// are one family.
 @Composable
 private fun HostStatsPanel(stats: JsonObject?, failed: Boolean, route: String?) {
     val colors = LocalTsColors.current
@@ -1034,8 +1017,6 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
     }
 }
 
-/// What the software card is doing, rather than several booleans that can
-/// disagree.
 private sealed interface UpdatePhase {
     data object Checking : UpdatePhase
     data object Ready : UpdatePhase
@@ -1060,8 +1041,6 @@ private fun UpdateNote(text: String, tone: UpdateTone) {
     )
 }
 
-/// Counted rather than "some work": a person deciding whether to end their
-/// own sessions wants the number.
 private fun updateWorkPhrase(count: Int): String =
     if (count == 1) L10n.text("android.devicedetail.one_thing_is.cda2ad7f") else L10n.text("android.devicedetail.0_things_are.ce038154", "${count}")
 
@@ -1091,7 +1070,6 @@ private fun updateInstalledWaitingSentence(applied: JsonObject): String {
 private fun UpdateReadyBody(state: JsonObject) {
     val colors = LocalTsColors.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // Two versions on one line, because the pair is the fact.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),

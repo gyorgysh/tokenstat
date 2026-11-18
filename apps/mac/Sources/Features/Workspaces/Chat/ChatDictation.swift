@@ -65,7 +65,6 @@ final class ChatDictation {
 
     var isActive: Bool { phase != .idle }
 
-    /// The language dictation will listen for.
     var locale: Locale { Self.resolve(chosenLocale) }
 
     /// Switching language mid-sentence keeps what was said and listens on in
@@ -140,7 +139,6 @@ final class ChatDictation {
         tearDown()
     }
 
-    /// Stop and put the draft back the way it was before dictation started.
     func cancel() {
         if let text, read() == text.expected { write(text.original) }
         stop()

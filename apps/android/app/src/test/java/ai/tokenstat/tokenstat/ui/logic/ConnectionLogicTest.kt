@@ -122,7 +122,6 @@ class ConnectionLogicTest {
         assertFalse(tracker.offline)
         tracker.note(NetworkPlane.PEER, "studio", NetworkFailureKind.OFFLINE, now)
         assertTrue(tracker.offline)
-        // A path that came back clears evidence about a network that is gone.
         tracker.setPath(PathStatus.ONLINE)
         assertFalse(tracker.offline)
     }

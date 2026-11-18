@@ -58,7 +58,6 @@ struct ClientOnboardingArt: View {
     }
 }
 
-// MARK: - What tokenstat is
 
 private struct IntroArt: View {
     var reduceMotion: Bool
@@ -136,7 +135,6 @@ private struct AgentsArt: View {
     }
 }
 
-// MARK: - Your AI Heatmap
 
 private struct HeatmapArt: View {
     var reduceMotion: Bool
@@ -186,7 +184,6 @@ private struct HeatmapArt: View {
     }
 }
 
-// MARK: - All your devices
 
 private struct DevicesArt: View {
     var reduceMotion: Bool
@@ -228,7 +225,6 @@ private struct DevicesArt: View {
     }
 }
 
-// MARK: - Where it went
 
 private struct SpendArt: View {
     var reduceMotion: Bool
@@ -260,7 +256,6 @@ private struct SpendArt: View {
     }
 }
 
-// MARK: - What is left
 
 private struct RemainingArt: View {
     var reduceMotion: Bool
@@ -300,7 +295,6 @@ private struct RemainingArt: View {
     }
 }
 
-// MARK: - Workspaces
 
 private struct WorkspacesArt: View {
     var reduceMotion: Bool
@@ -342,7 +336,6 @@ private struct WorkspacesArt: View {
     }
 }
 
-// MARK: - Sessions
 
 private struct SessionsArt: View {
     var reduceMotion: Bool
@@ -408,7 +401,6 @@ private struct SessionsArt: View {
     }
 }
 
-// MARK: - On the go
 
 private struct OnTheGoArt: View {
     var reduceMotion: Bool
@@ -452,7 +444,6 @@ private struct OnTheGoArt: View {
     }
 }
 
-// MARK: - We never see your files
 
 private struct PrivacyArt: View {
     var reduceMotion: Bool
@@ -486,7 +477,6 @@ private struct PrivacyArt: View {
     }
 }
 
-// MARK: - You are in control
 
 private struct ControlArt: View {
     var reduceMotion: Bool

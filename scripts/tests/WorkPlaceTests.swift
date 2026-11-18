@@ -59,7 +59,6 @@ import Foundation
         assert(where_(remote, scope: alice, among: ["remote:studio:pocket"]) == nil)
         assert(where_(nil, scope: alice) == nil)
 
-        // Half a record is not a place.
         assert(WorkPlace.workspace(folder(alice, host: "", id: "x"), section: "chat") == nil)
         assert(WorkPlace.workspace(folder(alice, host: thisMac, id: "x"), section: "") == nil)
         assert(!WorkPlace(globalSection: "home", folder: folder(alice, host: thisMac, id: "x"),

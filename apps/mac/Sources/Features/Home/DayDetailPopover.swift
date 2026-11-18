@@ -16,7 +16,6 @@ struct DayDetailPopover: View {
     var isLoading: Bool
     /// The hovered cell's frame in `HeatmapView.coordinateSpace`.
     var anchor: HoveredCellFrame?
-    /// The window's content size, to keep the card inside it.
     var windowSize: CGSize
 
     private let margin: CGFloat = 8
@@ -72,8 +71,8 @@ struct DayDetailPopover: View {
         // beyond the margin, not the margin itself. Treating the margin as the
         // centre is what made the card straddle the cell.
         let candidate = preferredLeft
-            ? anchor.frame.minX - margin - width / 2   // card sits to the left
-            : anchor.frame.maxX + margin + width / 2   // card sits to the right
+            ? anchor.frame.minX - margin - width / 2
+            : anchor.frame.maxX + margin + width / 2
         let flipped = preferredLeft
             ? anchor.frame.maxX + margin + width / 2
             : anchor.frame.minX - margin - width / 2
@@ -103,7 +102,6 @@ struct DayDetailPopover: View {
         return min(max(desired, minimum), maximum)
     }
 
-    // MARK: - Card
 
     private func card(_ detail: DayDetail) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -182,8 +180,6 @@ struct DayDetailPopover: View {
 
     private static let rowsMaxHeight: CGFloat = 150
 
-    /// The input/output/cache split, as a bar and a key, exactly like the
-    /// profile page's day hover.
     private func split(_ detail: DayDetail) -> some View {
         let total = detail.rows.reduce(
             into: (fresh: UInt64(0), cacheRead: UInt64(0), cacheWrite: UInt64(0), output: UInt64(0))

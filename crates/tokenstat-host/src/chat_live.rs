@@ -384,7 +384,6 @@ struct Protocol {
 struct Pending {
     path: PathBuf,
     steer: bool,
-    // The positive mailbox response has been posted.
     accepted: bool,
     // All input bytes and the flush completed, even if the echo is pending.
     written: bool,
@@ -403,8 +402,6 @@ struct Pending {
 struct GoalContinuation {
     active: bool,
     held: Option<(String, Value, Instant)>,
-    /// Set once the run has settled, so a replayed completion is not held
-    /// a second time.
     settled: bool,
 }
 
@@ -434,8 +431,6 @@ impl GoalContinuation {
         self.held = None;
     }
 
-    /// The held turn and its completion, once the goal is no longer active or
-    /// the wait for another turn has run out.
     fn settled(&mut self, now: Instant) -> Option<(String, Value)> {
         let (_, _, until) = self.held.as_ref()?;
         if self.active && now < *until {
@@ -1222,7 +1217,6 @@ pub fn run(path: &Path) -> Result<(), String> {
                             .any(|pending| pending.steer && pending.written)
                             && protocol.deferred_result.is_none()
                         {
-                            // Restore this result if the write is refused or fails.
                             protocol.deferred_result = Some(message);
                         }
                         continue;
@@ -2134,7 +2128,6 @@ mod tests {
             })
         };
         started.recv_timeout(Duration::from_secs(5)).unwrap();
-        // A different command remains usable while this probe is in flight.
         assert_eq!(
             cache.version("another", || Some([0, 160, 0])),
             Some([0, 160, 0])

@@ -20,10 +20,6 @@ struct SSHInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                // The one action this column is for, where a person can see
-                // it. Connecting used to live in the list's context menu and
-                // nowhere else, so the screen with the whole server on it had
-                // no way to reach the server.
                 if let host = selectedHost {
                     Button(L10n.text("common.connect"), .connect) { model.connectRequest = host }
                         .buttonStyle(AccentButtonStyle(small: true))

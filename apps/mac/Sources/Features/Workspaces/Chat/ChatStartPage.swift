@@ -117,7 +117,6 @@ struct ChatStartPage: View {
                 }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: showsStarters)
                 .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.1), value: needsRepository)
-                // Keep short screens still while allowing long content to scroll.
                 .scrollBounceBehavior(.basedOnSize)
             }
             .opacity(draft.isSubmitting ? 0 : 1)
@@ -204,9 +203,6 @@ struct ChatStartPage: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // The blocking choice, first. It used to sit under the agent and
-            // autonomy controls, smallest of the three, which put the one
-            // thing a send cannot happen without at the bottom of the card.
             HStack(spacing: 10) {
                 if let hostPicker { hostPicker }
                 if !requiresHostSelection { repositoryPicker.frame(maxWidth: .infinity, alignment: .leading) }
@@ -355,10 +351,6 @@ struct ChatStartPage: View {
         for case .attachment(let item) in drops { if let file = item.file { try? FileManager.default.removeItem(at: file) } }
     }
 
-    /// One idiom for every control in the card: the same chrome, font and
-    /// padding as the agent field and the mode pills beside it. It used to be
-    /// a taller menu in its own shape, which made three controls read as
-    /// three unrelated widgets.
     private var repositoryPicker: some View {
         Menu {
             if repositories.contains(where: { !$0.isRemote }) {

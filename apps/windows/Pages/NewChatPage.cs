@@ -102,8 +102,6 @@ internal sealed class NewChatPage : Page
         intro.Children.Add(_subtitle);
         content.Children.Add(intro);
 
-        // The blocking choice, first: the repository, styled like every other
-        // control in the card. Lit until it is made.
         _repositoryButton.MinHeight = 30; _repositoryButton.Padding = new Thickness(10, 5, 10, 5);
         _repositoryButton.CornerRadius = new CornerRadius(10); _repositoryButton.BorderThickness = new Thickness(1);
         _repositoryButton.Background = Theme.PanelBrush; _repositoryButton.HorizontalAlignment = HorizontalAlignment.Left;
@@ -128,8 +126,6 @@ internal sealed class NewChatPage : Page
         foreach (var key in new[] { "TextControlBackgroundFocused", "TextControlBackgroundPointerOver" }) _draft.Resources[key] = Theme.PanelBrush;
         _draft.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
 
-        // The utility row, as in a chat: attach and fast mode, the agent field
-        // with the setup control beside it, then Send.
         _attach = Buttons.ToolbarIcon(ActionIcon.Attach, L10n.Text("windows.chatpage.attach_a_file.21298c62"), async (_, _) => await AttachAsync());
         _attach.Foreground = Theme.AccentBrush; _attach.Width = _attach.Height = 28;
         AutomationProperties.SetAutomationId(_attach, "newChat.attach");
@@ -172,7 +168,6 @@ internal sealed class NewChatPage : Page
         StartCard(_card);
         content.Children.Add(_card);
 
-        // First run: nothing to talk about yet, so the page teaches the first step.
         _addButton = Buttons.Primary(Copy("add_repository"), ActionIcon.Create, async (_, _) => await AddAsync(), small: true);
         _addButton.HorizontalAlignment = HorizontalAlignment.Left;
         var firstStep = new Grid { ColumnSpacing = Theme.SpaceM, RowSpacing = Theme.SpaceM };
@@ -190,7 +185,6 @@ internal sealed class NewChatPage : Page
         StartCard(_onboarding);
         content.Children.Add(_onboarding);
 
-        // A few ways to begin. They go away the moment there is a draft.
         foreach (var (key, icon) in new[] { ("starter_tour", ActionIcon.Docs), ("starter_tests", ActionIcon.Run), ("starter_review", ActionIcon.Compare) })
             _starters.Children.Add(Starter(Copy(key), icon));
         _starters.Margin = new Thickness(0, -8, 0, 0);
@@ -228,7 +222,6 @@ internal sealed class NewChatPage : Page
         Unloaded += (_, _) => { RememberDraft(); _lifetime++; _stagingCancellation?.Cancel(); RemoteWorkspaces.Changed -= RepositoriesChanged; _catalogRevision++; if (!_handoff) _request++; };
     }
 
-    /// <summary>The Mac's chatStartCard: a quiet panel with a hairline, lifted off the page.</summary>
     private static void StartCard(Border card)
     {
         card.Background = Theme.PanelBrush; card.BorderBrush = Theme.BorderBrush; card.BorderThickness = new Thickness(1);
@@ -236,7 +229,6 @@ internal sealed class NewChatPage : Page
         card.Shadow = new ThemeShadow(); card.Translation = new System.Numerics.Vector3(0, 0, 16);
     }
 
-    /// <summary>Lighter than a secondary button: a suggestion, not an action the page asks for.</summary>
     private Button Starter(string text, ActionIcon icon)
     {
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -292,7 +284,6 @@ internal sealed class NewChatPage : Page
             var fresh = _repositories();
             if (!fresh.Select(item => item.Id).SequenceEqual(_list.Select(item => item.Id))) RefreshRepositories();
         }
-        // This computer first, then each remote computer under its name.
         foreach (var group in _list.GroupBy(item => (item.IsLocal, item.Machine)).OrderBy(group => group.Key.IsLocal ? 0 : 1))
         {
             menu.Items.Add(new MenuFlyoutItem { Text = group.Key.Machine, IsEnabled = false, FontSize = 11 });
@@ -345,7 +336,6 @@ internal sealed class NewChatPage : Page
         return id.Length == 0 ? null : _available.FirstOrDefault(backend => Format.Text(backend, "id") == id);
     }
 
-    /// <summary>The same agent field as a running chat, writing into this draft.</summary>
     private void RenderAgent()
     {
         var locked = _sending || _account != AppServices.AccountGeneration || _available.Length == 0;
@@ -359,7 +349,6 @@ internal sealed class NewChatPage : Page
                     var text = value?.ToString() ?? "";
                     if (key == "autonomy") { _autonomy = text; continue; }
                     _setup[key] = text;
-                    // A new agent starts from its own defaults.
                     if (key == "backend") { _setup["model"] = ""; _setup["effort"] = ""; }
                 }
                 NormalizeFastMode(); RememberDraft(); RefreshWorkingStyle(); RefreshFastMode(); RefreshActions();
@@ -375,7 +364,6 @@ internal sealed class NewChatPage : Page
         _notice.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    /// <summary>What Send says while it cannot be pressed, as on the Mac.</summary>
     private string? BlockReason()
     {
         if (_sending) return null;
@@ -494,7 +482,6 @@ internal sealed class NewChatPage : Page
         var enabled = !_sending && _account == AppServices.AccountGeneration;
         _workingStyle.Children.Add(Chrome.Segmented([("plan", L10n.Text("windows.chatpage.plan.fa8ed0bd")), ("execute", L10n.Text("windows.chatpage.execute.e3a67d95"))], _mode,
             value => { _mode = value; RememberDraft(); RefreshWorkingStyle(); return Task.CompletedTask; }, enabled: enabled));
-        // One option, same block, when the agent decides it.
         var bypassOnly = Format.Text(CurrentBackend(), "gateTier") == "bypassOnly";
         var choices = bypassOnly ? new[] { ("bypass", L10n.Text("windows.chatpage.don_t_ask.15dae980")) }
             : new[] { ("standard", L10n.Text("windows.chatpage.ask_first.4a9e8cf3")), ("bypass", L10n.Text("windows.chatpage.don_t_ask.15dae980")) };

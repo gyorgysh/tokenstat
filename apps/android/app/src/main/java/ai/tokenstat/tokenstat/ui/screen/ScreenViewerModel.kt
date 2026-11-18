@@ -41,7 +41,6 @@ import java.security.MessageDigest
 class ScreenViewerModel(
     private val app: AppViewModel,
     private val scope: CoroutineScope,
-    /// The clipboard on this device, when there is one to keep in step.
     private val clipboard: ScreenClipboard? = null,
     /// Where a session's viewer close runs. The composition scope is being
     /// cancelled when `release` runs from `onDispose`, which would drop the
@@ -165,7 +164,6 @@ class ScreenViewerModel(
         transferJob?.cancel()
         sessionJob?.cancel()
         sessionJob = null
-        // A new session starts with no input from the old one.
         synchronized(inputLock) { inputQueue.clear() }
         val id = viewerId
         viewerId = null
@@ -192,7 +190,6 @@ class ScreenViewerModel(
         synchronized(mediaLock) { decoder.release() }
     }
 
-    // The session.
 
     private suspend fun runSession(current: Int) {
         while (current == generation && !stopped) {
@@ -210,7 +207,6 @@ class ScreenViewerModel(
         }
     }
 
-    /// Whether the loop should dial again. Says why either way.
     private suspend fun retry(current: Int, reason: String, autoRequest: Boolean): Boolean {
         if (current != generation || stopped) return false
         if (actionable(reason)) {
@@ -427,7 +423,6 @@ class ScreenViewerModel(
             value.contains("no display") || value.contains("videotoolbox")
     }
 
-    // Input.
 
     /// Every input event, in the order it was made. Independent sends would
     /// let a move overtake the release that should have ended its drag.
@@ -585,7 +580,6 @@ class ScreenViewerModel(
         send(ScreenFrames.clipboard(text))
     }
 
-    // Settings on a live session.
 
     /// Turn control on or off, without stopping the picture where the host
     /// knows how.
@@ -658,7 +652,6 @@ class ScreenViewerModel(
         }
     }
 
-    // Access.
 
     /// Ask the computer itself, then nudge the owner's other devices.
     ///
@@ -719,7 +712,6 @@ class ScreenViewerModel(
         return answer["granted"]?.jsonPrimitive?.contentOrNull == "true"
     }
 
-    // File transfer.
 
     fun sendFile(file: ScreenFileSource) {
         if (transferJob != null || peer.isEmpty()) return

@@ -58,7 +58,6 @@ class TranscriptFollowTest {
         follow.note(atBottom = true, userScroll = false)
         assertTrue(follow.paused)
         assertFalse(follow.pinned)
-        // A scroll of one's own back onto the end clears it.
         follow.note(atBottom = true, userScroll = true)
         assertFalse(follow.paused)
         assertTrue(follow.pinned)
@@ -92,12 +91,9 @@ class TranscriptFollowTest {
 
     @Test
     fun `the pill seats match the Apple transcript`() {
-        // Scrolled away wins over everything: the way back first.
         assertEquals(FollowPill.JumpToLatest, pillFor(showJump = true, busy = true, paused = true))
-        // A live turn offers pause and resume.
         assertEquals(FollowPill.Following, pillFor(showJump = false, busy = true, paused = false))
         assertEquals(FollowPill.Follow, pillFor(showJump = false, busy = true, paused = true))
-        // Idle and pinned: nothing. A control nobody needs is clutter.
         assertNull(pillFor(showJump = false, busy = false, paused = false))
         assertNull(pillFor(showJump = false, busy = false, paused = true))
     }

@@ -27,7 +27,6 @@ struct HeatmapView: View {
     let calendar: ActivityCalendar
     /// Clicking a day pins it in the inspector.
     var onSelect: ((HeatCell) -> Void)?
-    /// The day currently pinned, so the grid can mark it.
     var selectedDate: String?
     /// The pointer moved over (or left) a day. The parent owns the detail
     /// fetch and the popover, so this only carries which cell it is.
@@ -50,11 +49,6 @@ struct HeatmapView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            // The cell size comes from the width available, so the grid always
-            // spans the card. It used to be a fixed 11 points inside a
-            // horizontal scroll view anchored trailing, which on a wide window
-            // drew a year of squares against the right edge and left half the
-            // card empty.
             HeatmapFittedLayout(heightForWidth: gridHeight(for:)) {
                 GeometryReader { proxy in
                     // Quantised before anything is derived from it. There are 371

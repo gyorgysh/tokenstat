@@ -1,18 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// The shape of a graph, without the canvas.
-///
-/// A workflow is the most visual object in the app and every screen except the
-/// editor used to print it as a sentence: `Start → Refine Claude haiku low →
-/// Plan Grok grok-4.6 high → Done`. Nobody compares two of those at a glance.
-/// This lays the same nodes out in columns, one per layer, so a library row, a
-/// recipe chip and a live run all read as a picture you can tell apart from the
-/// one under it.
-///
-/// It never mutates the graph. `x`/`y` in the IR belong to the editor canvas,
-/// which is free to place nodes anywhere, so the strip re-derives its own
-/// layering from the edges instead of trusting coordinates that may all be zero.
 enum WorkflowLayering {
     /// Longest-path layers for acyclic edges. Wait for every predecessor
     /// before visiting a join, so its successors inherit its final depth.

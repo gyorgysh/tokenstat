@@ -2,7 +2,6 @@
 import Foundation
 import CoreFoundation
 
-/// How the Repositories sidebar lists work.
 enum SidebarProjectsDisplay: String, CaseIterable, Sendable {
     /// Folders first, chats nested under each one.
     case byRepository
@@ -10,13 +9,11 @@ enum SidebarProjectsDisplay: String, CaseIterable, Sendable {
     case byChat
 }
 
-/// Order inside the Repositories sidebar.
 enum SidebarProjectsSort: String, CaseIterable, Sendable {
     /// The person's drag order (folder mode only).
     case manual
     /// A–Z by folder or chat title.
     case name
-    /// Latest activity first.
     case recent
 }
 
@@ -73,7 +70,6 @@ final class SidebarPreferences {
     private static let displayKey = "shell.sidebar.projectsDisplay"
     private static let sortKey = "shell.sidebar.projectsSort"
 
-    /// Folder tree or a flat chat list. Device-local, additive.
     var projectsDisplay: SidebarProjectsDisplay {
         get {
             guard let raw = defaults.string(forKey: Self.displayKey),
@@ -85,7 +81,6 @@ final class SidebarPreferences {
         set { defaults.set(newValue.rawValue, forKey: Self.displayKey) }
     }
 
-    /// Manual drag order, name, or recent activity.
     var projectsSort: SidebarProjectsSort {
         get {
             guard let raw = defaults.string(forKey: Self.sortKey),

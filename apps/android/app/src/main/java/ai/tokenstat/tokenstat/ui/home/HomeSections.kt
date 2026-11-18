@@ -1128,8 +1128,6 @@ fun HomeLayoutPreview(sections: List<HomeSection>) {
             .padding(Space.s),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // The greeting, which is not a card and cannot be moved. Drawn so
-        // the bars below read as a screen rather than a stack.
         Box(
             Modifier.width(84.dp).height(8.dp)
                 .clip(CircleShape)

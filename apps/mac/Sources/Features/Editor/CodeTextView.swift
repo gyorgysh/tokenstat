@@ -334,7 +334,6 @@ struct CodeTextView: NSViewRepresentable {
             storage.endEditing()
         }
 
-        /// Lines counted last time, and the length they were counted at.
         private var lineCount = 1
         private var countedLength = -1
         /// Set by `textDidChange`, so an edit that happens to leave the length
@@ -575,7 +574,6 @@ struct CodeTextView: NSViewRepresentable {
             )
         }
 
-        /// Indent or outdent the selected lines.
         func shiftIndent(_ direction: Int) {
             guard let textView else { return }
             let string = textView.string as NSString

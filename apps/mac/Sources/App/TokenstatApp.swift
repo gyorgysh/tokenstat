@@ -97,32 +97,23 @@ enum BridgeLaunch {
 
 extension Notification.Name {
     #if os(macOS)
-    /// Posted by the File menu, acted on by the window that owns the folders.
     static let addWorkspaceRequested = Notification.Name("ai.tokenstat.addWorkspaceRequested")
-    /// View menu / ⌘B: toggle the leading sidebar. RootView acts.
     static let toggleLeftSidebar = Notification.Name("ai.tokenstat.toggleLeftSidebar")
-    /// The Edit menu's Search Work. The sheet belongs to the window.
     static let searchWorkRequested = Notification.Name("ai.tokenstat.searchWorkRequested")
     /// Previous or next conversation from the View menu. The object is -1 or 1.
     static let chatStepRequested = Notification.Name("ai.tokenstat.chatStepRequested")
-    /// View menu / ⌥⌘E: open every step group in the chat in front, or
-    /// fold them all again if any is open.
     static let chatStepGroupsToggleRequested = Notification.Name("ai.tokenstat.chatStepGroupsToggleRequested")
-    /// View menu / ⌥⌘B: toggle the trailing inspector. RootView acts.
     static let toggleRightSidebar = Notification.Name("ai.tokenstat.toggleRightSidebar")
     #endif
     /// The local archive gained or changed events (scan, remote fetch). Home
     /// re-reads its heatmap without a full window restart.
     static let archiveDidChange = Notification.Name("ai.tokenstat.archiveDidChange")
-    /// A local host call is retrying after the daemon went quiet or disappeared.
     static let hostRecoveryStarted = Notification.Name("ai.tokenstat.hostRecoveryStarted")
-    /// A local host call answered after a recovery attempt.
     static let hostRecoveryFinished = Notification.Name("ai.tokenstat.hostRecoveryFinished")
     /// The host stayed silent past the call's patience. Not the same as being
     /// gone: it is usually busy, or the tunnel is mid-reconnect after a path
     /// change.
     static let hostBecameSilent = Notification.Name("ai.tokenstat.hostBecameSilent")
-    /// The host was unreachable and the repair did not bring it back.
     static let hostBecameUnreachable = Notification.Name("ai.tokenstat.hostBecameUnreachable")
 }
 
@@ -372,7 +363,6 @@ struct TokenstatApp: App {
     }
 
     #if os(macOS)
-    /// Scene id shared with the About menu item.
     static let aboutWindowID = "about"
 
     /// The window's opening size, clamped to the display it opens on.

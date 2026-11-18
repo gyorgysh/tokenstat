@@ -76,7 +76,6 @@ internal fun ReviewFileBrowser(
                     }
                 }
             }
-            // A one point rule with a wider grab area, so the list can be resized.
             Box(
                 Modifier.width(9.dp).fillMaxHeight().draggable(
                     orientation = Orientation.Horizontal,

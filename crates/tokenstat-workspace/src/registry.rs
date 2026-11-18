@@ -319,8 +319,6 @@ mod tests {
 
     #[test]
     fn a_folder_reached_two_ways_is_one_workspace() {
-        // `/tmp/x/../x` and `/tmp/x` are the same folder. Two rows that
-        // disagree about the same directory would be worse than useless.
         let dir = temp_dir("canon");
         let indirect = dir.join("..").join(dir.file_name().unwrap());
         let mut r = Registry::default();
@@ -351,7 +349,6 @@ mod tests {
 
     #[test]
     fn a_missing_folder_is_kept_and_marked() {
-        // An unplugged disk is not a decision to forget the workspace.
         let dir = temp_dir("missing");
         let mut r = Registry::default();
         let ws = r.add(&dir, 1).unwrap();
@@ -384,8 +381,6 @@ mod tests {
                 .is_empty()
         );
 
-        // Silently starting over would drop the user's folders without saying
-        // so, which is worse than refusing to load.
         let bad = dir.join("bad.json");
         std::fs::write(&bad, b"{ not json").unwrap();
         assert!(Registry::load_from(&bad).is_err());
@@ -449,8 +444,6 @@ mod tests {
         assert_eq!(r.workspaces.len(), 1);
         assert_eq!(again.id, ws.id);
         assert_eq!(again.path, ws.path);
-        // An ordinary add of the same folder must not insert a second row
-        // beside the plain one.
         r.add(&dir, 3).unwrap();
         assert_eq!(r.workspaces.len(), 1);
     }

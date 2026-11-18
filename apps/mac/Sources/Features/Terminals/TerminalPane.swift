@@ -45,19 +45,14 @@ struct TerminalPane: View {
         workspaces.front(in: folder.id)
     }
 
-    /// The strip beside the sessions, in the order the tabs were opened.
     private var tabs: [WorkspaceSurface] {
         workspaces.tabs(in: folder.id)
     }
 
-    /// True when the pane is showing a terminal rather than a document.
     private var showsTerminal: Bool { front == .sessions }
 
-    /// Which harnesses this Mac can launch. Shared, and resolved off the main
-    /// actor: see `LaunchCatalog` for the crash that reading it inline caused.
     private var launcher: LaunchCatalog { LaunchCatalog.shared }
 
-    /// The machine that owns this folder, when it is remote.
     private var peer: String? {
         let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
         return parts.count == 3 && parts[0] == "remote" ? parts[1] : nil
@@ -98,7 +93,6 @@ struct TerminalPane: View {
         launcherProfiles.filter { LaunchProfile.acceptsLocalModel($0.id) }
     }
 
-    /// Size of the terminal area, measured rather than assumed.
     @State private var paneSize: CGSize = .zero
 
     /// The grid a new session should start at.
@@ -353,7 +347,6 @@ struct TerminalPane: View {
         .clipped()
     }
 
-    /// Document / launcher layer above the terminal stack.
     @ViewBuilder
     private var coverFill: some View {
         // The launcher wins over every other surface when toggled on: that is
@@ -705,12 +698,6 @@ struct TerminalPane: View {
         front == .launcher || (sessions.isEmpty && front == .sessions)
     }
 
-    /// One chip, drawn from the surface it stands for.
-    ///
-    /// The strip used to build each kind of chip at its own call site with its
-    /// own selection rule, and the commit and the working tree both hardcoded
-    /// `isSelected: true`, so two tabs could look selected at once. Selection
-    /// is one comparison against one value now.
     @ViewBuilder
     private func chip(for tab: WorkspaceSurface) -> some View {
         let selected = front == tab
@@ -807,9 +794,6 @@ struct TerminalPane: View {
         let args = workspaces.bypassPermissions(for: folder.id)
             ? profile.args + profile.bypassArgs
             : profile.args
-        // The strip's own menu honours the model selection too. It used to
-        // ignore it, so the same harness started on a different model
-        // depending on which button opened it.
         let selection = LaunchProfile.acceptsLocalModel(profile.id)
             ? LocalModelSelection.stored(for: folder.id, in: workspaces)
             : nil
@@ -829,7 +813,6 @@ struct TerminalPane: View {
         }
     }
 
-    // MARK: - Missing folder
 
     private var missingFolder: some View {
         VStack(spacing: Theme.Space.m) {
@@ -844,19 +827,6 @@ struct TerminalPane: View {
     }
 }
 
-/// The close control on a tab.
-///
-/// Shown whenever the tab is selected or the pointer is over it, not only when
-/// selected: closing a background tab should not mean selecting it first.
-///
-/// It lives *inside* the tab's own chrome, which is what every tab in every
-/// browser does and what this did not. It used to be a 44pt square sibling of
-/// the tab, so the tab's rounded panel ended and then an unattached x floated
-/// after it, reading as its own control rather than as part of the tab. The
-/// target is 20pt now, still comfortably clickable, with its own hover circle
-/// so the affordance does not depend on the glyph alone.
-/// The small x on a tab. Shared with the SSH pane, which draws the same strip
-/// for the same reason and should not draw a second close button for it.
 struct TabCloseButton: View {
     let help: String
     let action: () -> Void
@@ -917,7 +887,6 @@ private struct LaunchChip: View {
     }
 }
 
-/// One session's tab: status dot, label, and a close button on the active one.
 private struct SessionChip: View {
     let session: WorkspaceTerminal
     let isSelected: Bool
@@ -993,10 +962,6 @@ private struct SessionChip: View {
 
 }
 
-/// An open file's tab, next to the session tabs.
-///
-/// A different icon from a session on purpose: these live in the same strip,
-/// and a terminal and a file are not the same kind of thing to close.
 private struct FileChip: View {
     /// The full thing, for the tooltip: a path, or a commit's subject.
     let path: String
@@ -1057,12 +1022,6 @@ private struct FileChip: View {
     }
 }
 
-/// Full-pane starting state while a session has no process output yet.
-///
-/// Replaces the empty live terminal that used to sit there with a blinking
-/// caret for the whole of an agent boot (measured 3–6s for Claude Code under
-/// hostd). The host call itself is tens of milliseconds; this covers the
-/// process's own startup, not the bridge.
 private struct SessionStartingView: View {
     let command: String
 
@@ -1098,20 +1057,6 @@ private struct SessionStartingView: View {
     }
 }
 
-/// A thin line under the terminal for the one fact a dead terminal should
-/// never hide: that its process ended.
-///
-/// It stands **under** the emulator, which changes the emulator's height when
-/// it appears. That is only safe here because the process is already gone: a
-/// resize raises SIGWINCH, and a live full screen program answers one by
-/// repainting from scratch. The two live notices used to sit on this line and
-/// caused exactly that, so they float over the terminal now
-/// (`TerminalNotices`).
-///
-/// Separate from the terminal view, which is owned by `TerminalStack` in AppKit
-/// so that switching sessions never relayouts it. Starting state lives in the
-/// pane above, not here: a second "Starting…" strip under an empty terminal is
-/// what made the wait feel like a stuck UI.
 struct TerminalHost: View {
     let session: TerminalSession
 
@@ -1161,8 +1106,6 @@ private struct TerminalNotices: View {
     }
 }
 
-/// One session's live notice. Absent when there is nothing to say, which is
-/// almost always.
 private struct TerminalNotice: View {
     let session: TerminalSession
 
@@ -1305,7 +1248,6 @@ private struct LaunchSurface: View {
         profiles.filter { $0.installed && !isOffGrid($0) }
     }
 
-    /// Not installed, or installed and hidden. Same catalog order.
     private var extraProfiles: [LaunchProfile] {
         profiles.filter { !$0.installed || isOffGrid($0) }
     }
@@ -1560,7 +1502,6 @@ private struct LaunchSurface: View {
         .accessibilityLabel(conversationCount == 0 ? L10n.text("apple.terminalpane.chat.460b3a7d") : L10n.text("apple.terminalpane.chat_0_conversations.bd13c4c3", "\(conversationCount)"))
     }
 
-    /// Where the launch settings went, in one line.
     private var settingsHint: some View {
         Label(
             modelProfiles.isEmpty
@@ -1597,8 +1538,6 @@ private struct LaunchSurface: View {
         )
     }
 
-    /// One grid tile: a launch for something installed, an install for
-    /// something that has a bundled installer, a muted card for the rest.
     @ViewBuilder
     private func tile(for profile: LaunchProfile) -> some View {
         if profile.installed, !isOffGrid(profile) {
@@ -1612,8 +1551,6 @@ private struct LaunchSurface: View {
         }
     }
 
-    /// Same dimmed dashed panel as an uninstalled tile. Opens the rest of
-    /// the catalog, or closes it.
     private var addTile: some View {
         Button {
             showingCatalog.toggle()
@@ -1644,8 +1581,6 @@ private struct LaunchSurface: View {
         .accessibilityLabel(showingCatalog ? L10n.text("apple.terminalpane.hide_extra_tools.6063173b") : L10n.text("apple.terminalpane.show_more_tools.fd6e5f9f"))
     }
 
-    /// A muted tile that runs the tool's official installer, then flips to a
-    /// launch tile once the catalog re-resolves.
     private func installButton(_ profile: LaunchProfile) -> some View {
         LaunchInstallTile(
             profile: profile,
@@ -1654,7 +1589,6 @@ private struct LaunchSurface: View {
         )
     }
 
-    /// An installed tool the user hid. Putting it back does not run the installer.
     private func showAgainButton(_ profile: LaunchProfile) -> some View {
         LaunchInstallTile(
             profile: profile,

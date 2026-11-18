@@ -97,7 +97,6 @@ fun CloneRepositoryScreen(
     val ready = url.trim().isNotEmpty() && parent != null
 
     BackHandler { onClose() }
-    // Start at the machine's own home, so the common case needs no picking.
     LaunchedEffect(peer) {
         runCatching { model.workspaceSection(peer, "fs.browse", buildJsonObject {}).jsonObject }
             .onSuccess { answer ->

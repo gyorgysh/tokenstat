@@ -66,7 +66,6 @@ struct SyncCard: View {
         }
     }
 
-    /// A non-interactive confirmation row, matching `UpdateCard.status`.
     private func status(
         title: String,
         subtitle: String,

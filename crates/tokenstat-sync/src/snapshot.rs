@@ -291,8 +291,6 @@ mod tests {
         store(&path, "{\"v\":1}", Some("\"abc\"".into())).unwrap();
         assert_eq!(read_etag(&path, &etag_path(&path)), Some("\"abc\"".into()));
 
-        // Rewriting the snapshot invalidates the stored hash, so the stale
-        // sidecar is ignored rather than trusted as a 304 signal.
         store(&path, "{\"v\":2}", None).unwrap();
         assert_eq!(read_etag(&path, &etag_path(&path)), None);
     }

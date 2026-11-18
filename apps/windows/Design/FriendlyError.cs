@@ -344,8 +344,6 @@ internal static class FriendlyError
                 Symbol: Symbol.Globe);
         }
 
-        // Nothing matched. Say that something failed and show the words the
-        // machine used, rather than inventing a cause.
         return new FriendlyErrorInfo(
             L10n.Text("windows.friendlyerror.that_did_not_work.93a20328"),
             string.IsNullOrEmpty(raw) ? L10n.Text("windows.friendlyerror.something_went_wrong_and_nothing_said_what.8776f982") : raw,

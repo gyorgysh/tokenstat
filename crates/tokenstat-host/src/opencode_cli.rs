@@ -616,7 +616,6 @@ mod tests {
             "echo 'Model to use in the format provider/model#variant'",
         );
         assert_eq!(generation(&binary), Generation::V2);
-        // A wrapper is executed as supplied; no binary is renamed or replaced.
         assert!(
             std::fs::read_to_string(binary)
                 .unwrap()
@@ -722,7 +721,6 @@ mod tests {
                 .trim()
                 .parse()
                 .unwrap();
-            // The dedicated process group was killed, including the sleeper.
             let deadline = Instant::now() + Duration::from_secs(2);
             loop {
                 let alive = unsafe { libc::kill(-pid, 0) } == 0;

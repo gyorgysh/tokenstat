@@ -609,7 +609,6 @@ private fun LaneRow(lane: JsonObject, all: List<JsonObject>, busy: Boolean, onLa
             else -> L10n.text("common.teams.lane_kept", asker, files.size.toString())
         }
         Text(detail, color = colors.textSecondary)
-        // Compared across every computer's lanes, as on the Mac.
         val overlapping = all.filter { other ->
             other.str("branch") != lane.str("branch") &&
                 (other["files"] as? JsonArray)?.any { (it as? JsonPrimitive)?.contentOrNull in files } == true

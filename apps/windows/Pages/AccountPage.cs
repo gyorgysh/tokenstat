@@ -179,9 +179,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// Who you are, who can reach you, and the legal end of the account.
-    /// </summary>
     private async Task RenderAccountPaneAsync(StackPanel content)
     {
         var account = _account;
@@ -249,9 +246,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         content.Children.Add(await PlanLimitsCardAsync());
     }
 
-    /// <summary>
-    /// Settings that live on this computer, signed in or not.
-    /// </summary>
     private async Task RenderThisPcPaneAsync(StackPanel content)
     {
         content.Children.Add(await HostCardAsync());
@@ -261,10 +255,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         content.Children.Add(UpdateCard());
     }
 
-    /// <summary>
-    /// Everything works without an account. Signing in only adds the option
-    /// to publish: a profile page, and usage from all machines in one place.
-    /// </summary>
     private UIElement SignedOutCard()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -295,7 +285,6 @@ internal sealed class AccountPage : Page, IToolbarItems
             L10n.Text("windows.accountpage.sign_in_to_see_how_much_of_each_tool_s_sub.2b26b3eb"));
     }
 
-    /// <summary>Who you are, at the size a profile deserves.</summary>
     private static UIElement IdentityCard(JsonNode account)
     {
         var handle = Format.Text(account, "handle", "");
@@ -334,7 +323,6 @@ internal sealed class AccountPage : Page, IToolbarItems
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        // The crown, star or shield the profile page uses. Free has no mark.
         if (Marks.TierMark(tier, 17) is { } mark)
         {
             mark.VerticalAlignment = VerticalAlignment.Center;
@@ -398,10 +386,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         };
     }
 
-    /// <summary>
-    /// Sync is a desktop act: it uploads this PC's archive. Last sync, a
-    /// button, and the way out.
-    /// </summary>
     private UIElement SyncCard(JsonNode account)
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -563,8 +547,6 @@ internal sealed class AccountPage : Page, IToolbarItems
             });
         }
         left.Children.Add(head);
-        // Only when the machine has a name, so the id is not printed twice on
-        // a row that is already showing it as its title.
         if (!string.IsNullOrEmpty(label) && !string.IsNullOrEmpty(id))
         {
             left.Children.Add(new TextBlock
@@ -636,7 +618,6 @@ internal sealed class AccountPage : Page, IToolbarItems
                 }
                 catch
                 {
-                    // A non-string entry is not a source.
                 }
             }
         }
@@ -703,7 +684,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         catch
         {
-            // A host without the feed simply has no switch to show.
             return panel;
         }
         panel.Children.Add(Chrome.SettingSwitch(L10n.Text("windows.accountpage.claude_live.title"), Format.Flag(feed, "enabled"), async on =>
@@ -840,10 +820,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// Whether this PC stays a host after the app quits. The stored policy the
-    /// host helper honours.
-    /// </summary>
     private async Task<UIElement> HostCardAsync()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -854,7 +830,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         catch
         {
-            // The card below says the helper has not answered.
         }
         if (policy is null)
         {
@@ -1256,10 +1231,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// The claim, stated where someone is deciding whether to connect an
-    /// account. This is the moment it matters.
-    /// </summary>
     private static UIElement PrivacyNote()
     {
         return Chrome.Card(L10n.Text("windows.accountpage.what_syncing_sends.6540deb3"), new TextBlock

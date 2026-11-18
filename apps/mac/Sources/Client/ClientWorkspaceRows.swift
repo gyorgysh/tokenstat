@@ -74,7 +74,6 @@ struct ClientStatPanels: View {
     }
 }
 
-/// Shared leading tile size for folder and session cards.
 private enum ClientRowMark {
     static let size: CGFloat = 26
 }

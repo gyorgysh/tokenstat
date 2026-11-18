@@ -86,10 +86,6 @@ internal static class DetailBar
         return bar;
     }
 
-    /// <summary>
-    /// Shared with the Mac DetailChromeBottomSpacing: the bottom inset that
-    /// puts adjacent headers on the same optical baseline.
-    /// </summary>
     private const double BottomSpacing = 3;
 
     /// <summary>

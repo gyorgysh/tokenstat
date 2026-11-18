@@ -266,12 +266,6 @@ enum WorkflowRecipes {
     }
 }
 
-/// Example pipelines. Tapping one fills the Design field.
-///
-/// These used to be their own arrow sentence, `Start → Refine Claude haiku low
-/// → Plan Grok grok-4.6 high → …`, which is the shape of the pipeline written
-/// out as text you have to parse. Two of them side by side were a wall. The
-/// name says what it is for and the strip says what it does.
 struct WorkflowRecipeChips: View {
     let recipes: [WorkflowRecipe]
     var onPick: (WorkflowRecipe) -> Void

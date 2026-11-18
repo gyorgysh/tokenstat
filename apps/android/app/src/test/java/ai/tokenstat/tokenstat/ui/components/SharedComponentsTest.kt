@@ -133,10 +133,8 @@ class SharedComponentsTest {
         for (day in 0 until 7) {
             assertEquals(day < 5, scheduleFires("weekdays", 0, 0, day))
         }
-        // Weekly prefers the bitset when it carries days.
         assertEquals(true, scheduleFires("weekly", 0b00011111, 6, 0))
         assertEquals(false, scheduleFires("weekly", 0b00011111, 6, 5))
-        // Zero bitset falls back to the single weekday.
         assertEquals(true, scheduleFires("weekly", 0, 2, 2))
         assertEquals(false, scheduleFires("weekly", 0, 2, 3))
         assertEquals(true, scheduleFires("custom", 0b00001010, 0, 1))

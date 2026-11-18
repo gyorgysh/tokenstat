@@ -42,8 +42,6 @@ final class TerminalDropView: TerminalSelectionView {
     /// other way: the session holds the emulator for its whole life.
     weak var session: TerminalSession?
 
-    /// Border shown while a drag is over the pane. A drop target that gives no
-    /// feedback reads as a broken one.
     private var highlight: NSView?
 
     /// One queue for promise fetches, created once rather than per drop.
@@ -239,8 +237,6 @@ final class TerminalDropView: TerminalSelectionView {
 
     // MARK: - Typing the result
 
-    /// Type paths at the cursor, quoted for a shell, separated and followed by
-    /// a space so the next word does not run into the last path.
     private func type(paths: [String]) {
         guard let session, !paths.isEmpty else { return }
         session.paste(text: paths.map(Self.shellQuoted).joined(separator: " ") + " ")
@@ -375,7 +371,6 @@ final class TerminalDropView: TerminalSelectionView {
         return url
     }
 
-    // MARK: - Highlight
 
     private func showHighlight() {
         guard highlight == nil else { return }

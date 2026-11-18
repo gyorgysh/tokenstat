@@ -63,15 +63,12 @@ enum WorkbenchShortcut: String, CaseIterable {
         }
     }
 
-    /// True when this entry is bare Return, which the map forbids.
     var isBareReturn: Bool { key == "\r" || key == "\n" }
 }
 
-/// When the editor shortcuts may fire.
 struct EditorShortcutState: Equatable {
     var dirty = false
     var saving = false
-    /// A newer host copy is waiting for an explicit choice.
     var conflict = false
     var canNavigate = false
     var findShowing = false
@@ -79,25 +76,21 @@ struct EditorShortcutState: Equatable {
     var terminalOpen = false
 }
 
-/// When the focused job Run shortcut may fire.
 struct JobRunShortcutState: Equatable {
     var working = false
     var hasSelection = false
     var hasLiveRun = false
     /// An unconfirmed create/run is waiting for Check/Retry, not a new Run.
     var hasPendingLaunch = false
-    /// An editor, history sheet or confirm is already on screen.
     var modalPresented = false
     var terminalOpen = false
 }
 
-/// When the contextual New shortcut may fire.
 struct NewShortcutState: Equatable {
     var modalPresented = false
     var terminalOpen = false
 }
 
-/// When the inspector toggle may fire.
 struct InspectorShortcutState: Equatable {
     /// False where there is no inspector to show (no folder, compact phone
     /// without a pushed surface, unknown workspace).

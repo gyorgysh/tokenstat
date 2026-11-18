@@ -141,7 +141,6 @@ class SharedPrefsLaunchChoice(context: Context) : LaunchChoiceStore {
     }
 }
 
-/// What a preview or a test uses.
 class InMemoryLaunchChoice(private var choice: LaunchChoice? = null) : LaunchChoiceStore {
     override fun read(): LaunchChoice? = choice
     override fun write(choice: LaunchChoice) {

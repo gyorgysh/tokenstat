@@ -259,7 +259,6 @@ class ScreenTouchView(context: Context) : View(context) {
         }
     }
 
-    // The keyboard.
 
     override fun onCheckIsTextEditor(): Boolean = inputEnabled
 

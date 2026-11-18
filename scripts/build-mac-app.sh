@@ -27,9 +27,6 @@
 # because it happened to be on disk is a slice that can be older than the
 # source it claims to be, and that one would ship to TestFlight.
 #
-# The version is written into CFBundleShortVersionString, so a release tag names
-# the build the user sees in About rather than whatever was last committed to
-# project.yml.
 #
 # Needs xcodegen (brew install xcodegen). The Xcode project is generated, not
 # committed: see apps/mac/project.yml.
@@ -54,15 +51,11 @@ if ! command -v xcodegen > /dev/null; then
     exit 1
 fi
 
-FFI_PLATFORMS="${TOKENSTAT_FFI_PLATFORMS:-macos}"
-echo "Building TokenstatFFI (universal: $FFI_PLATFORMS)"
-# Deliberately unquoted: this is a list of platform words.
-# shellcheck disable=SC2086
-"$ROOT/scripts/build-ffi-xcframework.sh" $FFI_PLATFORMS
+IFS=$' \t\n' read -r -d '' -a ffi_platforms <<< "${TOKENSTAT_FFI_PLATFORMS:-macos}" || true
+echo "Building TokenstatFFI (universal: ${TOKENSTAT_FFI_PLATFORMS:-macos})"
+"$ROOT/scripts/build-ffi-xcframework.sh" ${ffi_platforms[@]+"${ffi_platforms[@]}"}
 
 echo "Generating the Xcode project"
-# The chat start page's surface is a Metal shader, so the bundle needs a
-# compiled metallib and the build needs the Metal compiler.
 "$ROOT/scripts/ensure-metal-toolchain.sh"
 
 (cd "$ROOT/apps/mac" && xcodegen > /dev/null)
@@ -81,8 +74,6 @@ case "$SWIFT_MODE" in
     *) echo "invalid TOKENSTAT_SWIFT_COMPILATION_MODE: $SWIFT_MODE" >&2; exit 2 ;;
 esac
 
-# Build only the architectures the Rust library actually has a slice for.
-#
 # A release must be universal, and CI installs both targets so it is. A checkout
 # with only the host target installed would otherwise fail at the link step for
 # the architecture it never built, which is a confusing way to learn that
@@ -183,8 +174,6 @@ rm -rf "${OUT:?}/Tokenstat.app"
 # flattens both.
 ditto "$APP" "$OUT/Tokenstat.app"
 
-# Sign with Developer ID when this machine has the identity.
-#
 # Not cosmetic. macOS keys a TCC grant to the code signature, and the ad-hoc
 # signature this produces otherwise changes on every build, so every rebuild
 # silently loses Screen Recording and Accessibility: the app looks the same and

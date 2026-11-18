@@ -56,8 +56,6 @@ internal static class ServerLauncher
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 row.Children.Add(SshHostPlatform.Row(SshHostPlatform.Label(host), content));
-                // What a click does, in words: back to the live shell, or the
-                // connection form.
                 var verb = Verb(connected ? L10n.Text("common.open") : L10n.Text("common.connect"),
                     connected ? ActionIcon.Run : ActionIcon.Next);
                 Grid.SetColumn(verb, 1);
@@ -89,7 +87,6 @@ internal static class ServerLauncher
         return body;
     }
 
-    /// <summary>A quiet accent link with its glyph, the Mac's plain caption button.</summary>
     private static Button Link(string title, ActionIcon icon)
     {
         var button = new Button
@@ -105,7 +102,6 @@ internal static class ServerLauncher
         return button;
     }
 
-    /// <summary>Glyph and caption in the accent, for what a row or link does.</summary>
     private static StackPanel Verb(string title, ActionIcon icon)
     {
         var glyph = icon.Icon();

@@ -111,12 +111,10 @@ class SshSessionsTest {
         assertNull(state.selected)
         state.adopt(entry("a"))
         assertEquals("a", state.selected?.id)
-        // Adopting the same id twice lists it once.
         state.adopt(entry("a"))
         assertEquals(1, state.sessions.value.size)
         state.dismiss()
         assertNull(state.selected)
-        // Dismiss keeps the shell: the entry stays for Open sessions.
         assertEquals(1, state.sessions.value.size)
         assertEquals(listOf("a"), state.sessionsFor("host_1").map { it.id })
         assertFalse(state.sessions.value.isEmpty())

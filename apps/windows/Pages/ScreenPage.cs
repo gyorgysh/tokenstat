@@ -715,7 +715,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         catch
         {
-            // A bad still must not kill the viewer.
         }
     }
 
@@ -759,7 +758,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         catch
         {
-            // Shutdown must not throw.
         }
         if (_closed)
         {
@@ -805,7 +803,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         catch
         {
-            // Leaving the page must not throw.
         }
     }
 
@@ -1035,7 +1032,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             }
             catch
             {
-                // Fall through to reopening below.
             }
         }
         await CloseViewerAsync();

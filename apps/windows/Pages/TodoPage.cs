@@ -1090,10 +1090,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         _detailHost.Children.Add(RunCard(card));
     }
 
-    /// <summary>
-    /// Copy the on-screen field values into the draft so a re-render keeps
-    /// the user's unsent edits. Called before any action that reloads.
-    /// </summary>
     private void SnapshotDraft()
     {
         if (_dTitle is null || _editorId != _selectedId)

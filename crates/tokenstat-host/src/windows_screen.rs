@@ -421,7 +421,6 @@ impl InputState {
             "scroll" => {
                 for (amount, flag) in [(event.dy, 0x0800), (event.dx, 0x1000)] {
                     if let Some(amount) = amount.filter(|n| n.is_finite()) {
-                        // Convert bounded pixel motion into proportional Windows wheel units.
                         unsafe {
                             ts_screen_mouse(
                                 0,

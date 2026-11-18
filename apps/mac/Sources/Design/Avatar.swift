@@ -295,9 +295,6 @@ struct Avatar: View {
         return raw
     }
 
-    /// The fetched picture when one is on hand: this view's own image first,
-    /// then the shared cache, read synchronously so the first frame already
-    /// has it.
     private var displayImage: Image? {
         guard let url = pictureURL else { return nil }
         if imageURL == url, let image { return image }
@@ -316,8 +313,6 @@ struct Avatar: View {
         )
     }
 
-    /// The signed-in account uses the same two-stop fill as the phone's
-    /// toolbar bubble. A per-person tint stays that person's colour.
     private var brandGradient: Bool { tint == Theme.accent }
 
     private var monogram: String {

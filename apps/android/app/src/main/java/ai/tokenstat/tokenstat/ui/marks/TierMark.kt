@@ -53,7 +53,6 @@ fun TierMark(tier: String, markSize: Int = 15) {
         fun pt(x: Float, y: Float) = Offset(x * unit, y * unit)
         when (kind) {
             TierKind.Crown -> {
-                // The band, and the bar under it, as two closed subpaths.
                 val band = Path().apply {
                     val outline = listOf(
                         3f to 7.4f, 7.6f to 10.6f, 12f to 3.4f, 16.4f to 10.6f,

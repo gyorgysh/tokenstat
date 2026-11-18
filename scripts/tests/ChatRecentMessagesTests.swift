@@ -50,7 +50,6 @@ private struct ChatRecentMessage: Equatable {
         precondition(projects.messages(for: "a|0").isEmpty)
         precondition(!projects.messages(for: "a|10").isEmpty)
         precondition((0..<10).allSatisfy { !projects.messages(for: "b|\($0)").isEmpty })
-        // Deleting one chat forgets that chat and nothing else.
         projects.remove("a|5")
         precondition(projects.messages(for: "a|5").isEmpty && !projects.messages(for: "b|5").isEmpty)
         precondition(!projects.messages(for: "a|6").isEmpty && !projects.messages(for: "b|6").isEmpty)
@@ -93,7 +92,6 @@ private struct ChatRecentMessage: Equatable {
         _ = visits.contains("p|2")
         visits.store([message(50)], for: "p|50", speculative: true, cost: cost)
         precondition(!visits.contains("p|2"), "contains must not refresh recency")
-        // Storing nothing keeps the copy that was there.
         visits.store([], for: "p|opened", cost: cost)
         precondition(!visits.messages(for: "p|opened").isEmpty)
 

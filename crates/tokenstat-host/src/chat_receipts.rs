@@ -649,7 +649,6 @@ mod tests {
         use std::time::Duration;
         let root = tempfile::tempdir().unwrap();
         let held = Operation::conversation(root.path(), "one").unwrap();
-        // Different conversations may prepare and accept independently.
         let other = Operation::conversation(root.path(), "two").unwrap();
         drop(other);
         let (ready, waiting) = mpsc::channel();

@@ -311,7 +311,6 @@ struct PickerOptionList<Value: Hashable>: View {
     /// gets this from the sheet's navigation title instead.
     var caption: String?
     var refresh: (() async -> Void)?
-    /// What a section is currently set to, shown beside its heading.
     var sectionValue: ((String) -> String?)?
     /// Tabs for a picker that holds several independent settings, one per
     /// section, each showing what it is set to. The agent/model/effort picker
@@ -323,19 +322,13 @@ struct PickerOptionList<Value: Hashable>: View {
     /// step, because a step is one question. The tabs stay clickable, so any
     /// earlier answer is one click away.
     var stepped = false
-    /// The search prompt for one step, "Search models" rather than a prompt
-    /// that names all three.
     var stepPrompt: ((String) -> String)?
     var finish: (() -> Void)?
     var stepPick: ((Value) async -> [String]?)?
     var selectionSummary: String?
     var pick: (Value) -> Void
-    /// Trailing accessory per row, for the model picker's favourite star.
     var accessory: ((Value) -> AnyView)?
-    /// Leading icon per row, for an agent's brand mark. Nil for a row with
-    /// none, so model and effort rows keep their alignment.
     var icon: ((Value) -> AnyView?)?
-    /// Right-aligned detail per row inside its button, for an agent's quota.
     var trailing: ((Value) -> AnyView?)?
 
     @State private var query = ""
@@ -460,9 +453,6 @@ struct PickerOptionList<Value: Hashable>: View {
         return sectionTabs[index - 1]
     }
 
-    /// One step back, beside the search field where the eye already is.
-    /// Command-[ does the same on a keyboard, as it does in every Mac app
-    /// with a back button.
     private func backButton(to section: String) -> some View {
         Button { show(section) } label: {
             Image(systemName: ActionIcon.back.symbol)
@@ -647,8 +637,6 @@ struct PickerOptionList<Value: Hashable>: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// The step's number, or a check once it has been answered on the way
-    /// through, so the strip reads as progress rather than as three filters.
     private func stepBadge(_ step: Int, answered: Bool, current: Bool) -> some View {
         ZStack {
             Circle()

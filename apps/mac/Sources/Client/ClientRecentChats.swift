@@ -124,8 +124,6 @@ struct ClientRecentChatsSection: View {
 
     private var receipts: ClientChatReadState { .shared }
 
-    /// Three newest by time, then five more by what needs a look. Unread used
-    /// to take every slot, so a chat you just left vanished under older dots.
     private var visible: [ChatRecentConversation] {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let ranked = ClientRecentChatsRanking.visible(

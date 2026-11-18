@@ -464,7 +464,6 @@ pub fn fetch_into(
     })
 }
 
-/// A fetch that had no token to use, and the sentence that says why.
 fn no_token_report(lapsed_at_ms: Option<i64>, inaccessible: bool) -> FetchReport {
     let message = match lapsed_at_ms {
         Some(expired_ms) => format!(

@@ -105,7 +105,6 @@ fun WorkSearchSheet(
             preparing = true
             failure = false
             runCatching {
-                // Pins and recents first: they are on this device already.
                 val known = mutableListOf<SearchFolder>()
                 if (HomeStores.pinIdentity(state.account).isNotEmpty()) {
                     for (pin in stores.pins(HomeStores.pinIdentity(state.account))) {

@@ -310,7 +310,6 @@ fun coalesceTranscript(
             ?: inner?.safeLong("atMs") ?: inner?.safeLong("at_ms")
 
     fun flushText() {
-        // The question block is drawn as its own card below the reply.
         val body = stripQuestionBlocks(text.toString(), streaming = running).trim()
         if (body.isNotEmpty()) {
             items.add(ChatDisplayItem.Assistant(textID, body, textBackend ?: defaultBackend))
@@ -459,7 +458,6 @@ fun coalesceTranscript(
                     brief = ev.str("brief") ?: inner?.str("brief") ?: "",
                 ),
             )
-            // The separator would say the same thing twice, less well.
             if (to.isNotEmpty()) lastBackend = to
             continue
         }
@@ -573,7 +571,6 @@ fun coalesceTranscript(
                 } else {
                     "tool-$callId#$occurrence"
                 }
-                // Empty when the event named no tool. The row then says Working.
                 val verb = inner.str("verb") ?: ""
                 val target = ChatToolState.clip(inner.str("target") ?: "")
                 if (eventBackend != null) toolBackends[rowID] = eventBackend
@@ -693,7 +690,6 @@ fun coalesceTranscript(
                     items.add(ChatDisplayItem.Edit(rowID, state))
                 } else {
                     val fallback = callId.ifEmpty { "end-${stamp(ev, items.size)}" }
-                    // Empty when the event named no tool. The row then says Worked.
                     val fallbackVerb = inner.str("verb") ?: ""
                     val presentation = refineMuseToolPresentation(eventBackend, fallbackVerb,
                         ChatToolState.clip(inner.str("target") ?: ""), inner.str("detail"))
@@ -789,7 +785,6 @@ fun coalesceTranscript(
             "attachment" -> {
                 flushText()
                 flushThinking()
-                // An attachment without an id carries nothing to download.
                 val id = inner.str("id") ?: inner.str("attachmentId")
                 if (id != null) {
                     items.add(

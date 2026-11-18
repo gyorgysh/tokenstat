@@ -295,7 +295,6 @@ fn tick() {
         if state.working {
             last_working.insert(w.pid, now);
         } else if hook_says_idle {
-            // Drop the grace clock so a later resume starts clean.
         } else if let Some(at) = previous {
             last_working.insert(w.pid, at);
         }
@@ -370,7 +369,6 @@ fn step(state: State, sample: f64, fresh_evidence: bool, hook: Option<bool>) -> 
     next.baseline = Some(baseline);
 
     next.working = match hook {
-        // Being told beats every measurement.
         Some(working) => working,
         None => {
             let delta = if state.working {
@@ -574,7 +572,6 @@ mod process_sampling_tests {
     }
 }
 
-/// Parent → children index for one process table, built once per tick.
 fn children_index(table: &HashMap<u32, Proc>) -> HashMap<u32, Vec<u32>> {
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
     for (pid, proc) in table {
@@ -652,7 +649,6 @@ fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
                 .collect();
             format!("{home}/.claude/projects/{slug}").into()
         }
-        // ~/.grok/sessions/<percent-encoded cwd>/
         "grok" => {
             let encoded = percent_encoded_directory(cwd);
             format!("{home}/.grok/sessions/{encoded}").into()
@@ -733,7 +729,6 @@ fn newest_write(dir: &str, depth: usize) -> Option<SystemTime> {
     newest
 }
 
-/// A lifecycle-hook record: an agent saying what it is doing.
 struct HookRecord {
     observed_at_ms: u64,
     cwd: Option<String>,
@@ -807,9 +802,7 @@ impl HookRecord {
             return false;
         }
         match (&self.agent, &watch.harness) {
-            // Both named: they have to be the same agent.
             (Some(a), Some(b)) => a == b,
-            // The record names an agent and this session does not. Refuse it.
             (Some(_), None) => false,
             // The record does not say which agent it is, so the directory is
             // all there is to go on.
@@ -938,7 +931,6 @@ mod tests {
     #[test]
     fn rise_above_baseline_reads_working() {
         let mut state = State::default();
-        // Learn an idle level near 2%, the sort a quiet agent sits at.
         for _ in 0..30 {
             state = step(state, 2.0, false, None);
         }

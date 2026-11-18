@@ -73,7 +73,6 @@ fn clamp_i64(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
 
-/// Meta key marking that [`Store::relabel_legacy_recovery`] has run.
 const LEGACY_RECOVERY_KEY: &str = "legacy_recovery_relabelled";
 
 /// Length of a Claude-style usage block. A new block starts when activity
@@ -332,7 +331,6 @@ impl Store {
         Ok(())
     }
 
-    /// True when `meta.schema_version` is present (tables already created).
     fn schema_ready(conn: &Connection) -> Result<bool, CoreError> {
         let has_meta: bool = conn
             .query_row(
@@ -1748,8 +1746,6 @@ mod tests {
         ];
 
         assert_eq!(s.insert_events(&events, &tz).unwrap(), 2);
-        // Ingesting twice must not change any total. This is the property that
-        // makes re-scanning a rewritten transcript safe.
         assert_eq!(s.insert_events(&events, &tz).unwrap(), 0);
 
         let t = s.totals(&Query::default()).unwrap();
@@ -1811,7 +1807,6 @@ mod tests {
 
         let rows = s.day_detail("2023-11-14").unwrap();
         assert_eq!(rows.len(), 2);
-        // Ordered by tokens descending: the Claude Code row is the larger one.
         assert_eq!(rows[0].source, "claude_code");
         assert_eq!(rows[0].model, "gpt-x");
         assert_eq!(rows[0].counters.output, Some(30));
@@ -1903,8 +1898,8 @@ mod tests {
         s.insert_events(
             &[
                 ev("a", t0, "m", 1),
-                ev("b", t0 + 60_000, "m", 2), // same block
-                ev("c", t0 + BLOCK_DURATION_MS + 1, "m", 3), // next block
+                ev("b", t0 + 60_000, "m", 2),
+                ev("c", t0 + BLOCK_DURATION_MS + 1, "m", 3),
             ],
             &tz,
         )
@@ -2008,8 +2003,6 @@ mod tests {
         rollup.source = SourceId::ClaudeCodeRollup;
         s.insert_events(&[rollup], &tz).unwrap();
 
-        // A rollup that parses but states no usable per-model totals produces
-        // nothing. The derived rows it cannot replace have to survive.
         assert_eq!(s.replace_recovered(&[], &tz).unwrap(), 0);
         let t = s.totals(&Query::default()).unwrap();
         assert_eq!(t.events, 1);
@@ -2101,7 +2094,7 @@ mod tests {
 
         let mut second = first.clone();
         second.counters.cache_read = Some(50);
-        second.counters.output = Some(10); // same output: no output growth
+        second.counters.output = Some(10);
         assert_eq!(s.insert_events(&[second], &tz).unwrap(), 1);
 
         let t = s.totals(&Query::default()).unwrap();
@@ -2153,8 +2146,6 @@ mod tests {
                 .any(|r| r.src == "claude_code_estimate" && r.conf == "derived")
         );
 
-        // Once only: an owner who deletes these rows must not get them back,
-        // and a second run must not touch anything else.
         assert_eq!(s.relabel_legacy_recovery().unwrap(), 0);
     }
 

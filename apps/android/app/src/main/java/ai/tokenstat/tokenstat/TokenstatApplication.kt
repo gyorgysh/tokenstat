@@ -25,7 +25,6 @@ class TokenstatApplication : Application() {
         )
         PushRegistrar.init(this)
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            // Retry on SSH use if storage is temporarily unavailable at launch.
             runCatching { ai.tokenstat.tokenstat.ui.ssh.SshSecrets.migrate(this@TokenstatApplication) }
             runCatching {
                 val seed = noBackupFilesDir.resolve("PriceBookSeed.json")

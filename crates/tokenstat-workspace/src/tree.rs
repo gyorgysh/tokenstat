@@ -269,8 +269,6 @@ mod tests {
         let dir = fixture();
         let entries = list(&dir, "").unwrap();
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
-        // Both directories, then both files. Not ASCII order, which would put
-        // every capital letter above every lower case one.
         assert_eq!(names, vec!["src", "target", ".gitignore", "Cargo.toml"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -287,8 +285,6 @@ mod tests {
 
     #[test]
     fn climbing_out_of_the_workspace_is_refused() {
-        // The whole point of taking a relative path. A front end that passes
-        // user input straight through must not be able to list the disk.
         let dir = fixture();
         for escape in ["..", "../..", "src/../..", "/etc"] {
             assert_eq!(
@@ -316,7 +312,6 @@ mod tests {
         let entries = list(&dir, "").unwrap();
         let target = entries.iter().find(|e| e.name == "target").unwrap();
         let src = entries.iter().find(|e| e.name == "src").unwrap();
-        // Present, not hidden: `target/` is something people go looking for.
         assert!(target.ignored, "target is in .gitignore");
         assert!(!src.ignored);
         let _ = std::fs::remove_dir_all(&dir);

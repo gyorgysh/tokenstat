@@ -209,7 +209,6 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    /// A child that would live a minute on its own.
     fn sleeper() -> Child {
         Command::new("cmd")
             .args(["/C", "ping -n 60 127.0.0.1 >NUL"])
@@ -254,7 +253,6 @@ mod tests {
         let pid = child.id();
         let born = creation(pid);
         assert!(!run_owner_gone(pid, born), "a live owner read as gone");
-        // Another start time at the same pid is another process.
         assert!(run_owner_gone(pid, born + 1));
         child.kill().unwrap();
         child.wait().unwrap();

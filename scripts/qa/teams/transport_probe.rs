@@ -172,7 +172,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("Fixture history is too large".into());
             }
             std::fs::write(directory.join("events.ndjson"), history)?;
-            // Optional chat files, stored where chat attachments live.
             if let Some(files) = input["params"]["files"].as_object() {
                 for (file, body) in files {
                     let name = body["name"].as_str().ok_or("Missing fixture file name")?;

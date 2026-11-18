@@ -207,7 +207,6 @@ impl Ord for VersionParts {
                 (true, true) => std::cmp::Ordering::Equal,
                 (true, false) => std::cmp::Ordering::Greater,
                 (false, true) => std::cmp::Ordering::Less,
-                // Vec order: identifier by identifier, then the longer wins.
                 (false, false) => self.pre.cmp(&other.pre),
             })
     }
@@ -256,7 +255,6 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
     check_latest_against(&[env!("CARGO_PKG_VERSION")])
 }
 
-/// True when `raw` is something `version_cmp` can treat as a real version.
 fn usable_version(raw: &str) -> Option<&str> {
     let s = raw.trim();
     if s.is_empty() || s.eq_ignore_ascii_case("unknown") {
@@ -745,7 +743,6 @@ fn download_windows_zip(check: UpdateCheck) -> Result<PathBuf, UpdateError> {
     Ok(path)
 }
 
-/// A GitHub token from the environment, if one is set and non-empty.
 fn github_token() -> Option<String> {
     std::env::var("GITHUB_TOKEN")
         .ok()
@@ -1233,7 +1230,6 @@ fn is_etxtbsy(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::ExecutableFileBusy || err.raw_os_error() == Some(26)
 }
 
-/// Make a freshly extracted file executable so it can be probed.
 fn make_runnable(path: &Path) -> Result<(), UpdateError> {
     #[cfg(unix)]
     {
@@ -2289,9 +2285,6 @@ mod tests {
 
     #[test]
     fn oldest_installed_picks_the_lagging_side() {
-        // Dev machine: hostd rebuilt past the release, app still on an older
-        // bundle. The check must treat the app version as current so the
-        // release still looks newer.
         assert_eq!(oldest_installed(&["1.0.2", "1.0.0"]), "1.0.0");
         assert_eq!(oldest_installed(&["0.9.0", "1.2.0"]), "0.9.0");
         assert_eq!(oldest_installed(&["1.0.2", "unknown", ""]), "1.0.2");
@@ -2333,7 +2326,6 @@ mod tests {
                 "{line}"
             );
         }
-        // A malformed line is skipped, not fatal to the lines after it.
         let mixed = format!("not-a-line\nabc123  {asset}\n");
         assert_eq!(expected_sha256(&mixed, asset).as_deref(), Some("abc123"));
     }
@@ -2407,7 +2399,6 @@ mod tests {
         let found = extract_binary(&archive, &dir).unwrap();
         assert_eq!(found, dir.join("extract").join("inner").join("tokenstat"));
         assert!(found.is_file());
-        // The archive beside the sandbox is untouched and nothing leaked out.
         assert!(archive.is_file());
         assert!(!dir.join("tokenstat").exists());
         let _ = fs::remove_dir_all(&dir);
@@ -2702,7 +2693,6 @@ mod tests {
         );
     }
 
-    /// Write an executable shell script standing in for a candidate binary.
     #[cfg(unix)]
     fn fake_binary(dir: &Path, name: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -2777,8 +2767,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_probe_that_hangs_is_killed_rather_than_waited_on() {
-        // The whole point of the timeout: a binary that prompts or deadlocks must
-        // not park a background job forever.
         let dir = scratch("hang");
         let bin = fake_binary(&dir, "hang", "sleep 30");
         let err = run_probe(&bin, &["--version"], Duration::from_millis(300)).unwrap_err();
@@ -2940,7 +2928,6 @@ mod tests {
                 "ad-hoc signed binary must not report a signing authority"
             );
         }
-        // An unsigned file certainly has none.
         let plain = dir.join("plain");
         fs::write(&plain, "not a binary").unwrap();
         assert!(!has_signing_authority(&plain));

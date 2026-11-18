@@ -136,7 +136,6 @@ class ChatOutboxTest {
         assertTrue(one != two)
     }
 
-    // The store.
 
     @Test
     fun `an update that changes nothing writes nothing back`() = runTest {

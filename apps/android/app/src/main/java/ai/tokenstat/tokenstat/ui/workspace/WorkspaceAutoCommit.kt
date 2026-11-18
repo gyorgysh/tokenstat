@@ -108,7 +108,6 @@ fun AutoCommitCard(
                 modelName = if (firstModels.contains("haiku")) "haiku" else firstModels.firstOrNull() ?: ""
             }
         }.onFailure {
-            // A host without the automation methods keeps no card.
             supported = false
         }
         runCatching {

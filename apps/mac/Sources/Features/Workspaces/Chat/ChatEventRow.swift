@@ -36,14 +36,10 @@ struct ChatEventRow: View {
     /// rest of a set of running tools say "Running" in words. See
     /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
-    /// The chat's Detailed level: tool output and diffs start open.
     var expandsOutput = false
     var compactTools = false
-    /// Opens or folds a step group, by the group's row id.
     var toggleGroup: (String) -> Void = { _ in }
-    /// Answers one of the agent's questions.
     var answerQuestion: (ChatQuestion, String) -> Void = { _, _ in }
-    /// This row's question is on its way to the host.
     var answeringQuestion = false
     /// False for a saved copy, which cannot send anything.
     var canAnswerQuestions = true
@@ -620,8 +616,6 @@ struct ChatWorkingIndicator: View {
     }
 }
 
-/// The seat's status line: rotating soft phrases while thinking, then a morph
-/// into the next concrete activity when a tool or reply starts.
 private struct SeatLivePhrase: View {
     var mood: PersonaMood
     var step: String?
@@ -703,7 +697,6 @@ private struct SeatShimmer: View {
     }
 }
 
-/// Elapsed clock alone, so the rotating phrase can sit beside it.
 private struct TurnElapsedClock: View {
     let since: Date
 
@@ -718,16 +711,6 @@ private struct TurnElapsedClock: View {
     }
 }
 
-/// The point where a conversation changed hands.
-///
-/// A backend switch used to be invisible and lossy: the incoming agent got a
-/// blank page and the person had to re-explain their own project to a second
-/// robot in the same window. It now receives a summary folded from the
-/// transcript, and this row is where that fact lives.
-///
-/// The summary is disclosed, not hidden. It is text tokenstat wrote and put in
-/// front of somebody's agent on their behalf, which is exactly the kind of
-/// thing that should never be invisible to them.
 struct ChatHandoffRow: View {
     let agent: String
     let brief: String

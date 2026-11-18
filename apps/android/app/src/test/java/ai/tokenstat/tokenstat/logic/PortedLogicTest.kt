@@ -54,7 +54,6 @@ class PortedLogicTest {
 
     @Test
     fun greetingAfternoonEveningAndNight() {
-        // Day-of-year multiples of five land on the time-of-day slot itself.
         assertEquals("Good afternoon", HomeGreeting.phrase(13, false, 5))
         assertEquals("Good evening", HomeGreeting.phrase(18, false, 5))
         assertEquals("Hello", HomeGreeting.phrase(3, false, 5))
@@ -63,7 +62,6 @@ class PortedLogicTest {
 
     @Test
     fun greetingPoolIsStablePerDay() {
-        // dayOfYear 3 lands on index 3: Welcome back / Welcome slot.
         assertEquals("Welcome", HomeGreeting.phrase(8, hasHistory = false, dayOfYear = 3))
         assertEquals("Welcome back", HomeGreeting.phrase(8, hasHistory = true, dayOfYear = 3))
         // Index 4 is Back at it only with history; otherwise it repeats the
@@ -88,12 +86,9 @@ class PortedLogicTest {
         )
     }
 
-    // compactTokens — port of formatTokens in Bridge/Models.swift: lowercase
-    // k, whole thousands above ten thousand.
     @Test
     fun tokenCountsCompact() {
         assertEquals("0", compactTokens(0))
-        // Non-positive counts render as zero, exactly like the Swift original.
         assertEquals("0", compactTokens(null))
         assertEquals("0", compactTokens(-5))
         assertEquals("999", compactTokens(999))
@@ -182,7 +177,6 @@ class PortedLogicTest {
         assertEquals("not-a-date", shortDate("not-a-date"))
     }
 
-    // TunnelCopy — a mid-reconnect tunnel reads as waiting, not gone.
     @Test
     fun tunnelAbsentDetection() {
         assertEquals(true, TunnelCopy.isAbsent("no_such_peer for abc"))
@@ -227,8 +221,6 @@ class PortedLogicTest {
         assertEquals("ABCD0101", normalizedRecovery("abcd-O1oI"))
     }
 
-    // friendlyError — every row of FriendlyError.swift, in the same order, so
-    // both clients answer identically.
     @Test
     fun sessionLimitsEndTheSession() {
         val limited = friendlyError("session_time_limit reached")
@@ -317,7 +309,6 @@ class PortedLogicTest {
             "The server could not answer",
             friendlyError("status request failed (503)").title,
         )
-        // A bare number is a port or a count, not a failure code.
         assertEquals("That did not work", friendlyError("listening on 503").title)
         val devices = friendlyError("device limit reached")
         assertEquals("Device limit reached", devices.title)
@@ -385,8 +376,6 @@ class PortedLogicTest {
         assertEquals(LightColors.stateIdle, RunOutcome.tint("bogus", LightColors))
     }
 
-    // DurationBar math — relative to the longest run beside it, with a floor
-    // so a short run still draws.
     @Test
     fun durationFractionAndLabel() {
         assertEquals(0.0, durationFraction(0.0, 100.0), 0.0)
@@ -400,12 +389,9 @@ class PortedLogicTest {
         assertEquals("Took 1.5h", durationLabel(5400.0))
     }
 
-    // RecentChatsRanking.visible — three newest by time stay on top, five
-    // more follow ranked by what needs a look, from ClientRecentChatsRanking.
     @Test
     fun rankingKeepsThreeNewestOnTop() {
         val now = 1_700_000_000_000L
-        // A chat just left sits above older unread replies.
         val chats = listOf(
             RecentChatsRanking.Item("old-unread", now - 50_000, running = false, needsAttention = false, unread = true),
             RecentChatsRanking.Item("older-unread", now - 60_000, running = false, needsAttention = false, unread = true),
@@ -445,7 +431,6 @@ class PortedLogicTest {
         val shown = RecentChatsRanking.visible(chats, now)
         assertEquals(8, shown.size)
         assertEquals(false, shown.any { it.id == "ancient" })
-        // An old approval still counts: attention outlives the window.
         val kept = RecentChatsRanking.visible(
             listOf(RecentChatsRanking.Item("old-approval", old, running = false, needsAttention = true, unread = false)),
             now,
@@ -516,14 +501,12 @@ class PortedLogicTest {
         assertEquals(true, PinnedWork.isPinned(moved, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null))
         val dropped = PinnedWork.unpin(moved, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null)
         assertEquals(false, PinnedWork.isPinned(dropped, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null))
-        // A conversation pin names the item, not the folder.
         val key = PinnedWork.pinKey(scope, "peer", "ws", PinnedWork.Kind.CONVERSATION, "chat1")
         assertEquals(true, key?.startsWith("conversation|") == true)
         assertEquals(null, PinnedWork.pinKey(scope, "peer", "ws", PinnedWork.Kind.WORKSPACE, "chat1"))
         assertEquals("Pinned work", PinnedWork.safeLabel("  "))
     }
 
-    // HomeLayout — stored orders survive new sections; unknown names drop.
     @Test
     fun homeLayoutNormalizeKeepsChosenOrder() {
         val (order, hidden) = normalizeHomeLayout(null, emptySet())
@@ -537,15 +520,11 @@ class PortedLogicTest {
         assertEquals(HomeSection.LIMITS, kept.first())
         assertEquals(HomeSection.USAGE, kept[1])
         assertEquals(6, kept.size)
-        // The hidden set is intersected with the order, and appended
-        // sections are in the order, so both survive.
         assertEquals(setOf(HomeSection.USAGE, HomeSection.ACTIVITY), keptHidden)
         assertEquals(HomeSection.CONTINUE, HomeSection.of("continue"))
         assertEquals(null, HomeSection.of("nope"))
     }
 
-    // DeviceCopy — the list and the detail cannot describe a machine
-    // differently.
     @Test
     fun deviceCopyNamesAndStatuses() {
         assertEquals("Studio", DeviceCopy.displayName("Studio", "macOS", true))
@@ -579,7 +558,6 @@ class PortedLogicTest {
         assertEquals(false, DeviceCopy.isHeadlessPlatform("Windows 11"))
         assertEquals(false, DeviceCopy.isHeadlessPlatform(null))
         assertEquals(false, DeviceCopy.isHeadlessPlatform(""))
-        // Whole words only: "aarch64" is not Arch Linux.
         assertEquals(false, DeviceCopy.isHeadlessPlatform("macOS 27.2.1 · aarch64"))
         assertEquals(false, DeviceCopy.isHeadlessPlatform("Windows 10.0.26300.9974 · x86_64"))
         assertEquals(false, DeviceCopy.isHeadlessPlatform("Linux · aarch64 · macOS"))
@@ -606,7 +584,6 @@ class PortedLogicTest {
         assertEquals(true, HostContracts.supportsHostUpdate(22))
     }
 
-    // LimitLogic — closest to full first, core thresholds for severity.
     @Test
     fun limitProvidersSortClosestToFullFirst() {
         val rows = listOf("a" to 12.0, "b" to 91.0, "c" to 70.0)
@@ -633,8 +610,6 @@ class PortedLogicTest {
         assertEquals("42%", HostStatsFormat.cpuLabel(0.42))
     }
 
-    // SearchPlaces.rank — every word must start a word in the place; title
-    // beats keywords beats the trail. Mirrors WorkSearchPlaceMatch.
     @Test
     fun searchRankMatchesApple() {
         val places = SearchPlaces.all(mapOf("peer-1" to "Build Mac"), mapOf("peer-1" to "macOS"))
@@ -642,10 +617,8 @@ class PortedLogicTest {
         assertTrue(notifications.any { it.id == "account:thisDevice:notifications" })
         val traffic = SearchPlaces.rank("local traffic", places)
         assertEquals(listOf("account:thisDevice:traffic"), traffic.map { it.id })
-        // A word from nowhere removes the place rather than ranking it last.
         assertEquals(emptyList<SearchPlace>(), SearchPlaces.rank("zxqv", places))
         assertEquals(emptyList<SearchPlace>(), SearchPlaces.rank("", places))
-        // "plan" means the Plan card, not every setting that mentions a plan.
         val plan = SearchPlaces.rank("plan", places)
         assertEquals("account:account:plans", plan.first().id)
         val device = SearchPlaces.rank("build", places)

@@ -2554,7 +2554,6 @@ final class ChatModel {
                 listMutations.remove(chat.id, owner: WorkReferenceKey.folder(scope: owner.scope,
                     hostIdentity: owner.host, workspaceID: owner.workspace))
             }
-            // Only this chat. Every other warm conversation is still right.
             previewCacheEpoch &+= 1
             if let cacheKey { recentMessages.remove(cacheKey) }
             if (folderID == nil || folderID == self.folderID) && selected?.id == chat.id {
@@ -4650,11 +4649,8 @@ final class ChatModel {
             if reset {
                 guard await publishEvents(id: id, generation: generation,
                     canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in chunk.events }) else { return false }
-                // A live page is the conversation again, not a copy of it.
                 savedCopy = nil
                 liveWindowLoaded = true
-                // The whole timeline, so there is nothing before it. Say so
-                // when there is something on screen; empty chats stay quiet.
                 earlierCursor = nil
                 hasEarlier = false
                 reachedStart = !chunk.events.isEmpty

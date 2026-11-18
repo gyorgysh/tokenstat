@@ -43,13 +43,11 @@ for mode in success copy first second rollback; do
     fi
   fi
 done
-# A failed first installation leaves no newly installed daemon behind.
 mode=second
 directory="$work/first-install"
 mkdir "$directory"
 if install_release_pair "$work/new-cli" "$work/new-host" "$directory" >/dev/null 2>&1; then exit 1; fi
 [ ! -e "$directory/tokenstat" ] && [ ! -e "$directory/tokenstat-hostd" ]
-# Restore the link itself, without replacing the executable it points to.
 directory="$work/symlink"
 mkdir "$directory"
 printf 'linked host\n' > "$work/original-host"

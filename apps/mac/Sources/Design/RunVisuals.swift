@@ -6,11 +6,6 @@
 
 import SwiftUI
 
-/// What a run's status looks like, in one place.
-///
-/// Automations and Workflows each carried their own copy of this switch, which
-/// is how "stopped" ends up amber on one screen and grey on the next. The two
-/// entry points that used to own it now call through here.
 enum RunOutcome {
     static func tint(_ status: String) -> Color {
         switch status {
@@ -40,8 +35,6 @@ struct RunHistoryStrip: View {
 
     /// Oldest first. The view reverses nothing, it just trims the front.
     var ticks: [Tick]
-    /// Same number as `slots`, so every strip is the same width whether the job
-    /// ran twice or two hundred times and the rows either side of it line up.
     var limit: Int = RunHistoryStrip.slots
     var height: CGFloat = 14
     var width: CGFloat = 4

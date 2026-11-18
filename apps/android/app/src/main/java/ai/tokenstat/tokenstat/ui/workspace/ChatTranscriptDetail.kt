@@ -186,8 +186,6 @@ fun withTurnChanges(
     return out
 }
 
-/// Every step is one line. Runs of reads and searches still read as one,
-/// even a run of one. Port of `ChatTranscriptFold.compactFold`.
 private fun foldCompact(
     items: List<ChatDisplayItem>,
     running: Boolean,
@@ -218,7 +216,6 @@ private fun foldCompact(
                     emitGroup(group, listOf(item), out, isOpen)
                 }
             }
-            // A failed step is a line too, marked on the line itself.
             item is ChatDisplayItem.Tool -> {
                 flushRun(trailing = false)
                 line(ChatStepGroup.Style.Step, listOf(item), item.state.running)
@@ -341,7 +338,6 @@ private fun foldMinimalTurn(
             // it is marked without taking a card of its own.
             item is ChatDisplayItem.Thinking || item is ChatDisplayItem.Tool || item is ChatDisplayItem.Edit -> members.add(item)
             else -> {
-                // Replies, questions, turn failures and handoffs stay in order.
                 flush(trailing = false)
                 out.add(item)
             }

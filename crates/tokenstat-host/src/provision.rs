@@ -130,7 +130,6 @@ fn agents() -> Value {
     Value::Array(Vec::new())
 }
 
-/// The service scope of this host, when it can be identified.
 fn service_scope() -> Value {
     #[cfg(target_os = "linux")]
     {

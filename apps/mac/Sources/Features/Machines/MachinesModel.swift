@@ -93,7 +93,6 @@ final class MachinesModel {
     var pending: [Peer] { peers.filter { $0.trust == .pending && $0.key != identity?.key } }
     var known: [Peer] { peers.filter { $0.trust != .pending && $0.key != identity?.key } }
 
-    /// Whether the tunnel is holding a live socket, when the daemon has said.
     var tunnelConnected: Bool { status?.tunnelOnline == true }
 
     /// Whether this account may use remote reach. The server's explicit

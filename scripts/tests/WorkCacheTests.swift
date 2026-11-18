@@ -14,7 +14,6 @@ import Foundation
         // One scope per account, shared by every machine and folder under it:
         // signing out removes one scope and takes exactly its copies.
         assert(WorkCache.scope(for: alice) == "account|https%3A%2F%2Fexample%2Ecom|alice")
-        // One record per conversation inside it.
         assert(WorkCache.recordID(for: conversation()) == "conv|host%2Da|folder%2D1|chat%2Da")
         // Nothing without a conversation is a record.
         let workspace = WorkReference(scope: alice, hostIdentity: "host-a",

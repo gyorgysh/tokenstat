@@ -386,7 +386,6 @@ fn billing_for(auth_type: Option<&str>) -> BillingMode {
     }
 }
 
-/// Parse an ISO-8601 UTC timestamp into epoch milliseconds.
 fn parse_iso8601_ms(s: &str) -> Option<i64> {
     s.parse::<jiff::Timestamp>()
         .ok()

@@ -160,8 +160,6 @@ fn run_once(session: &Mutex<Session>) {
             )
         })
     };
-    // Nothing to upload. A host with no archive of its own is a client, and a
-    // client has no usage to sync.
     let Some((tz, db_path)) = snapshot else {
         return;
     };

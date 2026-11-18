@@ -463,7 +463,6 @@ struct RootView: View {
     }
 
     #if DEBUG
-    /// `DebugUIHooks`' route strings, resolved against this window's folders.
     private func debugNavigate(_ target: String) {
         let parts = target.split(separator: ":", maxSplits: 2).map(String.init)
         switch parts.first {
@@ -481,7 +480,6 @@ struct RootView: View {
             guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0") else { return }
             let index = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
             openSection(.chat, in: folder.id)
-            // Waits for the pane like New chat does.
             Task {
                 for _ in 0..<60 {
                     if chat.folderID == folder.id, !chat.isLoading { break }
@@ -514,7 +512,6 @@ struct RootView: View {
     }
     #endif
 
-    /// Splash or chrome, plus window geometry and the pointer peeks.
     private var windowLayout: some View {
         // Mount the chrome after the host is ready; the window keeps its
         // traffic lights while the splash is visible.
@@ -599,7 +596,6 @@ struct RootView: View {
         .task { await watchPointer() }
     }
 
-    /// Lifetime observers and modal presentations share the same shell.
     private var sizedWindow: some View {
         windowLayout
         .onAppear {
@@ -1174,24 +1170,19 @@ struct RootView: View {
         .ignoresSafeArea(.container, edges: .top)
     }
 
-    /// A chat row's scroll id in the sidebar, apart from any other id there.
     static func sidebarChatRowID(_ conversationID: String) -> String {
         "sidebar-chat-\(conversationID)"
     }
 
-    /// The sidebar's width right now: the drag in flight, else the stored one.
     private var currentSidebarWidth: CGFloat {
         CGFloat(sidebarLiveWidth ?? sidebarWidth)
     }
 
-    /// Everything left of the detail column: the rail, the sidebar when it is
-    /// a column, and the glass insets.
     private var leftChromeWidth: CGFloat {
         let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
         return rail + (showsSidebar ? currentSidebarWidth : 0)
     }
 
-    /// The inspector's width right now.
     private var currentInspectorWidth: CGFloat {
         CGFloat(inspectorLiveWidth ?? inspectorWidth)
     }
@@ -1220,7 +1211,6 @@ struct RootView: View {
         .frame(width: ShellMetrics.railWidth + (ShellMetrics.usesGlass ? 0 : 6))
     }
 
-    /// A dot on a rail mark when that place has something live in it.
     private func railBadge(_ place: RailPlace) -> Bool {
         switch place {
         case .automations:
@@ -1338,7 +1328,6 @@ struct RootView: View {
         return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(PlanName.title(tier))")
     }
 
-    /// Leading toggles injected into every destination's chrome bar.
     private var detailChromeToggles: DetailChromeToggles {
         DetailChromeToggles(
             leftSidebar: AnyView(leftSidebarToolbarButton),
@@ -1362,7 +1351,6 @@ struct RootView: View {
         }
     }
 
-    /// Tabs for the place on screen, when it has sections of its own.
     private var sectionTabs: AnyView? {
         if let projectHeader { return AnyView(projectHeader) }
         switch route {
@@ -1381,7 +1369,6 @@ struct RootView: View {
             .equatable())
         #if os(macOS)
         case .ssh, .sshTerminals:
-            // The library's four sections, which used to be sidebar rows.
             return AnyView(ChromeTabStrip(
                 tabs: SSHSection.rows.map { ChromeTab(id: $0.id, label: $0.label, symbol: $0.symbol) },
                 selected: route.sshSection?.row.id,
@@ -1396,7 +1383,6 @@ struct RootView: View {
         }
     }
 
-    /// The project bar for a screen that belongs to one folder.
     private var projectHeader: ProjectHeader? {
         guard let id = route.workspaceID,
               let folder = workspaces.folders.first(where: { $0.id == id }) else { return nil }
@@ -1443,7 +1429,6 @@ struct RootView: View {
         }
     }
 
-    /// Leading sidebar mark for toolbars (sidebar column and detail column).
     private var leftSidebarToolbarButton: some View {
         SidebarToggleButton(
             edge: .leading,
@@ -1455,7 +1440,6 @@ struct RootView: View {
         )
     }
 
-    /// Trailing inspector mark for the detail toolbar.
     private var rightInspectorToolbarButton: some View {
         HStack(spacing: Theme.Space.xs) {
         if supportsWorkspaceBrowser {
@@ -1625,7 +1609,6 @@ struct RootView: View {
         detailMinimumWidth + ShellMetrics.railWidth + ShellMetrics.panelInset * 2
     }
 
-    /// The narrowest the window may get vertically.
     static var minimumContentHeight: CGFloat { DisplayFit.box(620) }
 
     /// Below this the sidebar collapses instead of being squeezed. Above it,
@@ -1654,7 +1637,6 @@ struct RootView: View {
     /// The detail column's comfortable width beside a docked inspector.
     private static let comfortDetail: CGFloat = 720
 
-    /// `showsSidebar` for a width that has not been stored yet.
     private func showsSidebarColumn(at width: CGFloat) -> Bool {
         columnVisibilityChoice != .detailOnly
             && (width <= 0 || sidebarColumnFits(
@@ -1748,7 +1730,6 @@ struct RootView: View {
         }
     }
 
-    /// The pane itself, shared by the fixed column and the floating overlay.
     @ViewBuilder
     private var inspectorContent: some View {
         Group {
@@ -1817,12 +1798,6 @@ struct RootView: View {
                 MachinesInspector(model: machines) { closeInspector() }
             case let .sshTerminals(hostID):
                 #if os(macOS)
-                // The saved commands for this server, beside its shells.
-                // Settings used to be forced open here on the reasoning that
-                // somebody had just learned what the keepalive should have
-                // been, which is a thing people do once. Reaching for a
-                // command they have already saved is a thing they do all day,
-                // and on the Mac there was no way to reach one at all.
                 SSHSessionInspector(
                     model: ssh,
                     sessions: sshSessions,
@@ -1908,8 +1883,6 @@ struct RootView: View {
         return !showsSidebar
     }
 
-    /// The floated sidebar is on screen: pinned open, or peeking under the
-    /// pointer.
     private var showsSidebarOverlay: Bool {
         usesOverlaySidebar && (isSidebarPinned || isSidebarOverlayVisible)
     }
@@ -1929,13 +1902,10 @@ struct RootView: View {
             || sshHostPendingClose != nil
     }
 
-    /// The floating pane is on screen.
     private var showsOverlayInspector: Bool {
         usesOverlayInspector && (isOverlayPinned || isOverlayVisible)
     }
 
-    /// The detail column: the destination, its fixed inspector column, and the
-    /// floating overlay that replaces the column below the fit edge.
     private var detailColumn: some View {
         HStack(spacing: 0) {
             detail
@@ -2302,9 +2272,6 @@ struct RootView: View {
         isSidebarOverlayVisible = false
     }
 
-    /// Shuts the pane on the user's behalf.
-    ///
-    /// Closing is always allowed, whether the pane is docked or floating.
     private func closeInspector() {
         isInspectorPresented = false
         isOverlayVisible = false
@@ -2326,7 +2293,6 @@ struct RootView: View {
             .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
 
-    /// A starred server with nothing open: one click asks to connect.
     @ViewBuilder
     private func sshFavoriteHostRow(_ host: SSHHost) -> some View {
         HStack(spacing: 0) {
@@ -2343,7 +2309,6 @@ struct RootView: View {
         }
     }
 
-    /// A server with sessions, and its sessions under it when it is expanded.
     @ViewBuilder
     private func sshLiveHostRow(_ host: SSHHost) -> some View {
         let mine = sshSessions.sessions(for: host.id)
@@ -2643,7 +2608,6 @@ struct RootView: View {
         openSection(.chat, in: submission.repositoryID)
     }
 
-    /// Every registered folder, each opening onto its chats and sessions.
     @ViewBuilder
     private var projectsSection: some View {
         // Folders the user chose. Nothing to do with the archive: its
@@ -2795,7 +2759,6 @@ struct RootView: View {
         }
     }
 
-    /// Folders that survive the filter, in the chosen sort.
     private var visibleProjectFolders: [WorkspaceFolder] {
         let filtered = workspaces.folders.filter { folder in
             let chats = chat.sidebarChats(in: folder.id).filter { !chat.isUntouched($0, in: folder.id) }
@@ -2808,7 +2771,6 @@ struct RootView: View {
         }
     }
 
-    /// Header badge: folders in repository mode, chats in chat mode.
     private var projectsSectionCount: Int {
         if projectsDisplay == .byChat {
             return visibleChatEntries.count
@@ -2933,7 +2895,6 @@ struct RootView: View {
         }
     }
 
-    /// One project: its row, and when open, what lives in it.
     @ViewBuilder
     private func projectRow(_ folder: WorkspaceFolder) -> some View {
         #if os(macOS)
@@ -3299,12 +3260,6 @@ struct RootView: View {
     }
     #endif
 
-    /// Who is signed in, pinned to the bottom of the sidebar with a menu.
-    ///
-    /// The archive line that used to live here moved into the inspector, which
-    /// already had an Archive section. Two places saying where the numbers came
-    /// from was one too many, and this corner is where people look for their
-    /// account.
     private var accountFooter: some View {
         VStack(spacing: 0) {
             // Offline is the same card language as sync and update, so the
@@ -3337,8 +3292,6 @@ struct RootView: View {
     }
 
     #if os(macOS)
-    /// The account menu, as data. Rebuilt on every press, so "Sync now" and
-    /// the update check reflect what is happening at the moment it opens.
     private var accountMenuItems: [NativeMenuItem] {
         let checkUpdates = NativeMenuItem(
             appUpdate.isChecking ? L10n.text("apple.rootview.checking_for_updates.497a1998") : L10n.text("apple.rootview.check_for_updates.f26f3275"),
@@ -3390,7 +3343,6 @@ struct RootView: View {
         }
     }
 
-    /// Whether the mounted chat pane is the screen in front.
     private var showsChat: Bool { route.workspaceSection == .chat }
 
     /// The folder the mounted chat pane is for.
@@ -3402,10 +3354,8 @@ struct RootView: View {
         return mountedChatFolder
     }
 
-    /// Whether the mounted pull-request pane is the screen in front.
     private var showsPulls: Bool { route.workspaceSection == .pulls }
 
-    /// The folder the mounted pull-request pane is for.
     private var pullsFolder: String? {
         if case let .workspace(id, .pulls) = route { return id }
         return mountedPullsFolder
@@ -3718,8 +3668,6 @@ struct RootView: View {
         await workflows.load()
     }
 
-    /// Open a graph on Workflows, with its run in the inspector when we have
-    /// one. A run clicked under a folder opens on that folder's board.
     private func openWorkflow(graphID: String, runID: String?, in folderID: String? = nil) {
         navigate(to: folderID.map { .workspace(id: $0, section: .workflows) } ?? .global(.workflows)) {
             workflows.selectGraph(graphID)
@@ -3764,8 +3712,6 @@ struct RootView: View {
         }
     }
 
-    /// Open a job on Automations, with its run in the inspector when we have
-    /// one. A job clicked under a folder opens on that folder's board.
     private func openAutomation(jobID: String, runID: String?, in folderID: String? = nil) {
         navigate(to: folderID.map { .workspace(id: $0, section: .automations) } ?? .global(.automations)) {
             automations.selectJob(jobID)
@@ -4378,7 +4324,6 @@ struct RootView: View {
     }
     #endif
 
-    /// Reuse the exact folder and conversation routing used by the sidebar.
     private func openPin(_ pin: PinnedWorkStore.Pin) {
         guard pinAvailability(pin) == nil else { return }
         if desktopAvailability(pin.reference) == .savedCopy {
@@ -4719,7 +4664,6 @@ struct RootView: View {
         return terminals.sessions.first { $0.state == .needsAttention }
     }
 
-    /// Answer a `NavigationRequest` from a screen that does not know the shell.
     private func handle(_ request: NavigationRequest) {
         switch request {
         case let .global(section):
@@ -4887,8 +4831,6 @@ private struct SidebarRow: View {
     /// How many steps in from the group's own rows this one sits. Nested SSH
     /// folders use it; everything else is flat and leaves it at zero.
     var indent: Int = 0
-    /// Sits beside repository rows, so it takes their inset and height and
-    /// the two lists start their marks in one column.
     var folderMetrics = false
     var action: () -> Void
 
@@ -4905,8 +4847,6 @@ private struct SidebarRow: View {
     }
 }
 
-/// What a sidebar row looks like, apart from what pressing it does, so a
-/// row that opens a menu (New chat) is drawn exactly like one that acts.
 private struct SidebarRowLabel: View {
     var label: String
     var symbol: String
@@ -4963,8 +4903,6 @@ private struct SidebarRowLabel: View {
     }
 }
 
-/// New chat, drawn as the plain sidebar row it always was, opening the list
-/// of projects to start it in.
 private struct SidebarMenuRow<Items: View>: View {
     var label: String
     var symbol: String
@@ -5000,18 +4938,11 @@ private struct SidebarMenuRow<Items: View>: View {
 /// as small as text is allowed to go here. Larger reads as a settings pane
 /// rather than a sidebar, and that is what a 14/12/11 stack looked like.
 private enum RowMetrics {
-    /// The leading brand or folder tile.
     static let mark: CGFloat = 26
-    /// Line one: the name.
     static let title: CGFloat = 13
-    /// Lines two and three: git summary, then state.
     static let meta: CGFloat = 11
-    /// Between the three lines. Tight: they are one block of text about one
-    /// thing, not three separate facts.
     static let lineGap: CGFloat = 2
-    /// Above and below the text block.
     static let rowPadding: CGFloat = 6
-    /// The state dot.
     static let dot: CGFloat = 7
 }
 
@@ -5060,8 +4991,6 @@ private struct StateBadge: View {
         }
     }
 
-    /// Working and attention carry colour. Everything else stays grey so
-    /// the one row that needs a person is the one that draws the eye.
     private var labelStyle: AnyShapeStyle {
         switch state {
         case .working: return AnyShapeStyle(Theme.stateWorking)
@@ -5129,7 +5058,6 @@ private enum WorkspaceDrag {
     }
 }
 
-/// Drag a workspace row, and accept another row dropped onto it.
 private struct WorkspaceReorder: ViewModifier {
     let id: String
     var canDrag: Bool = true
@@ -5361,8 +5289,6 @@ private struct WorkspaceRow: View {
         }
     }
 
-    /// Same selection treatment as the destination rows: tinted fill plus a
-    /// leading accent bar, with hover as a plain grey wash.
     private var background: some View {
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -5461,7 +5387,6 @@ extension SidebarGroupHeader where Trailing == EmptyView {
     }
 }
 
-/// A glyph button for a sidebar heading, at the sidebar's minimum target, lit while its state is on.
 private struct SidebarHeaderIconButton: View {
     let systemImage: String
     let help: String
@@ -5571,7 +5496,6 @@ private struct SidebarFilterField: View {
     }
 }
 
-/// "Show N more" as a whole row, so it is as easy to hit as the chats above it.
 private struct SidebarShowMoreRow: View {
     let title: String
     let action: () -> Void
@@ -5650,8 +5574,6 @@ private struct SidebarChatDayHeader: View {
 }
 
 private struct ChatSidebarConversationRow: View {
-    /// Where the mark starts: a `SidebarRow`'s padding plus half the slack
-    /// between its 18 pt glyph frame and the 16 pt mark.
     static let markInset: CGFloat = Theme.Space.m + 1
     /// Where the title starts, so the list's footer can line up with it.
     static var titleInset: CGFloat { markInset + DisplayFit.dp(16) + Theme.Space.s }
@@ -5663,8 +5585,6 @@ private struct ChatSidebarConversationRow: View {
     /// How the mark names this conversation to the draft store. Nil while
     /// the folder's owner is unknown, which draws nothing.
     let draft: WorkReference?
-    /// When the current turn was first seen running. Nil when it is not
-    /// running, which draws the bare word with no clock.
     let runningSince: Date?
     let isSelected: Bool
     let select: () -> Void
@@ -5837,7 +5757,6 @@ extension ChatSidebarConversationRow {
     }
 }
 
-/// A live workflow run, drawn under the workspace it is bound to.
 private struct ActiveWorkflowRow: View {
     let run: WorkflowRunRecord
     let isSelected: Bool
@@ -6199,4 +6118,4 @@ private struct ActiveSessionRow: View {
 }
 #endif
 
-#endif  // os(macOS), the desktop shell
+#endif

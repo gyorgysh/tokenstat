@@ -55,7 +55,6 @@ def main() -> int:
             pngs.append((size, out.read_bytes()))
     ico = DEST_DIR / "tokenstat.ico"
     pack_ico(pngs, ico)
-    # In-app About mark. Same light tile as the ICO.
     about = DEST_DIR / "tokenstat.png"
     about.write_bytes(
         (ROOT / "apps/mac/Design/AppIcon/tokenstat-icon-light-256.png").read_bytes()

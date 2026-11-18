@@ -113,7 +113,6 @@ internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, 
             }
         } else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                // The chip keeps its own width and the actions stay at the end.
                 Box(Modifier.weight(1f)) { ChatComposerAgentField(backends, chat, onAgent, !locked) }
                 actions()
             }

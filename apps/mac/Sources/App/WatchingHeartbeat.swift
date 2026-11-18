@@ -27,7 +27,6 @@ import AppKit
 /// the person is reading without typing. Hidden windows and other destinations
 /// release it; the host lease also handles crashes and lost connections.
 struct WatchingHeartbeat: ViewModifier {
-    /// The conversation on screen, or nil when there is none.
     var conversationID: String?
     /// The host that owns it. Nil is this computer.
     var peer: String?

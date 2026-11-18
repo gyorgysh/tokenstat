@@ -73,7 +73,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     private readonly HashSet<string> _loadingDays = new();
     private string? _loadingOverviewFor;
 
-    /// <summary>One pinned day's local breakdown, the Mac DayOverview shape.</summary>
     private sealed record DayOverview(
         JsonNode? Totals,
         JsonArray ByModel,
@@ -81,7 +80,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         JsonArray ByProject,
         JsonArray BySession);
 
-    /// <summary>One row in an inspector group card.</summary>
     private sealed record DayGroupRow(
         string Key, string Label, long Tokens, string? Value, bool Monospaced);
 
@@ -792,10 +790,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return parts.Count == 0 ? L10n.Text("windows.homepage.recently_active.f2e4cdc5") : string.Join(" · ", parts);
     }
 
-    /// <summary>
-    /// One figure per stat, like the phone's tiles. Built from the same series
-    /// as the heatmap, so the two cannot disagree.
-    /// </summary>
     private static UIElement UsageSummary(JsonNode? calendar, string? error)
     {
         if (calendar is not null)
@@ -865,7 +859,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return outCells;
     }
 
-    /// <summary>One cell of the delivered grid, for pinning by date.</summary>
     private static HeatDay? FindDay(JsonNode calendar, string date)
     {
         if (calendar["rows"] is not JsonArray rows)
@@ -1052,10 +1045,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return false;
     }
 
-    /// <summary>
-    /// One vendor's quota, in its own panel. Quota windows, and the numbers
-    /// are the vendor's own. Nothing here is derived from the archive.
-    /// </summary>
     private UIElement PlanLimitPanel(JsonNode? provider)
     {
         var source = Format.Text(provider, "source", L10n.Text("windows.homepage.plan.fa8ed0bd"));
@@ -1446,7 +1435,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
     }
 
-    /// <summary>Pin a day in the inspector. Hover still only glances.</summary>
     private void SelectDay(HeatDay? day)
     {
         if (day is null || day.Locked)
@@ -1561,10 +1549,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return query;
     }
 
-    /// <summary>
-    /// The day pinned from the heatmap: an Insights-shaped overview in the
-    /// shell's inspector column. Today is pinned when Home first loads.
-    /// </summary>
     private void RefreshInspector()
     {
         _inspectorRoot.Children.Clear();
@@ -1925,10 +1909,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return FoldDetail(detail, part => Format.Text(part, "model"), ShortModel, monospaced: true);
     }
 
-    /// <summary>
-    /// Models that have a list rate. Unpriced and local ones belong in their
-    /// own card, not mixed into a column that shows money.
-    /// </summary>
     private static List<DayGroupRow> PricedModelRows(JsonNode detail, DayOverview? extra)
     {
         var unpriced = UnpricedNames(detail);
@@ -2153,7 +2133,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return string.IsNullOrEmpty(leaf) ? "model" : leaf;
     }
 
-    /// <summary>An optional counter that may be absent. Absent is null, not zero.</summary>
     private static long? OptLong(JsonNode? node, string name)
     {
         var value = node?[name];
@@ -2171,7 +2150,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
     }
 
-    /// <summary>How long ago an epoch-millis instant was, in words.</summary>
     private static string Ago(long epochMs)
     {
         if (Format.Instant(epochMs) is not DateTimeOffset moment) return L10n.Text("common.unknown");
@@ -2198,7 +2176,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return moment.LocalDateTime.ToString("d");
     }
 
-    /// <summary>How far off a future epoch-millis instant is, in words.</summary>
     private static string FutureIn(long epochMs)
     {
         if (Format.Instant(epochMs) is not DateTimeOffset moment) return L10n.Text("common.unknown");

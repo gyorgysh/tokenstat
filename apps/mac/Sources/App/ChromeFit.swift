@@ -23,13 +23,10 @@
 enum ChromeFit {
     /// Detail width below which a trailing pane floats instead of squeezing.
     static let comfortDetail = 800.0
-    /// The sidebar column's footprint at full factor.
     static let sidebarWidth = 260.0
     /// The detail column's absolute minimum, below which nothing sits beside it.
     static let detailMinimum = 480.0
-    /// The narrowest a floating or docked browser pane gets.
     static let browserMinimum = 320.0
-    /// Divider widths: 1 beside the sidebar, 5 for the browser handle.
     static let sidebarDivider = 1.0
     static let browserDivider = 5.0
     /// How much content stays visible beside a floating browser.

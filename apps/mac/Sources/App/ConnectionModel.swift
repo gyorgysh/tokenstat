@@ -13,9 +13,7 @@ import Observation
 /// gets shown, and `FriendlyError` still writes it, but what the app *believes*
 /// about the network is decided here, from the error code where there is one.
 enum NetworkFailureKind: Equatable {
-    /// This device has no working internet.
     case offline
-    /// Reached nothing in time.
     case timedOut
     /// Name resolution, TLS, or a refused connection: the service is not
     /// answering the way it should.
@@ -29,8 +27,6 @@ enum NetworkFailureKind: Equatable {
     /// not exist is not a network fault.
     case other
 
-    /// Whether this says something about the network as opposed to about the
-    /// request.
     var isNetwork: Bool {
         switch self {
         case .offline, .timedOut, .service, .peerAbsent: return true
@@ -183,7 +179,6 @@ final class ConnectionModel {
     /// One that has never answered is not news, it is a machine that is off,
     /// and Machines says so in the place somebody goes to ask.
     private var peersSeenWorking: Set<String> = []
-    /// Machines that were working and are not now.
     private(set) var unreachablePeers: Set<String> = []
     /// Key to the name its owner gave it, so the card can say which machine.
     /// Empty until something that lists peers hands them over.
@@ -203,7 +198,6 @@ final class ConnectionModel {
 
     var isOffline: Bool { connectivity?.isOffline ?? false }
 
-    /// Whether a machine that was reachable has stopped answering.
     var peerFailing: Bool { !unreachablePeers.isEmpty }
 
     /// What is currently unwell, as one string. Two warnings with the same
@@ -212,7 +206,6 @@ final class ConnectionModel {
         "\(serviceFailing ? 1 : 0)|\(unreachablePeers.sorted().joined(separator: ","))"
     }
 
-    /// Whether the current warning was dismissed and nothing changed since.
     var isDismissed: Bool {
         guard let dismissed = dismissedSignature else { return false }
         return dismissed == signature
@@ -248,7 +241,6 @@ final class ConnectionModel {
         return peerNames[key]
     }
 
-    /// Four words at most, for the chip.
     var title: String {
         if isOffline { return L10n.text("common.offline") }
         if serviceFailing { return L10n.text("apple.connectionmodel.no_connection.c9e1a200") }
@@ -259,7 +251,6 @@ final class ConnectionModel {
         return L10n.text("apple.connectionmodel.connected.22965568")
     }
 
-    /// One sentence, for the popover.
     var detail: String {
         if isOffline {
             return L10n.text("apple.connectionmodel.this_device_cannot_reach_the_internet_retr.4fb94fa0", "\(Int(ConnectivityModel.retryInterval.components.seconds))")

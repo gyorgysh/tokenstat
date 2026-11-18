@@ -191,7 +191,6 @@ private enum MarkdownCache {
     // Room for ten warm conversations in a few projects. At 1500 the second
     // project's warming pushed out the first one's parsed text.
     static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 3000)
-    /// One entry per paragraph, list row and table cell, so several per block.
     static let inline = ParsedTextCache<AttributedString>(limit: 10000)
     /// Finished, coloured code, keyed by the fence's digest.
     ///
@@ -202,7 +201,6 @@ private enum MarkdownCache {
     /// made a conversation full of code hitch. The colouring is now done once
     /// and what is kept is the answer.
     static let rendered = ParsedTextCache<[AttributedString]>(limit: 600)
-    /// Parsed diff fences, keyed by the fence's source.
     static let diffs = ParsedTextCache<FileDiff>(limit: 300)
     /// Finished prose chains per message, keyed by the caller's font set,
     /// style and markdown (see `MessageMarkdown`). A whole-card hover or a
@@ -854,9 +852,7 @@ private struct MessageMarkdownContent: View {
 private struct MarkdownCodeBlock: View {
     let language: String?
     let source: String
-    /// The fence's digest, from the parser. Cheap to compare and to hash.
     let key: String
-    /// The longest line, in characters.
     let widest: Int
     let font: Font
     var style: MarkdownStyle = .document

@@ -15,23 +15,17 @@ import SwiftUI
 /// so the places it holds are always one click away and hiding the sidebar
 /// gives the room back without taking the way home with it.
 enum ShellMetrics {
-    /// The rail's own width. Wide enough that the window's traffic lights sit
-    /// inside the left surface rather than hanging over the content column
-    /// when the sidebar is hidden.
     static let railWidth: CGFloat = 64
     /// Gap between the floating glass panel and the window edges. Zero where
     /// the panel is flat and runs edge to edge.
     static var panelInset: CGFloat { usesGlass ? 6 : 0 }
-    /// Corner radius of the floating panel.
     static let panelRadius: CGFloat = 16
     /// The band the traffic lights sit in. The shell's titlebar is hidden and
     /// empty, so this is the only thing above the first row of chrome.
     static let titleBand: CGFloat = 28
 
-    /// The sidebar's resizable range and its first width.
     static let sidebarRange: ClosedRange<Double> = 220...440
     static let sidebarDefault: Double = 272
-    /// The inspector's resizable range and its first width.
     static let inspectorRange: ClosedRange<Double> = 300...640
     static let inspectorDefault: Double = 400
 
@@ -214,8 +208,6 @@ private final class FrostedGlassView: NSView {
     }
 }
 
-/// The panel's edge. Light on dark and dark on light, strong enough to read
-/// as the edge of a pane of glass rather than a seam.
 @available(macOS 26, *)
 private struct SidebarPanelRim: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -325,7 +317,6 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
 struct RailButton: View {
     let place: RailPlace
     let isSelected: Bool
-    /// A small count or state dot in the corner, when the place has news.
     var badge: Bool = false
     let action: () -> Void
 
@@ -371,9 +362,7 @@ struct ColumnResizeHandle: View {
     enum Side { case leading, trailing }
 
     let side: Side
-    /// The committed width.
     @Binding var width: Double
-    /// The width while a drag is in flight, or nil at rest.
     @Binding var liveWidth: Double?
     let range: ClosedRange<Double>
     var showsLine: Bool = true
@@ -410,7 +399,6 @@ struct ColumnResizeHandle: View {
                     start = nil
                 }
         )
-        // Double-click puts the column back where it started.
         .onTapGesture(count: 2) {
             let reset = side == .leading ? ShellMetrics.sidebarDefault : ShellMetrics.inspectorDefault
             width = min(range.upperBound, max(range.lowerBound, reset))
@@ -457,18 +445,10 @@ final class ColumnResizeCursorView: NSView {
 #endif
 
 #if os(macOS)
-/// A project's name and branch, then its sections, in the content bar.
-///
-/// The sections used to be ten rows repeated under every folder in the
-/// sidebar. Here they are one strip over the thing they switch, the way a
-/// repository's tabs sit over the repository, and the sidebar is left with
-/// the chats and sessions people actually open.
 struct ProjectHeader: View {
     let folder: WorkspaceFolder
     let selected: WorkspaceSection?
-    /// Present when the branch can be switched from here.
     var branch: AnyView?
-    /// What each section holds, where that is worth a number.
     var count: (WorkspaceSection) -> Int? = { _ in nil }
     let select: (WorkspaceSection) -> Void
 
@@ -477,7 +457,6 @@ struct ProjectHeader: View {
     static let sections: [WorkspaceSection] = [
         .chat, .sessions, .changes, .files, .pulls, .todo, .notes, .automations, .workflows,
     ]
-    /// How many sections keep their names when the bar gets tight.
     private static let primary = 5
 
     var body: some View {
@@ -538,7 +517,6 @@ struct ChromeTab: Identifiable, Hashable {
 struct ChromeTabStrip: View, Equatable {
     let tabs: [ChromeTab]
     let selected: String?
-    /// How many tabs keep their names at the middle width.
     var primary: Int = 3
     /// Whose sections these are. Only for equality: a strip that compares
     /// equal keeps its previous `select`, which must never be a closure that

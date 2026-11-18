@@ -21,6 +21,5 @@ import Foundation
 /// its old id would look like a viewer that never left. A process that dies
 /// without detaching is forgotten by the host's own lease instead.
 enum TerminalViewer {
-    /// Stable for the lifetime of this process, and different in every other.
     static let id = UUID().uuidString
 }

@@ -174,7 +174,6 @@ struct Ghost: View {
     }
 }
 
-// MARK: - A machine
 
 /// One drawing in three states, because they are three moments of the same
 /// thing: a server with nothing on it, a server being set up, and a server
@@ -670,7 +669,6 @@ private struct RemoteGateScene: View {
     }
 }
 
-// MARK: - Sessions
 
 /// A terminal waiting for its first command: the frame, a prompt, a caret that
 /// blinks the way the real one does.
@@ -710,7 +708,6 @@ private struct SessionsScene: View {
     }
 }
 
-// MARK: - Tasks
 
 /// Three lanes with one card in the first: the board before anybody has moved
 /// anything. The card leans toward the lane it would go to next.
@@ -753,7 +750,6 @@ private struct TasksScene: View {
     }
 }
 
-// MARK: - Notes
 
 /// A sheet with a folded corner and one line still being written.
 private struct NotesScene: View {
@@ -806,7 +802,6 @@ private struct NotesScene: View {
     }
 }
 
-// MARK: - Workflows
 
 /// Three nodes and the run that has not passed through them: the connectors are
 /// dashed and the dashes travel, so the graph reads as a route rather than a
@@ -857,7 +852,6 @@ private struct WorkflowsScene: View {
     }
 }
 
-// MARK: - Automations
 
 /// A clock with nothing on it: the face is drawn and the hand sweeps, and the
 /// row underneath where a job would sit is still an outline.
@@ -902,7 +896,6 @@ private struct AutomationsScene: View {
     }
 }
 
-// MARK: - Changes
 
 /// A clean working tree: the gutter is there, every line is unchanged, and the
 /// tick settles over it.
@@ -943,7 +936,6 @@ private struct ChangesScene: View {
     }
 }
 
-// MARK: - History
 
 /// A commit list with nothing in it yet: the rail is there, the newest seat is
 /// still an outline, and it breathes so the screen reads as waiting rather
@@ -1004,7 +996,6 @@ private struct HistoryScene: View {
     }
 }
 
-// MARK: - Not a git repository
 
 /// A folder that has no history behind it: the branch is drawn and never
 /// meets the folder, so the picture is the missing connection rather than an
@@ -1075,9 +1066,7 @@ private struct NotGitScene: View {
     }
 }
 
-// MARK: - Files
 
-/// A folder with one sheet lifting out of it.
 private struct FilesScene: View {
     var reduceMotion: Bool
     @State private var lifted = false
@@ -1123,7 +1112,6 @@ private struct FilesScene: View {
     }
 }
 
-// MARK: - Waiting
 
 /// The question went out and nothing has come back: arcs leaving a machine, and
 /// no answer drawn, because there is not one.
@@ -1160,7 +1148,6 @@ private struct WaitingScene: View {
     }
 }
 
-// MARK: - Remote Reach
 
 /// A phone calling a Mac whose Remote Reach switch is still off. The pulse
 /// ends at the switch, making this an actionable setup state rather than a
@@ -1227,7 +1214,6 @@ private struct RemoteReachScene: View {
     }
 }
 
-// MARK: - Vault
 
 /// Two devices drawing together around a lock: the vault before this plan
 /// includes it.
@@ -1292,7 +1278,6 @@ private struct VaultScene: View {
     }
 }
 
-// MARK: - Screen
 
 /// A display with a scan line, the picture that is missing until Legend.
 private struct ScreenScene: View {
@@ -1386,14 +1371,7 @@ private struct WorkspaceAccessScene: View {
     }
 }
 
-// MARK: - Chat
 
-/// The Mac chat empty picture, scaled to the client art canvas.
-///
-/// One character, sized for the 128x84 frame every other empty screen uses.
-/// The bubble with three pulsing dots that used to be here was a picture of
-/// waiting, and the four harness marks around it named agents nobody has to
-/// choose between on this screen.
 private struct ChatEmptyScene: View {
     var seed: UInt64
 

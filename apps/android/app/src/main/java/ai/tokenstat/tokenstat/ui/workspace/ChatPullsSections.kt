@@ -1227,8 +1227,6 @@ fun ChatSection(
                 }
             }
         }
-        // Sending is engaging: follow is the default, so a new turn resumes
-        // it even from a scrollback.
         pinToLatest()
         if (openId != id || !ownsProject()) return
         if (clean != "/compact" && staged.isEmpty() && tryParkSteer(id, clean)) return
@@ -1762,8 +1760,6 @@ fun ChatSection(
                     running = openChat?.bol("running") ?: true,
                 )
             }
-            // What the list draws. `transcript` stays every row, for the
-            // seat line and anything else that must see a folded step.
             val foldedRows = remember(transcript, detail, groupsOpen, toggledGroups, openChat?.bol("running")) {
                 foldTranscript(transcript, detail, running = openChat?.bol("running") ?: true) { id ->
                     groupsOpen != (id in toggledGroups)
@@ -2306,11 +2302,8 @@ fun ChatSection(
     }
 }
 
-/// The three fact cards the iOS list leads with: Conversations, Running,
-/// Agents. Figure first in accent, caption below, mark trailing.
 private data class RecordedPatchLine(val text: String, val kind: Int = 0)
 
-/// Pages the recorded text without building a view for every line at once.
 private fun recordedPatchLines(file: ChangedFile, limit: Int): List<RecordedPatchLine> = sequence {
     if (file.patches.isEmpty()) yield(RecordedPatchLine(L10n.text("android.workbench.patch_unavailable"), 2))
     file.patches.forEachIndexed { index, patch ->
@@ -2974,7 +2967,6 @@ private fun pullStateLabel(value: String) = when (value) {
     else -> L10n.text("android.pullfilter.open")
 }
 
-/** Keep the list itself readable on a phone; filtering lives in one touch-sized sheet. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PullFilterSheet(
@@ -3393,7 +3385,6 @@ internal fun readAttachment(context: android.content.Context, uri: android.net.U
     }
 }
 
-/// The newest running tool or edit, in the words the seat shows.
 private fun liveStep(items: List<ChatDisplayItem>): String? {
     for (item in items.asReversed()) {
         when (item) {
@@ -3409,8 +3400,6 @@ private fun liveStep(items: List<ChatDisplayItem>): String? {
     return null
 }
 
-/// The turn in progress, with the conversation's own face at the same left
-/// edge as an agent reply. Port of `ChatWorkingIndicator`.
 @Composable
 private fun ChatWorkingIndicator(
     seed: ULong,
@@ -3609,8 +3598,6 @@ internal fun ChatComposer(
                         onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota,
                         running = locked, onStop = onStop,
                         keyboardOpen = inputFocused, onHideKeyboard = { keyboard?.hide(); focus.clearFocus(); expanded = false })
-                    // Staged files sit above the field, each with its own way out, so
-                    // a wrong pick is one tap to undo rather than a sent message.
                     staged.forEach { attachment ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -3667,8 +3654,6 @@ internal fun ChatComposer(
                     )
                 }
                 if (expandedField) input(Modifier.fillMaxWidth())
-                // While dictation listens, its bar takes the controls' row
-                // and the words appear in the field above it.
                 if (dictation.isActive) {
                     if (!expandedField) input(Modifier.fillMaxWidth())
                     ChatDictationBar(dictation)
@@ -3715,7 +3700,6 @@ internal fun ChatComposer(
                         }
                     }
                     if (expandedField) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
-                    // Beside the field, where the keyboard's own mic would be.
                     ChatDictationButton(dictation, read = { currentDraft }, write = { currentOnDraft(it) }, enabled = !sending)
                     // Stop lives in the row above, as on the iPhone. A landscape
                     // keyboard hides that row, so it stays here then.

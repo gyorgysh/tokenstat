@@ -109,7 +109,6 @@ object TsType {
         fontFamily = interfaceFamily,
     )
 
-    // The phone text ladder, in the app's face and at the phone's sizes.
     val largeTitle = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
     val title = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
     val title2 = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)

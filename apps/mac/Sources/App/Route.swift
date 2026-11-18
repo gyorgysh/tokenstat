@@ -6,15 +6,6 @@
 
 import SwiftUI
 
-/// Where the shell is pointed.
-///
-/// Two scopes, one shape. Tasks, workflows and automations all already carry a
-/// workspace on the host side, and the app used to show every one of them in a
-/// single cross-project board because navigation was flat while the data was
-/// not. A route says which scope you are in as well as which screen, so the
-/// same screen can be the whole machine's list or one folder's.
-///
-/// See `docs/workspace-navigation.md`.
 enum Route: Hashable {
     /// Machine-wide. The weekly question, and the screens that have no folder.
     case global(GlobalSection)
@@ -76,7 +67,6 @@ enum Route: Hashable {
 
     var isWorkspace: Bool { workspaceID != nil }
 
-    /// The server whose sessions are in front, when that is what is in front.
     var sshTerminalHostID: String? {
         if case let .sshTerminals(host) = self { return host }
         return nil
@@ -89,15 +79,6 @@ enum Route: Hashable {
     /// site than unwrapping the optional, and there are a lot of call sites.
     func isGlobal(_ section: GlobalSection) -> Bool { globalSection == section }
 
-    /// Whether the trailing inspector column exists here.
-    ///
-    /// Account is the one screen with nothing to put beside it. Everything
-    /// else has a panel, so the default is yes, and every SSH section says
-    /// yes: the list is the content column and the editor is the inspector.
-    ///
-    /// Notes used to be the other exception, which is why a note's own text
-    /// could be written and then never read again on a wide window while a
-    /// task one list over had a whole pane for the same thing.
     var hasInspector: Bool {
         #if os(macOS)
         globalSection != .team && globalSection != .account && globalSection != .newChat && globalSection != .notes && workspaceSection != .notes
@@ -107,7 +88,6 @@ enum Route: Hashable {
     }
 }
 
-/// The machine-wide screens.
 enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     case home
     case team
@@ -254,7 +234,6 @@ enum SSHSection: Hashable, Identifiable {
         return self
     }
 
-    /// Set when the route is one folder's worth of hosts.
     var folderID: String? {
         if case let .hosts(folder) = self { return folder }
         return nil

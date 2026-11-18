@@ -233,7 +233,6 @@ internal sealed partial class ChatPage
     private bool CardExpanded(DisplayItem item)
     {
         if (_expandedCards.TryGetValue(item.Id, out var user)) return user;
-        // Detailed opens every finished output, not only a small diff.
         if (ChatDetailPreference.Level == ChatDetail.Detailed && !item.Running
             && (item.Kind == ItemKind.Tool ? !string.IsNullOrEmpty(item.Detail)
                 : item.Kind == ItemKind.Edit && !string.IsNullOrEmpty(item.Patch)))
@@ -243,7 +242,6 @@ internal sealed partial class ChatPage
         return ShouldAutoExpand(item);
     }
 
-    /// <summary>Questions whose answer is on its way to the host.</summary>
     private readonly HashSet<string> _answering = [];
     private readonly Dictionary<string, string> _questionWriting = [];
     private readonly Dictionary<string, List<string>> _questionPicks = [];
@@ -427,10 +425,6 @@ internal sealed partial class ChatPage
 
     private bool AnyGroupOpen() => _groupsOpen || _toggledGroups.Count > 0;
 
-    /// <summary>
-    /// The detail level, and Expand or Collapse all, in one menu beside the
-    /// conversation's other actions.
-    /// </summary>
     private UIElement DetailChoices()
     {
         var choices = new FlowPanel { Spacing = Theme.SpaceS };
@@ -492,10 +486,6 @@ internal sealed partial class ChatPage
     private static string StepGroupKey(ChatStepGroup? group) => group is null ? ""
         : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Failures}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Plain}|{group.Verb}|{group.Subject}";
 
-    /// <summary>
-    /// Compact: the verb, what it acted on and the lines it changed, in one
-    /// quiet line. Port of ChatStepGroupRow.swift <c>plainLine</c>.
-    /// </summary>
     private UIElement PlainStepLine(string id, ChatStepGroup group)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -643,10 +633,6 @@ internal sealed partial class ChatPage
         };
     }
 
-    /// <summary>
-    /// One line standing in for folded steps, like the Mac's ChatStepGroupRow.
-    /// The whole line is the control: it shows or hides the steps below it.
-    /// </summary>
     private UIElement StepGroupRow(string id, ChatStepGroup group)
     {
         if (group.Plain) return PlainStepLine(id, group);
@@ -747,10 +733,6 @@ internal sealed partial class ChatPage
         return button;
     }
 
-    /// <summary>
-    /// A step under its open group: inset, with a rule down the left so it
-    /// reads as belonging to the line above it.
-    /// </summary>
     private static UIElement GroupStepInset(UIElement view) => new Border
     {
         BorderBrush = Theme.BorderBrush,
@@ -760,7 +742,6 @@ internal sealed partial class ChatPage
         Child = view,
     };
 
-    /// <summary>A quiet red count of failed steps. A lone step just says Failed.</summary>
     private static TextBlock? FailureMark(ChatStepGroup group, double size, bool mono)
     {
         if (group.Failures == 0 || group.Running) return null;
@@ -812,7 +793,6 @@ internal sealed partial class ChatPage
         }
     }
 
-    /// <summary>"10s", "3m", "1h 5m", floored, like the Mac's turn timer.</summary>
     private static string? StepGroupDuration(ChatStepGroup group)
     {
         if (group.Running || group.StartedAt is not { } start || group.EndedAt is not { } end || end <= start) return null;
@@ -1265,10 +1245,6 @@ internal sealed partial class ChatPage
         Content = content,
     };
 
-    /// <summary>
-    /// One step of a run under an open Compact line: the verb and what it
-    /// acted on, with its output a click away and no card around either.
-    /// </summary>
     private UIElement PlainStepRow(DisplayItem item)
     {
         var verb = item.Kind == ItemKind.Edit ? "Edit" : item.Verb;

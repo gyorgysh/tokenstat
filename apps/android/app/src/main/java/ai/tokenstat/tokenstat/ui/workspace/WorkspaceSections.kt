@@ -847,8 +847,6 @@ private fun TodoSection(
         if (error != null) item { SectionError(error) }
         if (writeError != null) item { SectionError(writeError) }
         item {
-            // Spaced: the label's own count sits at its trailing edge, so
-            // with no gap the button covered it and the header read "TASKS 1".
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -1118,8 +1116,6 @@ private fun WorkflowsSection(
     }
 }
 
-/// A workflow as a picture: named step capsules joined left-to-right, the
-/// compact reading of `MiniGraph`/`WorkflowStepStrip` in a phone column.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkflowCard(

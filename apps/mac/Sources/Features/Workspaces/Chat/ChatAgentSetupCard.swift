@@ -386,8 +386,6 @@ struct AgentSignInSheet: View {
         #endif
     }
 
-    /// Copy, then say so where the person is looking: the button turns into
-    /// a tick and the code itself pulses, then both settle back.
     private func copy(_ code: String) {
         ChatClipboard.copy(code)
         copyGeneration += 1

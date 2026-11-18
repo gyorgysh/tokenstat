@@ -249,7 +249,6 @@ struct WorkspaceChangesView: View {
     var folder: WorkspaceFolder?
     #if os(macOS)
     @Bindable var automations: AutomationsModel
-    /// Opens the Auto commit job on Automations after it starts.
     var onOpenAutomation: ((String, String?) -> Void)? = nil
     #endif
     var onReview: ((String?) -> Void)? = nil
@@ -364,8 +363,6 @@ struct WorkspaceChangesView: View {
     }
 
     #if os(macOS)
-    /// Tick or clear everything at once. The label says which way it will go,
-    /// rather than being a tri-state box that makes you guess.
     private func selectAll(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
         let selected = (model.stagedSelection[folder.id] ?? []).intersection(git.files.map(\.path)).count
         let all = selected == git.files.count
@@ -686,8 +683,6 @@ private struct CommitBox: View {
         .padding(Theme.Space.s)
     }
 
-    /// Bring commits in, send them out, and the pull request they belong
-    /// to. One row, so the whole round trip is in one place.
     private var syncRow: some View {
         FlowLayout(spacing: Theme.Space.s, rowSpacing: Theme.Space.s) {
             syncControls
@@ -804,7 +799,6 @@ private struct CommitBox: View {
 }
 #endif
 
-/// One changed file: a tick for the next commit, and the name opens its diff.
 private struct ChangeRow: View {
     var file: FileChange
     var isStaged: Bool

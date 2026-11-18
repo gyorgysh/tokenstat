@@ -15,7 +15,7 @@ enum TerminalControlCode {
         case 0x61...0x7A: return byte - 0x60  // a–z
         case 0x41...0x5A: return byte - 0x40  // A–Z
         case 0x5B...0x5F: return byte - 0x40  // [ \\ ] ^ _
-        case 0x20: return 0  // space is NUL
+        case 0x20: return 0
         default: return nil
         }
     }
@@ -50,9 +50,7 @@ import UIKit
 /// Bytes go to the same closure the terminal view writes on, so this adds no
 /// transport and cannot get out of step with what typing does.
 struct ClientTerminalKeys: View {
-    /// Send raw bytes to the pty.
     let send: ([UInt8]) -> Void
-    /// Put the keyboard away, so the screen is all output, or bring it back.
     let toggleKeyboard: () -> Void
     /// Whether a drag scrolls the buffer instead of reaching the program.
     @Binding var scrolls: Bool

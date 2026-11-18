@@ -371,7 +371,6 @@ private struct TotalTile: View {
                 Text(formatSpend(micros))
                     .font(ClientType.figureSmall)
                     .foregroundStyle(Theme.accent)
-                    // A figure that moved should look like it moved.
                     .contentTransition(.numericText())
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)

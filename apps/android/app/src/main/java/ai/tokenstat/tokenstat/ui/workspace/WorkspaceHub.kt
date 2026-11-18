@@ -401,8 +401,6 @@ fun WorkspaceHub(
         }
         if (wideNavigation && !compactChat) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                // Keep the primary destinations visible and put the remainder
-                // in a menu when the detail column cannot fit the whole strip.
                 val primary = if (maxWidth >= 1400.dp) HubSection.entries else
                     listOf(HubSection.SESSIONS, HubSection.CHAT, HubSection.CHANGES)
                 val overflow = HubSection.entries.filter { it !in primary }

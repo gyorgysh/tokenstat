@@ -30,7 +30,6 @@ const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// The response keeps every field this parses; the DTOs below ignore the rest.
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage?skip_spend=1";
 
-/// Where a refresh token is traded for a new access token.
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 
 /// Claude Code's own public OAuth client. Not a secret: it names the

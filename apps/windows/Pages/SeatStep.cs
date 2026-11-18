@@ -3,24 +3,11 @@ using System.Text;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Words for the live seat, a tool row, and a permission chip.
-/// The same sentences are used on every client. The seat names the whole
-/// step in one line. A row keeps the path or the command beside a shorter
-/// word: present while the step runs, past once it has finished. A name
-/// this list does not know stays as the tool wrote it. The permission
-/// chip uses that same word. The Always allow line names the rule that
-/// is stored, which is a command prefix or a tool name, never the chip.
-/// </summary>
 internal static class SeatStep
 {
     public const int DetailCap = 32;
     public const int ScanCap = 4096;
 
-    /// <summary>
-    /// Soft lines the live seat rotates through while the agent is thinking.
-    /// Short and similar in weight so a change of phrase reads as the same wait.
-    /// </summary>
     public static IReadOnlyList<string> ThinkingPhrases() =>
     [
         L10n.Text("common.chat.seat.thinking"),
@@ -68,8 +55,6 @@ internal static class SeatStep
             case "TodoWrite":
                 return L10n.Text("windows.seatstep.updating_the_list.ca724dcc");
             default:
-                // A path with nothing left after the slashes is just work.
-                // "Working on" with an empty name reads as a broken sentence.
                 var edges = TrimEdges(line);
                 if (edges.Contains('/') || edges.Contains('\\'))
                 {
@@ -82,10 +67,6 @@ internal static class SeatStep
         }
     }
 
-    /// <summary>
-    /// Waiting wins. A real step is shown as written. Speaking is a reply.
-    /// Everything else is thought.
-    /// </summary>
     public static string SeatLabel(bool waiting, string? step, bool speaking)
     {
         if (waiting) return L10n.Text("common.waiting");

@@ -36,7 +36,6 @@ internal fun DrawScope.drawPersonaProps(mood: PersonaMood, time: Double, hue: Co
     }
     when (mood) {
         PersonaMood.Reading -> {
-            // Folded paper seen from behind, with eyes above its top edge.
             val bob = sin(time * 2) * 0.007
             box(0.25, 0.69 + bob, 0.50, 0.23)
             line(0.50, 0.70 + bob, 0.50, 0.91 + bob)

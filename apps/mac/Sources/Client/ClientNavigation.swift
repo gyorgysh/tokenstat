@@ -282,7 +282,6 @@ final class ClientNavigationModel {
         }
     }
 
-    /// Which project section the strip above the content is showing.
     var section: WorkspaceSection = .sessions {
         didSet { if section != oldValue { chooseNavigation(); restoredRoute = nil } }
     }

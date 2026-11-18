@@ -32,8 +32,6 @@ object AvatarCache {
     private const val MAX_COUNT = 128
     private const val MAX_BYTES = 64 * 1024 * 1024
 
-    /// Avatars are small uploads. Four megabytes is already absurd; more than
-    /// that is a response doing something other than showing a face.
     private const val BYTE_LIMIT = 4 * 1024 * 1024
     private const val TIMEOUT_MS = 10_000
 

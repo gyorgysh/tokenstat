@@ -43,7 +43,6 @@ final class ClientSetupModel {
     var trusted = false
 
     var check: ServerCheck?
-    /// What this machine will be called on the account.
     var machineName = ""
     var agents: [String] = ["claude_code"]
     var printInvite = false
@@ -355,7 +354,6 @@ final class ClientSetupModel {
         error = nil
     }
 
-    /// Offer a distinct name when this account already has a server with it.
     func chooseAvailableMachineName() async throws {
         guard let owner = ownership.claim(), preparedOwner == owner else { throw CancellationError() }
         let account = try await Bridge.account()
@@ -602,7 +600,6 @@ final class ClientSetupModel {
     }
 }
 
-/// How this wizard will sign in to the server it is setting up.
 enum SetupCredential: Equatable {
     case none
     /// A key already in the vault, on every device that shares the account.

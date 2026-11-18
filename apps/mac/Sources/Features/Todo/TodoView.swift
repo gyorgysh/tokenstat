@@ -10,7 +10,6 @@ import SwiftUI
 struct TodoView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
-    /// Open a delegated run's transcript on the Automations screen.
     var onViewRun: ((String, String) -> Void)? = nil
     /// Spawn an interactive terminal for this card. Not an automation.
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
@@ -52,7 +51,6 @@ struct TodoView: View {
         }
     }
 
-    /// The folder this board is scoped to, named on the chrome bar.
     private var scopeChip: ScopeChip? {
         guard let id = model.scope else { return nil }
         guard let folder = folders.first(where: { $0.id == id }) else { return nil }
@@ -162,8 +160,6 @@ struct TodoView: View {
         .overlay(alignment: .bottom) { ThemeRule() }
     }
 
-    /// Order, the archive and a new card: what changes the board rather
-    /// than what narrows it.
     private var boardActions: some View {
         HStack(spacing: Theme.Space.s) {
             Picker(L10n.text("apple.todoview.sort_tasks.952f3831"), selection: $newestFirst) {
@@ -229,7 +225,6 @@ struct TodoView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Waiting on the first read of the board.
     private var isWarming: Bool {
         !model.hasLoaded && model.errorMessage == nil
     }
@@ -393,8 +388,6 @@ struct TodoView: View {
         dropBeforeID = nil
     }
 
-    /// Append a dragged card to this column. Shared by header chrome and the
-    /// empty space under the last card.
     private func dropOnColumn(_ ids: [String], column: String) -> Bool {
         guard let cardID = ids.first,
               let card = model.cards.first(where: { $0.id == cardID }) else { return false }
@@ -451,7 +444,6 @@ private struct CardView: View {
     var folders: [WorkspaceFolder]
     var isSelected: Bool = false
     var onSelect: () -> Void = {}
-    /// Opens the run's transcript on the Automations screen.
     var onViewRun: ((String, String) -> Void)?
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)?
     var onDropBefore: ((TodoCard) -> Void)?
@@ -743,10 +735,6 @@ private struct CardView: View {
 
 // MARK: - New card
 
-/// The full-width row that opens New Task.
-///
-/// It sits at the foot of a column's cards, the one place a board offers to
-/// add. The toolbar's New task covers a backlog too long to scroll.
 private struct AddCardTrigger: View {
     @Binding var expanded: Bool
 

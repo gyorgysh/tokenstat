@@ -591,7 +591,6 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
     }
 }
 
-/// Full-screen terminal for one remote session.
 struct ClientTerminalScreen: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(AccountModel.self) private var account

@@ -230,7 +230,6 @@ pub(crate) fn path_query(token: &Token, base: Option<&str>) -> Option<PathQuery>
         None => (String::new(), literal.clone()),
     };
     let dir = if head.is_empty() {
-        // `sr`, meaning something in the directory the session is sitting in.
         base?.to_string()
     } else if head == "~/" {
         "~".to_string()
@@ -285,7 +284,6 @@ pub(crate) fn escape_path(path: &str) -> Option<String> {
     Some(out)
 }
 
-/// Join a listed name onto the part of the path already typed.
 fn joined(query: &PathQuery, entry: &Entry) -> String {
     let head =
         if query.head.is_empty() && (entry.name.starts_with('-') || entry.name.starts_with('~')) {
@@ -321,9 +319,7 @@ pub(crate) struct SessionHistory {
     pub commands: Vec<String>,
 }
 
-/// How many directories a session remembers.
 const KEPT_DIRECTORIES: usize = 60;
-/// How many command lines a session remembers.
 const KEPT_COMMANDS: usize = 200;
 /// The longest command line worth remembering. A pasted file is not a command
 /// somebody will want offered back to them.
@@ -505,7 +501,6 @@ pub(crate) fn rank(
         sort_scoped(&mut rows, snippets);
     }
 
-    // 2. What the far end says is in the directory.
     if let Some(query) = query {
         let mut names: Vec<&Entry> = entries
             .iter()
@@ -654,7 +649,6 @@ fn snippet_row(snippet: &Snippet, replace: usize) -> Row {
     }
 }
 
-/// Scoped snippets ahead of general ones, then alphabetically.
 fn sort_scoped(rows: &mut [Row], snippets: &[Snippet]) {
     let scoped = |row: &Row| {
         snippets

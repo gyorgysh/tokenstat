@@ -28,10 +28,8 @@ internal sealed partial class TeamsPage : Page
     // stops instead of drawing over the one now shown.
     private int _view;
     private int _attachmentRevision;
-    // Which side of the shared chat composer was last used: comment or ask.
     private string _composerMode = "comment";
     private bool _attached;
-    // A result to show once the reload after Land or Discard has drawn.
     private string? _flash;
     private TeamCommentModel? _currentComment;
     private bool CommentIdle => _fileOperations == 0 && (_currentComment is not { } comment || !comment.Busy && comment.Text.Length == 0 && comment.RecoveredText is null);
@@ -475,8 +473,6 @@ internal sealed partial class TeamsPage : Page
         if (repo["role"] is not null) await LoadMore();
     }
 
-    /// A member starts an empty shared chat on that computer and asks its
-    /// agent there, without waiting for the owner to share one.
     private UIElement NewChat(string orgId, string repoId, string checkout, string computer)
     {
         var view = _view;
@@ -530,8 +526,6 @@ internal sealed partial class TeamsPage : Page
                 agent.IsEnabled = true;
             }
         });
-        // Title, agent and Start side by side, the way the Mac lays out the
-        // same card, with what it does underneath.
         var fields = new Grid { ColumnSpacing = Theme.SpaceS };
         fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         fields.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -562,7 +556,6 @@ internal sealed partial class TeamsPage : Page
             _ => L10n.Text("common.teams.lane_kept", asker, files.Count.ToString()),
         };
         row.Children.Add(new TextBlock { Text = detail, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
-        // Compared across every computer's lanes, as on the Mac and Android.
         var overlapping = all.Where(other => Format.Text(other, "branch") != Format.Text(lane, "branch")
                 && ((other["files"] as JsonArray)?.Any(f => files.Contains(f?.ToString() ?? "")) ?? false))
             .Select(other => Format.Text(other, "ask") is { Length: > 0 } text ? text : Format.Text(other, "branch")).ToList();

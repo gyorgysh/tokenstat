@@ -576,8 +576,6 @@ private fun orderedAutomationRuns(runs: List<AutomationRun>): List<AutomationRun
     return ordered.mapNotNull { byID[it.id] }
 }
 
-/// The library: search, the scheduler card, the summary, and one row per
-/// job. Port of the `ClientAutomationWorkspace` phone list.
 @Composable
 private fun AutomationListPage(
     scoped: List<AutomationJob>,
@@ -752,8 +750,6 @@ private fun SchedulerCard(hostLabel: String, folderName: String, queue: Automati
     }
 }
 
-/// A job as a name, one quiet line, and whether it is going.
-/// Port of `ClientJobRow`.
 @Composable
 private fun AutomationJobRow(
     job: AutomationJob,
@@ -817,8 +813,6 @@ private fun AutomationJobRow(
     }
 }
 
-/// One scheduled job on a phone: the prompt, Run / Stop, pause.
-/// Port of `ClientAutomationDetailView`.
 @Composable
 private fun AutomationDetailPage(
     job: AutomationJob?,
@@ -1004,8 +998,6 @@ private fun AutomationDetailPage(
     }
 }
 
-/// Every retained run for one job, live first, twenty at a time.
-/// Port of `ClientAutomationHistoryView`.
 @Composable
 private fun AutomationHistoryPage(
     job: AutomationJob?,
@@ -1077,8 +1069,6 @@ private fun AutomationHistoryPage(
     }
 }
 
-/// One automation run on a phone: status and a live transcript.
-/// Port of `ClientAutomationRunView`.
 @Composable
 private fun AutomationRunPage(
     model: AppViewModel,
@@ -1381,7 +1371,6 @@ fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolea
                 color = LocalTsColors.current.textPrimary,
             )
         } else {
-            // Tool calls as the chat's compact activity lines, prose as text.
             val blocks = remember(text) { RunTranscriptParser.parse(text) }
             blocks.forEachIndexed { index, block ->
                 when (block) {

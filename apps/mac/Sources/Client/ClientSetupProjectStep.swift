@@ -8,15 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Step eight: the project, which is the point of all of it.
-///
-/// Setup used to end on a machine and a list of folders that was empty, which
-/// is a working server and nothing to do with it. This ends inside a project,
-/// with a first task already typed and not sent.
-///
-/// Neither route is new work: cloning and picking a folder are the same two
-/// screens the workspace list offers, reached from here so that nobody has to
-/// find them afterwards.
 struct ClientSetupProjectStep: View {
     @Bindable var model: ClientSetupModel
     var onFinish: () -> Void

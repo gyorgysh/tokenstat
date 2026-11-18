@@ -290,7 +290,6 @@ struct SSHSessionSummary: Codable, Sendable, Hashable, Identifiable {
     var label: String
     var openedMs: Int64
     var alive: Bool
-    /// Output the host had to drop before anybody read it, in bytes.
     var droppedBytes: UInt64
 
     enum CodingKeys: String, CodingKey {
@@ -380,7 +379,6 @@ struct RemoteListing: Codable, Sendable, Hashable {
     var truncated: Bool = false
 }
 
-/// What became of a clone somebody started.
 struct RemoteCloneStatus: Codable, Sendable, Hashable {
     /// `running`, `done` or `failed`.
     var state: String
@@ -469,13 +467,10 @@ struct SSHSessionRead: Codable, Sendable, Hashable {
 /// saved. Nothing here is sent to the shell by being shown: `insert` is typed
 /// only when a row is chosen.
 struct SSHSuggestion: Codable, Sendable, Hashable, Identifiable {
-    /// `directory`, `file` or `snippet`.
     var kind: String
     var title: String
     var detail: String
-    /// What to type once `replace` characters have been rubbed out.
     var insert: String
-    /// How many characters at the end of the typed line this stands in for.
     var replace: Int
     /// `{{placeholder}}` names, asked for before a snippet is inserted.
     var variables: [String] = []
@@ -504,8 +499,6 @@ struct SSHSuggestion: Codable, Sendable, Hashable, Identifiable {
 
     var isSnippet: Bool { kind == "snippet" }
     var isDirectory: Bool { kind == "directory" }
-    /// Read character by character: a path, or a command line. A snippet is
-    /// the one row whose title is a name somebody wrote for themselves.
     var readsAsCode: Bool { kind != "snippet" }
 }
 
@@ -656,7 +649,6 @@ struct ScreenQualityProfile: Sendable, Hashable {
         keyframeSeconds: 4
     )
 
-    /// A metered link somebody wants to keep cheap, or a poor one.
     static let dataSaver = ScreenQualityProfile(
         maxWidth: 1280,
         averageBitRate: 800_000,
@@ -676,7 +668,6 @@ struct ScreenQualityProfile: Sendable, Hashable {
         keyframeSeconds: 2
     )
 
-    /// Asked for by hand, on a link that can take it.
     static let directSharp = ScreenQualityProfile(
         maxWidth: 3840,
         averageBitRate: 16_000_000,
@@ -767,7 +758,6 @@ struct ScreenAccessAsk: Codable, Sendable, Hashable {
 enum DeviceAccessKind: String, Sendable, Hashable {
     /// Watch this screen, and possibly drive it.
     case screen
-    /// Open the folders, files, terminals and agents on this machine.
     case workspace
 }
 
@@ -796,14 +786,11 @@ struct DeviceAccessPending: Codable, Sendable, Hashable, Identifiable {
         case askedAt, expiresAt
     }
 
-    /// What to call it on screen. Falls back to the head of the key, which is
-    /// what the rest of the app shows when the account knows no better.
     var displayName: String {
         if let label, !label.isEmpty { return label }
         return L10n.text("apple.models.device_0.625b47c6", "\(peerID.prefix(8))")
     }
 
-    /// The one-line question, for a toast and for a notification title.
     var headline: String {
         switch kind {
         case .screen: return L10n.text("apple.models.0_wants_to_see_this_screen.a07f03f2", "\(displayName)")
@@ -1062,7 +1049,6 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     /// Which grid this is: `"local"` or `"account"`. Optional because a peer
     /// running an older host does not send it, and a missing answer is local.
     var scope: String?
-    /// Why this is not the grid that was asked for, in words to show.
     var notice: String?
     /// What kind of fallback this is, so the interface can act on it instead
     /// of parsing the sentence: `"auth"` (sign-in would fix it), `"upgrade"`
@@ -1075,7 +1061,6 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     /// Free year: last month exact, older days muted. Same treatment as
     /// the public profile. Missing or false on a paid grid and on local.
     var historyLocked: Bool?
-    /// How many recent days stay exact. The banner names this number.
     var historyDays: Int?
     /// Offer an upgrade under the grid. The app is the owner, so this is
     /// true whenever the year is locked.
@@ -1093,7 +1078,6 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
 
     var isStaleGrid: Bool { noticeCode == "stale" }
 
-    /// How current the account grid is, in the same words the limit cards use.
     var freshness: String? {
         guard let fetchedAt else { return nil }
         let ago = fetchedAt.formatted(.relative(presentation: .named))
@@ -1191,7 +1175,6 @@ struct SyntaxRules: Codable, Sendable, Hashable {
     var blockComment: [String]?
     var indent: Int
 
-    /// What pressing Tab inserts.
     var indentUnit: String { String(repeating: " ", count: max(1, indent)) }
 
     static let fallback = SyntaxRules(lineComment: nil, blockComment: nil, indent: 4)
@@ -1388,7 +1371,6 @@ struct DeviceLogin: Codable, Sendable, Hashable {
     /// The short code the user reads. Shown large, because reading it off a
     /// screen is the one manual step in the whole flow.
     var userCode: String
-    /// Where to send them. Usually already carries the code.
     var openURL: String
     var verificationURI: String
     var expiresIn: UInt64
@@ -1415,7 +1397,6 @@ struct DevicePoll: Codable, Sendable, Hashable {
     var isConfirmed: Bool { state == "confirmed" }
 }
 
-/// Who is signed in.
 struct Account: Codable, Sendable, Hashable {
     var signedIn: Bool
     var host: String
@@ -1446,8 +1427,6 @@ struct Account: Codable, Sendable, Hashable {
     /// gave nil, so the Account screen said "never" for an account that had
     /// synced minutes earlier.
     var lastSyncAt: String?
-    /// The machine this app is running on, so the list below can say which row
-    /// is the one you are sitting at.
     var thisMachineID: String?
     /// The account's own id, as the server states it. The stable identity for
     /// an account that has not claimed a handle yet. A new account has no
@@ -1457,7 +1436,6 @@ struct Account: Codable, Sendable, Hashable {
     /// decodes the few fields the UI shows and ignores the rest.
     var machines: [Machine]
     var schemaCurrent: UInt32?
-    /// Devices this plan may link. A computer, phone, or tablet each uses one.
     var machineLimit: Int?
     var hostsLinked: Int?
     /// Whether the relay will accept a HELLO from this account.
@@ -1481,15 +1459,12 @@ struct Account: Codable, Sendable, Hashable {
 
     var hostMachines: [Machine] { machines.filter(\.isHost) }
 
-    /// What to call this person on screen: their chosen name, or the handle
-    /// when they have not set one.
     var title: String? {
         let name = displayName?.trimmingCharacters(in: .whitespaces)
         if let name, !name.isEmpty { return name }
         return handle
     }
 
-    /// A paid rung, whether Apple, Paddle, or a grant such as founder access.
     var isPaidTier: Bool {
         switch tier?.lowercased() {
         case "supporter", "patron", "legend": return true
@@ -1515,7 +1490,6 @@ struct Account: Codable, Sendable, Hashable {
         billing?.isApple == true && billing?.blocksOtherStore == true
     }
 
-    /// Live website subscription.
     var isPaddleBilled: Bool {
         billing?.isPaddle == true && billing?.blocksOtherStore == true
     }
@@ -1681,7 +1655,6 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// Outcome of a sync.
 struct SyncOutcome: Codable, Sendable, Hashable {
     var host: String
     var rows: UInt64
@@ -1948,9 +1921,6 @@ struct ProjectHarnesses: Identifiable, Hashable {
 
     var id: String { path }
 
-    /// Last path component, which is what someone calls the project. The full
-    /// path stays available for the row's tooltip, since two checkouts of the
-    /// same repository share a leaf name.
     var name: String {
         let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
         let leaf = trimmed.split(separator: "/").last.map(String.init)
@@ -2115,7 +2085,6 @@ enum ChangeKind: String, Codable, Sendable {
         }
     }
 
-    /// The word for it, where there is room for a word rather than a glyph.
     var label: String {
         switch self {
         case .added: return L10n.text("apple.models.added.6b02e0d3")
@@ -2128,7 +2097,6 @@ enum ChangeKind: String, Codable, Sendable {
     }
 }
 
-/// One changed file.
 struct FileChange: Codable, Sendable, Hashable, Identifiable {
     var path: String
     var kind: ChangeKind
@@ -2139,7 +2107,6 @@ struct FileChange: Codable, Sendable, Hashable, Identifiable {
 
     var id: String { path }
 
-    /// Directory the file sits in, for grouping. Empty at the repo root.
     var directory: String {
         let parts = path.split(separator: "/")
         return parts.count > 1 ? parts.dropLast().joined(separator: "/") : ""
@@ -2150,7 +2117,6 @@ struct FileChange: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// Git state of a workspace folder.
 struct GitStatus: Codable, Sendable, Hashable {
     var isRepo: Bool
     var branch: String?
@@ -2178,7 +2144,6 @@ struct GitStatus: Codable, Sendable, Hashable {
     }
 }
 
-/// One branch offered by the workspace branch picker.
 struct GitBranch: Codable, Sendable, Hashable, Identifiable {
     var name: String
     var current: Bool
@@ -2409,7 +2374,6 @@ struct PullForgeConnection: Codable, Sendable, Hashable {
     var source: String?
 }
 
-/// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String
     /// Path relative to the project root, with `/` separators.
@@ -2443,7 +2407,6 @@ enum GitOutcomeAction: Sendable, Hashable {
     case commit
     case push
 
-    /// What to say when it worked.
     var done: String {
         switch self {
         case .commit: return L10n.text("apple.models.committed.3160c5e5")
@@ -2493,7 +2456,6 @@ struct Commit: Codable, Sendable, Hashable, Identifiable {
     /// app, and a commit without tags is still a commit.
     var tags: [String]?
 
-    /// The seven characters everyone actually reads.
     var shortID: String { String(id.prefix(7)) }
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
@@ -2502,7 +2464,6 @@ struct Commit: Codable, Sendable, Hashable, Identifiable {
     var tagList: [String] { tags ?? [] }
 }
 
-/// How close to a limit a window is.
 enum LimitSeverity: String, Codable, Sendable {
     case normal, warning, critical
 
@@ -2584,9 +2545,7 @@ struct LimitsSyncState: Codable, Sendable {
     }
 }
 
-/// What one provider says about its own limits.
 struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
-    /// Archive source id, so the brand mark is the same one used elsewhere.
     var source: String
     var plan: String?
     var windows: [UsageWindow]
@@ -2609,8 +2568,6 @@ struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
     /// Something to draw, as opposed to only a reason there is nothing.
     var hasWindows: Bool { !windows.isEmpty }
 
-    /// When the soonest window rolls over, which is the next moment these
-    /// numbers can change on their own.
     var nextReset: Date? {
         windows.compactMap(\.resetsAt).min()
     }
@@ -2620,7 +2577,6 @@ struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
 struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var subject: String
-    /// Everything after the subject. Empty when there is none.
     var body: String
     var author: String
     var email: String
@@ -2671,7 +2627,6 @@ struct WorkspaceSummary: Codable, Sendable, Hashable, Identifiable {
     var automations: Int
 }
 
-/// A folder the user registered.
 struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var path: String
@@ -2692,7 +2647,6 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
 
     var changeCount: Int { git?.files.count ?? 0 }
 
-    /// `+120 −8`, or nil when there is nothing to say.
     var diffStat: String? {
         guard let git, git.isRepo, !git.files.isEmpty else { return nil }
         return git.compactChangeSummary
@@ -2718,7 +2672,6 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     var isRemote: Bool { machineID != nil }
 }
 
-// MARK: - Automations
 
 // MARK: - Chat
 
@@ -2771,7 +2724,6 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     /// What the last turn left in the provider's prompt cache. Absent for an
     /// agent that does not report it and on a host older than protocol 54.
     var promptCache: ChatPromptCache? = nil
-    /// The chat this one was started to continue, if any.
     var continuedFrom: String? = nil
 
     /// A saved page has no live setup or permissions. These inert values are
@@ -2882,9 +2834,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
 /// The last request a conversation sent, as the host recorded it.
 struct ChatPromptCache: Codable, Sendable, Hashable {
     var backend: String
-    /// Everything that request put in front of the model.
     var tokens: UInt64
-    /// The model the provider says answered.
     var model: String?
     /// The conversation's model setting when the turn started.
     var selection: String?
@@ -3032,14 +2982,6 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
-/// A voice, not a launcher.
-///
-/// A persona used to carry a backend, model, effort, mode and autonomy, all of
-/// which already live on the conversation and are adjustable there. It was a
-/// duplicate that went stale, and it meant a persona was tied to one agent and
-/// could not survive the conversation being handed to another. What is left is
-/// what the word means: a name and a brief, plus the seed its face is drawn
-/// from.
 struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     var id: String
     /// Nil is a shared legacy persona, available in every workspace.
@@ -3579,7 +3521,6 @@ struct AutomationQueue: Codable, Sendable {
     var timezone: String? = nil
 }
 
-// MARK: - Workflows
 
 /// Host-owned graph. The Mac canvas is a view of this, not the source of truth.
 struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
@@ -4120,7 +4061,6 @@ struct AgentBackend: Codable, Sendable, Identifiable {
     }
 }
 
-// MARK: - Todo
 
 enum TodoKind: String, Codable, Sendable, Hashable {
     case task
@@ -4219,7 +4159,6 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
         Self.cleanModelID(model ?? "")
     }
 
-    /// What an agent should do. Notes first, title if the notes are empty.
     var promptForRun: String {
         let body = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty { return body }
@@ -4329,10 +4268,8 @@ struct PtyProgramStatus: Codable, Sendable, Hashable {
 /// follow the Rust `SessionInfo`, including optional metadata from newer hosts.
 struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var id: String
-    /// The command as launched, for a tab label.
     var command: String
     var cwd: String
-    /// Workspace this belongs to, so sessions can be grouped by folder.
     var workspaceID: String?
     /// Daemon-owned jobs (automations) set this so the workspace must not
     /// adopt the session as a tab.
@@ -4433,9 +4370,7 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
 /// is the point: a burst of build output is up to half a megabyte per poll, and
 /// decoding it in the session actor put that work on the thread that draws.
 struct PtyChunk: Decodable, Sendable {
-    /// The output itself, already decoded.
     var bytes: Data
-    /// Offset to ask for next time.
     var nextOffset: UInt64
     /// Bytes dropped before this chunk because this reader fell behind the
     /// host's bounded buffer. Zero in normal use, and never silently ignored.
@@ -4476,11 +4411,9 @@ struct PtyChunk: Decodable, Sendable {
 
 // MARK: - Machines
 
-/// Who this machine is to another one.
 struct MachineIdentity: Codable, Sendable {
     /// The public key as hex. Long, and the thing that is actually pinned.
     let key: String
-    /// The short form somebody reads aloud to check two ends match.
     let fingerprint: String
     /// The same key as three words. What the screen leads with, because it is
     /// the comparison a person performs rather than skims.
@@ -4491,7 +4424,6 @@ struct MachineIdentity: Codable, Sendable {
     var labelIsChosen: Bool?
 }
 
-/// A machine this one knows about.
 struct Peer: Codable, Sendable, Identifiable, Hashable {
     enum Trust: String, Codable, Sendable {
         /// It made contact and nobody has decided yet. The only state a new
@@ -4517,7 +4449,6 @@ struct Peer: Codable, Sendable, Identifiable, Hashable {
     var id: String { key }
 }
 
-/// Whether this machine is reachable by others.
 struct RemoteStatus: Codable, Sendable {
     /// Whether this machine keeps an outbound connection to the blind tunnel.
     let tunnel: Bool
@@ -4530,7 +4461,6 @@ struct RemoteStatus: Codable, Sendable {
     let tunnelOnline: Bool?
     /// Whether the account directory carries this machine's key and name.
     let tunnelRegistered: Bool?
-    /// Why the tunnel is not connected, when it is not.
     let tunnelError: String?
     let key: String
     let fingerprint: String

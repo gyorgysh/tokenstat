@@ -219,7 +219,6 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
         }
     }
 
-    /// This account's active subscription among ours, if Play holds one.
     private fun ourPurchase(purchases: List<Purchase>): Purchase? {
         val expected = appAccountToken?.trim().orEmpty()
         return purchases

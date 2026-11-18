@@ -58,7 +58,6 @@ class TsRefreshTest {
         TsRefresh.run("tsrefresh-scope", "origin|bob") { runs++ }
         TsRefresh.run("tsrefresh-scope", null) { runs++ }
         assertEquals(3, runs)
-        // But the same scope inside the window still skips.
         TsRefresh.run("tsrefresh-scope", "origin|alice") { runs++ }
         assertEquals(3, runs)
     }

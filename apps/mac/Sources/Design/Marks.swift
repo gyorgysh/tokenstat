@@ -269,7 +269,6 @@ enum LogoRefresh {
 }
 
 extension Notification.Name {
-    /// A screen started a refresh the wordmark should acknowledge.
     static let clientRefreshing = Notification.Name("ai.tokenstat.client.refreshing")
 }
 
@@ -282,8 +281,6 @@ struct Wordmark: View {
     /// bar, one brand in it, and room to spend, and at sidebar size the mark
     /// read as a caption rather than as the name of the app.
     var size: CGFloat = 17
-    /// Take the leading edge and push everything else right, which is what a
-    /// sidebar header wants and a centred toolbar item does not.
     var fills = true
     /// Draw the bars as well as the name. A lockup that already placed the
     /// mark above the letters wants the word only, or the bars appear twice.

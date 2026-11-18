@@ -176,7 +176,6 @@ pub(crate) struct AskContext {
     events: std::sync::Arc<Vec<Value>>,
     archive: std::sync::Arc<journal::Snapshot>,
     message: Value,
-    /// The checkout state covered by this Ask's review.
     worktree: tokenstat_workspace::git::CheckoutReview,
 }
 

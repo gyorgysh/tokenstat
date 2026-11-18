@@ -335,15 +335,13 @@ fn decode_thread_blob(data_type: &str, data: &[u8]) -> Result<Vec<u8>, String> {
     match data_type {
         "zstd" | "" => decode_zstd_bounded(data),
         "json" => Ok(data.to_vec()),
-        other => {
-            decode_zstd_bounded(data).or_else(|_| {
-                if data.starts_with(b"{") {
-                    Ok(data.to_vec())
-                } else {
-                    Err(format!("unsupported data_type {other:?}"))
-                }
-            })
-        }
+        other => decode_zstd_bounded(data).or_else(|_| {
+            if data.starts_with(b"{") {
+                Ok(data.to_vec())
+            } else {
+                Err(format!("unsupported data_type {other:?}"))
+            }
+        }),
     }
 }
 

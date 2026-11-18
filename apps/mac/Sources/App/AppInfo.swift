@@ -35,7 +35,6 @@ enum AppInfo {
     /// nothing to read it.
     static let referrer = "tokenstat_app"
 
-    /// The public website.
     static let website = URL(string: "https://tokenstat.ai/?ref=\(referrer)")!
     static let websiteLabel = "tokenstat.ai"
 

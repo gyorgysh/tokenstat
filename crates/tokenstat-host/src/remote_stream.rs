@@ -246,8 +246,6 @@ pub(crate) fn parse_handshake(first: &str) -> Option<String> {
     Some(token.to_string())
 }
 
-// MARK: - The pumps
-
 /// Bridge a TCP socket and a stream connection in both directions.
 ///
 /// Two threads, one per direction. EOF on either side is propagated: a closed
@@ -469,18 +467,14 @@ fn pump_pty_subscribe(connection: Connection, session: &str, access: StreamAcces
     let _ = input.join();
 }
 
-// MARK: - The local side of a terminal subscription
-
 /// How much pushed output a subscription cache keeps. Terminals are small, and
 /// anything older is evicted from the front with the lost bytes counted.
 const PTY_CACHE_CAP: usize = 8 * 1024 * 1024;
 
 struct PtySubscription {
     buffer: Vec<u8>,
-    /// Bytes evicted from the front because the cache hit its cap.
     trimmed: u64,
     active: bool,
-    /// The channel's write half: keystrokes ride it to the owning machine.
     writer: Option<StreamWriter>,
     space: Arc<Condvar>,
 }
@@ -715,8 +709,6 @@ pub(crate) fn write_pty_input(peer: &str, session: &str, bytes: &[u8]) -> Result
         .map(|_| true)
         .map_err(|e| format!("the tunnel channel dropped: {e}"))
 }
-
-// MARK: - Remote pty list
 
 /// How long a peer's pty list is reused before the peer is dialled again.
 ///
@@ -1078,7 +1070,6 @@ mod tests {
         };
         assert!(super::append_pty_frame(&mut cache, &frame, b"hello"));
         assert_eq!(cache.trimmed, 100);
-        // Replayed overlapping data is not appended a second time.
         assert!(super::append_pty_frame(&mut cache, &frame, b"hello"));
         assert_eq!(cache.buffer, b"hello");
         super::pty_subscriptions().lock().unwrap().insert(

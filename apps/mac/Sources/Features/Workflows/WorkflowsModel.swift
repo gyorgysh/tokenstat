@@ -5,10 +5,8 @@
 import Foundation
 import Observation
 
-/// How much readable transcript the inspector keeps.
 private let transcriptDisplayCap = 256 * 1024
 
-/// Which side of the Workflows inspector is showing.
 enum WorkflowFocus: Sendable {
     case none
     case graph
@@ -30,7 +28,6 @@ final class WorkflowsModel {
     private(set) var runs: [WorkflowRunRecord] = []
     private(set) var backends: [AgentBackend] = []
 
-    /// True once the daemon has been read at least once.
     private(set) var hasLoaded = false
 
     var errorMessage: String?
@@ -154,8 +151,6 @@ final class WorkflowsModel {
         return graphs.filter { $0.scope == .workspace && $0.workspaceID == scope }
     }
 
-    /// The runs of the current scope, for the same reason `scoped` exists:
-    /// Recent runs sits under a scoped library and has to agree with it.
     var scopedRuns: [WorkflowRunRecord] {
         guard let scope else {
             return runs.filter { run in
@@ -279,7 +274,6 @@ final class WorkflowsModel {
         editorEpoch += 1
     }
 
-    /// Drop a run that belongs to another graph, along with its tail.
     private func clearForeignRunSelection() {
         stopPolling()
         selectedRunID = nil
@@ -743,7 +737,6 @@ final class WorkflowsModel {
         }
     }
 
-    /// Whether the poll still belongs to the graph and step on screen.
     private func isWatching(runID: String, nodeID: String) -> Bool {
         guard selectedRunID == runID, selectedStepID == nodeID else { return false }
         return selectedRun?.workflowID == selectedGraphID

@@ -55,7 +55,6 @@ struct PhoneHeatmap: View {
     private let cell: CGFloat = 15
     private let gap: CGFloat = 3.5
     private let corner: CGFloat = 3
-    /// Room for the weekday letters down the leading edge.
     private let gutter: CGFloat = 16
     /// The month row's height, which the weekday letters are pushed down by so
     /// the two line up.
@@ -394,7 +393,6 @@ struct PhoneHeatmap: View {
         }
     }
 
-    /// The day under the finger and the square it was drawn in.
     private struct Focus: Equatable {
         var day: HeatCell
         var rect: CGRect
@@ -419,8 +417,6 @@ struct PhoneHeatmap: View {
         return Focus(day: day, rect: rect)
     }
 
-    /// One light tap as the finger crosses into another day. The grid gives no
-    /// other feedback that the selection moved while a thumb is covering it.
     private static func tick() {
         UISelectionFeedbackGenerator().selectionChanged()
     }

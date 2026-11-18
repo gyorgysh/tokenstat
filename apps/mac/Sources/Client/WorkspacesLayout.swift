@@ -45,7 +45,6 @@ enum WorkspacesSection: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
-/// A starting arrangement for the three work blocks.
 enum WorkspacesPreset: String, CaseIterable, Identifiable, Codable, Sendable {
     case foldersFirst = "folders"
     case chatsFirst = "chats"

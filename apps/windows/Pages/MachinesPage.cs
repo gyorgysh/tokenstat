@@ -328,10 +328,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         RefreshInspector();
     }
 
-    /// <summary>
-    /// Both kinds of standing request, in one pass, so the queue is ordered
-    /// by when somebody asked rather than by which policy answered first.
-    /// </summary>
     private async Task LoadRequestsAsync()
     {
         var requests = new List<(JsonNode Row, bool Screen)>();
@@ -409,10 +405,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         }
     }
 
-    /// <summary>
-    /// Rebuild the content from the cached fetch. Selection calls this rather
-    /// than LoadAsync, so picking a device does not re-read the daemon.
-    /// </summary>
     private void Render()
     {
         // The five-second poll rebuilds these rows. Hold the scroll position
@@ -460,8 +452,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         var allowed = RemoteReachAllowed(account);
         if (allowed)
         {
-            // Above pairing, because a device asking for either grant is
-            // already paired: it got far enough to ask.
             if (_requests.Count > 0)
             {
                 _root.Children.Add(WaitingForYouCard());
@@ -712,11 +702,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         return Format.Text(machine, "kind") == "client" ? L10n.Text("windows.machinespage.unnamed_device.6aba593f") : L10n.Text("windows.machinespage.unnamed_computer.810da0c7");
     }
 
-    /// <summary>
-    /// Machines asking to be let in. First, because these are the only things
-    /// here that are waiting on a person. Everything else can be read at
-    /// leisure.
-    /// </summary>
     private UIElement ApprovalCard(List<JsonNode> pending)
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -1103,10 +1088,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         return toggle;
     }
 
-    /// <summary>
-    /// Devices paired with this PC but not on the account. They still need a
-    /// row with Revoke and Forget, or there is nowhere to turn one away.
-    /// </summary>
     private UIElement OtherApprovedCard(List<JsonNode> peers)
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -1151,7 +1132,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 RefreshInspector();
                 DetailsRequested?.Invoke();
             }));
-            // Access changes are rarer than a look, so they wait in one menu.
             var manage = new MenuFlyout();
             if (Format.Text(peer, "trust") == "approved")
             {
@@ -1581,10 +1561,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         return Format.Text(machine, "kind") != "client";
     }
 
-    /// <summary>
-    /// The presence light before a machine's name: solid when reachable,
-    /// grey when offline, amber while its state is not confirmed yet.
-    /// </summary>
     private static Border PresenceDot(bool? online, bool isSelf, bool tunnelUp)
     {
         var color = isSelf
@@ -1695,8 +1671,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             RefreshInspector();
             DetailsRequested?.Invoke();
         }));
-        // Rename and Unlink are rare, so they share one menu instead of two
-        // buttons on every row.
         var manage = new MenuFlyout();
         ContextMenus.AddAsync(manage, L10n.Text("common.rename"), () => RenameAsync(id, Format.Text(machine, "label"), isSelf));
         if (!isSelf)
@@ -2328,10 +2302,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         return t >= 10 ? L10n.Text("windows.machinespage.0_1_gb.12e92d23", $"{u:0}", $"{t:0}") : L10n.Text("windows.machinespage.0_1_gb.12e92d23", $"{u:0.0}", $"{t:0.0}");
     }
 
-    /// <summary>
-    /// The host release on this PC or on a peer, with Install and Restart
-    /// where they do something. Matches the desktop Mac Software card.
-    /// </summary>
     private UIElement HostUpdateCard(string? peerKey, bool local)
     {
         var body = new StackPanel { Spacing = Theme.SpaceS };
@@ -2605,10 +2575,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         Render();
     }
 
-    /// <summary>
-    /// Pair a machine that is not on the account yet. The paste is the whole
-    /// form: a key, a name for the list, and an optional address hint.
-    /// </summary>
     private async Task PairAsync()
     {
         var keyBox = new TextBox { PlaceholderText = L10n.Text("windows.machinespage.key_from_the_other_machine.4a191927") };
@@ -2759,10 +2725,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         await LoadAsync();
     }
 
-    /// <summary>
-    /// This PC names itself: that writes the local label, so the two agree.
-    /// Clearing the field hands the name back to the device.
-    /// </summary>
     private async Task RenameSelfAsync(string current)
     {
         var box = new TextBox { Text = current, PlaceholderText = L10n.Text("windows.machinespage.device_name.155106be") };
@@ -2899,7 +2861,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         }
         catch
         {
-            // The card names the page, so the address is one search away.
         }
     }
 }

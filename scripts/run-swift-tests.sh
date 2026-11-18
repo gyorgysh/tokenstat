@@ -35,7 +35,6 @@ failed=0
 ran=0
 for test in "$tests"/*Tests.swift; do
   name="$(basename "$test" .swift)"
-  # The header names its sources. Two lines is the whole convention.
   wanted="$(head -4 "$test" | grep -oE '[A-Za-z0-9_]+\.swift' || true)"
   paths=()
   missing=""

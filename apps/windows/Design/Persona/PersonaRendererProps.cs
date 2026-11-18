@@ -47,7 +47,6 @@ internal static class PersonaRendererProps
         sheet.Figures.Add(outline);
         canvas.Paint(sheet, PersonaDraw.Solid(PersonaDraw.White, 0.90));
 
-        // The fold: what turns two flat halves into one sheet with a crease.
         var fold = new PathGeometry();
         var crease = PersonaDraw.Figure(T(midX, minY + h * 0.16), false);
         PersonaDraw.Quad(crease, T(midX, maxY - h * 0.05), T(midX - w * 0.02, (minY + maxY) / 2));
@@ -58,8 +57,6 @@ internal static class PersonaRendererProps
 
         if (unit >= 44)
         {
-            // The print, showing faintly through the paper. Enough to say
-            // there is something on the other side, not enough to read.
             var bleed = new PathGeometry();
             for (int line = 0; line < 4; line++)
             {
@@ -128,8 +125,6 @@ internal static class PersonaRendererProps
         {
             return;
         }
-        // One moulding line across the back. It is what stops a rounded
-        // rectangle reading as a card.
         var seam = new PathGeometry();
         var line = PersonaDraw.Figure(new PPoint(minX + w * 0.16, py + h * 0.16), false);
         PersonaDraw.Line(line, minX + w - w * 0.16, py + h * 0.16);
@@ -180,8 +175,6 @@ internal static class PersonaRendererProps
         {
             return;
         }
-        // Three rows, each narrower and shorter than the one in front of it,
-        // because that is what rows going away from you do.
         for (int row = 0; row < 3; row++)
         {
             double along = row / 3.0;
@@ -282,7 +275,6 @@ internal static class PersonaRendererProps
         double handle = unit * 0.30;
         double w = unit * 0.044;
 
-        // A tapered handle: thick where it is held, thinner at the ferrule.
         var shaft = new PathGeometry();
         var figure = PersonaDraw.Figure(new PPoint(px - handle * 0.58, py - w * 0.42));
         PersonaDraw.Line(figure, px + handle * 0.24, py - w * 0.26);
@@ -331,7 +323,6 @@ internal static class PersonaRendererProps
         PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
         double reach = unit * 0.105 * scale;
-        // The same patch of soil the sprout came out of, and the stalk it kept.
         double rootX = px;
         double rootY = py + reach * 1.9;
         DrawSoil(canvas, rootX, rootY, unit, reach * 1.5, opacity);
@@ -447,7 +438,6 @@ internal static class PersonaRendererProps
         var figure = PersonaDraw.Figure(new PPoint(px, py), false);
         PersonaDraw.Line(figure, tailX, tailY);
         tail.Figures.Add(figure);
-        // Relative gradient along the stroke, head bright to tail gone.
         double minX = Math.Min(px, tailX);
         double minY = Math.Min(py, tailY);
         double w = Math.Max(Math.Abs(px - tailX), 1e-6);
@@ -497,8 +487,6 @@ internal static class PersonaRendererProps
         var geometry = new PathGeometry();
         PersonaDraw.RoundedRect(geometry, px - size * 0.5, py - size * 0.85, size, size * 1.7, size * 0.22);
         var shape = canvas.Paint(geometry, PersonaDraw.Solid(colour, opacity));
-        // Squashed by its own spin, so a flat scrap turns edge-on to us
-        // halfway round instead of sliding sideways.
         var group = new TransformGroup();
         group.Children.Add(new RotateTransform { Angle = tilt * 180 / Math.PI, CenterX = px, CenterY = py });
         group.Children.Add(new ScaleTransform
@@ -581,7 +569,6 @@ internal static class PersonaRendererProps
             double cy = py + Math.Sin(angle) * reach * 0.92;
             PersonaDraw.Ellipse(biscuit, cx, cy, reach * 0.46, reach * 0.46);
         }
-        // The persona's own colour, like every other prop it holds.
         canvas.Paint(
             biscuit, PersonaDraw.Solid(hue, 0.62 * opacity),
             PersonaDraw.Solid(hue, 0.95 * opacity), Math.Max(1, unit * 0.014));

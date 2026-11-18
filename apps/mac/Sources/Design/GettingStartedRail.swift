@@ -116,8 +116,6 @@ struct GettingStartedRail: View {
         #endif
     }
 
-    /// A finished stretch of the line reads finished. The rest is the same
-    /// border every card uses, fading out so it does not end in a hard stop.
     private func connector(_ state: GettingStartedState) -> LinearGradient {
         let top = state == .done ? Theme.accent.opacity(0.5) : Theme.border
         return LinearGradient(
@@ -128,7 +126,6 @@ struct GettingStartedRail: View {
     }
 }
 
-/// The circle carrying the step number, or a check once the step is behind.
 private struct GettingStartedDisc: View {
     let number: Int
     let state: GettingStartedState

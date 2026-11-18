@@ -184,7 +184,6 @@ internal static class SidebarChrome
         return grid;
     }
 
-    /// <summary>The change counts a folder label reserves at its right edge, if it has any.</summary>
     private static FrameworkElement? Counts(object? root)
     {
         if (root is FrameworkElement { Name: CountsName } found) return found;

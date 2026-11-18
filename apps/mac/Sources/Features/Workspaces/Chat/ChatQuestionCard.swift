@@ -122,7 +122,6 @@ struct ChatQuestionCard: View {
         picked.contains(option) ? Theme.accent : Theme.panel
     }
 
-    /// What the agent is doing about the question right now.
     private var waitingWords: String {
         if !question.blocking, let fallback = question.defaultAnswer {
             return L10n.text("apple.chatquestion.going_with", fallback)

@@ -1327,8 +1327,6 @@ final class TranscriptWindow {
     private func setNearTop(_ value: Bool) {
         guard nearTop != value else { return }
         nearTop = value
-        // The readers go away with it, so what they last said has to go too.
-        // A stale frame is an anchor pointing at a row that has since moved.
         if !value { rowFrames = [:] }
         nearTopChanged?(value)
     }

@@ -77,8 +77,6 @@ class DeviceMarksTest {
 
     @Test
     fun glyphsMatchClientDeviceIcon() {
-        // The same ladder `ClientDeviceIcon.symbol` climbs: tablets and
-        // phones by name, then laptop, desktop, and rack by name or platform.
         assertSame(Icons.Default.TabletAndroid, deviceGlyphVector("iPad", null, false))
         assertSame(Icons.Default.PhoneAndroid, deviceGlyphVector("iPhone 17", null, false))
         assertSame(Icons.Default.Laptop, deviceGlyphVector("Gyorgy's MacBook Pro", null, true))
@@ -86,7 +84,6 @@ class DeviceMarksTest {
         assertSame(Icons.Default.Dns, deviceGlyphVector("Linux", null, true))
         assertSame(Icons.Default.Dns, deviceGlyphVector("web-01", "Ubuntu 24.04 · x86_64", true))
         assertSame(Icons.Default.Dns, deviceGlyphVector("build", "Windows 11", true))
-        // A bare "pro" is not a desktop: only the full Mac names claim one.
         assertSame(Icons.Default.Laptop, deviceGlyphVector("MacBook Pro", null, true))
         assertSame(Icons.Default.Computer, deviceGlyphVector("AirPods pro", null, true))
         assertSame(Icons.Default.Computer, deviceGlyphVector("mystery", null, true))

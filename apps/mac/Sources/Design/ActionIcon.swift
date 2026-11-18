@@ -8,7 +8,6 @@ import SwiftUI
 
 /// One glyph per action. Case names match `shared/web/actionIcons.js`.
 enum ActionIcon {
-    // Confirm and create
     case save
     case claim
     case create
@@ -16,7 +15,6 @@ enum ActionIcon {
     case copy
     case download
 
-    // Account and session
     case signIn
     case signOut
     case account
@@ -27,7 +25,6 @@ enum ActionIcon {
     case permissions
     case edit
 
-    // Money
     case plans
     case billing
     case appStore
@@ -41,7 +38,6 @@ enum ActionIcon {
     case theme
     case layout
 
-    // Devices and sync
     case connect
     case disconnect
     case approve
@@ -71,7 +67,6 @@ enum ActionIcon {
     case enterFullScreen
     case exitFullScreen
 
-    // Destructive
     case delete
 
     // Navigation out of the current surface
@@ -92,7 +87,6 @@ enum ActionIcon {
     case home
     case help
 
-    // Tools
     case send
     case attach
     case dictate
@@ -214,7 +208,6 @@ enum ActionIcon {
         }
     }
 
-    /// Arrow actions sit after the title so they point onward.
     var trails: Bool {
         switch self {
         case .next, .latest, .external, .more, .collapse: return true

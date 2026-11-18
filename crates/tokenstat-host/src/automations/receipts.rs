@@ -141,7 +141,6 @@ impl Store {
         }
         validate(&job)?;
         job.schedule.validate()?;
-        // Server-owned fields are not part of the request.
         job.id.clear();
         job.revision = 0;
         job.last_run_at_ms = None;

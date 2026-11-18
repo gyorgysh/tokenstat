@@ -339,7 +339,6 @@ struct MachinesView: View {
         }
     }
 
-    // MARK: - This machine
 
     private func thisMachine(fillsHeight: Bool = false) -> some View {
         Card(
@@ -1026,12 +1025,6 @@ struct MachinesView: View {
         }
     }
 
-    /// What protects a connection, with the keys it actually runs on.
-    ///
-    /// The paragraph used to sit at the foot of this screen as grey text, which
-    /// is where a claim goes to be skipped. It is the product, so it gets a
-    /// card, and it carries the fingerprints somebody can compare against the
-    /// other machine rather than asking them to take the sentence on trust.
     private var encryptionNote: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Button {
@@ -1468,7 +1461,6 @@ private struct StatusDot: View {
     }
 }
 
-// MARK: - Naming this machine
 
 /// The machine's name, editable in place.
 ///
@@ -1560,7 +1552,6 @@ private struct AccountNameField: View {
     }
 }
 
-// MARK: - One peer
 
 private struct PeerRow<Actions: View>: View {
     var peer: Peer
@@ -1646,7 +1637,6 @@ private struct TrustBadge: View {
     }
 }
 
-// MARK: - Pairing by hand
 
 /// Connect to a machine by pasting its pairing code.
 ///

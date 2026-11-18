@@ -455,8 +455,6 @@ struct ChatView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            // The agent update notice is the window's, at the bottom right
-            // beside the other app notices (RootView).
             TransientToast(message: $dropNotice, severity: .warning)
                 .padding(.top, Theme.Space.m)
                 .padding(.trailing, Theme.Space.m)
@@ -1272,7 +1270,6 @@ struct ChatView: View {
         // The end always exists. Anything else may sit outside the built
         // slice: slide to it first, or the scroll lands nowhere.
         if id != TranscriptFollow.bottomID {
-            // A target folded into a step group opens it first.
             model.revealRow(id)
             applySlice(TranscriptSlice.revealing(id, in: model.transcriptItems))
         } else {
@@ -1336,8 +1333,6 @@ struct ChatView: View {
 
     private func submit(from chat: ChatConversation, sendNow: Bool = false, cacheConfirmed: Bool = false) {
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        // An attached image is content on its own: text is only mandatory
-        // when there is nothing attached.
         guard !model.isSharedSource, !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         if model.consumeChatCommand() { return }
         switch model.holdForSignIn(text, backend: chat.backend) {

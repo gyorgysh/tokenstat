@@ -18,11 +18,8 @@ import SwiftUI
 enum SessionState: Equatable {
     /// No process, or the session is gone.
     case none
-    /// A spawn is in flight but the host has not answered yet.
     case starting
-    /// The process is alive and produced output recently.
     case working
-    /// The process is alive but has been quiet for a while.
     case idle
     /// The process is waiting on the person: a permission prompt, a gate,
     /// or a failed step that paused the run.
@@ -30,7 +27,6 @@ enum SessionState: Equatable {
     /// A turn finished while the process remains available for the next one.
     case done
     case failed
-    /// The process has exited.
     case stopped
 
     var label: String {
@@ -286,7 +282,6 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         return created
     }
 
-    /// Where this reader is in the output stream.
     private var offset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
     private var writerTask: Task<Void, Never>?
@@ -352,10 +347,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     private var readWaitMs: Int {
         isFocused ? Self.readHold : 0
     }
-    /// Milliseconds of polling since the last liveness check.
     private var sinceInfo = 0
-    /// When the last loop pass ran, so elapsed time can be measured rather than
-    /// assumed from the delay that was scheduled.
     private var lastLoopAt = Date()
     /// How long the host may hold a read open for the focused session.
     ///
@@ -508,7 +500,6 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// test run, which is what anyone scrolling up is looking for.
     private static let scrollbackLines = 20_000
 
-    /// Re-theme the view when the system appearance changed.
     func applyColors(scheme: ColorScheme, to view: TerminalView) {
         guard scheme != colorSchemeApplied else { return }
         colorSchemeApplied = scheme
@@ -775,7 +766,6 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         releaseActivity()
     }
 
-    /// What the detached poll needs for one bridge call.
     private struct PollPlan: Sendable {
         var offset: UInt64
         var waitMs: Int
@@ -1095,7 +1085,6 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         private var spent: Duration = .zero
         private var active: [String] = []
         private var current: String?
-        /// The session on screen, when one of the feeders is.
         private var focused: String?
         /// Where the round-robin over the *other* sessions has got to.
         ///

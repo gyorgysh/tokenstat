@@ -19,7 +19,6 @@ import UIKit
 /// include this is a decision somebody can act on, and it is the only one of
 /// the three that gets a button.
 enum ClientEmptyKind {
-    /// The answer arrived and it was nothing.
     case nothingYet
     /// We could not get an answer.
     case unreachable
@@ -48,8 +47,6 @@ enum ClientEmptyKind {
 struct ClientEmptyState: View {
     let kind: ClientEmptyKind
     let title: String
-    /// One sentence. If it needs two, the screen is explaining something that
-    /// belongs elsewhere.
     var message: String?
     /// Shown only when there is something the person can actually do.
     var actionTitle: String?
@@ -57,8 +54,6 @@ struct ClientEmptyState: View {
     /// `.refresh` or `.plans`. The default is only for forward navigation.
     var actionIcon: ActionIcon = .next
     var action: (() -> Void)?
-    /// Override the kind's default mark when the empty state is about a
-    /// specific surface (devices, workspaces) rather than activity.
     var mark: String?
     /// A drawn scene instead of the mark, for the screens where "nothing here"
     /// is worth a picture of the thing that is missing. See `ClientEmptyArt`.
@@ -381,7 +376,6 @@ struct ClientErrorCard: View {
 /// old per-row delays made one placeholder look like several animation layers.
 /// The pulse remains `Skeleton.Bar`'s and still honours Reduce Motion.
 enum ClientWireframe {
-    /// The two totals at the top of Home.
     struct Totals: View {
         var body: some View {
             HStack(spacing: Theme.Space.s) {
@@ -668,12 +662,6 @@ struct ClientAccessApprovalSteps: View {
     }
 }
 
-/// Request access, explained as a sheet rather than as small print.
-///
-/// The button used to fire the request and leave two captions underneath it,
-/// which is why nobody could tell the SSH path from the code path. This asks
-/// first, then shows where the request went and exactly what answers it on
-/// the other machine, with copy buttons so no command is retyped.
 struct ClientAccessApprovalSheet: View {
     let hostName: String
     /// The selected host key lets the device redeem its invite code here.

@@ -161,7 +161,6 @@ pub(crate) fn poll_terminals() {
             terminals.remove(&id);
         }
     }
-    // Capture terminal endings before publishing the combined snapshot.
     poll_overview();
 }
 
@@ -524,8 +523,6 @@ mod tests {
         info.hidden = true;
         retain_completed_terminal(&mut completed, &info, now + COMPLETION_LIFE);
         assert_eq!(completed.len(), 1);
-        // An interactive agent can finish a turn while its PTY stays alive.
-        // Closing that tab must retain the agent's reported result.
         info.id = "completed-agent".into();
         info.hidden = false;
         info.alive = true;

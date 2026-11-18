@@ -376,8 +376,6 @@ fun NewChatScreen(
         val choices = chatAgentChoices(agents, chat)
         val quotaReadings = rememberAgentQuotaReadings(model, effectivePeer.orEmpty())
         val updatingAgent by model.updatingAgent.collectAsStateWithLifecycle()
-        // The same stepped panel an open chat uses: agent, then model, then
-        // effort, each row with its mark, limits and update button.
         TsPickerSheet(L10n.text("android.chatagentpanel.agent_model_and_effort.217ff8ae"), { agentMenu = false }) {
             TsPickerOptionList(choices, { chatAgentIsSelected(it, chat) },
                 L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da"),

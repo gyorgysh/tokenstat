@@ -33,12 +33,6 @@ struct InspectorView: View {
         .background(Theme.background)
     }
 
-    /// Panels rather than sections divided by rules.
-    ///
-    /// This pane used to be flat label/value rows separated by dividers, which
-    /// made it the one surface in the app that did not look like the rest of
-    /// it. Home is cards, Insights is cards, and the inspector is now the same
-    /// object at sidebar width.
     private var period: some View {
         Card(title: L10n.text("apple.inspectorview.this_period.8ed3e11f"), subtitle: nil, mark: "mark_insights") {
             if isEmptyArchive {
@@ -112,11 +106,6 @@ struct InspectorView: View {
         }
     }
 
-    /// The selected row, or an invitation to select one.
-    ///
-    /// The panel used to disappear when nothing was selected, so the pane
-    /// changed height as you clicked around and the counters that only exist
-    /// here were a feature you had to discover by accident.
     @ViewBuilder
     private var selection: some View {
         Card(title: L10n.text("apple.inspectorview.selected.57fd7a0c"), subtitle: nil, mark: "mark_activity") {

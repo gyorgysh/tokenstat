@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 mod receipts;
 pub use receipts::{AutomationCreationOutcome, AutomationRunOutcome};
 
-/// How many completed runs to remember per machine.
 const RUNS_KEPT: usize = 100;
 
 /// Default time limit for a new job or card, in seconds (180 minutes).
@@ -38,7 +37,6 @@ pub const DEFAULT_MAX_CONCURRENT: u32 = 2;
 /// How often the scheduler looks for due jobs.
 const TICK: Duration = Duration::from_secs(5);
 
-/// How fast the transcript drain polls the pty buffer.
 const DRAIN_POLL: Duration = Duration::from_millis(20);
 
 /// How long to keep reading after the process has gone.
@@ -52,8 +50,6 @@ const DRAIN_TAIL: Duration = Duration::from_millis(300);
 /// Output can end a moment before the process is reaped, and a run that exited
 /// cleanly must not be filed as an error because the code had not landed yet.
 const EXIT_SETTLE: Duration = Duration::from_secs(2);
-
-// MARK: - Schedule
 
 /// Monday through Friday as a bitset, Monday = bit 0.
 const WEEKDAYS_MASK: u8 = 0b0001_1111;
@@ -214,7 +210,6 @@ fn next_wall_clock(
     let from = jiff::Timestamp::from_millisecond(from_ms).ok()?;
     let zoned = from.to_zoned(tz.clone());
     let mut day = zoned.date();
-    // A schedule within a year of today is far more than anybody asks for.
     for _ in 0..400 {
         let on_day = match day_mask {
             None => true,
@@ -244,8 +239,6 @@ fn next_wall_clock(
     }
     None
 }
-
-// MARK: - Backends
 
 /// The agent CLIs a job can run, with the flags that make them headless.
 ///
@@ -1182,8 +1175,6 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
     }).collect()
 }
 
-// MARK: - The job
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Automation {
@@ -1315,7 +1306,6 @@ pub fn scheduler_timezone() -> String {
         .to_string()
 }
 
-/// A job waiting for a free slot.
 struct Pending {
     interactive: bool,
     job: Automation,
@@ -1615,8 +1605,6 @@ impl Store {
         Ok(())
     }
 
-    // MARK: jobs
-
     pub fn list(&self) -> Vec<Automation> {
         self.jobs
             .lock()
@@ -1636,8 +1624,6 @@ impl Store {
         {
             return Err(format!("an automation with id {} already exists", job.id));
         }
-        // One Auto commit per folder. A later create with a different
-        // agent edits that job rather than adding another row.
         if is_auto_commit_name(&job.name)
             && let Some(idx) = jobs.iter().position(|existing| {
                 existing.workspace_id == job.workspace_id && is_auto_commit_name(&existing.name)
@@ -1772,8 +1758,6 @@ impl Store {
         }
         Ok(changed)
     }
-
-    // MARK: runs
 
     pub fn runs(&self) -> Vec<RunRecord> {
         self.runs
@@ -2024,8 +2008,6 @@ impl Store {
         }
         Ok(transcript::slice_reply(&bytes, offset))
     }
-
-    // MARK: running
 
     /// Run a job that is not part of the stored list: the todo board's
     /// delegate path. Returns the run so the caller can link it to its card.
@@ -2446,7 +2428,6 @@ impl Store {
         if status != "running" {
             return Err("that run is not running".into());
         }
-        // Marked killed, no pty yet. Drain will see the mark if it starts.
         Ok(())
     }
 
@@ -2623,8 +2604,6 @@ impl Store {
     }
 }
 
-// MARK: - Scheduler
-
 /// Start the recurring scheduler. Only the daemon server calls this; the
 /// in-process bridge never runs jobs on a timer.
 /// Takes no session, and that matters. This used to lock the shared session on
@@ -2640,8 +2619,6 @@ pub fn start_scheduler() {
         }
     });
 }
-
-// MARK: - Helpers
 
 fn validate(job: &Automation) -> Result<(), String> {
     if job.name.trim().is_empty() {
@@ -3158,8 +3135,6 @@ mod tests {
         let first_next = job.next_run_at_ms;
         assert!(first_next.is_some());
 
-        // Client still sends the old next time (as the app used to). Switching
-        // to Once must clear it so the job no longer fires on its own.
         job.schedule = ScheduleSpec {
             kind: ScheduleKind::Once,
             ..ScheduleSpec::default()
@@ -4251,8 +4226,6 @@ mod tests {
         let at_effort = codex.iter().position(|a| a == "-c").unwrap();
         assert_eq!(codex[at_effort + 1], "model_reasoning_effort=low");
 
-        // A backend without the flags must not silently swallow them; the
-        // shell ignores both because the client never offers a picker for it.
         let shell = agent_command(
             "sh",
             "ls",
@@ -4408,7 +4381,6 @@ mod tests {
     /// tests rather than reusing `shell_argv`, so a fixture cannot pass by
     /// agreeing with the code it is checking.
     fn test_shell_command(unix: &str, windows: &str) -> (String, Vec<String>) {
-        // Both are always passed, only one of them ever runs.
         let _ = (unix, windows);
         #[cfg(unix)]
         {
@@ -4461,9 +4433,6 @@ mod tests {
             })
             .unwrap();
         let pty_id = info.id.clone();
-        // A budget long enough for a shell to start and print, short enough
-        // that a run which never ends fails the test quickly instead of
-        // holding the suite for the whole allowance.
         store.drain(&pty_id, &transcript_path, u64::MAX, run_id, "sh", true);
 
         let record = store
@@ -4473,10 +4442,6 @@ mod tests {
             .unwrap()
             .clone();
         let (text, _) = store.transcript(run_id, 0).unwrap();
-        // The transcript is quoted on failure: a run recorded as stopped or
-        // failed is far easier to explain when the terminal's own words are in
-        // the message, and this test has only ever failed where nobody can
-        // attach a debugger.
         assert_eq!(
             record.status, "ok",
             "exit code {:?}, transcript {text:?}",
@@ -4824,7 +4789,6 @@ mod tests {
                 max_concurrent: 1,
             })
             .unwrap();
-        // The configured queue cap applies even when jobs share a checkout.
         let first_folder = dir.join("first");
         std::fs::create_dir_all(&first_folder).unwrap();
         let workspace_id = sh_workspace(&first_folder);

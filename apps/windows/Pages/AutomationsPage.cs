@@ -111,8 +111,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             _query = text ?? "";
             RenderList();
         });
-        // Full width, like the Mac search box: a capped field stops halfway
-        // across its column and leaves dead background beside itself.
         _searchBox.HorizontalAlignment = HorizontalAlignment.Stretch;
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

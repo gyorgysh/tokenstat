@@ -81,7 +81,6 @@ struct RemoteHostFeatureProbeTests {
         let newReinstallSupport = await RemoteHostFeature.agentReinstall.isSupported(peer: "peer")
         check(newReinstallSupport, "the first reinstall-capable host is accepted")
         Bridge.version = 99
-        // The first run asks.
         do {
             let probe = RemoteHostFeatureProbe()
             check(probe.state == .checking, "starts checking")

@@ -66,7 +66,6 @@ internal fun TsModalScreen(
         Surface(Modifier.fillMaxSize().testTag("modal-screen").semantics { paneTitle = title }, color = colors.background) {
             val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
             BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                // With a tall keyboard, keep the action and a way out ahead of the title.
                 val compact = footer != null && keyboardVisible && maxHeight < 200.dp
                 Column(Modifier.fillMaxSize()) {
                     if (!compact) {

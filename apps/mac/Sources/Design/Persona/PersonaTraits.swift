@@ -35,7 +35,6 @@ struct PersonaTraits {
     let eyeShape: EyeShape
     let mouth: Mouth?
     let hasAntenna: Bool
-    /// How wide this creature's mouth sits, as a multiplier.
     let mouthWidth: CGFloat
     /// Stiffness multiplier. Below one is slime, above one is gel.
     let firmness: CGFloat
@@ -114,8 +113,6 @@ struct PersonaTraits {
 }
 
 extension Color {
-    /// Blend towards another colour. Used to walk the accent-to-secondary arc
-    /// so a persona's tint is always a colour this app already owns.
     func mixed(with other: Color, by amount: Double) -> Color {
         let amount = min(max(amount, 0), 1)
         #if canImport(AppKit)

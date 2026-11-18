@@ -817,9 +817,6 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             _status.Children.Add(actions);
         }
 
-        /// <summary>
-        /// Whether an address names a loopback development server.
-        /// </summary>
         private static bool IsLoopback(Uri url)
         {
             return BrowserRouteState.IsLoopback(url);

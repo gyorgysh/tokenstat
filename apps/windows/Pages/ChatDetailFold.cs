@@ -188,10 +188,6 @@ internal static class ChatDetailFold
         return output;
     }
 
-    /// <summary>
-    /// Every step is one line. Runs of reads and searches still read as one,
-    /// even a run of one. Port of <c>ChatTranscriptFold.compactFold</c>.
-    /// </summary>
     private static List<ChatPage.DisplayItem> Compact(
         List<ChatPage.DisplayItem> items, bool running, Func<string, bool> isOpen)
     {
@@ -227,7 +223,6 @@ internal static class ChatDetailFold
                     Emit(group, [item], output, isOpen);
                 }
             }
-            // A failed step is a line too, marked on the line itself.
             else if (item.Kind == ChatPage.ItemKind.Tool || item.Kind == ChatPage.ItemKind.Edit)
             {
                 FlushRun(false);
@@ -386,7 +381,6 @@ internal static class ChatDetailFold
                     members.Add(item);
                     break;
                 default:
-                    // Replies, questions, turn failures and handoffs stay in order.
                     Flush(false);
                     output.Add(item);
                     break;

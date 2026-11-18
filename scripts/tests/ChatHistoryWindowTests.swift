@@ -29,8 +29,6 @@ struct ChatHistoryWindowTests {
 
         require(ChatHistoryWindow.visible(count: 30, selected: 2, expanded: false) == 0..<5, "shallow selection")
 
-        // A selection past the collapsed few opens the warm ten around it,
-        // so the lit row is always drawn.
         require(ChatHistoryWindow.visible(count: 30, selected: 7, expanded: false) == 0..<10, "deep selection opens ten")
         require(ChatHistoryWindow.visible(count: 30, selected: 25, expanded: false) == 20..<30, "far selection windows")
         require(ChatHistoryWindow.visible(count: 30, selected: 29, expanded: false) == 20..<30, "last row clamps")

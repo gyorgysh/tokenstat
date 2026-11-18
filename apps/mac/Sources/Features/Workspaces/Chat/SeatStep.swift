@@ -2,21 +2,10 @@
 
 import Foundation
 
-/// Words for the live seat, a tool row, and a permission chip.
-///
-/// The same sentences are used on every client. The seat names the whole
-/// step in one line. A row keeps the path or the command beside a shorter
-/// word: present while the step runs, past once it has finished. A name
-/// this list does not know stays as the tool wrote it. The permission
-/// chip uses that same word. The Always allow line names the rule that
-/// is stored, which is a command prefix or a tool name, never the chip.
 enum SeatStep {
     static let detailCap = 32
     static let scanCap = 4096
 
-    /// Soft lines the live seat rotates through while the agent is thinking.
-    /// Short, similar in weight, so a change of phrase reads as the same
-    /// wait rather than a new status.
     static var thinkingPhrases: [String] {
         [
             L10n.text("common.chat.seat.thinking"),
@@ -58,8 +47,6 @@ enum SeatStep {
         case "TodoWrite":
             return L10n.text("apple.seatstep.updating_the_list.ca724dcc")
         default:
-            // A path with nothing left after the slashes is just work.
-            // "Working on" with an empty name reads as a broken sentence.
             let edges = trimEdges(line)
             if edges.contains("/") || edges.contains("\\") {
                 let file = fileName(line)
@@ -71,8 +58,6 @@ enum SeatStep {
         }
     }
 
-    /// Waiting wins. A real step is shown as written. Speaking is a reply.
-    /// Everything else is thought.
     static func seatLabel(waiting: Bool, step: String?, speaking: Bool) -> String {
         if waiting { return L10n.text("common.waiting") }
         if let step, !step.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -82,8 +67,6 @@ enum SeatStep {
         return L10n.text("common.chat.seat.thinking")
     }
 
-    /// Present while the step runs, past once it has finished.
-    /// An unknown name is returned unchanged, once trimmed.
     static func word(verb: String?, running: Bool) -> String {
         switch trimVerb(verb) {
         case "Read": return running ? L10n.text("apple.seatstep.reading.463816d0") : L10n.text("apple.seatstep.read.9b9a8d05")
@@ -102,25 +85,17 @@ enum SeatStep {
         }
     }
 
-    /// The running word already says what is happening, so a Running chip
-    /// beside it would repeat the same news.
     static func speaks(verb: String?) -> Bool {
         let name = trimVerb(verb)
         return word(verb: name, running: true) != name
     }
 
-    /// The chip on a permission card. Pending is present tense, a decision
-    /// is past tense, and a blank name stays Approval.
     static func approvalWord(verb: String?, pending: Bool) -> String {
         let name = trimVerb(verb)
         if name.isEmpty { return L10n.text("apple.seatstep.approval.147fb813") }
         return word(verb: name, running: pending)
     }
 
-    /// What Always allow will store for the rest of this chat.
-    /// A command prefix is that prefix. A plain tool is its own name.
-    /// A command with no safe prefix is not stored, so the line says so
-    /// instead of naming the tool.
     static func allowAlwaysNote(verb: String?, shellPrefix: String?) -> String? {
         let prefix = trimVerb(shellPrefix)
         if !prefix.isEmpty {

@@ -501,7 +501,6 @@ mod tests {
         path
     }
 
-    /// A version 2 database, whose tables the version 1 query cannot see.
     fn temp_db_v2(rows: &[(&str, &str, i64, &str, &str)]) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
@@ -547,8 +546,6 @@ mod tests {
         assert_eq!(out.events[0].counters.input_fresh, Some(3));
         assert_eq!(out.events[0].counters.cache_read, Some(13182));
         assert_eq!(out.events[0].billing, BillingMode::Metered);
-        // The other folder is still excluded, and the missing version 1
-        // tables are silence rather than a warning.
         assert!(
             parse_db_in(&path, Some("/Users/me/git/other"), None)
                 .events
@@ -626,8 +623,6 @@ mod tests {
             ("old", "ses1", 1_000, data, dir),
             ("new", "ses1", 9_000, data, dir),
         ]);
-        // The whole point: the rows below the floor are never read, rather than
-        // read and then discarded. One folder here is thousands of messages.
         let mine = parse_db_in(&path, Some(dir), Some(5_000));
         assert_eq!(mine.events.len(), 1);
         assert_eq!(mine.rows_seen, 1, "the old row is not even parsed");

@@ -17,7 +17,6 @@ import AppKit
 enum WorkspacePreference {
     private static let bypassKey = "workspace.bypassPermissions"
     private static let localModelKey = "workspace.localModel"
-    /// Sidebar order for the merged local and remote list.
     private static let orderKey = "workspace.order"
     /// The centre pane's open tabs, per workspace.
     private static let tabsKey = "workspace.tabs"
@@ -84,7 +83,6 @@ extension Notification.Name {
     static let remotePeerBecameUnreachable = Notification.Name("tokenstat.remotePeerBecameUnreachable")
 }
 
-/// The tabs of the workspace inspector.
 enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
     case files = "Files"
     case changes = "Changes"
@@ -274,7 +272,6 @@ final class WorkspacesModel {
     var stagedSelection: [String: Set<String>] = [:]
     var commitMessage: [String: String] = [:]
     var commitDescription: [String: String] = [:]
-    /// Last Auto commit backend / model picked per folder.
     var autoCommitBackend: [String: String] = [:]
     var autoCommitModel: [String: String] = [:]
     /// Result of the last write, for the banner, keyed by workspace id so one
@@ -462,7 +459,6 @@ final class WorkspacesModel {
         if loadingCommit[workspaceID] == id { loadingCommit[workspaceID] = nil }
     }
 
-    /// Close whichever commit this workspace has open.
     func closeCommit(in workspaceID: String) {
         for tab in tabs(in: workspaceID) {
             if case .commit = tab { close(tab, in: workspaceID) }
@@ -517,7 +513,6 @@ final class WorkspacesModel {
         closeFile(path, in: workspaceID)
     }
 
-    /// Save the pending file and then close it.
     func saveAndClosePending() async {
         guard let pending = pendingClose else { return }
         pendingClose = nil
@@ -672,7 +667,6 @@ final class WorkspacesModel {
         isFront(.launcher, in: workspaceID)
     }
 
-    /// True when the pane is showing a terminal rather than a document.
     func isShowingTerminal(in workspaceID: String) -> Bool {
         isFront(.sessions, in: workspaceID)
     }
@@ -689,13 +683,10 @@ final class WorkspacesModel {
         document(for: path, in: workspaceID)?.isDirty ?? false
     }
 
-    /// True when any open file has unsaved changes. Used to warn before an
-    /// action that would lose them.
     var hasUnsavedWork: Bool {
         documents.values.contains(where: \.isDirty)
     }
 
-    /// True when any open file in this workspace has unsaved changes.
     func hasUnsavedWork(in workspaceID: String) -> Bool {
         documents.values.contains { $0.workspaceID == workspaceID && $0.isDirty }
     }
@@ -895,7 +886,6 @@ final class WorkspacesModel {
         folders.first { $0.id == selectedID }
     }
 
-    /// This machine's folders, as the host last reported them.
     private var localFolders: [WorkspaceFolder] = []
     /// Remote folders by peer key, so the list can be refreshed without
     /// re-dialling every peer on every file change.
@@ -1601,7 +1591,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Folders the watcher saw change since the last refresh ran.
     private var pendingRefreshRoots: Set<String> = []
     private var pendingRefreshAll = false
 

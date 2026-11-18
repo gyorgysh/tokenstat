@@ -1104,7 +1104,6 @@ mod tests {
                 .is_ok()
             );
 
-            // Ciphertext copied into another scope does not open there.
             let mut moved_store = stored;
             let moved_record = moved_store.scopes["acc|alice"]["c1"].clone();
             moved_store
@@ -1486,7 +1485,6 @@ mod tests {
             assert!(stats.contains("\"records\":1"), "stats envelope: {stats}");
             assert!(crate::dispatch::call_sessionless("cache.unknown", "{}").is_none());
 
-            // A machine asking over the tunnel is refused, not answered.
             let refused = crate::request_context::with_remote_peer("phone", || {
                 crate::dispatch::call_sessionless("cache.stats", "{}")
                     .expect("answered with refusal")

@@ -5,7 +5,6 @@ param([string]$AppPath = '', [switch]$TraceNative)
 $ErrorActionPreference = 'Stop'
 if ($env:CI -ne 'true') { throw 'Run this startup regression on a disposable CI runner.' }
 if ($AppPath) {
-    # Preview uses the published folder and its actual release helper.
     $app = Get-Item -LiteralPath $AppPath
     if ($app.PSIsContainer) { throw 'AppPath must name Tokenstat.exe.' }
 } else {
@@ -47,7 +46,6 @@ function Start-NativeCrashTrace([System.Diagnostics.Process]$Target) {
     $crashLogs.Add($traceLog)
     $child = Start-Process -FilePath $tracer.FullName -ArgumentList @('--crash-trace', "$($Target.Id)", "`"$traceLog`"") -PassThru
     $crashTracers.Add($child)
-    # This observes only exception headers and stack addresses; no process dump.
     for ($traceAttempt = 0; $traceAttempt -lt 20; $traceAttempt++) {
         if ((Test-Path -LiteralPath $traceLog) -or $child.HasExited) { break }
         Start-Sleep -Milliseconds 100
@@ -184,7 +182,6 @@ try {
             $row = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($row)
         }
     }
-    # Seed only the disposable runner. No agent is started or message sent.
     Wait-ForControl 'sidebar.addProject' | Out-Null
     $folders = @(Call-Host 'workspace.list')
     if ($folders.Count -eq 0) { Wait-ForControl 'projects.firstAdd' | Out-Null }
@@ -339,7 +336,6 @@ try {
     Wait-ForControl "sidebar.chat.$($chats[4].id)" | Out-Null
     Invoke-Control (Wait-ForControl 'sidebar.chatAll')
     Wait-ForControl 'chat.list.create' | Out-Null
-    # Opening New chat is an unsent landing draft, with no durable conversation.
     $before = @(Call-Host 'chat.list' @{workspaceId = $folder.id})
     Open-Place 'New chat in UI smoke project'
     Wait-ForControl 'newChat.repository' | Out-Null

@@ -122,7 +122,6 @@ final class TerminalsModel {
         apply(selection, in: workspaceID)
     }
 
-    /// Layout of the terminal column in this folder.
     private(set) var splitLayout: [String: TerminalSplitLayout] = [:]
     /// Divider position, 0.2...0.8, leading share of the column.
     private(set) var splitFraction: [String: Double] = [:]
@@ -130,7 +129,6 @@ final class TerminalsModel {
     private(set) var splitLeadingID: [String: String] = [:]
     /// Right / bottom session when split.
     private(set) var splitTrailingID: [String: String] = [:]
-    /// Sessions the main pane is showing.
     private var paneFocusIDs: Set<String> = []
     private var paneFocusClaims = TerminalFocusClaims()
 

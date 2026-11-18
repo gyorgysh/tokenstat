@@ -384,7 +384,6 @@ struct ClientWorkspaceNotesView: View {
         }
     }
 
-    /// The note becomes a card on this folder's board and leaves this screen.
     private func convert(_ note: TodoCard) async {
         do {
             _ = try await ClientRemote.todoConvertToTask(

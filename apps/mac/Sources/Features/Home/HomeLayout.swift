@@ -33,8 +33,6 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// One line in the editor, saying what the card is for rather than
-    /// repeating its name.
     var detail: String {
         switch self {
         case .continueWork: L10n.text("apple.homelayout.the_folders_and_conversations_you_were_las.611a8af7")

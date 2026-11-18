@@ -384,7 +384,6 @@ fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
     .is_ok()
 }
 
-/// Parse an ISO-8601 timestamp into epoch milliseconds.
 fn parse_iso8601_ms(s: &str) -> Option<i64> {
     s.parse::<jiff::Timestamp>()
         .ok()
@@ -514,7 +513,6 @@ mod tests {
         assert!(first.counters.has_unknown());
     }
 
-    /// The forest stores each turn twice. Two rows, one event.
     #[test]
     fn the_duplicate_node_collapses() {
         let out = parse_db(&temp_db());
@@ -542,7 +540,6 @@ mod tests {
         assert_eq!(first.ts.utc_ms, 1_788_260_111_971);
     }
 
-    /// The live meter asks for one folder, and asks often.
     #[test]
     fn narrows_to_a_folder() {
         let path = temp_db();

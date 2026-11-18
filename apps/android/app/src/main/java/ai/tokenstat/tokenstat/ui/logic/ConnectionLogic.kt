@@ -172,8 +172,6 @@ class ConnectionTracker {
     private val peersSeenWorking = mutableSetOf<String>()
     private val unreachablePeers = mutableSetOf<String>()
 
-    /// Key to the name its owner gave it, so the card can say which machine.
-    /// Empty until something that lists peers hands them over.
     private val peerNames = mutableMapOf<String, String>()
 
     /// The most recent answer from either plane, or null when nothing has
@@ -284,8 +282,6 @@ class ConnectionTracker {
         unreachablePeers.clear()
     }
 
-    /// The machine this card is about, when exactly one is unreachable and
-    /// its name is known.
     private val unreachableName: String?
         get() = unreachablePeers.singleOrNull()?.let { peerNames[it] }
 

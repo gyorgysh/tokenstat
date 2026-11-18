@@ -13,7 +13,6 @@
 # `Theme.monoText` for anything read character by character, and
 # `Theme.numeric` for a column of figures. On the client, `ClientType`.
 #
-#   scripts/check-fonts.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

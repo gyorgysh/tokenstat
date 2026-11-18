@@ -42,7 +42,6 @@ use crate::screen_policy::{PENDING_TTL, PendingRequest, now_secs, prune_pending}
 /// the account owns. Without a cap that is a way to fill somebody's disk and
 /// their notification list from a device that has no grant at all.
 const MAX_PENDING: usize = 32;
-/// Asks one device may make in an hour before it is told to wait.
 const MAX_ASKS_PER_HOUR: u32 = 5;
 /// Codes one device may try in an hour, whatever it does to a single code.
 const MAX_REDEEMS_PER_HOUR: u32 = 10;
@@ -1104,7 +1103,6 @@ mod tests {
             assert!(store.allowed.contains(&mine));
             assert!(store.invite.is_none(), "a code is consumed on first use");
 
-            // Single use, and the copy on the screen is now worth nothing.
             account_holds(&mine, "iPhone");
             let refused = redeem(&mine, &code).unwrap_err();
             assert!(refused.contains("no code waiting"), "{refused}");
@@ -1138,7 +1136,6 @@ mod tests {
             let refused = redeem(&mine, wrong).unwrap_err();
             assert!(refused.contains("retired"), "{refused}");
             assert!(load().unwrap().invite.is_none());
-            // The right code is worth nothing once the code is retired.
             assert!(
                 redeem(&mine, &code)
                     .unwrap_err()
@@ -1242,7 +1239,6 @@ mod tests {
                 .iter()
                 .filter_map(|entry| entry["event"].as_str())
                 .collect();
-            // Newest first.
             assert_eq!(events.first(), Some(&"revoked"));
             assert!(events.contains(&"granted"));
             assert!(events.contains(&"invite redeemed"));

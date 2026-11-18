@@ -246,7 +246,6 @@ fn credential_cache() -> &'static std::sync::Mutex<CredentialCache> {
     CACHE.get_or_init(|| std::sync::Mutex::new(CredentialCache::default()))
 }
 
-/// Forget what was found, because it has just changed.
 fn forget_credentials() {
     let mut cache = credential_cache()
         .lock()
@@ -346,7 +345,6 @@ fn discover(host: &str) -> Option<Credential> {
     None
 }
 
-/// What a probe of a borrowed token found.
 enum Probe {
     /// The forge accepted it.
     Works,

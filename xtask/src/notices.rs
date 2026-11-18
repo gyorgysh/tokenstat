@@ -192,7 +192,6 @@ fn render(root_crate: &str, crates: &[Crate]) -> String {
         out.push_str(&format!("| {} | {} | {} |\n", name, c.version, c.licence));
     }
 
-    // Text to the packages that ship it, so one MIT text serves two hundred.
     let mut texts: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for c in crates {
         for t in &c.texts {

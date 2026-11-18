@@ -911,7 +911,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(_transcript);
         TraceComposition("transcript mounted");
         RefreshCost();
-        // Usage remains in the inspector; the transcript contains messages only.
         _composerDock.Visibility = Visibility.Visible;
         _composerDock.Child = Composer();
         TraceComposition("composer mounted");
@@ -1198,8 +1197,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             var persona = FindPersona(id);
             if (persona is null) return;
-            // Like the Mac: a persona is a name and a brief. It leaves the
-            // agent, model, mode and autonomy as the person set them.
             await UpdateAsync(new JsonObject
             {
                 ["personaId"] = id,
@@ -1425,10 +1422,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return view;
     }
 
-    /// <summary>
-    /// A failed turn: the same character that was thinking is the one that
-    /// droops, like the Mac failed row.
-    /// </summary>
     private UIElement FailedRow(DisplayItem item)
     {
         var grid = new Grid { ColumnSpacing = Theme.SpaceS };
@@ -1629,10 +1622,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return bubble;
     }
 
-    /// <summary>
-    /// The reply side of the conversation, like the Mac row: full width,
-    /// panel fill and a hairline, the same radius as the user bubble.
-    /// </summary>
     private static UIElement AssistantBubble(string text) => new Border
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -1644,10 +1633,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Child = AssistantBody(text),
     };
 
-    /// <summary>
-    /// The reply as markdown, like the Mac. Fenced code keeps this page's
-    /// code block, with its copy menu and horizontal scrolling.
-    /// </summary>
     private static UIElement AssistantBody(string text) => ChatMarkdown.Create(text, CodeBlock);
 
     private static UIElement CodeBlock(string code)
@@ -2039,7 +2024,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var setup = ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
         {
             _setupExpanded = true;
-            // Setup reveals its native agent and working-style controls.
             _statsExpanded["setup/" + L10n.Text("common.chat_agent_behavior")] = true;
             PaintConversation();
             // This ScrollViewer survives chat reloads. Its old offset can
@@ -2534,15 +2518,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             catch
             {
-                // A dropped poll is retried on the next tick.
             }
         }
     }
 
-    /// <summary>
-    /// Ask the host to read the agent CLIs' model lists again instead of
-    /// serving the ones it cached. See the comment beside the Model picker.
-    /// </summary>
     private async Task ReloadBackendsAsync()
     {
         // Old hosts ignore the unknown `refresh` field and answer from cache
@@ -2612,7 +2591,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (!IsLoaded) return;
         RenderInspector();
         if (_openChat is null || _composerDock.Child is null) return;
-        // Refresh menus without clearing transcript rows or their scroll position.
         var focus = _draft.FocusState;
         _composerDock.Child = null;
         _composerWell.Children.Clear();
@@ -2718,7 +2696,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return FindPersona(remembered) is null ? null : remembered;
     }
 
-    /// <summary>The open chat's agent is known to the host and not installed.</summary>
     private bool OpenBackendMissing()
     {
         var backend = Backend(Format.Text(_openChat, "backend"));
@@ -2740,7 +2717,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
         void FlushText()
         {
-            // The question block is drawn as its own card below the reply.
             var body = ChatQuestionText.Strip(text.ToString(), streaming: _running).Trim();
             if (body.Length > 0)
             {
@@ -2888,7 +2864,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         ToolCallId = callId,
                         AttachmentScope = toolScope,
                         Kind = ItemKind.Tool,
-                        // Empty when the event named no tool. The row then says Working.
                         Verb = Format.Text(ev, "verb"),
                         Target = Format.Text(ev, "target"),
                         Running = true,
@@ -3089,7 +3064,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         TextWrapping = TextWrapping.Wrap,
     };
 
-    /// Compact summary and a full-width disclosure, shared with context cards.
     private Border SetupSection(string title, UIElement body, ActionIcon icon, string? subtitle = null, UIElement? primary = null, Button? reveal = null, Action? opened = null)
     {
         var summary = new StackPanel { Spacing = Theme.SpaceS };

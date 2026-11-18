@@ -37,7 +37,6 @@ export default {
           result: event.status === "completed" ? event.result : event.error?.message,
         });
       } catch (_) {
-        // Telemetry cannot change the result of an action already taken.
       }
     });
   },

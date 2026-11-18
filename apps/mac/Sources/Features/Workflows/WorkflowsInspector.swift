@@ -277,7 +277,6 @@ struct WorkflowsInspector: View {
     }
 }
 
-/// Transcript that can stay pinned to the newest line.
 private struct FollowTranscript: View {
     let text: String
     let empty: String
@@ -449,7 +448,6 @@ private struct WorkflowNodeInspector: View {
         }
     }
 
-    /// The node the live run is on, if this graph has one.
     private var liveNodeID: String? {
         guard let working = model.working, let run = model.lastRun(for: working), run.isLive else {
             return nil

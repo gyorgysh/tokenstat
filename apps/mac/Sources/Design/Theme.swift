@@ -26,11 +26,8 @@ enum Theme {
     static let accent = Color.adaptive(light: hex(0x6A3DFF), dark: hex(0x8B5CF6))
     static let secondary = Color.adaptive(light: hex(0xC026D3), dark: hex(0xE879F9))
 
-    /// Behind everything.
     static let background = Color.adaptive(light: hex(0xFBFBFD), dark: hex(0x08070D))
-    /// Sidebar, one step darker than the content beside it.
     static let sidebar = Color.adaptive(light: hex(0xF3F2F8), dark: hex(0x12101D))
-    /// Cards and panels.
     static let panel = Color.adaptive(light: .white, dark: hex(0x100E1A))
     /// Behind a tab strip.
     ///
@@ -49,9 +46,7 @@ enum Theme {
     /// card floats off it, and the page reads as this app's. The Mac keeps
     /// its window glass, which has a desktop behind it.
     static let chatStartGround = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
-    /// Hairlines. These carry the structure that shadows used to.
     static let border = Color.adaptive(light: hex(0xE7E7EE), dark: hex(0x211D33))
-    /// A row the pointer is over.
     static let rowHighlight = Color.adaptive(light: hex(0xF0ECFF), dark: hex(0x1B1430))
     /// The quiet circular seat behind a small chrome glyph, such as a close
     /// button.
@@ -72,7 +67,6 @@ enum Theme {
     /// wrong colour. A plain adaptive pair cannot pick up its background.
     static let controlGlyph = Color.adaptive(light: hex(0x6B6876), dark: hex(0xA8A5B5))
 
-    /// The same glyph while the pointer is over it.
     static let controlGlyphHover = Color.adaptive(light: hex(0x2A2831), dark: hex(0xE9E7F0))
     /// The row that is actually selected.
     ///
@@ -217,9 +211,7 @@ enum Theme {
     /// set, not derived, and paired actions share a minimum width so Cancel and
     /// Save are the same shape.
     enum Control {
-        /// Sheets, detail footers, empty-state calls to action.
         static let height: CGFloat = 30
-        /// Row accessories and card headers.
         static let heightSmall: CGFloat = 24
         /// A control that has to be easy to hit, such as Jump to latest
         /// over a moving transcript. The same 44pt target serves touch
@@ -231,7 +223,6 @@ enum Theme {
         /// An icon button in the sidebar or a section heading. Never smaller
         /// than the platform's minimum target, however small its glyph.
         static let sidebarIcon: CGFloat = 28
-        /// Buttons that sit beside each other in a footer.
         static let pairedWidth: CGFloat = 88
         /// Row height for a list a person scans rather than reads.
         #if os(macOS)
@@ -253,14 +244,8 @@ enum Theme {
         /// title, a subtitle and a close control without clipping into the
         /// rounded top.
         static let headerMinHeight: CGFloat = 72
-        /// Icon seat beside the title. Larger than a chrome glyph, smaller
-        /// than the 48pt mark on a permission sheet.
         static let iconSeat: CGFloat = 36
-        /// Footer that holds one row of 30pt actions, optically centred.
         static let footerHeight: CGFloat = 64
-        /// Inset of the body from the window edges and the header/footer
-        /// rules. Generous on purpose: a sheet that hugs its copy looks
-        /// unfinished, and this is the one padding owner for that air.
         static let bodyPadding: CGFloat = 32
     }
 
@@ -382,7 +367,6 @@ enum Theme {
         fitted(size, weight: weight, mono: true)
     }
 
-    /// Small uppercase label above a group.
     static var sectionHeader: Font {
         fitted(12, weight: .semibold, mono: false)
     }
@@ -490,7 +474,6 @@ struct Card<Content: View>: View {
     /// phone put a vendor mark: left of the title, not in the trailing
     /// accessory.
     var leading: AnyView?
-    /// Trailing accessory in the header, for a count or a control.
     var accessory: AnyView?
     /// Take all the height offered rather than only what the content needs.
     ///
@@ -609,7 +592,6 @@ struct Card<Content: View>: View {
     }
 }
 
-/// One headline number with its label.
 struct Stat: View {
     var label: String
     var value: String
@@ -832,7 +814,6 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
     static var height: CGFloat { DetailChromeBarHeight }
 }
 
-/// Shared height for `DetailChromeBar` and matching chrome rows.
 let DetailChromeBarHeight: CGFloat = 52
 let DetailChromeBottomSpacing: CGFloat = 3
 
@@ -959,7 +940,6 @@ struct TabStrip<Tab: Hashable>: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: Self.height)
-        // Nothing in a tab strip may paint outside it.
         .clipped()
         .background(showsChrome ? Theme.sidebar : Color.clear)
         .overlay(alignment: .bottom) {
@@ -1040,12 +1020,6 @@ struct NoticeDismissButton: View {
     }
 }
 
-/// A line of status across the top of a pane.
-///
-/// One banner for the whole app. There used to be three: a red-tinted bar in
-/// the editor, this in Insights, and orange caption text in the sidebar footer,
-/// so the same severity looked like three different things depending on which
-/// screen you were on.
 struct Banner: View {
     enum Severity {
         case info
@@ -1177,7 +1151,6 @@ struct EmptyState<Action: View>: View {
     }
 }
 
-/// Whether an editable field has something waiting to be written.
 enum FieldSaveState: Equatable {
     case idle
     case dirty
@@ -1355,9 +1328,7 @@ struct ToolbarIconButton: View {
 
     let systemImage: String
     var help: String = ""
-    /// Accent the glyph (open sidebar, selected state).
     var isAccent: Bool = false
-    /// Replace the glyph with a small spinner.
     var isBusy: Bool = false
     /// Optional accent dot on a corner (closed-panel cue).
     var showsBadge: Bool = false
@@ -1469,7 +1440,6 @@ struct SidebarToggleButton: View {
     }
 
     let edge: Edge
-    /// Whether the pane this button controls is currently on screen.
     let isOpen: Bool
     let action: () -> Void
     /// Full help string, including the shortcut (e.g. "Hide Sidebar (⌘B)").
@@ -1651,7 +1621,6 @@ struct ActionLabelStyle: LabelStyle {
 /// Soft accent capsule for a primary action in content. Toolbar items stay
 /// system-styled.
 struct AccentButtonStyle: ButtonStyle {
-    /// Dense variant for rows and card accessories.
     var small = false
     /// Finger-friendly. Jump to latest over a transcript, not a row chip.
     var comfortable = false
@@ -1696,7 +1665,6 @@ struct AccentButtonStyle: ButtonStyle {
 /// a delete that read as a link. Same shape as the other two, danger colour,
 /// so the eye sorts a row of actions by colour and not by guessing.
 struct DestructiveButtonStyle: ButtonStyle {
-    /// Dense variant for rows and card accessories.
     var small = false
     var comfortable = false
 
@@ -1727,7 +1695,6 @@ struct DestructiveButtonStyle: ButtonStyle {
 /// design language on the same row, which is exactly how the Machines screen
 /// looked with default Revoke/Forget buttons beside accent Approve/Connect.
 struct SecondaryButtonStyle: ButtonStyle {
-    /// Dense variant for rows and card accessories.
     var small = false
     var comfortable = false
     @Environment(\.isEnabled) private var isEnabled
@@ -1765,9 +1732,7 @@ struct SecondaryButtonStyle: ButtonStyle {
 /// hand-built this shape rather than share one, which is how a convention
 /// turns into three slightly different boxes.
 struct ThemedFieldStyle: TextFieldStyle {
-    /// Dense variant, for a field sharing a row with small buttons.
     var small = false
-    /// A field that grows with what is typed into it.
     var multiline = false
     /// The face for the text. See `ThemedFieldBox.font`: chaining `.font`
     /// after the style does not reach the text.
@@ -1807,7 +1772,6 @@ extension TextFieldStyle where Self == ThemedFieldStyle {
 /// the same field rather than a feature.
 struct ThemedFieldBox: ViewModifier {
     var small = false
-    /// Whether the field is allowed to be taller than one row.
     var multiline = false
     /// The face for the text, where the default is wrong.
     ///
@@ -2003,7 +1967,6 @@ extension ToggleStyle where Self == BrandCheckboxStyle {
 struct SegmentedTabs<Value: Hashable>: View {
     let options: [Value]
     @Binding var selection: Value
-    /// What to write on each tab.
     let title: (Value) -> String
     /// Phone editors use the comfortable row so each tab is a 44-point target.
     var comfortable = false
@@ -2180,7 +2143,6 @@ struct ConcurrentChips: View {
     }
 }
 
-/// One segment of `SegmentedCapsulePicker`.
 private struct SegmentButton: View {
     var label: String
     var symbol: String
@@ -2233,8 +2195,6 @@ struct AppMenuPicker<Option: Hashable>: View {
     var title: String = ""
     var options: [(value: Option, label: String)]
     @Binding var selection: Option
-    /// Reload the options. Offered in the panel when the list is somebody
-    /// else's answer that can go stale, and nil when it is a fixed set.
     var refresh: (() async -> Void)?
     /// Above this many options the control opens a searchable panel instead
     /// of a menu.
@@ -2563,7 +2523,6 @@ enum DisplayFit {
     /// small but legible window and a squashed one.
     private static let textFloor: CGFloat = 0.85
 
-    /// Scale a fixed width by the display fit.
     static func scale(_ value: CGFloat) -> CGFloat {
         value * factor
     }

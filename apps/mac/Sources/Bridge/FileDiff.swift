@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// What one line of a diff is.
 enum DiffLineKind: String, Codable, Sendable {
     case context, added, removed
 }
@@ -25,7 +24,6 @@ struct DiffHunk: Codable, Sendable, Hashable, Identifiable {
     var id: String { header }
 }
 
-/// One file's diff against HEAD.
 struct FileDiff: Codable, Sendable, Hashable {
     /// One decoded snapshot. Layout tasks compare this small identity instead
     /// of hashing megabytes of source text on the main actor.

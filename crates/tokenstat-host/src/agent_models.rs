@@ -210,7 +210,6 @@ fn refresh_blocking() {
     probe_all(false);
 }
 
-/// The fan-out itself. `force` skips each entry's TTL check.
 fn probe_all(force: bool) {
     std::thread::scope(|scope| {
         scope.spawn(|| {
@@ -1202,8 +1201,6 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         }
     }
 
-    /// The one shape that matters out of `model/list`: ids, in order, with
-    /// the hidden ones left out.
     #[test]
     fn codex_list_takes_visible_ids_in_order() {
         let line = r#"{"id":2,"result":{"data":[
@@ -1217,7 +1214,6 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         );
     }
 
-    /// A notification on the same pipe, or an error answer, is not a list.
     #[test]
     fn codex_list_rejects_anything_that_is_not_an_answer() {
         assert_eq!(
@@ -1252,7 +1248,6 @@ not-a-model
         fill(test_id, false, || Some(vec!["test-model-1".into()]));
         assert_eq!(for_backend(test_id, &[]), vec!["test-model-1"]);
 
-        // Wind the timestamp back past LIVE_TTL to simulate staleness
         let past = Instant::now() - (LIVE_TTL + Duration::from_secs(1));
         cache_lock().get_mut(test_id).unwrap().at = past;
 

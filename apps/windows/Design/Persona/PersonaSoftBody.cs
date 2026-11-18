@@ -178,10 +178,6 @@ internal sealed class PersonaSoftBody
     /// <summary>Scratch, kept around so a step allocates nothing.</summary>
     private readonly PVector[] _forces;
 
-    /// <summary>
-    /// Fixed per-node phase offsets, so the ripple runs round the rim rather
-    /// than pulsing everywhere at once.
-    /// </summary>
     private readonly double[] _ripple;
     private readonly (double X, double Y)[] _shapeBasis;
     private readonly double[] _restEdges;
@@ -189,13 +185,8 @@ internal sealed class PersonaSoftBody
     private readonly PPoint _restOffset;
     public double RestBottom { get; }
 
-    /// <summary>
-    /// How much of the body is resting on the ground, zero to one, eased so
-    /// that touching down ramps the support in rather than snapping it on.
-    /// </summary>
     private double _grounded;
 
-    /// <summary>This creature's permanent dents, as a radial offset per node.</summary>
     private readonly double[] _lumps;
 
     /// <summary>

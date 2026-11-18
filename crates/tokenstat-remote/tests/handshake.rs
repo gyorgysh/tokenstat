@@ -78,8 +78,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
     let server = Server::bind("127.0.0.1:0", &server_identity).expect("bind");
     let address = server.local_address().expect("address");
 
-    // ---- 1. An unknown client is refused, and recorded so somebody can be asked.
-
     let dialling = {
         let address = address.clone();
         let identity = MachineIdentity::from_secret([22u8; 32]);
@@ -102,8 +100,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
     assert_eq!(listed.len(), 1, "an unknown peer is written down");
     assert_eq!(listed[0].key, tokenstat_identity::hex(&client_key));
     assert!(!PeerStore::load().expect("load").is_approved(&client_key));
-
-    // ---- 2. Approved, and the connection carries a message both ways.
 
     approve(&client_key, "the client");
 
@@ -130,8 +126,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
 
     assert_eq!(dialling.join().expect("thread"), "{\"ok\":true}");
 
-    // ---- 3. A payload larger than one Noise message survives the split.
-
     // Noise caps a message at 65535 bytes. A file diff exceeds that routinely,
     // so this is the ordinary case and not an edge one.
     let big: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
@@ -152,8 +146,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
     served.send(b"ok").expect("send");
     assert_eq!(dialling.join().expect("thread"), b"ok");
 
-    // ---- 4. A frame larger than the caller allows is refused, not allocated.
-
     let dialling = {
         let address = address.clone();
         std::thread::spawn(move || {
@@ -167,8 +159,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
     let too_big = served.receive(1024).expect_err("must refuse");
     assert!(too_big.to_string().contains("limit is 1024"), "{too_big}");
     let _ = dialling.join();
-
-    // ---- 5. Revoked stays revoked, however many times it reconnects.
 
     revoke(&client_key);
     for attempt in 0..3 {
@@ -184,8 +174,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
         }
         let _ = dialling.join();
     }
-
-    // ---- 6. A client that pinned a different key refuses the server.
 
     forget(&client_key);
     approve(&client_key, "the client");
@@ -206,8 +194,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
     assert!(message.contains("laptop"), "{message}");
     assert!(message.contains("reinstalled"), "{message}");
     assert!(message.contains("in its place"), "{message}");
-
-    // ---- 7. Rubbish on the port is a refusal, not a panic or a hang.
 
     let address_for_junk = address.clone();
     let junk = std::thread::spawn(move || {

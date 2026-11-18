@@ -28,9 +28,7 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
     let sessions: [Session]
     /// Left / top session when split, or the only visible session when not.
     let leading: Session?
-    /// Right / bottom session when split.
     var trailing: Session? = nil
-    /// The half that should own the keyboard.
     var focused: Session? = nil
     /// `nil` is a single pane. Horizontal is side by side, vertical is stacked.
     var splitAxis: Axis? = nil
@@ -48,7 +46,6 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
     /// parented at their last frames, so bringing the layer back does not
     /// SIGWINCH.
     var isSurfaceVisible: Bool = true
-    /// Which visible half last took a click, so first responder follows it.
     var onActivate: ((Session) -> Void)? = nil
 
     func makeNSView(context: Context) -> TerminalStackView {
@@ -272,7 +269,6 @@ final class TerminalStackView: NSView {
         }
     }
 
-    /// Mark every visible terminal for a full redraw once bounds are real.
     private func scheduleFullPaint() {
         needsFullPaint = true
         if bounds.width > 1, bounds.height > 1 {

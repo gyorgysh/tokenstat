@@ -594,7 +594,6 @@ mod tests {
             code(admit_with(&ask, &teammate, "m1", "fix it", "fix it")),
             "team_agent_approval_pending"
         );
-        // Sending the same request again does not stack a second prompt.
         assert_eq!(
             code(admit_with(&ask, &teammate, "m1", "fix it", "fix it")),
             "team_agent_approval_pending"
@@ -680,7 +679,6 @@ mod tests {
             code(admit_with(&ask, &teammate, "m4", "m4", "go")),
             "team_agent_requests_busy"
         );
-        // A request already held still answers as waiting, not busy.
         assert_eq!(
             code(admit_with(&ask, &teammate, "m1", "m1", "go")),
             "team_agent_approval_pending"

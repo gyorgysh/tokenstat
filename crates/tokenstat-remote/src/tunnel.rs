@@ -46,7 +46,6 @@ pub fn on_team_moved(hook: impl Fn(&str) + Send + Sync + 'static) {
     let _ = TEAM_MOVED.set(Box::new(hook));
 }
 
-/// The repository id in a `TEAM-MOVED` line, if it is one.
 fn team_moved(text: &str) -> Option<&str> {
     let id = text.strip_prefix("TEAM-MOVED ")?;
     (!id.is_empty()
@@ -117,7 +116,6 @@ const CH_DATA: u8 = 3;
 const CH_CLOSE: u8 = 4;
 const CH_ERROR: u8 = 5;
 
-/// How long an open channel waits for the relay to confirm it.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How much unread data a channel may hold before it is declared dead. A
 /// stream that is not being drained (the far side pushes faster than the
@@ -198,8 +196,6 @@ pub struct TunnelSession {
     /// closes it so a turn-off during connect does not leave a live socket
     /// that the IO loop would then store.
     connecting: Mutex<Option<TcpStream>>,
-    /// What the relay connection is doing right now, for the screen that
-    /// reports it. The supervisor owns this; the host reads it.
     status: Mutex<TunnelStatus>,
     /// How to get a fresh HELLO credential when the relay refuses the one this
     /// session holds. Set by the host, which is the side that can talk to the
@@ -340,7 +336,6 @@ impl TunnelSession {
         *self.renew.lock().unwrap_or_else(|e| e.into_inner()) = Some(renew);
     }
 
-    /// Ask for a fresh credential and keep it.
     fn renew_credential(&self) -> Renewal {
         let minted = {
             let guard = self.renew.lock().unwrap_or_else(|e| e.into_inner());
@@ -892,8 +887,6 @@ impl Transport for ChannelTransport {
     }
 }
 
-// MARK: - The supervisor
-
 fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
     let mut backoff = RECONNECT_FLOOR;
     // Consecutive attempts that ended in a fresh credential. Bounded, because
@@ -1134,7 +1127,6 @@ fn handshake_relay(
     }
 }
 
-/// Connect, register, and pump until the socket dies.
 fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
     ensure_running(session)?;
     let token = session
@@ -1341,7 +1333,6 @@ fn set_relay_nonblocking(socket: &mut Socket) -> Result<(), RemoteError> {
     .map_err(RemoteError::Io)
 }
 
-/// Route one channel frame from the relay.
 fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
     if frame.len() < 5 {
         return;
@@ -1630,7 +1621,6 @@ mod tests {
         let (done, completed) = mpsc::channel();
         let write = std::thread::spawn(move || done.send(writer.write(b"outbound")).unwrap());
         let sent_while_partial = completed.recv_timeout(Duration::from_millis(200));
-        // Finish with many relay chunks cutting across Noise frame boundaries.
         for chunk in wire[6..].chunks(997) {
             data(&receiver_session, chunk);
         }
@@ -1690,7 +1680,6 @@ mod tests {
         };
         drain_to(4 * 1024 * 1024);
         assert_eq!(state.inner.lock().unwrap().buffer.len(), 4 * 1024 * 1024);
-        // Refill before draining the remainder, exercising a wrapped queue.
         enqueue(&data[8 * 1024 * 1024..]);
         assert_eq!(state.inner.lock().unwrap().buffer.len(), 8 * 1024 * 1024);
         let mut close = vec![CH_CLOSE];
@@ -2069,8 +2058,6 @@ mod tests {
     fn denial_codes_become_sentences() {
         assert!(denial_message("DENIED legacy_token_rejected").contains("update tokenstat"));
         assert!(denial_message("DENIED not_on_this_plan").contains("paid-plan"));
-        // An unknown code still carries its wire form so a new relay reason is
-        // debuggable from a screenshot.
         assert_eq!(
             denial_message("DENIED brand_new"),
             "the relay refused the connection: brand_new"
@@ -2239,8 +2226,6 @@ mod tests {
                     break;
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // A dropped pending connection leaves the queue empty,
-                    // which is the same closed state with the FIN first.
                     if Instant::now() >= deadline {
                         break;
                     }
@@ -2367,8 +2352,6 @@ mod tests {
 
     #[test]
     fn an_overfull_inbound_queue_refuses_instead_of_growing() {
-        // The test session's queue holds one: the second OPENED must be
-        // dropped and taken back out of the map, not queued behind the first.
         let session = inert_session();
         let inbound = session.take_inbound().expect("inbound");
         dispatch_frame(&session, &opened_frame(1));

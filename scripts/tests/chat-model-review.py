@@ -304,7 +304,6 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-chat-create-') as directory:
 
 start = source.index('    func warmWorkspacePreviews(')
 end = source.index('\n    private func', start)
-# The next production member may have documentation; retain only the function.
 brace = source.index('{', start)
 depth, end = 1, brace + 1
 while depth:

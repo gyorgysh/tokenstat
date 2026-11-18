@@ -4,7 +4,6 @@
 
 import SwiftUI
 
-/// A roomy, commit-style review of the current working tree.
 struct WorkingTreeReviewView: View {
     let folder: WorkspaceFolder
     @Bindable var model: WorkspacesModel
@@ -167,7 +166,6 @@ struct WorkingTreeReviewView: View {
     }
 }
 
-/// The same file navigator for current Git changes and recorded turn edits.
 struct ReviewFileChoice: Identifiable {
     let path: String
     let added: UInt64?
@@ -205,7 +203,6 @@ struct ReviewFileBrowser<Detail: View>: View {
     @Binding var selection: String?
     var allFiles: ReviewAllFiles? = nil
     @ViewBuilder var detail: () -> Detail
-    /// The list's width is the person's to set, and is kept between launches.
     @AppStorage("reviewFileListWidth") private var listWidth: Double = 220
     @State private var dragStart: Double?
     @State private var cursorPushed = false
@@ -256,7 +253,6 @@ struct ReviewFileBrowser<Detail: View>: View {
         CGFloat(min(max(width, 160), max(160, min(420, Double(total) * 0.5))))
     }
 
-    /// A one point rule with a wider grab area, so the list can be resized.
     private func divider(in total: CGFloat) -> some View {
         Rectangle().fill(Theme.border).frame(width: 1)
             .overlay {

@@ -128,8 +128,6 @@ fun FloatingTabBar(
             // the capsule and dirties the labels near its edge. Just enough
             // lift to separate it from the list.
             shadowElevation = 3.dp,
-            // No offset: the dock shrinks toward the left like the iOS bar,
-            // and the tabs fade under it from the right.
             modifier = Modifier
                 .width(width)
                 .then(if (backdrop != null) Modifier.backdropBlur(backdrop, barShape) else Modifier)
@@ -175,8 +173,6 @@ fun FloatingTabBar(
     }
 }
 
-/// The minimised corner pill: the current tab's glyph on the same dock
-/// surface, asking the host to expand when tapped.
 @Composable
 private fun MinimizedPill(
     icon: ImageVector?,
@@ -262,8 +258,6 @@ private fun FloatingTabContent(spec: TabSpec, selected: Boolean, labelSize: Text
         Modifier
             .fillMaxWidth()
             .clearAndSetSemantics {}
-            // Horizontal too: without it the longest label runs to the very
-            // edge of its slot and reads as one word touching the next.
             .padding(horizontal = 2.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -284,8 +278,6 @@ private fun FloatingTabContent(spec: TabSpec, selected: Boolean, labelSize: Text
             ),
             color = if (selected) colors.accent else colors.textPrimary,
             maxLines = 1,
-            // Past the smallest step the word ends in an ellipsis rather than
-            // being cut through a letter.
             overflow = TextOverflow.Ellipsis,
         )
     }

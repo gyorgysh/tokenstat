@@ -125,7 +125,6 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         m if m.starts_with("launcher.") => true,
         m if m.starts_with("harness.") => true,
         m if m.starts_with("todo.") => true,
-        // Reading a handoff is a poll; writing one is work.
         "work.continuity.put" => true,
         "stream.open" => matches!(stream_kind, Some("pty.subscribe" | "screen.video")),
         _ => false,
@@ -531,7 +530,6 @@ mod tests {
         ] {
             assert!(counts_as_work(method, None), "{method} must count");
         }
-        // The handoff poll and attachment read are not the work.
         assert!(!counts_as_work("work.continuity.get", None));
         assert!(!counts_as_work("work.continuity.attachments", None));
         assert!(!counts_as_work("automation.creationReceipt", None));

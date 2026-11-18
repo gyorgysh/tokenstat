@@ -162,7 +162,6 @@ internal static class EmptyState
             }
             catch
             {
-                // The banner stays. The URL is the whole message.
             }
         };
         var stack = new StackPanel { Spacing = 6 };
@@ -454,10 +453,6 @@ internal static class EmptyState
         return ghost;
     }
 
-    /// <summary>
-    /// A four-point spark, the accent that makes a scene pop. Static by
-    /// design: each scene already carries its one loop.
-    /// </summary>
     private static ShapesPath Sparkle(double size, Brush fill)
     {
         double half = size / 2;

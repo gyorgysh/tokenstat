@@ -43,7 +43,6 @@ internal sealed class RunNotifications
         Workflows,
     }
 
-    /// <summary>Run id to the status it last had, per feed. The whole state this needs.</summary>
     private readonly Dictionary<Feed, Dictionary<string, string>> _lastStatus = new();
 
     /// <summary>Feeds read once. Before that, everything is history.</summary>
@@ -222,7 +221,6 @@ internal sealed class RunNotifications
                     Post(id, L10n.Text("windows.runnotifications.waiting_for_you.9f760ab2"), L10n.Text("windows.runnotifications.0_needs_an_answer_to_carry_on.6eb7efc2", $"{name}"));
                     break;
                 default:
-                    // Stopped is somebody at this keyboard. They know.
                     break;
             }
         }

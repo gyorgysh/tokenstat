@@ -390,10 +390,6 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
     }
 
-    /// <summary>
-    /// What the starting cover names: the program's own file name without
-    /// its extension, or a shell when the host has not said yet.
-    /// </summary>
     private string StartingLabel()
     {
         var command = (_session.Command ?? "").Replace('\\', '/');

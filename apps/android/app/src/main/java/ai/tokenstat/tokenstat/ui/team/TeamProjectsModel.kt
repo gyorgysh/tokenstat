@@ -45,8 +45,6 @@ internal class TeamProjectsModel(private val calls: TeamCalls) {
             val page = TeamDirectoryPage.read(answer, "repositories", offset)
             require(page.rows.all { it.teamString("organizationId") == organization })
             if (ticket != generation) return
-            // A project nobody shares has nothing to open. It stays in the
-            // team's repository list, where an admin can remove it.
             val assigned = page.rows.filter { it.teamString("role") in setOf("viewer", "contributor", "maintainer") && it.teamShared() }
             projects = projects + (organization to TeamManagementPage(if (more) TeamCatalogPage.append(before.rows, assigned) else assigned, page.next, true))
             errors = errors - organization

@@ -109,7 +109,6 @@ struct BranchKey {
     repo: tokenstat_sync::forge::Repo,
 }
 
-/// How long `pulls.branch` reuses an answer before asking the forge again.
 const BRANCH_TTL: Duration = Duration::from_secs(60);
 /// How long a chat list keeps showing what was last learned. Chat lists
 /// never ask the forge themselves, so this is all they have, and a badge a
@@ -214,10 +213,8 @@ struct DetailEntry<T> {
     value: T,
 }
 
-/// How long a detail, timeline page or diff is worth reusing.
 const DETAIL_TTL: Duration = Duration::from_secs(30);
 
-/// Read one of the read caches, if what is in it is still worth having.
 fn cached<K: Eq + std::hash::Hash, V: Clone>(
     cache: &Mutex<HashMap<K, DetailEntry<V>>>,
     key: &K,

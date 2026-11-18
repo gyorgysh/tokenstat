@@ -33,5 +33,5 @@ editor.Refresh(new JsonObject { ["name"] = "Another host name", ["prompt"] = "An
 Check(editor.Draft["name"]!.GetValue<string>() == "Local name" && editor.Revision == 8, "Dirty refresh lost the local draft or advanced its expected revision");
 var lifetime = new OperationEpoch();
 var mounted = lifetime.Capture();
-lifetime.Advance(); // Unloaded before the initial host read completes.
+lifetime.Advance();
 Check(!mounted.IsCurrent && lifetime.Capture().IsCurrent, "A late initial load started a hidden automation poller");

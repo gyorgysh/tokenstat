@@ -68,7 +68,6 @@ class UsageSnapshotTest {
         assertNull(UsageSnapshot.calendar(owner, calendar(listOf(cell), JsonPrimitive("invalid"))))
         assertNull(UsageSnapshot.calendar(owner, calendar(listOf(cell, JsonPrimitive("invalid")))))
         assertNull(UsageSnapshot.calendar(owner, calendar(listOf(JsonObject(cell + ("locked" to JsonPrimitive("invalid")))))))
-        // Duplicates outside the retained 35 days must still invalidate the response.
         val old = JsonObject(cell + ("date" to JsonPrimitive(today.minusDays(40).toString())))
         val rows = (35 downTo 0).map { JsonObject(cell + ("date" to JsonPrimitive(today.minusDays(it.toLong()).toString()))) }
         assertNull(UsageSnapshot.calendar(owner, calendar(listOf(old, old) + rows)))

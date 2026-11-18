@@ -1084,8 +1084,6 @@ mod tests {
 
     #[test]
     fn a_malformed_line_is_a_parse_error_not_a_shutdown() {
-        // Garbage, then a good line, then invalid UTF-8: each bad line is
-        // reported and the loop can still read what follows.
         let mut reader = io::Cursor::new(b"not json\n{\"id\":4}\n\xff\xfe\n".to_vec());
         assert!(matches!(
             read_message(&mut reader).unwrap(),

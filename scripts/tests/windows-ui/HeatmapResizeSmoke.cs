@@ -12,7 +12,6 @@ internal static class HeatmapResizeSmoke
 {
     internal static async Task Run(StackPanel host)
     {
-        // Malformed metadata must neither throw nor cause a multi-billion-column render.
         var malformed = Heatmap.View(new JsonObject { ["weeks"] = long.MaxValue,
             ["rows"] = new JsonArray(new JsonArray(new JsonObject { ["date"] = "2025-01-01",
                 ["level"] = long.MaxValue }, JsonValue.Create(7))),

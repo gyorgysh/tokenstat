@@ -176,7 +176,6 @@ internal static class SidebarUpdateCard
         return Card(body, Theme.PanelBrush, Theme.Brush(static () => WithAlpha(Theme.Warning, 0.35)));
     }
 
-    /// <summary>A confirmation row with no action, for a state that needs none.</summary>
     private static UIElement Status(string title, string subtitle, FrameworkElement mark)
     {
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
@@ -244,7 +243,6 @@ internal static class SidebarUpdateCard
         }
         catch
         {
-            // The account page still carries the same link.
         }
     }
 }

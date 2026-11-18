@@ -48,7 +48,6 @@ const WINDOW_DAYS: i64 = 30;
 const DAY_MS: i64 = 86_400_000;
 const HOUR_MS: i64 = 3_600_000;
 
-/// How far back the history walk goes, in windows.
 const MAX_WINDOWS: usize = 12;
 
 /// Older windows change rarely, so they are walked once a day. The hourly

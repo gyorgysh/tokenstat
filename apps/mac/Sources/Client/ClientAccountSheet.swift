@@ -236,18 +236,6 @@ private struct ClientAccountContent: View {
         .cardSurface()
     }
 
-    /// Ending the account, kept apart from everything above it.
-    ///
-    /// Deletion used to sit under Legal, between the terms links and the third
-    /// party notices, because having it in the app at all is a store
-    /// requirement. That put the most destructive thing here can start in the
-    /// one tab nobody opens to change a setting. It is not a document. It ends
-    /// the account, so it lives at the end of the account, behind a rule that
-    /// says the rest of the pane has finished.
-    ///
-    /// It stays visible when signed out: the website's flow signs the person in
-    /// first, and a delete that is only reachable from one state is a delete
-    /// somebody cannot find.
     @ViewBuilder
     private var dangerZone: some View {
         ThemeRule()
@@ -261,8 +249,6 @@ private struct ClientAccountContent: View {
         deleteAccountCard
     }
 
-    /// Notifications first. That switch is why most people open this pane,
-    /// and it used to sit under the cache, below the fold on a phone.
     @ViewBuilder
     private var thisDevicePane: some View {
         notificationsCard
@@ -909,7 +895,6 @@ private struct ClientLicensesSheet: View {
     }
 }
 
-/// Lazy monospaced reader for the notices file.
 private struct ClientNoticesTextView: UIViewRepresentable {
     let text: String
     /// Observed so a Dynamic Type change re-runs `updateUIView` and rescales

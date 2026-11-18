@@ -247,7 +247,6 @@ struct GitSyncLoadingView: View {
 }
 
 extension BranchPull {
-    /// The colours the pull request screens already use for each state.
     var tint: Color {
         if draft, state == "open" { return Theme.stateIdle }
         switch state {
@@ -263,7 +262,6 @@ extension BranchPull {
 struct GitBranchPullControl: View {
     let workspaceID: String
     let peer: String?
-    /// The folder's branch, so a checkout asks again.
     let branch: String?
     let folderName: String
     let hostName: String

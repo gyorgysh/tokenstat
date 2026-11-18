@@ -694,8 +694,6 @@ private fun SetupDoors(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        // The computer first: no token, no rental, nothing to buy. The doors
-        // below it both assume a server.
         SetupDoorCard(
             title = L10n.text("android.setupwizard.on_my_mac.8282732a"),
             body = L10n.text("android.setupwizard.install_the_desktop_app_on_the_computer_yo.adea6dec"),
@@ -801,8 +799,6 @@ private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.Clie
             sharing = false
         }
     }
-    // Nothing is written and nothing is installed: this is a screen
-    // watching, which is the only thing a phone can honestly do here.
     ForegroundEffect(model) {
         val deadline = System.currentTimeMillis() + 600_000
         while (arrived == null && System.currentTimeMillis() < deadline) {

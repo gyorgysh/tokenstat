@@ -441,7 +441,6 @@ private struct ChatQueueRow: View {
         }
     }
 
-    /// One or two lines on the accent strip, with the clock that marks a wait.
     private var compactField: some View {
         HStack(alignment: .top, spacing: Theme.Space.s) {
             Image(systemName: ActionIcon.scheduled.symbol)

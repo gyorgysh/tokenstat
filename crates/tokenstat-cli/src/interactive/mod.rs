@@ -203,7 +203,6 @@ struct Detail {
     scroll: u16,
 }
 
-/// What kind of report a [`Detail`] window shows.
 enum DetailKind {
     Heatmap,
     Wrapped { year: i32 },
@@ -246,7 +245,6 @@ struct App {
     tab: Tab,
     input: String,
     cursor: usize,
-    /// Index into the current filtered suggestion list.
     suggest_idx: usize,
     scroll: u16,
     page_rows: u16,
@@ -270,7 +268,6 @@ struct App {
     projects: Vec<Bucket>,
     sessions: Vec<Bucket>,
     blocks: Vec<UsageBlock>,
-    /// Active report filter (model / project / date window).
     filter: Query,
     /// Date tabs default to newest first so recent days are on screen without
     /// scrolling. One-shot `tokenstat daily` stays oldest→newest so the
@@ -283,17 +280,12 @@ struct App {
     /// Previous slash commands for ↑/↓ recall when the palette is closed.
     history: Vec<String>,
     history_idx: Option<usize>,
-    /// Active modal wizard, if any.
     wizard: Option<Wizard>,
-    /// Open report window (heatmap / wrapped / budget), if any.
     detail: Option<Detail>,
     /// Host flag to pass to device login after leaving the alternate screen.
     pending_login_host: Option<Option<String>>,
-    /// After login succeeds, run a sync against this host.
     pending_sync_host: Option<String>,
-    /// Summary tab: show every model row instead of the top preview.
     summary_models_expanded: bool,
-    /// Cached sync hint for the status bar (offline, from local config).
     sync_hint: Option<String>,
     /// Result channel for a `/sync` running on a worker thread. The UI never
     /// blocks on the network, so a dead link cannot freeze the client.
@@ -306,7 +298,6 @@ struct App {
     dirty: bool,
 }
 
-/// How many model rows the Summary tab shows before asking for expand.
 const SUMMARY_MODEL_PREVIEW: usize = 10;
 
 /// Rescan when opening the interactive client if the archive is this old.
@@ -447,7 +438,6 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
     result
 }
 
-/// True when `last_scan_ms` is missing or older than `max_age`.
 fn archive_needs_scan(last_scan_ms: Option<&str>, max_age: Duration) -> bool {
     let Some(raw) = last_scan_ms else {
         return true;
@@ -564,7 +554,6 @@ fn opt_cell(v: Option<u64>) -> String {
     }
 }
 
-/// Parse `/login sandbox`, `/sync --host prod`, or a bare URL from slash args.
 fn host_flag_from_args(args: &[&str]) -> Option<String> {
     let mut i = 0;
     while i < args.len() {
@@ -700,8 +689,6 @@ mod tests {
         assert!(looks_like_a_period("2026-08-03"));
         assert!(looks_like_a_period("2026-W31"));
         assert!(looks_like_a_period("2026-08"));
-        // Projects and sessions share the renderer, and ordering them by key
-        // would draw a trend out of something with no time axis.
         assert!(!looks_like_a_period("tokenstat"));
         assert!(!looks_like_a_period("claude-opus-5"));
         assert!(!looks_like_a_period("ses_0001"));
@@ -726,7 +713,6 @@ mod tests {
 
     #[test]
     fn an_old_scan_triggers_a_refresh() {
-        // Fifteen minutes ago, past the ten-minute threshold.
         let old = (jiff::Timestamp::now().as_millisecond() - 15 * 60 * 1000).to_string();
         assert!(archive_needs_scan(Some(&old), AUTO_SCAN_MAX_AGE));
     }

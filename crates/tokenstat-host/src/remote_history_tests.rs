@@ -172,7 +172,6 @@ fn encrypted_history_child() {
         let worker = std::thread::spawn(move || {
             let session = Arc::new(Mutex::new(Session::open_client(None).unwrap()));
             let mut readers = Vec::new();
-            // Two readers plus a replacement connection for each.
             for _ in 0..4 {
                 let connection = server.accept().unwrap().unwrap();
                 let session = Arc::clone(&session);

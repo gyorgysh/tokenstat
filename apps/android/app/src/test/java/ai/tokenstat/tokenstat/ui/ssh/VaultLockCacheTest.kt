@@ -36,7 +36,6 @@ class VaultLockCacheTest {
     fun detailMatchesAppleRow() {
         assertEquals("not set up", VaultLockSnapshot(false, false, false, 0).detail(canWrite = true))
         assertEquals("not syncing", VaultLockSnapshot(false, false, false, 0).detail(canWrite = false))
-        // No "locked" here: the badge beside it says that.
         assertNull(VaultLockSnapshot(true, true, false, 0).detail(canWrite = true))
         assertEquals("1 record", VaultLockSnapshot(true, false, true, 1).detail(canWrite = true))
         assertEquals("3 records", VaultLockSnapshot(true, false, true, 3).detail(canWrite = true))

@@ -73,7 +73,6 @@ internal static class HostOwnerLock
         }
         catch
         {
-            // Best effort.
         }
         stream.Dispose();
     }

@@ -500,8 +500,6 @@ mod tests {
         assert!(!composed.user_text.contains("tokenstat-chat-output"));
     }
 
-    /// A persona has a name on screen all day and the agent behind it was
-    /// never told, so calling it by that name reached nobody.
     #[test]
     fn the_persona_name_reaches_the_agent_ahead_of_its_brief() {
         let composed = compose(Inputs {

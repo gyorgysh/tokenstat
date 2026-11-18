@@ -17,7 +17,6 @@ struct ServerCheck { var distro: String?; var os: String? }
         precondition(cache.label(for: host, now: now) == "Ubuntu 24.04")
         precondition(SSHHostPlatformCache(defaults: defaults).label(for: host) == "Ubuntu 24.04")
         precondition(cache.label(for: host, now: now.addingTimeInterval(91 * 86400)) == nil)
-        // Editing the endpoint invalidates old metadata.
         host.port = 2222
         precondition(cache.label(for: host) == nil)
         // A changed trusted identity invalidates a label confirmed with keys…

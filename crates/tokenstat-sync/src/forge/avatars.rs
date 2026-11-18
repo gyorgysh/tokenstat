@@ -57,7 +57,6 @@ struct RestUser {
 pub fn commit_avatars(repo: &Repo, from: Option<&str>) -> Result<CommitAvatars, ForgeError> {
     let from = from.filter(|oid| is_commit_id(oid));
     match page(repo, from) {
-        // Unknown to the forge: start from its default branch instead.
         Err(HttpFailure::NotFound) | Err(HttpFailure::Forge(ForgeError::Api(_)))
             if from.is_some() =>
         {

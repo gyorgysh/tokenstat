@@ -5,8 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 root = Path(__file__).resolve().parents[1]
-def member(file, signature):
-    source = (root / file).read_text()
+def member(source, signature):
     start = source.index(signature)
     brace = source.index('{', start)
     end, depth = brace + 1, 1
@@ -14,16 +13,11 @@ def member(file, signature):
         depth += (source[end] == '{') - (source[end] == '}')
         end += 1
     return source[start:end].replace('private func', 'func')
-retry = member('apps/mac/Sources/Client/ClientChatView.swift', '    private func foregroundRefresh() async {')
-# The second foreground refresh belongs to the transcript, the first to its list.
-source = (root / 'apps/mac/Sources/Client/ClientChatView.swift').read_text()
-first = source.index('    private func foregroundRefresh() async {')
-second = source.index('    private func foregroundRefresh() async {', first + 1)
-brace = source.index('{', second); end, depth = brace + 1, 1
-while depth:
-    depth += (source[end] == '{') - (source[end] == '}'); end += 1
-retry = source[second:end].replace('private func', 'func')
-cache = member('apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift', '    private func keepOfflineCopy(')
+client = (root / 'apps/mac/Sources/Client/ClientChatView.swift').read_text()
+thread = client[client.index('\nstruct ClientChatThread: View {'):]
+retry = member(thread, '    private func foregroundRefresh() async {')
+model = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift').read_text()
+cache = member(model, '    private func keepOfflineCopy(')
 code = '''import Foundation
 struct Reference { let itemID: String }
 struct Conversation { let lastMessageAtMs: Int64?; let backend = "codex" }

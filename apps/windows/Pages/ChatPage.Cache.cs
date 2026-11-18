@@ -50,7 +50,6 @@ internal sealed partial class ChatPage
         return canStart ? ColdSendChoice.StartNew : ColdSendChoice.Send;
     }
 
-    /// <summary>Change the model, asking first when the cache is for another one.</summary>
     private async Task ChangeModelAsync(string next)
     {
         if (!ChatCacheRule.ModelSuppressed

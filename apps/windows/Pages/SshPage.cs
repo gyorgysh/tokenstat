@@ -301,10 +301,6 @@ internal sealed class SshPage : Page, IToolbarItems
         await LoadKeysAsync(keys);
     }
 
-    /// <summary>
-    /// Saved hosts with their connect, edit and delete actions, plus the add
-    /// form entry. The Hosts tab, and the screen the sidebar group opens.
-    /// </summary>
     private async Task LoadHostsAsync()
     {
         JsonNode listed;
@@ -1051,10 +1047,6 @@ internal sealed class SshPage : Page, IToolbarItems
         return copy;
     }
 
-    /// <summary>
-    /// Sessions this host is still holding, so a relaunched app adopts what
-    /// it left running instead of showing an empty screen over live shells.
-    /// </summary>
     private async Task LoadSessionsAsync()
     {
         JsonArray? sessions;
@@ -1247,10 +1239,6 @@ internal sealed class SshPage : Page, IToolbarItems
         _suggestRoot.Children.Clear();
     }
 
-    /// <summary>
-    /// True when a snippet is saved against the server the open session is
-    /// on. Those lead, because somebody scoped them on purpose.
-    /// </summary>
     private bool IsScopedToSession(JsonNode snippet)
     {
         if (string.IsNullOrEmpty(_sessionHostId))
@@ -1303,7 +1291,6 @@ internal sealed class SshPage : Page, IToolbarItems
                 }
                 ordered.Add((snippet, IsScopedToSession(snippet)));
             }
-            // Scoped first: somebody scoped them on purpose.
             ordered.Sort((a, b) => b.Scoped.CompareTo(a.Scoped));
         }
         foreach (var (snippet, scoped) in ordered)
@@ -1787,10 +1774,6 @@ internal sealed class SshPage : Page, IToolbarItems
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Hosts already in ~/.ssh/config, offered for import. Saved ones are
-    /// skipped, so importing twice changes nothing.
-    /// </summary>
     private async Task LoadConfigAsync()
     {
         JsonArray? candidates;

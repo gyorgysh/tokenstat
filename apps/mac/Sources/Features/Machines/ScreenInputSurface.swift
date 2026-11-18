@@ -26,7 +26,6 @@ struct ScreenInputActions {
     var click: (Int, Int) -> Void
     /// Hold or release the left button, for a drag that outlives one gesture.
     var press: (Bool) -> Void
-    /// Wheel movement in pixels.
     var scroll: (CGSize) -> Void
     /// Move a locally zoomed picture without sending anything to the host.
     var panView: (CGSize, CGSize) -> Void
@@ -62,12 +61,10 @@ enum ScreenFlag {
     static let command: UInt64 = 1 << 20
 }
 
-/// How a finger or a pointer maps onto the remote pointer.
 enum ScreenPointerMode: String, CaseIterable, Identifiable {
     /// The finger drags the pointer from wherever it already is. What a laptop
     /// trackpad does, and the only thing that works on a phone.
     case trackpad
-    /// The pointer goes where the finger touched.
     case direct
 
     var id: String { rawValue }
@@ -610,10 +607,6 @@ struct ScreenKeyBar: View {
                 Button(action: pointer.toggleDrag) {
                     ActionIcon.move.label(pointer.dragLatched ? L10n.text("apple.screeninputsurface.release.e020e3c6") : L10n.text("apple.screeninputsurface.hold.8e685d54"))
                 }
-                // One width for both words. "Release" is wider than "Hold",
-                // so the pinned button used to grow the moment it was pressed
-                // and shove the whole scrolling row sideways under the
-                // thumb that had just pressed it.
                 .buttonStyle(ScreenKeyStyle(active: pointer.dragLatched, width: 104))
                 .padding(.leading, Theme.Space.m)
                 .padding(.trailing, Theme.Space.s)

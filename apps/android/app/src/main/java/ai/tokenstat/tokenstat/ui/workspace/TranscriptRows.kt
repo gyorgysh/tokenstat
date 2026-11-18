@@ -144,8 +144,6 @@ internal fun TranscriptItemRow(
         is ChatDisplayItem.Changes -> TurnChangesCard(item, onReviewChanges)
         is ChatDisplayItem.Plan -> ChatPlanCard(item.steps, live = live)
         is ChatDisplayItem.GroupStep -> {
-            // Inset under its open header, with a rule down the left so the
-            // steps read as belonging to the line above them.
             val rule = LocalTsColors.current.border
             Box(
                 Modifier
@@ -209,7 +207,6 @@ internal fun TranscriptItemRow(
         }
         is ChatDisplayItem.Handoff -> HandoffRow(to = item.to, brief = item.brief)
         is ChatDisplayItem.Thinking -> {
-            // Reasoning stays an aside: small, secondary, markdown.
             MarkdownText(
                 text = item.text,
                 baseStyle = TextStyle(fontSize = 12.sp),
@@ -390,8 +387,6 @@ private fun HandoffRow(to: String, brief: String) {
     }
 }
 
-/// A tool call on a transcript: verb, target, optional snippet, and how it
-/// ended. Ported from Design/ToolRow.swift.
 @Composable
 private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = false) {
     val colors = LocalTsColors.current
@@ -629,8 +624,6 @@ internal fun CompactToolLine(id: String, verb: String, target: String, snippet: 
     PlainStepRow(ChatDisplayItem.Tool(id, ChatToolState(id, verb, target, false, false, null, 0, null, snippet)))
 }
 
-/// One step of a run under an open Compact line: the verb and what it
-/// acted on, with its output a tap away and no card around either.
 @Composable
 private fun PlainStepRow(item: ChatDisplayItem) {
     val colors = LocalTsColors.current
@@ -691,8 +684,6 @@ private fun toolGlyph(verb: String): ImageVector {
     }
 }
 
-/// One file the agent changed, named after the file rather than after the
-/// tool. Ported from ChatFileEditRow.swift.
 @Composable
 private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = false) {
     val colors = LocalTsColors.current
@@ -706,7 +697,6 @@ private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = fa
         }
     }
 
-    // A failed edit is marked rather than boxed.
     val tint = if (state.failed) colors.textSecondary else colors.accent
     val bar = if (state.failed) colors.danger.copy(alpha = 0.6f) else colors.accent
     val border = if (state.running) colors.accent.copy(alpha = 0.45f) else colors.border
@@ -1290,8 +1280,6 @@ private fun AnnotatedString.Builder.parseInline(
     }
 }
 
-/// One line standing in for folded steps. Port of ChatStepGroupRow.swift:
-/// the whole line is the control, and tapping it shows or hides the steps.
 @Composable
 private fun StepGroupRow(group: ChatStepGroup, onClick: () -> Unit) {
     val colors = LocalTsColors.current
@@ -1367,8 +1355,6 @@ private fun StepGroupRow(group: ChatStepGroup, onClick: () -> Unit) {
     }
 }
 
-/// The counts after the title: steps and files for work, what was looked at
-/// for a run of reads, the first line for a thought.
 private fun stepGroupSummary(group: ChatStepGroup): String? = when (group.style) {
     ChatStepGroup.Style.Work -> buildList {
         add(if (group.steps == 1) L10n.text("android.chatdetail.steps.one", "1") else L10n.text("android.chatdetail.steps.other", "${group.steps}"))
@@ -1393,8 +1379,6 @@ internal fun shortStepSubject(verb: String?, subject: String): String {
     }
 }
 
-/// Compact: the verb, what it acted on and the lines it changed, in one
-/// quiet line. Port of ChatStepGroupRow.swift `plainLine`.
 @Composable
 private fun PlainStepLine(group: ChatStepGroup, onClick: () -> Unit) {
     val colors = LocalTsColors.current
@@ -1448,8 +1432,6 @@ private fun PlainStepLine(group: ChatStepGroup, onClick: () -> Unit) {
     }
 }
 
-/// A quiet red count of a line's failed steps. A lone step just says Failed.
-/// Port of ChatStepGroupRow.swift `failureMark`.
 @Composable
 private fun StepGroupFailureMark(group: ChatStepGroup, style: TextStyle) {
     val text = stepGroupFailureText(group) ?: return

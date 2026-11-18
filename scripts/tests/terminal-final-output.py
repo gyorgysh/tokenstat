@@ -208,7 +208,6 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-phone-terminal-review-') as d
     # Leave room for Unicode filtering and scheduling on shared CI runners.
     subprocess.run([str(path / 'test')], check=True, timeout=60)
 
-# Decode both current status fields and legacy replies from the real model.
 models = (root / 'apps/mac/Sources/Bridge/Models.swift').read_text()
 start = models.index('struct PtyChunk:')
 end = models.index('\n}\n', start) + 2

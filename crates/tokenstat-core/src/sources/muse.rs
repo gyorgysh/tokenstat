@@ -281,7 +281,6 @@ fn workspace_project(path: &Path) -> Option<String> {
     }
 }
 
-/// How much of a session log may be read looking for its workspace.
 const HEAD_BYTES: u64 = 256 * 1024;
 
 /// `payload.record.workspace_root`, from either the metadata record or the
@@ -415,8 +414,6 @@ mod tests {
         assert_eq!(out.events[0].counters.output, Some(236));
     }
 
-    /// A resumed scan hands over only what was appended, so the header is not
-    /// in the text. The project still has to come out right.
     #[test]
     fn a_tail_read_still_names_the_project() {
         let dir = session_dir("01a05c83");
@@ -455,7 +452,6 @@ mod tests {
         assert_eq!(out.rows_seen, 0);
     }
 
-    /// What the live meter asks: which folder is this log's session in.
     #[test]
     fn the_head_says_which_folder_the_session_is_in() {
         let head = format!("{METADATA}\n{FIRST_CALL}\n");

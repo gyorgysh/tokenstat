@@ -61,7 +61,6 @@ pub(super) fn handle_event(app: &mut App, ev: Event) -> Result<()> {
                 }
             }
 
-            // Global shortcuts when the input is empty.
             if app.input.is_empty() {
                 match key.code {
                     KeyCode::Char('q') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -157,7 +156,6 @@ pub(super) fn handle_event(app: &mut App, ev: Event) -> Result<()> {
                     _ => {}
                 }
             } else if !suggesting {
-                // With text in the field and no palette, ↑↓ walk command history.
                 match key.code {
                     KeyCode::Up => {
                         app.history_prev();
@@ -275,7 +273,6 @@ pub(super) fn handle_wizard_key(
         _ => return Ok(()),
     }
 
-    // Enter: take the wizard so we can mutate app freely.
     let Some(wizard) = app.wizard.take() else {
         return Ok(());
     };

@@ -11,7 +11,6 @@ warm = source[source.index("extension MarkdownText {"):source.index("/// Whether
 warm = warm.replace("extension MarkdownText {", "private enum MarkdownText {", 1)
 assert warm.count("guard !sources.isEmpty else { return }") == 1
 assert warm.count("Task.detached(priority: .utility) {") == 1
-# Observe completion without changing the worker or its scheduling.
 warm = warm.replace("guard !sources.isEmpty else { return }",
                     "guard !sources.isEmpty else { return }; completed.enter()")
 warm = warm.replace("Task.detached(priority: .utility) {",

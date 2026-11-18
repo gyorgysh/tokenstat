@@ -247,7 +247,6 @@ struct AccountView: View {
         }
     }
 
-    /// Settings that live on this computer, signed in or not.
     @ViewBuilder
     private var thisMacPane: some View {
         hostCard
@@ -268,12 +267,6 @@ struct AccountView: View {
     }
     #endif
 
-    /// Who you are, at the size a profile deserves.
-    ///
-    /// This screen used to open with three `Stat` columns reading "Handle",
-    /// "Plan", "Last sync", which is a report about an account rather than an
-    /// account. The picture, the name and the tier belong together and belong
-    /// first.
     private func identity(_ account: Account) -> some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             Avatar(url: account.avatar, name: account.title, handle: account.handle, size: 64)
@@ -493,8 +486,6 @@ struct AccountView: View {
         .padding(.vertical, Theme.Space.xs)
     }
 
-    /// The claim, stated where someone is deciding whether to connect an
-    /// account. This is the moment it matters, not the marketing page.
     private var privacyNote: some View {
         Card(title: L10n.text("apple.accountview.what_syncing_sends.6540deb3"), subtitle: nil, mark: "mark_sync") {
             Text(L10n.text("apple.accountview.aggregate_counts_per_day_tool_and_model_an.4f196b00"))
@@ -1376,7 +1367,6 @@ private struct NoticesTextPane: NSViewRepresentable {
 }
 #endif
 
-/// The device code, shown while waiting for the browser half of sign-in.
 private struct SignInCode: View {
     var device: DeviceLogin
     var onCancel: () -> Void

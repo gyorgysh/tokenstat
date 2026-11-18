@@ -160,7 +160,6 @@ internal sealed class PersonaMark : Canvas
         _wasMoving = moving;
     }
 
-    // Tiny faces need fewer paints than the large, interactive character.
     private TimeSpan FrameInterval => TimeSpan.FromSeconds(
         1 / Math.Min(_state.FrameRate(), _size <= 28 ? 30 : 60));
 

@@ -37,7 +37,6 @@ enum WorkspaceChangeFilter {
     /// that is where a commit or a branch switch shows up.
     static let gitNoise: Set<String> = ["objects", "logs", "lfs"]
 
-    /// What a batch of events means for the watched folders.
     enum Change: Equatable {
         /// Only noise. Nothing to read.
         case none

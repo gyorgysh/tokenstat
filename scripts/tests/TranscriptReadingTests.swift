@@ -16,7 +16,6 @@ import SwiftUI
     /// answers with nothing further.
     var earlierPages: [[Row]] = []
     var fetches = 0
-    /// Rows asked to be opened out of a folded step group.
     var revealed: [String] = []
     var closedHeader: String?
     func revealRow(_ id: String) -> String {

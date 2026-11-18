@@ -843,7 +843,6 @@ stop_stream()
                     .lines()
                     .map(|line| serde_json::from_str(line).unwrap())
                     .collect();
-                // The goal's continuation turn belongs to the same run.
                 assert_eq!(output.matches("Goal continued.").count(), 1, "{output}");
                 let completions: Vec<_> = rows
                     .iter()

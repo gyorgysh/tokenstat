@@ -348,7 +348,6 @@ struct ClientPastRunRow: View {
     }
 }
 
-/// Opens the complete run history from a short preview.
 struct ClientAllRunsRow: View {
     let count: Int
     var showsChevron: Bool = true

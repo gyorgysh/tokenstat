@@ -405,7 +405,6 @@ fn prepare_authorization(
         json!({"authorizationURL":url,"deviceKey":identity.public_key_hex(),"deviceName":tokenstat_identity::machine_label()}),
     )
 }
-/// Register this device and its connection key with the signed-in account.
 fn register_device(owner: &AccountSnapshot) -> Result<(), DispatchError> {
     let identity = tokenstat_identity::MachineIdentity::load_or_create().map_err(|_| {
         DispatchError::new(

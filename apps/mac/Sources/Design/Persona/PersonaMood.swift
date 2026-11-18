@@ -1096,7 +1096,6 @@ enum PersonaMood: Hashable, CaseIterable {
 
         case .typing:
             let keys = PersonaMood.typing(clock)
-            // On the floor, in front of it, which is where a keyboard goes.
             let keyboard = CGPoint(x: 0.66, y: PersonaStage.floor)
             motes.append(PersonaMote(
                 kind: .keyboard,
@@ -1480,11 +1479,9 @@ enum PersonaMood: Hashable, CaseIterable {
 
     // MARK: - Shared timing
 
-    /// One hit to the next, in the rally.
     static let rallyPeriod: CGFloat = 0.78
     /// 125bpm. Fast enough to read as a beat at 26pt, slow enough not to buzz.
     static let beatPeriod: CGFloat = 0.48
-    /// One length of the floor, there or back.
     static let stridePeriod: CGFloat = 2.6
 
     /// Where a pacing character is and which way it is going.

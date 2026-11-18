@@ -98,8 +98,6 @@ need_cmd() {
 # (typical Linux).
 TOKENSTAT_INSTALL_TMP=""
 
-# Remove only the directory we created with mktemp. Refuses empty paths,
-# common roots, and any path that does not match our template name.
 cleanup_install_tmp() {
   local d
   d="${TOKENSTAT_INSTALL_TMP:-}"
@@ -109,7 +107,6 @@ cleanup_install_tmp() {
       return 0
       ;;
   esac
-  # Only dirs from: mktemp -d ".../tokenstat-install.XXXXXX"
   case "$d" in
     */tokenstat-install.*) ;;
     *) return 0 ;;
@@ -193,8 +190,6 @@ expected_sha() {
       name=$2
       sub(/^\*/, "", name)
       if (name == want || name ~ "/" want "$") {
-        # Only an exact 64-hex digest is a checksum; anything else is a line
-        # to refuse, not a value to trust.
         if (hash ~ /^[0-9a-fA-F]{64}$/) { print tolower(hash); exit }
       }
     }
@@ -380,7 +375,6 @@ main() {
   echo "  ${DIM}update:${R} tokenstat update"
   echo
 
-  # Drop the temp dir now; trap remains for early exit (die/download failure).
   cleanup_install_tmp
   trap - EXIT
 }

@@ -245,7 +245,6 @@ fun <T> TsPickerOptionList(
         else -> sectionTabs.first()
     }
     val stepIndex = sectionTabs.indexOf(activeSection)
-    // Which way the list slides on a step change.
     var movingForward by remember { mutableStateOf(true) }
     fun show(section: String) {
         movingForward = sectionTabs.indexOf(section) >= stepIndex
@@ -336,8 +335,6 @@ fun <T> TsPickerOptionList(
                     onSubmit = submit@{
                         if (!enabled || choosing) return@submit
                         val target = if (stepped && query.isBlank()) {
-                            // Done on an empty field keeps the marked row and
-                            // moves on.
                             filtered.firstOrNull { isSelected(it.value) } ?: filtered.firstOrNull()
                         } else {
                             pickerSubmitTarget(choices, query, activeSection)
@@ -481,8 +478,6 @@ private fun TsPickerTabStrip(
     }
 }
 
-/// One selectable row: the mark, the label, and whatever the caller hangs off
-/// the end of it.
 @Composable
 private fun <T> TsPickerRow(
     choice: PickerChoice<T>,

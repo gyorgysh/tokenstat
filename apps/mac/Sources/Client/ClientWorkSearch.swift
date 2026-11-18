@@ -2,12 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// The one way into search, in the top bar of every screen.
-///
-/// The glass alone, with the title kept for VoiceOver: this sits in a toolbar
-/// beside the wordmark, where a word would crowd the one piece of brand the
-/// client gets. Home used to carry a second, spelled-out copy under the
-/// greeting, which is a button for something the bar above it already offers.
 struct ClientWorkSearchButton: View {
     @Environment(ClientNavigationModel.self) private var navigation
 
@@ -80,7 +74,6 @@ struct ClientWorkSearchPresentation: View {
 
     private var machines: [Machine] { account.account?.machines ?? [] }
 
-    /// Screens and settings, searched beside the work in the shared sheet.
     private var places: WorkSearchPlaceSource {
         WorkSearchPlaceSource(
             matches: { ClientAppPlaces.matches($0, machines: machines) },

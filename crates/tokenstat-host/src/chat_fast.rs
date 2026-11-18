@@ -203,7 +203,6 @@ mod tests {
                 &argv[3..],
                 ["--resume", "session", "-p", "literal --model text"]
             );
-            // Off leaves the selected base model in the ordinary launch.
             let mut off = vec![
                 "grok".into(),
                 "--model".into(),

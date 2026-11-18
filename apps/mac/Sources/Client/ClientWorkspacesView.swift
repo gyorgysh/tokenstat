@@ -969,9 +969,6 @@ struct ClientWorkspacesView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
-            // Opening the device used to hide behind a bare chevron, so the
-            // card never said it could be entered. It says so now, as its own
-            // row. The card tap stays for the same action.
             if host.machineID != nil {
                 Button {
                     navigation.openDevice(machineID: host.machineID)
@@ -1187,7 +1184,6 @@ final class ClientWorkspacesModel {
     /// What this phone is called. It is never in the host list (it cannot dial
     /// itself), so it gets one line of its own.
     private(set) var thisDeviceName: String?
-    /// Full-screen terminal currently shown from the all-sessions list.
     var activeTerminal: ClientTerminalSession?
     @ObservationIgnored private var lastRecoverAt = Date.distantPast
     @ObservationIgnored private var refreshGeneration = UUID()
@@ -2012,7 +2008,6 @@ final class ClientWorkspacesModel {
         }, lease: lease, replacing: .peer(peer))
     }
 
-    /// What a notification tap should open on this host.
     enum NotificationTarget {
         case session(PtySessionInfo)
         case chat(peer: String, hostName: String, folder: WorkspaceFolder?, chat: ChatRecentConversation)

@@ -9,7 +9,6 @@ enum TaskResultWorkspaceSurface: String, CaseIterable, Identifiable, Hashable, S
 
     var id: String { rawValue }
 
-    /// Same words the folder itself uses for these sections.
     var title: String {
         switch self {
         case .changes: return L10n.text("apple.taskresultroute.changes.bbd4b6a8")
@@ -17,7 +16,6 @@ enum TaskResultWorkspaceSurface: String, CaseIterable, Identifiable, Hashable, S
         }
     }
 
-    /// Same glyphs the folder itself uses for these sections.
     var symbol: String {
         switch self {
         case .changes: return "plusminus"

@@ -3,19 +3,10 @@ package ai.tokenstat.tokenstat.ui.logic
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
-/// Words for the live seat, a tool row, and a permission chip.
-///
-/// The same sentences are used on every client. The seat names the whole
-/// step in one line. A row keeps the path or the command beside a shorter
-/// word: present while the step runs, past once it has finished. A name
-/// this list does not know stays as the tool wrote it. The permission
-/// chip uses that same word. The Always allow line names the rule that
-/// is stored, which is a command prefix or a tool name, never the chip.
 object ChatSeat {
     const val DETAIL_CAP = 32
     const val SCAN_CAP = 4096
 
-    /// Soft lines the live seat rotates through while the agent is thinking.
     fun thinkingPhrases(): List<String> = listOf(
         L10n.text("common.chat.seat.thinking"),
         L10n.text("common.chat.seat.planning_next_moves"),
@@ -45,8 +36,6 @@ object ChatSeat {
             "Task", "Subagent" -> L10n.text("android.chatseat.asking_another_agent.fde5ee73")
             "TodoWrite" -> L10n.text("android.chatseat.updating_the_list.ca724dcc")
             else -> {
-                // A path with nothing left after the slashes is just work.
-                // "Working on" with an empty name reads as a broken sentence.
                 val edges = trimEdges(line)
                 if (edges.contains('/') || edges.contains('\\')) {
                     val file = fileName(line)
@@ -60,8 +49,6 @@ object ChatSeat {
         }
     }
 
-    /// Waiting wins. A real step is shown as written. Speaking is a reply.
-    /// Everything else is thought.
     fun seatLabel(waiting: Boolean, step: String?, speaking: Boolean): String {
         if (waiting) return L10n.text("common.waiting")
         if (step != null && step.isNotBlank()) return step

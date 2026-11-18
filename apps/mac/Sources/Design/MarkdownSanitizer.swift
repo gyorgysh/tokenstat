@@ -92,7 +92,6 @@ enum MarkdownSanitizer {
         // express code styling nested inside a Markdown link consistently.
         safe = replacingAnchors(in: safe)
 
-        // Inline emphasis survives the HTML-to-Markdown boundary.
         safe = replace(pattern: #"(?i)<strong[^>]*>"#, in: safe) { _, _ in "**" }
         safe = replace(pattern: #"(?i)</strong\s*>"#, in: safe) { _, _ in "**" }
         safe = replace(pattern: #"(?i)<em[^>]*>"#, in: safe) { _, _ in "*" }
@@ -347,7 +346,6 @@ enum MarkdownSanitizer {
         return tags
     }
 
-    /// The `href` attribute of one already-bounded tag, or nil.
     private static func hrefValue(in tag: String) -> String? {
         guard let expression = expression(#"(?i)href\s*=\s*["']([^"']+)["']"#) else { return nil }
         let string = tag as NSString

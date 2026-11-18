@@ -471,8 +471,6 @@ with tempfile.TemporaryDirectory() as directory:
                     str(work / 'Check.swift'), str(sources / 'Features/Work/WorkReference.swift'), '-o', str(work / 'check')], check=True)
     subprocess.run([str(work / 'check')], check=True, timeout=45)
 
-    # Exercise the complete actual session model with its existing tests,
-    # including the new owner-change-before-root-rerender case.
     session_model = plain((sources / 'Features/Machines/SSHSessionsModel.swift').read_text())
     (work / 'SSHSessionsModel.swift').write_text(session_model)
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(work / 'ModuleCache'),
@@ -482,7 +480,6 @@ with tempfile.TemporaryDirectory() as directory:
                     '-o', str(work / 'sessions')], check=True)
     subprocess.run([str(work / 'sessions')], check=True, timeout=45)
 
-# Integration checks cover the iOS/macOS wiring excluded from this executable.
 client = (sources / 'Client/ClientRootView.swift').read_text()
 assert '.task(id: WorkSessionContext.shared.generation)' in client
 assert '.modifier(ClientSSHPresentations(' in client

@@ -1644,7 +1644,6 @@ Host db
         assert_eq!(dropped.credential_id, None);
     }
 
-    /// A snippet's host scoping survives the wire in both directions.
     #[test]
     fn a_snippet_keeps_the_hosts_it_is_scoped_to() {
         let sent = json!({

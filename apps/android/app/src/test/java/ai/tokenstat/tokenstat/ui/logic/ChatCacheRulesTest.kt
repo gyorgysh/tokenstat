@@ -9,7 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Same rules as the Mac's `ChatPromptCacheRule`.
 class ChatCacheRulesTest {
     private val hour = 3_600_000L
 

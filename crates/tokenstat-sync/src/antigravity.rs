@@ -358,7 +358,6 @@ fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
     }
     let models_text = crate::profile::limited_text(models_resp)?;
 
-    // Bundle both responses so cache + parser stay self-contained.
     let bundle = serde_json::json!({
         "loadCodeAssist": serde_json::from_str::<Value>(&load_text)?,
         "fetchAvailableModels": serde_json::from_str::<Value>(&models_text)?,

@@ -13,7 +13,6 @@ import SwiftUI
 /// A source can have plan usage without publishing a remaining-limit endpoint.
 struct PlanUsageCard: View {
     let rows: [Bucket]
-    /// True when this card shares a row with others and has to match them.
     var fillsHeight = false
 
     var body: some View {

@@ -48,8 +48,6 @@ internal static class PersonaMoodDrive
                 drive.Pressure = 58 * traits.Firmness;
                 drive.ShapeStiffness = 118 * traits.Firmness;
                 drive.AnchorPull = 2.4;
-                // A little smaller in the air, which buys the headroom the hop
-                // needs without the resting character being smaller than it was.
                 drive.Radius = PersonaStage.RestRadius * 0.90;
                 drive.Stretch = new PSize(1, 1);
                 break;
@@ -177,7 +175,6 @@ internal static class PersonaMoodDrive
                 drive.Damping = (3.0 + eased * 1.4) * traits.Firmness;
                 drive.Pressure = (44 - eased * 18) * traits.Firmness;
                 drive.ShapeStiffness = (150 - eased * 88) * traits.Firmness;
-                // A puddle is allowed to feel its own weight. That is the point.
                 drive.Support = 1 - eased * 0.7;
                 drive.Stretch = new PSize(
                     1 + eased * 0.34 - retry * 0.22,
@@ -194,8 +191,6 @@ internal static class PersonaMoodDrive
                 drive.Damping = (3.9 - gag.Laugh * 1.6) * traits.Firmness;
                 drive.Lean = 0.07 + sway * 0.035 - gag.Shock * 0.20;
                 drive.AnchorX = PersonaStage.CentreX - 0.012 + sway * 0.008;
-                // The laugh is a fast wobble on top of the read, which is what
-                // somebody trying not to laugh at a newspaper actually does.
                 double chuckle = gag.Laugh * Math.Sin(clock * 2 * Math.PI * 7.5);
                 drive.Stretch = new PSize(
                     1 + sway * 0.016 - gag.Shock * 0.08 - chuckle * 0.05,
@@ -215,8 +210,6 @@ internal static class PersonaMoodDrive
                 drive.Lean = rock * 0.26 * (1 - round.Loss) + round.Loss * 0.14;
                 drive.AnchorX = PersonaStage.CentreX + rock * 0.030;
                 drive.AnchorPull = 9;
-                // Losing is played entirely in the body: it deflates, and the
-                // ground stops holding it up.
                 drive.Support = 1 - round.Loss * 0.35;
                 drive.Stretch = new PSize(
                     1 + round.Loss * 0.16 - round.Win * 0.10,
@@ -233,8 +226,6 @@ internal static class PersonaMoodDrive
                 drive.Damping = 3.4 * traits.Firmness;
                 drive.AnchorX = walk.X;
                 drive.Radius = PersonaStage.RestRadius * 0.88;
-                // Leaning into the direction of travel, and standing up
-                // straight at the turns, which is where the lean crosses zero.
                 drive.Lean = walk.Direction * 0.20 * (1 - idea) - idea * 0.10;
                 drive.AnchorPull = 13;
                 drive.Stretch = new PSize(1 - idea * 0.12, 1 + idea * 0.18);
@@ -247,8 +238,6 @@ internal static class PersonaMoodDrive
                 drive.Gravity = 1.35;
                 drive.Damping = 3.4 * traits.Firmness;
                 drive.Pressure = 42 * traits.Firmness;
-                // Leaning over a keyboard that is on the floor, which is where
-                // a keyboard is.
                 drive.AnchorX = PersonaStage.CentreX - 0.055;
                 drive.AnchorPull = 12;
                 drive.Lean = 0.24 * (1 - keys.Pause) - keys.Pause * 0.12 + keys.Nod * 0.10;
@@ -282,8 +271,6 @@ internal static class PersonaMoodDrive
                 var work = PersonaMoodTiming.Sketch(clock);
                 drive.Gravity = 1.55;
                 drive.Damping = 3.6 * traits.Firmness;
-                // Leaning down and across at the sheet on the floor, and
-                // following its own hand from one side of it to the other.
                 drive.Lean = 0.20 + work.Sweep * 0.12 - work.Look * 0.30;
                 drive.AnchorX = PersonaStage.CentreX - 0.09 + work.Sweep * 0.030 - work.Look * 0.045;
                 drive.AnchorPull = 11;
@@ -311,8 +298,6 @@ internal static class PersonaMoodDrive
                 double pat = Math.Max(0, Math.Sin(clock * 2 * Math.PI / 1.15)) * (1 - plot.Joy);
                 drive.Gravity = 1.35;
                 drive.Damping = 3.8 * traits.Firmness;
-                // Leaning towards its own patch, which is on the floor to its
-                // right, so the patting lands on the soil.
                 drive.Lean = (0.16 + pat * 0.08) * (1 - plot.Joy) - plot.Joy * 0.10;
                 drive.Stretch = new PSize(
                     1 + pat * 0.025 - plot.Joy * 0.10,
@@ -326,8 +311,6 @@ internal static class PersonaMoodDrive
                 var bubble = PersonaMoodTiming.Bubble(clock);
                 drive.Gravity = 1.0;
                 drive.Damping = (3.4 - bubble.Blow * 0.8) * traits.Firmness;
-                // Cheeks first, then the flinch. The body inflates while it
-                // blows and loses all of it in three frames when the thing pops.
                 drive.Pressure = (44 + bubble.Blow * 16 - bubble.Pop * 22) * traits.Firmness;
                 drive.ShapeStiffness = (150 - bubble.Pop * 70) * traits.Firmness;
                 drive.Stretch = new PSize(
@@ -346,8 +329,6 @@ internal static class PersonaMoodDrive
                 drive.Damping = 3.5 * traits.Firmness;
                 drive.Lean = -0.10 - snack.Bite * 0.30 + snack.Chew * 0.05;
                 drive.AnchorX = PersonaStage.CentreX - 0.02;
-                // Chewing is a fast small squash, which is the whole
-                // difference between eating and holding food.
                 double jaw = snack.Chew * Math.Sin(clock * 2 * Math.PI * 4.6);
                 drive.Stretch = new PSize(
                     1 + snack.Bite * 0.09 + jaw * 0.045 + snack.Happy * 0.06,

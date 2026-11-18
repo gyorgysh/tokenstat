@@ -755,8 +755,6 @@ mod tests {
         );
     }
 
-    /// A chosen name outranks the system one, and clearing it gives the system
-    /// name back rather than leaving a machine called "".
     #[test]
     fn a_chosen_name_wins_and_an_empty_one_undoes_it() {
         let dir = std::env::temp_dir().join(format!("tokenstat-name-{}", std::process::id()));

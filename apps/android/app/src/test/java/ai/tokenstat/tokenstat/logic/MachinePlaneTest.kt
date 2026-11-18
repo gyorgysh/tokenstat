@@ -22,7 +22,6 @@ import org.junit.Test
 /// and snippet placeholder rules.
 class MachinePlaneTest {
 
-    // TerminalKeysLogic, from ClientTerminalKeys / TerminalControlCode.fold.
 
     @Test
     fun controlFoldMatchesApple() {
@@ -175,7 +174,6 @@ class MachinePlaneTest {
         assertEquals("Waiting…", ScreenFrames.transportLabel(null))
     }
 
-    // BrowserPolicy, from ClientWebView.allows.
 
     @Test
     fun browserAllowsTunnelAndSite() {
@@ -203,7 +201,6 @@ class MachinePlaneTest {
         assertEquals("tokenstat.ai", BrowserPolicy.title(null))
     }
 
-    // SnippetRun, from SSHSnippet.bytesToRun and placeholders.
 
     @Test
     fun placeholdersKeepOrderAndDropDupes() {

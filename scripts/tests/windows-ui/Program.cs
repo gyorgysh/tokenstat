@@ -472,7 +472,6 @@ public sealed partial class SmokeApp : Application
                     next.Play();
                     await probe.WaitForOpenAsync(ready.Task, $"reopen {iteration + 1}");
                     await Task.Delay(100);
-                    // Reconfigure/navigate while the live stream is waiting for more data.
                     video.SetMediaPlayer(null);
                     streamer.Close();
                     next.Source = null;

@@ -15,15 +15,12 @@ enum ChatPromptCacheRule {
     static let idleSuppressedKey = "chat.cacheWarning.idle.suppressed"
     static let modelSuppressedKey = "chat.cacheWarning.model.suppressed"
 
-    /// The record, when it belongs to the agent the chat is on now and is big
-    /// enough to matter.
     static func cache(_ chat: ChatConversation) -> ChatPromptCache? {
         guard let cache = chat.promptCache, cache.backend == chat.backend,
               cache.tokens >= minimumTokens else { return nil }
         return cache
     }
 
-    /// How long the cache has been gone, or nil while it still holds.
     static func idle(_ chat: ChatConversation, nowMs: Int64) -> Int64? {
         guard let cache = cache(chat) else { return nil }
         let idle = nowMs - cache.atMs
@@ -54,8 +51,6 @@ enum ChatPromptCacheRule {
     static func isSuppressed(_ key: String) -> Bool { UserDefaults.standard.bool(forKey: key) }
 }
 
-/// One question waiting for an answer, held by `ChatModel` so any view that
-/// changes the chat can raise it and the chat view answers it.
 struct ChatCacheWarning: Identifiable {
     enum Kind {
         /// Sending after the cache expired. `startNew` is nil when this message

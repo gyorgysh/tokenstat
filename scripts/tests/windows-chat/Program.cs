@@ -560,8 +560,6 @@ Check(!SeatStep.IsShell("push"), "push is not a command");
 Check(SeatStep.IsShell("Run-Task"), "run as its own word is a command");
 Console.WriteLine("Windows seat steps: file, command, site and mood words pass.");
 
-// Chat detail levels. The same cases as scripts/tests/ChatTranscriptFoldTests.swift
-// and the Android ChatTranscriptDetailTest, so the three clients fold alike.
 static ChatPage.DisplayItem Row(string id, ChatPage.ItemKind kind, string verb = "", bool running = false,
     bool failed = false, string path = "", long added = 0, long removed = 0, double cost = 0, string text = "",
     long started = 0, long ended = 0) =>
@@ -746,7 +744,6 @@ foreach (var level in new[] { ChatDetail.Minimal, ChatDetail.Standard })
 }
 Console.WriteLine("Windows folded history: collapsed and expanded windows reach earlier-page boundaries.");
 
-// Agent questions. The same stripping cases as ChatQuestionTests.swift.
 var questionFence = "```" + ChatQuestionText.Fence;
 var questionBlock = questionFence + "\n{\"question\":\"Which database?\"}\n```";
 Check(ChatQuestionText.Strip("Plain reply.") == "Plain reply.", "text without a block is untouched");

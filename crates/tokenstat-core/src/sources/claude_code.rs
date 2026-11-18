@@ -33,7 +33,6 @@ use crate::model::{
     BillingMode, Confidence, Counters, EventId, Extras, SourceId, Timestamp, UsageEvent,
 };
 
-/// Rows with this model carry no real usage.
 const SYNTHETIC_MODEL: &str = "<synthetic>";
 
 /// Locate the Claude Code project directory.
@@ -299,7 +298,6 @@ pub fn parse_file(path: &Path, projects_root: &Path, contents: &str) -> ParseOut
     out
 }
 
-/// Parse an ISO-8601 UTC timestamp into epoch milliseconds.
 fn parse_iso8601_ms(s: &str) -> Option<i64> {
     s.parse::<jiff::Timestamp>()
         .ok()

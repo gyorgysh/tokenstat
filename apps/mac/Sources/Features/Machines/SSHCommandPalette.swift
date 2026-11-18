@@ -185,7 +185,6 @@ extension View {
 enum SSHPalettePlacement {
     /// Clear of the edges, so the panel never sits on the terminal's border.
     static let margin: CGFloat = 8
-    /// Between the line being typed and the panel.
     static let gap: CGFloat = 4
 
     /// The panel's top-left corner, in the terminal's own coordinates with the
@@ -268,7 +267,6 @@ final class SSHPaletteLayer {
     private var hosting: NSHostingView<SSHSuggestionPanel>?
     /// The key watch, held only while the panel is on screen.
     private var keys: Any?
-    /// Answers true when the palette took the key.
     private let claimKey: (NSEvent) -> Bool
 
     init(claimKey: @escaping (NSEvent) -> Bool) {

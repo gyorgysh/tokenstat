@@ -199,7 +199,6 @@ internal sealed class TerminalSession
         }
         catch
         {
-            // Leaving the page must not throw.
         }
     }
 
@@ -595,7 +594,6 @@ internal sealed class TerminalSession
         }
         catch
         {
-            // Fall through to the list check below.
         }
         if (_failures < 40)
         {

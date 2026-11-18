@@ -316,7 +316,6 @@ class AuthoringLogicTest {
         val loaded = ScheduleFields.load(AutomationSchedule(ScheduleKind.INTERVAL, everySeconds = 90))
         assertEquals(90L, loaded.builtSchedule.everySeconds)
         assertNull(loaded.validation)
-        // Touching the picker rounds through whole minutes, minimum 60.
         val touched = loaded.copy(intervalMinutes = "90", intervalTouched = true)
         assertEquals(5400L, touched.builtSchedule.everySeconds)
         val weekly = ScheduleFields.load(AutomationSchedule(ScheduleKind.WEEKLY, weekday = 2, weekdays = 0b101))
@@ -523,7 +522,6 @@ class AuthoringLogicTest {
         assertTrue(recipes[0].nodes.any { it.kind == WorkflowNodeKind.CONDITION } .not())
         assertTrue(WorkflowRecipes.designAgents(backends).isNotEmpty())
         assertTrue(recipes[0].label.contains("Start") && recipes[0].label.contains("Done"))
-        // A phone can author workflows on Windows and Linux as well as macOS.
         recipes.forEach { recipe ->
             assertEquals("echo Done", recipe.nodes.last().command)
             assertEquals("done", recipe.edges.last().to)

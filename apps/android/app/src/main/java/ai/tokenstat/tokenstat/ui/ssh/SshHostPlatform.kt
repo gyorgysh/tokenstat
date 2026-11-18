@@ -93,7 +93,6 @@ object SshHostPlatform {
             savedMs = nowMs,
         )
         val edit = prefs.edit().putString(id, entry.serialize())
-        // Bound the store: drop the oldest beyond the cap.
         val all = prefs.all.keys
         if (all.size >= MAX_ENTRIES && !all.contains(id)) {
             val oldest = all.mapNotNull { key ->

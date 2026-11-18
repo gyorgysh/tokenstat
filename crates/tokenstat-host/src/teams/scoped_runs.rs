@@ -97,7 +97,6 @@ pub(super) fn new_chat(
             }
         })
     });
-    // Only the computer that published this checkout makes chats for it.
     let binding = super::sharing::local_binding(&owner, &client)?;
     if binding.issuer != principal.issuer()
         || binding.publisher_id != scope.publisher_id

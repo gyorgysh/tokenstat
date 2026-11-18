@@ -90,7 +90,6 @@ final class TranscriptProbe {
 
     /// What the transcript is holding. Written on change, not per frame.
     var rows = 0
-    /// Rows actually in the ForEach this turn, after the slice.
     var built = 0
     var pinned = true
     var scrolling = false

@@ -6,20 +6,10 @@
 
 import SwiftUI
 
-/// A schedule as a shape rather than a sentence.
-///
-/// The model already carries the rhythm: a kind, and a bitmask of days where
-/// the kind has days. The screen spent all of that on the string "weekdays at
-/// 09:00", which you have to read word by word and cannot compare against the
-/// job under it. Seven dots around a ring, the live ones filled, answers "when
-/// does this fire" before the eye reaches the name.
-///
 /// Monday is the top dot and the week runs clockwise, matching the bitmask the
 /// host uses (Monday = bit 0).
 struct CadenceGlyph: View {
     var schedule: AutomationSchedule
-    /// A paused job draws in the idle tint. It still has a rhythm, it just is
-    /// not keeping it.
     var enabled: Bool = true
     var size: CGFloat = 22
     /// The words this replaces. Callers pass `scheduleSummary`, which is the
@@ -96,10 +86,6 @@ struct CadenceGlyph: View {
     }
 }
 
-/// How much of the wait until the next run is already spent.
-///
-/// "Next Aug 17, 2026 at 09:00" is a date you have to subtract today from. A
-/// ring that is nearly closed says "soon" with no arithmetic.
 struct CountdownRing: View {
     /// Usually the last run. Without it the ring cannot show progress, so it
     /// draws empty and the words beside it carry the meaning.
@@ -137,7 +123,6 @@ struct CountdownRing: View {
     }
 }
 
-/// The countdown ring with the words it stands for, for rows that have space.
 struct NextRunBadge: View {
     var start: Date?
     var end: Date
@@ -153,10 +138,6 @@ struct NextRunBadge: View {
     }
 }
 
-/// Concurrency as places at a table, filled by what is running now.
-///
-/// "Max concurrent jobs: 2" is a setting. Two tiles with one lit is a picture
-/// of the queue, and it tells you the next job is going to wait.
 struct SlotGauge: View {
     var filled: Int
     var total: Int
@@ -165,8 +146,6 @@ struct SlotGauge: View {
     var uncapped: Bool = false
     var tile: CGFloat = 10
 
-    /// Tiles actually drawn.
-    ///
     /// The number comes from a text field somebody is still typing into, so it
     /// has to be bounded: `100000` is a valid thing to type and a hundred
     /// thousand rectangles in an HStack hangs the window before the value is

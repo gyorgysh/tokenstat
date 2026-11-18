@@ -270,13 +270,11 @@ mod tests {
 
     #[test]
     fn trailing_garbage_and_loose_padding_are_refused() {
-        // Anything after the first padding mark is not part of the encoding.
         assert!(decode("Zg==garbage").is_err());
         // 'h' is index 33, whose low bits are not the zero a one-byte value
         // leaves spare: non-canonical, and refused rather than rounded.
         assert!(decode("Zh==").is_err());
         assert!(decode("Zm9vYg==x").is_err());
-        // Padding is required, and only in the one shape that fits.
         assert!(decode("Zg").is_err());
         assert!(decode("Zg=").is_err());
         assert!(decode("Zm9vYg=").is_err());

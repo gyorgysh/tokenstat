@@ -95,7 +95,6 @@ extension WorkbenchShortcut {
 }
 
 extension View {
-    /// Attach a set of shortcuts to this view.
     func clientShortcuts(_ commands: [ClientShortcut]) -> some View {
         background(ClientShortcuts(commands: commands))
     }

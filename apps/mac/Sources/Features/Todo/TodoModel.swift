@@ -32,14 +32,11 @@ final class TodoModel {
     /// length of the first read, which is a claim rather than a wait.
     private(set) var hasLoaded = false
     var errorMessage: String?
-    /// The card the inspector is showing.
     var selectedCardID: String?
     /// Bumps on every select, including a second click on the same card, so
     /// the inspector can reopen.
     private(set) var selectionGeneration = 0
     var noticeMessage: String?
-    /// Where the notice's subject went, when that is somewhere this board is
-    /// not showing. The toast offers it as Show; the view applies it.
     var noticeScope: TodoScope?
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
@@ -64,7 +61,6 @@ final class TodoModel {
         syncPolling()
     }
 
-    /// Newest first by added date, or the order the person arranged.
     var sortNewestFirst = true
 
     /// Scheduler default, used when a new card does not set its own limit.
@@ -127,7 +123,6 @@ final class TodoModel {
             }
     }
 
-    /// Notes that have been put away, in any folder. Used to enable Archive.
     var archivedNoteCount: Int {
         cards.filter { $0.kind == .note && $0.column == "archive" }.count
     }
@@ -217,8 +212,6 @@ final class TodoModel {
         }
     }
 
-    /// Where a new card should land: the folder whose board this is, or the
-    /// one the global board has been filtered to. Nothing, on All and Inbox.
     var defaultWorkspaceID: String? {
         if let scope { return scope }
         if case let .workspace(id) = filter { return id }

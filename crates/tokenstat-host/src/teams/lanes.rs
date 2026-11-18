@@ -310,7 +310,6 @@ struct About {
     share: Option<String>,
     repository: PathBuf,
     pointer: String,
-    /// "ready" once checked and waiting for a person, "blocked" otherwise.
     #[serde(default)]
     status: Option<String>,
 }
@@ -412,7 +411,6 @@ pub(super) fn list(checkout: &str, share: Option<&str>) -> Result<Value, Dispatc
             else {
                 continue;
             };
-            // A connection scoped to one shared chat sees that chat's lanes only.
             if share.is_some() && about.share.as_deref() != share {
                 continue;
             }
@@ -1161,7 +1159,6 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             load()?
         };
         if method == "teams.lanes.catchUp" {
-            // The owner asked to try again now, on this computer only.
             let settings = file
                 .checkouts
                 .get(&input.checkout)

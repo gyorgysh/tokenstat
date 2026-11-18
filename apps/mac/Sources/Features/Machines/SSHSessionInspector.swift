@@ -9,16 +9,6 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-/// The saved commands for the server whose shells are on screen.
-///
-/// The inspector used to force the host editor open beside a live session, on
-/// the reasoning that somebody had just learned what the keepalive should have
-/// been. That is a thing people do once. Reaching for a command they have
-/// already saved is a thing they do all day, and on the Mac there was no way
-/// to do it at all: the snippet menu is built for the phone's key bar and sits
-/// behind `#if !os(macOS)`, so a Mac could write snippets and never run one.
-///
-/// Server settings are one click away in the chrome bar rather than in front.
 struct SSHSessionInspector: View {
     let model: SSHLibraryModel
     @Bindable var sessions: SSHSessionsModel
@@ -212,11 +202,6 @@ struct SSHSessionInspector: View {
             }
             ThemeRule()
             Button(L10n.text("common.edit"), .edit) { editing = .snippet(snippet.id) }
-            // Deleting from here used to mean opening the editor and finding
-            // the button in its footer, which is a long way round for a card
-            // that is right under the pointer. Behind a confirmation, unlike
-            // the library's own rows: this menu sits beside a live shell and a
-            // mis-click here is a mis-click during work.
             Button(L10n.text("common.delete"), .delete, role: .destructive) { deleting = snippet }
         }
     }

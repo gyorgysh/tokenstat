@@ -144,8 +144,6 @@ export async function load(base64, extension, background) {
         scene.background = new THREE.Color(background);
         renderer.setClearColor(background);
         const next = await parse(decode(base64), extension.toLowerCase());
-        // Parsing GLTF textures can finish after the row closes or another
-        // model is selected. Release that result without touching the view.
         if (!active || revision !== loadRevision) {
             release(next);
             return false;

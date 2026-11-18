@@ -131,8 +131,6 @@ internal sealed class PersonaPastime : Grid
             {
                 if (first)
                 {
-                    // A short beat, so the character is seen arriving rather
-                    // than already mid-activity when the screen fades in.
                     first = false;
                     await Task.Delay(TimeSpan.FromMilliseconds(700), token);
                 }
@@ -195,7 +193,6 @@ internal sealed class PersonaPastime : Grid
             ]
             : [PersonaMood.Pacing, PersonaMood.Thinking];
 
-    /// <summary>How long it stays quiet before finding something to do.</summary>
     private static (double Lo, double Hi) QuietFor(Repertoire doing) =>
         doing == Repertoire.Leisure ? (2.6, 5.4) : (1.2, 2.4);
 
@@ -208,10 +205,6 @@ internal sealed class PersonaPastime : Grid
     private static (int Lo, int Hi) Tellings(Repertoire doing) =>
         doing == Repertoire.Leisure ? (1, 2) : (1, 1);
 
-    /// <summary>
-    /// The bounds a telling is clamped to, for a mood with no story of its own
-    /// and for the very short ones.
-    /// </summary>
     private static (double Lo, double Hi) BusyFor(Repertoire doing) =>
         doing == Repertoire.Leisure ? (5.5, 20.0) : (5.0, 11.0);
 

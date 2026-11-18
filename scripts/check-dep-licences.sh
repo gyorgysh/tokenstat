@@ -22,7 +22,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Report metadata failures separately from licence-policy failures.
 if ! metadata="$(cargo metadata --format-version 1 --all-features)"; then
     echo "error: cargo metadata failed, so no licence conclusion can be drawn" >&2
     exit 2

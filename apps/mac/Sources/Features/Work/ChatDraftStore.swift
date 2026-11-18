@@ -108,7 +108,6 @@ final class ChatDraftStore {
         }
     }
 
-    /// Wait for the queued writes to reach the disk.
     func settle() {
         saveFailed = Self.queue.sync { writer.failed } || (saveFailed && writeGeneration == 0)
     }
@@ -214,7 +213,6 @@ final class ChatDraftStore {
         flush(key: key, mutation: .removeIfMatches(expected))
     }
 
-    /// Try the failed write again with what is on screen now.
     func retryFailedSave() {
         flush()
     }

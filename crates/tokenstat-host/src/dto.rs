@@ -864,7 +864,6 @@ impl CalendarDto {
         self.unlock_from = Some(unlock_from);
         self.history_locked = true;
         self.history_days = Some(history_days);
-        // The app is the owner looking at their own grid.
         self.history_upgrade = true;
         self
     }

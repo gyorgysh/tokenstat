@@ -52,7 +52,6 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 ORIG_HOME="${HOME}"
-# Cleanup owns only paths created during this invocation.
 TEMP_HOME=""
 UPLOAD_IOS_HELPER_PY=""
 
@@ -776,12 +775,10 @@ else
         echo "rustup and cargo are required to build the ffi." >&2
         exit 1
     fi
-    FFI_PLATFORMS="${TOKENSTAT_FFI_PLATFORMS:-macos ios sim}"
+    IFS=$' \t\n' read -r -d '' -a ffi_platforms <<< "${TOKENSTAT_FFI_PLATFORMS:-macos ios sim}" || true
     echo "building ffi"
-    # Deliberately unquoted: this is a list of platform words.
-    # shellcheck disable=SC2086
     if ! run_redacted "dist/ios/ffi-$VERSION-$BUILD.log" \
-        "$ROOT/scripts/build-ffi-xcframework.sh" $FFI_PLATFORMS; then
+        "$ROOT/scripts/build-ffi-xcframework.sh" ${ffi_platforms[@]+"${ffi_platforms[@]}"}; then
         fail_from_log "ffi build failed" "dist/ios/ffi-$VERSION-$BUILD.log"
     fi
 fi
@@ -791,8 +788,6 @@ if ! command -v xcodegen >/dev/null; then
     exit 1
 fi
 echo "generating xcode project"
-# The chat start page's surface is a Metal shader, so the bundle needs a
-# compiled metallib and the build needs the Metal compiler.
 "$ROOT/scripts/ensure-metal-toolchain.sh"
 
 (cd "$ROOT/apps/mac" && xcodegen >/dev/null)

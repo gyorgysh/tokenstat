@@ -26,7 +26,6 @@ use tokenstat_workspace::gitwrite::lane::Landing;
 #[path = "guardian/output.rs"]
 mod output;
 
-/// How many times a lane agent may try again after its work could not land.
 const FIX_ATTEMPTS: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
@@ -517,7 +516,6 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
                 }
                 match process.poll().map_err(map_io)? {
                     Poll::Started => {
-                        // A fix attempt is the same run: Running is recorded once.
                         if !ever_running {
                             chats.transition_owned_run(
                                 source.target(),

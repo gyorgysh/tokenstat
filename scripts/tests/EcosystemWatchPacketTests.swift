@@ -16,7 +16,7 @@ import Foundation
         let reset = EcosystemWatchPacket(installation: installation, revision: 11, sentAt: time, snapshot: .empty)
         assert(reset.isNewer(than: first))
         assert(!first.isNewer(than: reset)) // Late refresh cannot resurrect signed-out data.
-        assert(!reset.isNewer(than: reset)) // Duplicate delivery.
+        assert(!reset.isNewer(than: reset))
         let oldInstall = EcosystemWatchPacket(installation: UUID(), revision: 99, sentAt: time.addingTimeInterval(-1), snapshot: .preview)
         assert(!oldInstall.isNewer(than: reset))
         let newInstall = EcosystemWatchPacket(installation: UUID(), revision: 1, sentAt: time.addingTimeInterval(1), snapshot: .empty)

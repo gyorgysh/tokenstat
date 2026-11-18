@@ -10,7 +10,6 @@ use tokenstat_core::{Bucket, GroupBy, PriceTable, Query, SourceId, Store};
 use super::*;
 use crate::ui::{self, BOLD, DIM, accent};
 
-/// Merge the two recovery source ids into one row for a human table.
 fn fold_recovered_sources(rows: Vec<Bucket>) -> Vec<Bucket> {
     const RECOVERED: &str = "claude_code_rollup";
     let mut recovered: Option<Bucket> = None;

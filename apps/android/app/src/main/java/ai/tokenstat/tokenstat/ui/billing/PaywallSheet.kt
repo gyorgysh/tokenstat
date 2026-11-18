@@ -113,8 +113,6 @@ private val pitches = listOf(
     ),
 )
 
-/// The comparison, Free included. Free is not for sale, but a plan's pitch
-/// only lands when the free tier's own limits are beside it.
 private val compareTitles = listOf(L10n.text("android.paywallsheet.free.f411a1fb"), L10n.text("android.paywallsheet.supporter.2ce6c010"), L10n.text("android.paywallsheet.patron.dbcd07c6"), L10n.text("android.paywallsheet.legend.7482e374"))
 private val compareFeatures = listOf(
     "Devices" to listOf("2", "4", "6", "10"),

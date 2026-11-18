@@ -141,7 +141,6 @@ struct AutomationsView: View {
         #endif
     }
 
-    /// Search and the cuts on the left, the ways to add on the right.
     private var toolbar: some View {
         HStack(spacing: Theme.Space.s) {
             SearchField(text: $search, prompt: showingRuns ? L10n.text("apple.automationsview.search_runs.26d6d37f") : L10n.text("apple.automationsview.search_automations.bdff71b2"))
@@ -198,7 +197,6 @@ struct AutomationsView: View {
         .help(L10n.text("apple.automationsview.show_only_some_automations.74fe7a0c"))
     }
 
-    /// Ready-made jobs, one menu away rather than a section of their own.
     private var templatesMenu: some View {
         Menu {
             ForEach(Self.suggestedTemplates) { suggestion in
@@ -540,7 +538,6 @@ struct AutomationsView: View {
         return folder.isRemote ? "\(folder.machineLabel ?? L10n.text("apple.automationsview.remote.ffa98e02")) / \(folder.name)" : folder.name
     }
 
-    /// The folder this board is scoped to, named on the chrome bar.
     private var scopeChip: ScopeChip? {
         guard let id = model.scope else { return nil }
         guard let folder = folders.first(where: { $0.id == id }) else { return nil }
@@ -552,7 +549,6 @@ struct AutomationsView: View {
         )
     }
 
-    /// Waiting on the first read of the daemon's job list.
     private var isWarming: Bool {
         !model.hasLoaded && model.errorMessage == nil
     }
@@ -717,7 +713,6 @@ struct AutomationsView: View {
         }
     }
 
-    /// Seconds a run took, or has taken so far.
     private func seconds(of run: RunRecord) -> Double {
         guard let ended = run.endedAtMs else { return 0 }
         return max(0, (Double(ended) - Double(run.startedAtMs)) / 1000)
@@ -826,7 +821,6 @@ struct NewAutomationSheet: View {
     var folders: [WorkspaceFolder]
     var onNavigate: ((NavigationRequest) -> Void)?
     var existing: Automation? = nil
-    /// Pre-fills the form when the sheet was opened from a suggestion.
     var template: AutomationTemplate? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -1248,8 +1242,6 @@ struct NewAutomationSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Frequency block shaped like the familiar local-scheduler form: one
-    /// Repeat row, then the fields that kind needs (Every / On / At).
     @ViewBuilder
     private var scheduleControls: some View {
         VStack(alignment: .leading, spacing: 0) {

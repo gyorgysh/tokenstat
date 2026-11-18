@@ -67,17 +67,6 @@ struct HomeInspector: View {
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        // A footer bar, not a button that happens to be last.
-        //
-        // It used to be a full-width secondary button on the same background
-        // as the content, under a hairline, with content-sized padding all
-        // round. Three things read as one stranded slab: the rule separated
-        // nothing because both sides were the same colour, the border was the
-        // only edge and it is faint by design, and the padding was the
-        // content's rather than a bar's. Now the bar carries the sidebar
-        // surface, which is what every other footer in the app stands on, and
-        // the action is the accent, because opening the day is the reason this
-        // panel has a footer at all.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let onOpenInsights {
                 VStack(spacing: 0) {

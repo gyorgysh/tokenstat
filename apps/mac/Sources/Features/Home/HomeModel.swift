@@ -33,7 +33,6 @@ enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The glyph beside the label in the scope selector.
     var symbol: String {
         switch self {
         case .thisMachine: return "laptopcomputer"
@@ -41,7 +40,6 @@ enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// What the host calls it.
     var wire: String {
         switch self {
         case .thisMachine: return "local"
@@ -77,7 +75,6 @@ final class HomeModel {
     /// screen can offer a sign-in button instead of quoting a CLI command.
     private(set) var needsAccountSignIn = false
 
-    /// What each vendor says is left of its plan.
     var planLimits: [ProviderLimits] { PlanLimitsStore.shared.visible }
     var isLoadingLimits = false
     private var planUsageError: String?
@@ -380,7 +377,6 @@ final class HomeModel {
         hoverDetailTask = fetchDayDetail(day.date, settle: true)
     }
 
-    /// Today's cell on the delivered grid, if the host drew one.
     private var todayCell: HeatCell? {
         guard let last = calendar?.last else { return nil }
         return cell(on: last)
@@ -499,7 +495,6 @@ final class HomeModel {
         }
     }
 
-    /// Switch what the grid counts and redraw it.
     func setScope(_ new: ActivityScope) async {
         guard new != scope else { return }
         // The new grid is a different set of numbers; a cached hover from the
@@ -618,7 +613,6 @@ final class HomeModel {
 
 }
 
-/// Insights-shaped breakdown for one local day.
 struct DayOverview: Sendable {
     var totals: Totals?
     var byModel: [Bucket]

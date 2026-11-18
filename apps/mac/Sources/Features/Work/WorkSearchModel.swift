@@ -163,8 +163,6 @@ final class WorkSearchModel {
 
     private let liveFetch: WorkSearchLiveScheduler.Fetch?
     private let scope: WorkReference.Scope
-    /// Folders this index will answer for. Widened when a connected machine
-    /// lists what it holds, see `adopt(folders:live:)`.
     private var folders: [WorkSearchIndex.Folder: String]
     private let metadata: [WorkSearchIndex.Document]
     /// Whether saved conversation text is part of the index, which decides

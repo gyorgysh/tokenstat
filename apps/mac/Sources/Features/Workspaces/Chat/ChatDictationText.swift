@@ -12,7 +12,6 @@ import Foundation
 /// typed or edited in the meantime. Writing over that would throw their edit
 /// away, so `apply` answers nil and dictation stops instead.
 struct ChatDictationText: Equatable {
-    /// The draft as it was when dictation started.
     let original: String
     /// The latest reading, as it stands in the draft.
     private(set) var spoken = ""
@@ -21,7 +20,6 @@ struct ChatDictationText: Equatable {
         original = draft
     }
 
-    /// What dictation expects the draft to hold right now.
     var expected: String { spoken.isEmpty ? original : Self.join(original, spoken) }
 
     /// The new draft for this reading, or nil when the draft was edited by

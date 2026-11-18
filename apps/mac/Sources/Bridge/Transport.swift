@@ -34,7 +34,6 @@ protocol Transport: Sendable {
     /// overrides it to skip the pool wait.
     func callUrgent(method: String, params: String, patience: TimeInterval) throws -> String
 
-    /// What to call this in the interface, and in a bug report.
     var describedAs: String { get }
 }
 

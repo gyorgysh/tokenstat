@@ -66,7 +66,6 @@ final class IOSGutterView: UIView {
                     .foregroundColor: isCurrent ? accent : numbers,
                 ]
                 let size = label.size(withAttributes: attributes)
-                // Number block ends where the marker lane begins.
                 label.draw(
                     at: CGPoint(x: self.bounds.width - 8 - size.width, y: top),
                     withAttributes: attributes

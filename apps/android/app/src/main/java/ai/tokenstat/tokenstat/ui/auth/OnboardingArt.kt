@@ -171,8 +171,6 @@ private fun IntroArt(reduceMotion: Boolean, active: Boolean) {
     }
 }
 
-/// An illustrative conversation, with the review step visible rather than a
-/// picture of an agent silently making changes. Port of `AgentsArt`.
 @Composable
 private fun AgentsArt(reduceMotion: Boolean, active: Boolean) {
     val colors = LocalTsColors.current

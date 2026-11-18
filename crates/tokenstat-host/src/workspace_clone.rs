@@ -33,7 +33,6 @@ use serde_json::{Value, json};
 #[derive(Clone)]
 struct Job {
     path: PathBuf,
-    /// `None` while it runs, then the folder it registered or why it did not.
     outcome: Option<Result<String, String>>,
 }
 
@@ -212,8 +211,6 @@ fn watch(session: String, permit: ClonePermit<'static>, claim: TargetClaim) {
             std::thread::sleep(Duration::from_millis(400));
             let info = match tokenstat_pty::manager().info(&session) {
                 Ok(info) => info,
-                // The session is gone before it exited: nothing was seen, so
-                // nothing is claimed.
                 Err(_) => return finish(&session, Err("The clone stopped before it finished.")),
             };
             if info.alive {

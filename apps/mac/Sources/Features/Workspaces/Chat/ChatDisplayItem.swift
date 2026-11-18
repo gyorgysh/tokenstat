@@ -255,9 +255,6 @@ struct ChatDisplayItem: Identifiable, Equatable, Sendable {
     /// Inclusive end of a coalesced text/thinking block in the loaded archive.
     /// Lets a mark from a partial page resolve after earlier deltas arrive.
     var lastSequence: UInt64? = nil
-    /// The folded step group this row was opened from, when it is one of a
-    /// group's steps shown below its header. Nil for every top-level row.
-    /// See `ChatTranscriptFold`.
     var groupID: String? = nil
     /// How a step under an open Compact line is drawn. Nil everywhere else.
     var plainStep: PlainStep? = nil

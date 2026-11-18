@@ -69,7 +69,6 @@ class LaunchChoiceTest {
             "claude",
             LaunchDefaults.backend(null, backends.filter { it["id"].toString().contains("claude") }),
         )
-        // A list of nothing but the shell still does not answer the shell.
         assertEquals("claude", LaunchDefaults.backend(null, listOf(backends[0])))
     }
 

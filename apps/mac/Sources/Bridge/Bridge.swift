@@ -422,12 +422,6 @@ enum Bridge {
     }
 
     #if os(macOS)
-    /// Whether the footer has been told the host is in trouble.
-    ///
-    /// A successful call used to post "recovered" unconditionally, and calls
-    /// succeed constantly: nine notifications a second for the life of the
-    /// app, every one of them saying what the last one said. Only the call
-    /// that actually clears a card has anything to say.
     private static let hostStateNotifier = HostStateNotifier()
 
     /// Tell the footer about the host, from the main thread.
@@ -643,11 +637,8 @@ enum Bridge {
     nonisolated(unsafe) private static var lastHostRepairAt: Date?
     /// How long a completed repair stays fresh before launchd is touched again.
     private static let hostRepairCooldown: TimeInterval = 30
-    /// How long to wait for a host that may already be coming up on its own.
     private static let hostSoftWait: TimeInterval = 1.2
-    /// How long to wait for the socket after a kickstart or reinstall.
     private static let hostRepairWait: TimeInterval = 5
-    /// How long a caller arriving mid-repair waits for the socket.
     private static let hostRepairShareWait: TimeInterval = 2
 
     private static func socketIsUp() -> Bool {
@@ -686,7 +677,6 @@ enum Bridge {
         attributes: .concurrent
     )
 
-    /// Run blocking work on `calls` and await it.
     private static func offMainActor<T: Sendable>(
         _ work: @escaping @Sendable () throws -> T
     ) async throws -> T {
@@ -797,7 +787,6 @@ enum Bridge {
         }
     }
 
-    /// Which machine a call was addressed to, for `remote.call`.
     private static func peerOf(_ params: [String: Any]) -> String? {
         params["peer"] as? String
     }
@@ -1052,7 +1041,6 @@ extension Bridge {
     }
 }
 
-// MARK: - Automations
 
 // MARK: - Chat
 
@@ -2666,7 +2654,6 @@ extension Bridge {
         _ = try await background("local.provider.set", ["id": id, "port": port], as: Saved.self)
     }
 
-    /// Discover local providers on the machine that owns a remote workspace.
     static func localModels(onPeer peer: String) async throws -> [LocalProvider] {
         try await onPeer(peer, "local.models", as: [LocalProvider].self)
     }
@@ -2981,7 +2968,6 @@ extension Bridge {
         try await background("automation.transcript", ["id": id, "offset": offset], as: TranscriptChunk.self)
     }
 
-    /// Stop a run before its budget. Used by the todo board's Stop.
     static func automationKill(runID: String) async throws {
         _ = try await background("automation.kill", ["id": runID], as: Ack.self)
     }
@@ -3161,7 +3147,6 @@ extension Bridge {
         try await background("todo.delegate", ["id": id], as: TodoCard.self)
     }
 
-    /// Stop a delegated run.
     static func todoStop(id: String) async throws -> TodoCard {
         try await background("todo.stop", ["id": id], as: TodoCard.self)
     }
@@ -3326,10 +3311,6 @@ extension Bridge {
         return try await background("ssh.host.probe", params, as: SSHHostFingerprint.self)
     }
 
-    /// Everything `ssh.session.open` needs about a host, in one place.
-    ///
-    /// Three call sites used to build this dictionary by hand and only one of
-    /// them would have gained the environment, the keepalive or the jump host.
     private static func sessionParams(
         _ host: SSHHost, rows: Int, cols: Int, auth: [String: Any], jump: [String: Any]?
     ) -> [String: Any] {
@@ -3537,7 +3518,6 @@ extension Bridge {
         return rows
     }
 
-    /// Ask another computer to let this device open its work.
     static func askWorkspaceAccess(peer: String) async throws -> ScreenAccessAsk {
         try await onPeer(peer, "workspace.access.ask", as: ScreenAccessAsk.self)
     }
@@ -3699,7 +3679,6 @@ extension Bridge {
         try await vaultInvoke("ssh.vault.create", ["password": password, "tier": tier], patience: Patience.standard, expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultRecovery.self)
     }
 
-    /// Open the vault with the password, or with the recovery code.
     static func unlockSSHVault(password: String = "", recovery: String = "", tier: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultUnlock {
         try await vaultInvoke("ssh.vault.unlock", ["password": password, "recovery": recovery, "tier": tier, "migrate": true], patience: Patience.standard, expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultUnlock.self)
     }
@@ -3857,7 +3836,6 @@ extension Bridge {
         try await onPeer(peer, "fs.browse", ["path": path as Any], as: RemoteListing.self)
     }
 
-    /// Register a folder that is already on a peer.
     static func addWorkspace(peer: String, path: String) async throws -> WorkspaceFolder {
         try await onPeer(peer, "workspace.add", ["path": path], as: WorkspaceFolder.self)
     }

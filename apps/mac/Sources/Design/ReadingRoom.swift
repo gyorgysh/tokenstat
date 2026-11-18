@@ -27,7 +27,6 @@ enum ReadingRoom {
     #if os(macOS)
     /// Structured content: diffs, checks, tool detail, tables.
     static let laneWidth: CGFloat = 1040
-    /// Running text.
     static let proseWidth: CGFloat = 820
     #else
     /// A phone has one measure, and an iPad reaches this and stops.
@@ -44,6 +43,5 @@ enum ReadingRoom {
     /// of a wide window saying nothing.
     static let listWidth: CGFloat = .infinity
 
-    /// Where the lane sits inside the window it is given.
     static let alignment: Alignment = .topLeading
 }

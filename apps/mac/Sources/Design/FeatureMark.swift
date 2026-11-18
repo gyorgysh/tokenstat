@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// A product-owned vector mark for a feature surface.
 struct FeatureMark: View {
     var name: String
     var tint: Color = Theme.accent

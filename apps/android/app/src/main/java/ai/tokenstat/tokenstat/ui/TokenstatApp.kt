@@ -240,7 +240,6 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.*
 
-/// The brand accent from the shared token system.
 @Composable
 private fun tsAccent(): Color = LocalTsColors.current.accent
 
@@ -565,8 +564,6 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                 Spacer(Modifier.width(6.dp))
                 Text(L10n.text("android.tokenstatapp.what_is_tokenstat.b2e003ed"), style = TsType.subheadline, color = colors.accent)
             }
-            // Signing in creates the account, so the two documents that govern
-            // it belong on this screen and not only in Settings.
             LegalLine(onOpen = { openPage("$it?mobile=1") })
         }
     }
@@ -920,8 +917,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     LaunchedEffect(customization.visibleTabs) {
         if (displayed.none { it == selected }) selected = displayed.first()
     }
-    // The tab bar gets out of the way while a list scrolls, like iOS, and
-    // comes back at the top, on a tap, or when the tab changes.
     val tabBar = rememberTabBarMinimizeState()
     val tabBarScroll = rememberTabBarMinimizeScroll(tabBar)
     // A pushed screen (a conversation) takes the bar off the screen, the
@@ -953,8 +948,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     Scaffold(
         containerColor = colors.background,
         topBar = {
-            // A pushed screen brings its own header. Stacking the wordmark
-            // above it was two headers and a fifth of the screen.
             if (teamOpen || tabBarPresence.topHidden) return@Scaffold
             TopAppBar(
                 // Avatar leading, wordmark centred: the same chrome shape as
@@ -1001,8 +994,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         }
                     }
                     ConnectionChip(state.connection, onRetry = { model.retryConnection() })
-                    // No refresh button: like iOS, every tab refreshes with
-                    // a pull, and the wordmark dips while it runs.
                 },
             )
         },
@@ -1134,8 +1125,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         pendingDeviceId = pendingDeviceId,
                         onPendingDeviceConsumed = { pendingDeviceId = null },
                     )
-                    // Saved servers, for somebody who lives in them. No back
-                    // button: the bar behind it is the way out.
                     Destination.Ssh -> AndroidSSHScreen(model, state, onPlans = { Plans.open() }, tabBarScroll = tabBarScroll)
                 }
                 }
@@ -1429,8 +1418,6 @@ private fun HomeScreen(
                 item { HomeStatusBlock(state.error, state.connection.offline, onRetry = ::retry) }
             }
         }
-        // In the order this device was arranged in. A card with nothing to
-        // say draws nothing and keeps its place.
         sections.forEach { section ->
             when (section) {
                 HomeSection.USAGE -> if (calendar != null) {
@@ -1538,7 +1525,6 @@ private fun HomeScreen(
                             }
                         }
                     }
-                    // The same Free-year note the public profile puts under the heatmap.
                     if (rows.orEmpty().any { (it as? JsonArray).orEmpty().any { c -> (c as? JsonObject)?.bool("locked") == true } }) {
                         item { HistoryLockBanner() }
                     }
@@ -1603,8 +1589,6 @@ private fun HomeScreen(
             }
         }
         item {
-            // At the bottom, under everything it arranges. A control for
-            // changing the furniture does not belong above the furniture.
             TsSecondaryButton(
                 label = L10n.text("android.tokenstatapp.customize_home.642cec6e"),
                 onClick = { customizing = true },
@@ -1796,8 +1780,6 @@ private fun InsightsScreen(
         term.isBlank() || key.contains(term, ignoreCase = true) ||
             cutTitle(cut, key).contains(term, ignoreCase = true)
     }
-    // A share bar needs something to be a share of, and the largest shown
-    // row is a steadier reference than the total.
     val peak = shown.maxOfOrNull { it.long("valueMicros") ?: 0L } ?: 1L
     PullToRefreshBox(
         isRefreshing = isLoading,
@@ -1864,8 +1846,6 @@ private fun InsightsScreen(
                 }
             }
         } else if (rows.isEmpty()) {
-            // Not a dead end. An account with nothing on it has one thing
-            // to do next, and it is on Home.
             item {
                 EmptyState(
                     icon = Icons.Default.BarChart,
@@ -1920,17 +1900,12 @@ private fun InsightsScreen(
     }
 }
 
-/// A row's key as a person reads it, port of `Cut.title`: a harness id is
-/// a slug, and a day is an ISO date nobody says out loud. Cut 0 models,
-/// 1 harnesses, 2 days.
 private fun cutTitle(cut: Int, key: String): String = when (cut) {
     1 -> harnessName(key)
     2 -> shortDate(key)
     else -> key
 }
 
-/// "This period": the total at list rates plus the three fact panels, like
-/// the iOS summary. A remembered answer says how old it is.
 @Composable
 private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boolean, fetchedAtMs: Long?) {
     val colors = LocalTsColors.current
@@ -1966,8 +1941,6 @@ private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boole
     }
 }
 
-/// Tokens per day as bars, the Day cut's chart on iOS. Drawn on a Canvas:
-/// 53 accent bars need no chart dependency.
 @Composable
 private fun InsightDayChart(rows: List<JsonObject>) {
     val colors = LocalTsColors.current
@@ -2025,7 +1998,6 @@ private fun InsightDayChart(rows: List<JsonObject>) {
     }
 }
 
-/// Ranked token usage complements the detailed cost rows below it.
 @Composable
 private fun InsightTokenChart(rows: List<JsonObject>, cut: Int) {
     val colors = LocalTsColors.current
@@ -2053,8 +2025,6 @@ private fun InsightTokenChart(rows: List<JsonObject>, cut: Int) {
     }
 }
 
-/// One breakdown row: what it is, what it was worth, and how big a share
-/// of the largest shown row that is.
 @Composable
 private fun InsightRow(row: JsonObject, cut: Int, peak: Long) {
     val colors = LocalTsColors.current
@@ -2095,7 +2065,6 @@ private fun InsightRow(row: JsonObject, cut: Int, peak: Long) {
             Spacer(Modifier.width(Space.s))
             Text(moneyValue(value, estimated, complete), color = tsAccent(), style = TsType.numeric(16))
         }
-        // A quiet share bar in the accent, not a system meter.
         Box(
             Modifier
                 .fillMaxWidth()
@@ -2277,9 +2246,6 @@ private fun DevicesScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                // The count belongs above the list it counts, which is where
-                // the iPhone puts it, rather than above the two rows that add
-                // to it.
                 item {
                     DevicesHeader(
                         machineCount = machines.size,
@@ -3742,7 +3708,6 @@ private fun WorkspacesScreen(
             folderName, RecentPlaces.Kind.TERMINAL, sessionId,
         )
     }
-    // This phone's own record, for the row that opens nothing.
     val thisMachine = ((state.account?.get("machines") as? JsonArray).orEmpty())
         .mapNotNull { it as? JsonObject }
         .find { it.string("id") == thisId }
@@ -3825,8 +3790,6 @@ private fun WorkspacesScreen(
 
     @Composable
     fun listPane(modifier: Modifier) {
-        // Pulling the list re-reads the account and redials the host, and
-        // the logo dips the way it does on every other screen.
         PullToRefreshBox(
             isRefreshing = wsRefreshing,
             onRefresh = {
@@ -4318,7 +4281,6 @@ private fun WorkspaceList(
                         }
                         Text(L10n.text("common.online"), style = TsType.caption, color = colors.accent)
                     }
-                    // What the connection is, on the screen that makes them.
                     SecurityCard(
                         model = model,
                         peerKey = connectedPeer,
@@ -4747,8 +4709,6 @@ private fun AccountDialog(
     fun open(url: String) {
         runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) }
     }
-    // Account, this device, legal: the same three panes the iOS sheet has,
-    // so a setting is found in the same place on both phones.
     var pane by rememberSaveable { mutableStateOf(0) }
     // Full height, not half. The Apple sheet fills the screen, and the panes
     // behind these tabs are long: relay usage alone is a card with a progress
@@ -4849,8 +4809,6 @@ private fun AccountDialog(
                     // mark. The switch used to be a bare row above the cards,
                     // so the pane opened on an unlabelled toggle.
                     DeviceNotificationsCard()
-                    // This device's tab bar and rail, arranged by the person
-                    // holding it, where the other device-local choices live.
                     var tabsOpen by remember { mutableStateOf(false) }
                     TabsCard(
                         summary = tabSummary(
@@ -5527,8 +5485,6 @@ private fun shortDay(iso: String): String = runCatching {
 }.getOrElse { iso.take(10) }
 
 
-/// One document that opens off the device. The arrow says it leaves the app,
-/// which a plain row does not.
 @Composable
 private fun LegalLinkRow(label: String, onOpen: () -> Unit) {
     val colors = LocalTsColors.current

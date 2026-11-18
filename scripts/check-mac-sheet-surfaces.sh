@@ -9,7 +9,6 @@
 # `apps/mac/Sources/Design/ThemedSheet.swift`. 32pt body padding is the
 # air; hugging copy with 0pt inset is the failure this exists to catch.
 #
-#   scripts/check-mac-sheet-surfaces.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -86,7 +85,6 @@ def macos_source(src: str) -> str:
             if stack:
                 child, then_keep = stack[-1]
                 parent = parent_active() if len(stack) == 1 else stack[-2][0] if len(stack) > 1 else True
-                # Reconstruct parent from the stack without the current frame.
                 parent = all(frame[0] for frame in stack[:-1]) if len(stack) > 1 else True
                 if then_keep is None:
                     child = parent

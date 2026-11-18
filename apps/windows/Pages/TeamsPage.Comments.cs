@@ -27,7 +27,6 @@ internal sealed partial class TeamsPage
         Tool(ActionIcon.History, L10n.Text("common.teams.comment_drafts"), async (_, _) => await ShowDraftsAsync(origin, person));
         Tool(ActionIcon.Restore, L10n.Text("common.teams.saved_asks"), async (_, _) => await ShowSavedAsksAsync(origin, person));
     }
-    /// The comment side of the composer well. The caller docks it.
     private async Task<(StackPanel Panel, TeamCommentModel Model)?> AddCommentComposerAsync(JsonObject target, string title, string computer, int view)
     {
         var checkout = target.DeepClone().AsObject(); checkout.Remove("share");
@@ -53,7 +52,6 @@ internal sealed partial class TeamsPage
         if (!IsLoaded || _view != view) return null;
         _currentComment = model;
         var panel = new StackPanel { Spacing = Theme.SpaceS };
-        // The well is the box, as in the main composer, so the field draws none.
         var box = new TextBox { Text = model.Text, PlaceholderText = L10n.Text("common.teams.comment_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
             BorderThickness = new Thickness(0), Background = Theme.ClearBrush, MinHeight = 40, MaxHeight = 180 };
         box.Resources["TextControlBackgroundFocused"] = Theme.ClearBrush;
@@ -90,8 +88,6 @@ internal sealed partial class TeamsPage
             var action = model.CheckAsync(); Update(); await action; Update();
             if (IsLoaded && _view == view && model.Status == "comment_posted" && !_readingEarlier) await ShowChatAsync(target, title, computer);
         });
-        // Who reads it on the leading side, the buttons on the trailing side,
-        // the way the main composer's utility row is laid out.
         var audience = new TextBlock { Text = L10n.Text("common.teams.comment_audience"), FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
         copy = Buttons.Secondary(L10n.Text("common.teams.copy_draft"), ActionIcon.Copy, (_, _) => CopyDraft(model.RecoveredText ?? model.Text), small: true);
         reload = Buttons.Secondary(L10n.Text("common.teams.load_saved_draft"), ActionIcon.Refresh, async (_, _) => { var action = model.ReloadAsync(); Update(); await action; Update(); }, small: true);

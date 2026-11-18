@@ -101,8 +101,6 @@ command -v xcodegen > /dev/null || {
     exit 1
 }
 echo "Generating the Xcode project"
-# The chat start page's surface is a Metal shader, so the bundle needs a
-# compiled metallib and the build needs the Metal compiler.
 "$ROOT/scripts/ensure-metal-toolchain.sh"
 
 (cd "$ROOT/apps/mac" && xcodegen > /dev/null)
@@ -170,9 +168,6 @@ quit_running_app() {
     sleep 1
 }
 
-# Install the signed helper from the bundle where the launch agent runs it,
-# then restart the agent so the socket answers with this build. When no agent
-# is loaded the app installs and starts one itself on launch.
 deploy_hostd() {
     local support="$HOME/Library/Application Support/tokenstat/bin"
     local helper="$support/tokenstat-hostd"

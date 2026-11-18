@@ -943,8 +943,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private static Grid LazyDiff()
     {
-        // A spinner alone reads as frozen. The pulsing rows say what shape
-        // the diff lands in.
         var progress = new ProgressRing
         {
             IsActive = true,

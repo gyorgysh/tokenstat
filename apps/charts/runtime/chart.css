@@ -8,7 +8,6 @@
 }
 :root {
     color-scheme: light dark;
-    /* Native Theme panel, text, border and accentSoft tokens. */
     --bg: #fff;
     --fg: #000000;
     --muted: rgba(0, 0, 0, 0.6);
@@ -19,7 +18,6 @@
     --danger: #d6453f;
     --zoom-fill: rgba(106, 61, 255, 0.18);
     --mark-text: #ffffff;
-    /* Native accent, secondary, syntax and diff colors, with readable fills. */
     --series-1: #6a3dff;
     --series-2: #c026d3;
     --series-3: #2d62c4;
@@ -280,7 +278,6 @@ footer {
     }
 }
 
-/* Long annotations stay readable without allowing an unbounded transcript row. */
 h2 {
     max-height: 130px;
     overflow: auto;

@@ -60,8 +60,6 @@ fun ConnectionChip(connection: ConnectionUi, onRetry: () -> Unit) {
     val colors = LocalTsColors.current
     var open by remember { mutableStateOf(false) }
     val tint = if (connection.down) colors.danger else colors.warning
-    // A glyph per cause. A wall of identical warning triangles teaches people
-    // to stop reading them.
     val glyph = when {
         connection.offline -> Icons.Default.WifiOff
         connection.service -> Icons.Default.CloudOff

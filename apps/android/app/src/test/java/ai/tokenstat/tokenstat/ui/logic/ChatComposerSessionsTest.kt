@@ -57,7 +57,7 @@ class ChatComposerSessionsTest {
         assertFalse(store.clearIfUnchanged("a", acknowledged))
         assertEquals(listOf("new file"), store.snapshot("a").attachments)
         store.update("a", sent)
-        assertFalse(store.clearIfUnchanged("a", acknowledged)) // identical newly written payload
+        assertFalse(store.clearIfUnchanged("a", acknowledged))
     }
 
     @Test fun capacityRefusalPreservesWritingAndClearingReleasesSpace() {

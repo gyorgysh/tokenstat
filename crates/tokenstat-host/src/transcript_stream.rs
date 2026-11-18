@@ -297,8 +297,6 @@ mod tests {
     #[test]
     fn claude_completes_each_block_separately_with_the_same_message_id() {
         let mut p = Parser::new("claude");
-        // More messages than the bound also verifies normal streams release
-        // their state, rather than eventually falling back to buffered text.
         for n in 0..MAX_MESSAGES + 1 {
             let id = format!("message-{n}");
             feed(

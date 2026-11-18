@@ -76,7 +76,6 @@ fun PortBrowserScreen(
     request: BrowserOpenRequest,
     onClose: () -> Unit,
 ) {
-    // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
     val context = LocalContext.current

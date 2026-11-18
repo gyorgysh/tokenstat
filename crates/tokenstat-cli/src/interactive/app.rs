@@ -206,7 +206,6 @@ impl App {
             .trim()
             .trim_start_matches('/')
             .to_ascii_lowercase();
-        // Once the user has typed a space they are editing args, so hide the list.
         if self.input.contains(' ') {
             return Vec::new();
         }

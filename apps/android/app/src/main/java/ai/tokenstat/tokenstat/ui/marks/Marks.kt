@@ -110,7 +110,6 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
         Triple(10f, 42f, Color(0xFFE879F9)),
     )
 
-    // One run of the same rise for a refresh somebody pulled.
     var pulse by remember { mutableStateOf(false) }
     androidx.compose.runtime.DisposableEffect(Unit) {
         val unsubscribe = UiSignals.onRefreshing {
@@ -129,8 +128,6 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
 
     Box(Modifier.size(size.dp)) {
         bars.forEachIndexed { index, (y, height, color) ->
-            // The repeating rise, or one rise that lands and holds. Reduce
-            // Motion lands on the last frame and stays there.
             val looped = if (animated && loops && !reduceMotion) {
                 val transition = rememberInfiniteTransition(label = "logo")
                 val v by transition.animateFloat(
@@ -157,8 +154,6 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
                 }
                 land.value
             }
-            // The refresh dip: each bar sinks to 0.35 and comes back up over
-            // 260ms, a beat after the one before it, like `Marks.swift`.
             val dip = remember { Animatable(1f) }
             LaunchedEffect(pulse, reduceMotion) {
                 if (reduceMotion) {

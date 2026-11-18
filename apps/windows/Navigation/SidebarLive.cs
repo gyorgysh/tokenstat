@@ -126,7 +126,6 @@ internal static class SidebarLive
         }
         catch
         {
-            // The footer keeps whoever it was showing.
         }
         return (summaries, account);
     }

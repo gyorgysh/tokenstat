@@ -12,7 +12,6 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use tokenstat_sync::agent_versions::{self, LatestSource};
 
-/// How an installed agent is brought up to date.
 #[derive(Clone, Debug, PartialEq)]
 enum Via {
     /// The agent's own update command, with these arguments.
@@ -167,7 +166,6 @@ fn version_in(banner: &str) -> Option<String> {
     None
 }
 
-/// The numeric parts before any `-suffix`.
 fn numbers(version: &str) -> Vec<u64> {
     version
         .split('-')
@@ -253,7 +251,6 @@ fn package_version(command: &str, package: &str) -> Option<String> {
     None
 }
 
-/// The installed version, by the cheapest way that works for this agent.
 fn version_of(plan: &Plan, command: &str) -> Option<String> {
     package_of(plan)
         .and_then(|package| package_version(command, package))
@@ -294,8 +291,6 @@ fn stamp(command: &str) -> Option<String> {
     Some(format!("{}|{seconds}", real.display()))
 }
 
-/// One agent's row: its installed version and, when `check` is set, the
-/// latest one its vendor publishes.
 fn row(id: &'static str, check: bool) -> Option<Value> {
     let plan = plan(id)?;
     let command = crate::launcher::resolved_command(id)?;
@@ -381,7 +376,6 @@ fn check_now() -> Vec<Value> {
 /// never ask the vendors at the same time.
 static FLIGHT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// A check this recent already answers a button press.
 const JUST_CHECKED_MS: i64 = 30 * 1000;
 
 fn just_checked(now: i64, checked_at: i64) -> bool {
@@ -569,7 +563,6 @@ fn jitter(span: Duration) -> Duration {
     Duration::from_millis(rand::random::<u64>() % millis)
 }
 
-/// `PERIOD` moved by up to `PERIOD_JITTER` either way.
 fn next_period() -> Duration {
     PERIOD - PERIOD_JITTER + jitter(PERIOD_JITTER * 2)
 }
@@ -579,7 +572,6 @@ fn next_period() -> Duration {
 fn check_if_due() {
     let _flight = match FLIGHT.try_lock() {
         Ok(flight) => flight,
-        // Somebody else is already asking. Their check answers this one.
         Err(std::sync::TryLockError::WouldBlock) => return,
         // A panic during a check must not stop every later scheduled one.
         Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
@@ -739,7 +731,6 @@ mod tests {
         let rows = merged(&previous, fresh);
         assert_eq!(rows[0]["latest"], "0.9.0");
         assert_eq!(rows[0]["updateAvailable"], true);
-        // A stored value that is not a version is not shown.
         assert!(rows[1].get("latest").is_none());
         assert_eq!(rows[2]["latest"], "2.0.0");
     }

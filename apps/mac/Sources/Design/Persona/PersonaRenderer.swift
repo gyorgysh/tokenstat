@@ -310,7 +310,6 @@ enum PersonaRenderer {
         context.stroke(arc, with: .color(ink), lineWidth: max(1, unit * 0.023))
     }
 
-    /// Two soft patches on the cheeks, drawn under the eyes and outside them.
     private static func drawBlush(
         in context: inout GraphicsContext,
         place: (CGFloat, CGFloat) -> CGPoint,
@@ -1301,8 +1300,6 @@ private func drawCookie(
     }
 }
 
-/// The patch of ground a plant is in. Small, dark, and flat on the floor line,
-/// which is all it takes for a stem to read as rooted rather than stuck on.
 private func drawSoil(
     in context: inout GraphicsContext,
     at point: CGPoint,

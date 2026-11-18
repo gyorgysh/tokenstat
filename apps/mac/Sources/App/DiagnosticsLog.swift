@@ -30,7 +30,6 @@ enum DiagnosticsLog {
     private static let keepDays = 5
     /// One day's file stops growing here. A busy day is a few megabytes.
     private static let maxFileBytes: off_t = 64 * 1024 * 1024
-    /// The main thread is stalled once a ping has waited this long.
     private static let stallMs: UInt64 = 500
 
     private static let queue = DispatchQueue(label: "ai.tokenstat.diagnostics", qos: .utility)

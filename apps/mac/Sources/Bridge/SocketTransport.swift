@@ -27,7 +27,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// block a keystroke on another.
     private let lock = NSCondition()
     private var idle: [Connection] = []
-    /// Connections that exist right now, idle or in a call.
     private var live = 0
 
     /// Kept small. Terminal polling, the file watcher and a report can be in
@@ -57,7 +56,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// Ten slots therefore always remain for work on this machine.
     private static let maxRemoteLive = 6
 
-    /// Remote calls holding a connection right now.
     private var remoteLive = 0
 
     let path: String
@@ -566,7 +564,6 @@ private final class Connection {
         return try roundTrip(request)
     }
 
-    /// Write one request line and read one response line.
     func roundTrip(_ request: Data) throws -> String {
         wroteRequestBytes = false
         try writeAll(request)

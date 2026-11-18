@@ -550,7 +550,6 @@ pub fn breakdown(
                 key,
                 counters,
                 events,
-                // The account holds no session ids. See the doc comment.
                 sessions: 0,
                 value: EquivalentValue::from_micros(micros),
                 estimated,
@@ -689,7 +688,6 @@ pub fn machine_usage(
         let mut handles = Vec::with_capacity(machines.len());
         let from = from.as_str();
         let to = to.as_str();
-        // Chunk so at most four series requests are in flight together.
         for chunk in machines.chunks(4) {
             let mut batch = Vec::with_capacity(chunk.len());
             for machine in chunk {
@@ -923,7 +921,6 @@ fn adopted(snapshot: stored::Snapshot) -> Cache {
     }
 }
 
-/// The cached series, fetched if it is stale.
 fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError> {
     let owner = crate::account_session::current_or_capture().map_err(FetchError::new)?;
     let client = owner
@@ -1088,8 +1085,6 @@ mod tests {
 
     #[test]
     fn a_plan_limitation_is_expected_but_not_an_auth_problem() {
-        // "Your plan does not include this" is a settled fact about the
-        // account, not a fault, but signing in again would not fix it.
         let error =
             FetchError::new("the account refused this request (403): upgrade_required".to_string());
         assert!(error.expected);
@@ -1237,8 +1232,6 @@ mod tests {
 
     #[test]
     fn a_file_is_kept_for_a_fortnight_and_no_longer() {
-        // Past that the grid it would draw is a picture of a fortnight ago.
-        // Better to open empty and fetch than to open on fiction.
         let day = 24 * 60 * 60 * 1000i64;
         let now = 30 * day;
         assert!(stored::worth_opening(now - day, now));

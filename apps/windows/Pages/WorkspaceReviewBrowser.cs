@@ -14,7 +14,6 @@ internal sealed class WorkspaceReviewBrowser : Grid
     private readonly ListView _files = new() { SelectionMode = ListViewSelectionMode.Single };
     private readonly ComboBox _picker = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private bool _updating;
-    /// <summary>The list width the person dragged to, kept for this session.</summary>
     private static double s_listWidth = 210;
     private readonly ColumnDefinition _listColumn;
     private readonly Border _splitter;
@@ -34,7 +33,6 @@ internal sealed class WorkspaceReviewBrowser : Grid
         _detail = new ScrollViewer { Content = detail, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         SetRow(_detail, 1); SetColumn(_detail, 2); Children.Add(_detail);
-        // A one pixel rule with a wider grab area, so the list can be resized.
         var splitter = new Border { Background = Theme.ClearBrush,
             Child = new Border { Width = 1, Background = Theme.BorderBrush, HorizontalAlignment = HorizontalAlignment.Center } };
         AutomationProperties.SetName(splitter, L10n.Text("common.files"));

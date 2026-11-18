@@ -130,11 +130,8 @@ class OptionalSigningTests(unittest.TestCase):
                      mock.patch.object(signing.subprocess, "check_output", return_value=identity), \
                      mock.patch.object(signing.subprocess, "run", side_effect=capture) as run:
                     signing.main()
-                    # Helper, deep pass, the app's microphone entitlement, verify.
                     self.assertEqual(run.call_count, 0 if check_only else 4)
                     if not check_only:
-                        # No profile carries the entitlement on this path, so
-                        # the extra pass has to add it itself.
                         self.assertEqual(
                             signed["entitlements"],
                             {"com.apple.security.device.audio-input": True},

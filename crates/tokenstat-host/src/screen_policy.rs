@@ -237,7 +237,6 @@ fn verify_legend_account() -> Result<tokenstat_sync::profile::StatusResult, Stri
 /// frame, by design.
 #[cfg(feature = "local-host")]
 pub(crate) fn stream_allowed(peer: &str, control: bool) -> bool {
-    // Fast path: mirror younger than 1s.
     if let Ok(guard) = stream_cache().lock()
         && let Some(entry) = guard.as_ref()
         && entry.at.elapsed() < std::time::Duration::from_secs(1)
@@ -826,15 +825,11 @@ mod tests {
         )));
         // A server too old to name the account cannot pass.
         assert!(!account_is_review_demo(&status(None, true)));
-        // Both, which is the only way through.
         assert!(account_is_review_demo(&status(
             Some(REVIEW_DEMO_ACCOUNT_ID),
             true
         )));
 
-        // And the account half alone is not enough. A server naming the demo
-        // account to a machine that is not the review machine still gets no
-        // for the whole question, which is the point of the second gate.
         assert!(
             !on_review_machine(),
             "a test host is not the review machine"

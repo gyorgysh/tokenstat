@@ -157,7 +157,6 @@ pub fn auth(
         }
         Some(_) => anyhow::bail!("empty token"),
         None => {
-            // Convenience: pull whatever the vendor app already left locally.
             let (path, source) = match vendor {
                 tokenstat_sync::Vendor::Cursor => tokenstat_sync::cursor::auth_auto()?,
                 tokenstat_sync::Vendor::Antigravity => tokenstat_sync::antigravity::auth_auto()?,
@@ -460,7 +459,6 @@ pub fn profile_sync(
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if dry_run {
-        // Canonical JSON already printed by the sync client.
         return Ok(());
     }
 

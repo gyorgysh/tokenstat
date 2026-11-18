@@ -48,20 +48,7 @@ struct ChatComingSoonView: View {
     }
 }
 
-/// This folder's character, with nothing else in the picture.
-///
-/// It used to be a chat bubble with three pulsing dots and the four harness
-/// marks orbiting it. The bubble was a picture of waiting, and nobody on this
-/// screen is waiting yet: this is what somebody looks at while deciding
-/// whether to start. The marks went with it. Naming four agents on an empty
-/// screen is a decision nobody has to make here, and four things drifting
-/// around a character that is already moving is two animations arguing.
-///
-/// So it is one creature, left to get on with something, and what that is
-/// differs every time the screen is opened.
 struct ChatScene: View {
-    /// The character. Seeded from the folder, so a person's projects each keep
-    /// their own, the same one every time they open it.
     var seed: UInt64 = personaSeed(for: "chat")
 
     var body: some View {

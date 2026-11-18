@@ -224,7 +224,6 @@ pub fn review(dir: &Path) -> Result<Review, String> {
     })
 }
 
-/// Git's own words for a failure, or a sentence when it said nothing.
 fn failure(out: std::process::Output, fallback: &str) -> String {
     let message = super::GitOutcome::from(out).message;
     if message.is_empty() {

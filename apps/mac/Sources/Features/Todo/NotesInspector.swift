@@ -17,8 +17,6 @@ struct NotesInspector: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
     var embedded = false
-    /// Whether the list is hidden behind this pane, so there has to be a
-    /// way back to it. Beside the list, a back button leads nowhere new.
     var showsBack = true
     var onClose: () -> Void
 

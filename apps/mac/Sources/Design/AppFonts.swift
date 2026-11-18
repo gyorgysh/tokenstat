@@ -42,9 +42,7 @@ import UIKit
 /// Manrope rather than seven static faces, and a weight that is not one of the
 /// named instances is interpolated rather than faked by smearing.
 enum AppFonts {
-    /// Manrope. Language.
     static let interface = "Manrope"
-    /// JetBrains Mono. Anything read character by character.
     static let mono = "JetBrains Mono"
 
     /// Whether the bundled faces actually registered.

@@ -2,18 +2,6 @@
 
 import SwiftUI
 
-/// What a conversation tells its agent before it hears the person.
-///
-/// This exists because of a bug that was really a design failure. Every turn
-/// used to carry three machine-written paragraphs glued to the person's
-/// sentence, so an opening "Hey" came back describing a temporary folder
-/// nobody had mentioned, and there was nowhere in the app to see that text or
-/// change it. Both halves are now here: the brief belongs to the person and is
-/// editable, and the one rule tokenstat adds is readable rather than described.
-///
-/// Shared by the Mac inspector and the client's setup sheet, because the
-/// promise it makes ("nothing is sent that you cannot read") has to hold on
-/// whichever screen somebody opens.
 struct ChatInstructionsCard: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation

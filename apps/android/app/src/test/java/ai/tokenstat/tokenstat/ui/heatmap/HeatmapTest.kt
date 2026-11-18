@@ -89,8 +89,6 @@ class HeatmapTest {
 
     @Test
     fun dayDetailParamsUseTheAccountGrid() {
-        // `Bridge.dayDetail(date:scope: "account")`: the grid the day was
-        // tapped out of is the account's.
         val params = dayDetailParams("2026-08-11")
         assertEquals("2026-08-11", params["date"]?.jsonPrimitive?.content)
         assertEquals(53, params["weeks"]?.jsonPrimitive?.int)

@@ -40,7 +40,6 @@ class TabCustomizationTest {
     fun hiddenSelectedTabJoinsTemporarilyInOrder() {
         val customization = TabCustomization(FakePrefs(), all, setOf("ssh"))
         assertEquals(all, customization.displayed("ssh"))
-        // Without touching the preference: it is still hidden afterwards.
         assertEquals(setOf("ssh"), customization.hidden)
         assertEquals(
             listOf("home", "workspaces", "insights", "machines"),

@@ -268,14 +268,6 @@ struct ClientChatComposer: View {
         }
     }
 
-    /// Grow the writing area without leaving the conversation.
-    ///
-    /// Six lines is the right height for a message and the wrong one for a
-    /// brief. The toggle sits at the top right of the bar, away from send, so
-    /// the thumb that reaches for one never finds the other. The symbols are
-    /// the same full-screen pair the rest of the app uses: the names this
-    /// used to type by hand are not in SF Symbols, so the control worked
-    /// and drew nothing.
     private var expandToggle: some View {
         Group {
             if expanded {

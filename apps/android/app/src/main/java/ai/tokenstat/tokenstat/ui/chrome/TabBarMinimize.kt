@@ -74,14 +74,11 @@ fun rememberTabBarMinimizeScroll(state: TabBarMinimizeState): NestedScrollConnec
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                // Upward scroll the list could not take: the first row is
-                // showing, so the bar comes back.
                 if (available.y > slop) state.expand()
                 return Offset.Zero
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                // An upward fling with velocity to spare hit the top.
                 if (available.y > 0f) state.expand()
                 return Velocity.Zero
             }

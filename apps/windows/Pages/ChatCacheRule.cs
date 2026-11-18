@@ -7,9 +7,6 @@ using System.Text.Json.Nodes;
 namespace Tokenstat.Pages;
 
 /// <summary>
-/// When a message is about to make the agent read a whole conversation again.
-/// Mirrors the Mac's <c>ChatPromptCacheRule</c>.
-///
 /// The provider caches a conversation for one model, for a few minutes or an
 /// hour after the last turn. The host records the size, model and lifetime on
 /// the conversation as <c>promptCache</c>. No percentage of a plan is shown:
@@ -17,7 +14,6 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal static class ChatCacheRule
 {
-    /// <summary>Below this a full read is cheap, and a question is noise.</summary>
     public const long MinimumTokens = 50_000;
 
     /// <summary>Protocol 54 adds <c>chat.continueInNew</c>.</summary>
@@ -25,7 +21,6 @@ internal static class ChatCacheRule
 
     public static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-    /// <summary>The record, when it is this agent's and big enough to matter.</summary>
     public static JsonObject? Cache(JsonNode? chat)
     {
         if ((chat as JsonObject)?["promptCache"] is not JsonObject cache) return null;
@@ -52,7 +47,6 @@ internal static class ChatCacheRule
         return Format.Text(cache, "selection") != (next ?? "");
     }
 
-    /// <summary>Days and hours, or hours and minutes, like "1d 17h".</summary>
     public static string Duration(long milliseconds)
     {
         var minutes = Math.Max(0, milliseconds) / 60_000;

@@ -25,8 +25,6 @@ if ! grep -q "PipeOptions\.Asynchronous" "$CLIENT"; then
     fail=1
 fi
 
-# Comment lines are skipped, so a comment may name a banned API while
-# explaining why it is banned. A real call is never a comment.
 hits=$(grep -rnH "PipeOptions\.None" "$CLIENT" | grep -v ':[0-9][0-9]*: *//' || true)
 if [ -n "$hits" ]; then
     echo "$hits"

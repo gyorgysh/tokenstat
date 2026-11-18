@@ -338,7 +338,6 @@ mod tests {
     #[test]
     fn a_held_identity_lock_never_keeps_the_installed_host_out() {
         crate::test_identity::isolated(|| {
-            // First call takes it and keeps it for the process lifetime.
             hold_identity_lock().expect("a fresh identity directory is free");
             let default = crate::server::default_socket_path().expect("a data directory");
             assert_eq!(role_for(&default), Role::Primary);

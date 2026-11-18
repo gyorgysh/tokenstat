@@ -236,19 +236,14 @@ struct WorkspaceSummaryParams {
 #[serde(rename_all = "camelCase")]
 struct WorkspaceIdParams {
     id: String,
-    /// Only used by `workspace.rename`.
     #[serde(default)]
     name: Option<String>,
-    /// Branch checkout source, or the new branch name.
     #[serde(default)]
     branch: Option<String>,
-    /// Whether `branch` names a remote-tracking ref.
     #[serde(default)]
     remote: bool,
-    /// Optional start point for a new branch.
     #[serde(default)]
     from: Option<String>,
-    /// Only used by `workspace.log`.
     #[serde(default)]
     limit: Option<u32>,
     /// Directory to list, for `workspace.tree`, or the file to diff, for
@@ -258,7 +253,6 @@ struct WorkspaceIdParams {
     /// Paths to stage or unstage.
     #[serde(default)]
     paths: Option<Vec<String>>,
-    /// Commit message.
     #[serde(default)]
     message: Option<String>,
     /// Text content for `workspace.write`.
@@ -333,7 +327,6 @@ struct PtySpawnParams {
     rows: u16,
     #[serde(default = "default_cols")]
     cols: u16,
-    /// The user opted out of colour in settings.
     #[serde(default)]
     no_color: bool,
     /// The client is painting a dark background. Absent from an older client,
@@ -552,7 +545,6 @@ struct PtyIdParams {
     /// `pty.write` only: base64, because a keystroke is bytes.
     #[serde(default)]
     data: Option<String>,
-    /// `pty.resize` only.
     #[serde(default)]
     rows: Option<u16>,
     #[serde(default)]
@@ -610,7 +602,6 @@ struct AutomationParams {
     offset: Option<u64>,
     default_budget_seconds: Option<u64>,
     max_concurrent: Option<u32>,
-    /// `automation.interactiveCommand` only.
     backend: Option<String>,
     workspace_id: Option<String>,
     prompt: Option<String>,
@@ -654,7 +645,6 @@ struct ChatParams {
     desktop_app: Option<String>,
     id: Option<String>,
     workspace_id: Option<String>,
-    /// `chat.backends` only. See `AutomationParams::refresh`.
     refresh: Option<bool>,
     title: Option<String>,
     backend: Option<String>,
@@ -692,7 +682,6 @@ struct ChatParams {
     preview: Option<String>,
     shell_prefix: Option<String>,
     request_id: Option<String>,
-    /// `chat.answerQuestion`: which of the agent's questions this answers.
     question_id: Option<String>,
     turn_token: Option<String>,
     wait_ms: Option<u64>,
@@ -918,7 +907,6 @@ fn account_dto_from_status(s: tokenstat_sync::StatusResult) -> AccountDto {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct SyncParams {
-    /// Build and validate the payload without sending it.
     dry_run: bool,
     /// Ask the server to drop rows outside the window.
     prune: bool,
@@ -2603,7 +2591,6 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
 #[cfg(feature = "local-host")]
 fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     match method {
-        // Workspaces are registered folders, nothing to do with the archive.
         "automation.list" => serde_json::to_value(crate::automations::shared().list()).envelope(),
         "automation.create" => {
             let mut p: AutomationParams = parse(params)?;
@@ -3624,7 +3611,6 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     p.review.as_ref().ok_or("A pull needs a reviewed branch")?,
                 )?)
             };
-            // Review fetched, so ahead and behind moved even when nothing else did.
             invalidate_workspace_status(Some(&p.id));
             result.map_err(|e| e.to_string())
         }
@@ -3726,7 +3712,6 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             crate::live_work::start_terminal(&info);
             serde_json::to_value(info).map_err(|e| e.to_string())
         }
-        // `folders` filtered these, so nothing else can arrive.
         other => Err(format!("unknown folder method: {other}")),
     }
 }
@@ -4976,8 +4961,6 @@ fn proxy_unlisten(params: &str) -> Result<Value, String> {
     crate::remote_proxy::unlisten(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
 }
 
-// MARK: - Remote pty routing
-
 /// A resource id namespaced to another machine: `remote:<peer hex>:<inner>`.
 ///
 /// The same prefix the app uses for remote folder ids, so a terminal spawned
@@ -5283,9 +5266,6 @@ mod tests {
     fn a_client_says_which_methods_it_cannot_answer() {
         let mut s = Session::open_client(Some("UTC")).expect("client session");
 
-        // Every archive method refuses with the same code, so one branch in a
-        // front end covers all of them, and none of them fails as if something
-        // had gone wrong.
         for (method, params) in [
             ("totals", "{}"),
             ("report", r#"{"group":"day"}"#),
@@ -5305,8 +5285,6 @@ mod tests {
             );
         }
 
-        // And it says so up front, rather than only when asked to do the
-        // impossible.
         let info: Value = serde_json::from_str(&call(&mut s, "info", "{}")).expect("info envelope");
         assert_eq!(info["ok"], true, "{info}");
         assert_eq!(info["result"]["hasArchive"], false);
@@ -5317,8 +5295,6 @@ mod tests {
     #[test]
     fn every_response_is_a_decodable_envelope() {
         let mut s = session();
-        // Including the failure paths: a front end must never have to guess
-        // whether it got JSON back.
         for (method, params) in [
             ("info", "{}"),
             ("nonsense", "{}"),
@@ -5372,8 +5348,6 @@ mod tests {
             "host.policy",
             "host.provisionStatus",
             "host.stats",
-            // The Machines screen has to answer on a machine whose archive
-            // will not open, because that is when somebody goes looking at it.
             "machine.peers",
         ]) {
             let out = call_sessionless(method, r#"{"id":"pty-none"}"#)
@@ -5606,8 +5580,6 @@ mod tests {
         ));
         unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
 
-        // A machine has an identity the first time it is asked, with no setup
-        // step and no empty state to explain.
         let me: Value =
             serde_json::from_str(&call_sessionless("machine.identity", "{}").expect("sessionless"))
                 .expect("json");
@@ -5646,8 +5618,6 @@ mod tests {
         assert_eq!(listed["result"].as_array().map(Vec::len), Some(1));
         assert_eq!(listed["result"][0]["key"], stranger);
 
-        // Revoking leaves the record, so the same key coming back is known as
-        // one that was turned away rather than arriving as a stranger.
         let revoked: Value = serde_json::from_str(
             &call_sessionless("machine.revoke", &json!({"key": stranger}).to_string())
                 .expect("sessionless"),
@@ -5670,8 +5640,6 @@ mod tests {
                 .expect("json");
         assert_eq!(listed["result"].as_array().map(Vec::len), Some(0));
 
-        // A fingerprint where a key belongs is the likeliest paste error, and
-        // it has to fail rather than pin nothing.
         let bad: Value = serde_json::from_str(
             &call_sessionless("machine.pair", &json!({"key": "1234-5678"}).to_string())
                 .expect("sessionless"),
@@ -5762,8 +5730,6 @@ mod tests {
         assert_eq!(named["result"]["labelIsChosen"], true);
         assert_eq!(named["result"]["key"], key, "renaming is not a new machine");
 
-        // Blank is the undo, and it puts the computer's own name back rather
-        // than leaving a machine called "".
         let cleared: Value = serde_json::from_str(
             &call_sessionless("machine.rename", &json!({"name": "  "}).to_string())
                 .expect("sessionless"),
@@ -5842,13 +5808,11 @@ mod tests {
             avatar_url("https://tokenstat.ai/", &raw).as_deref(),
             Some("https://tokenstat.ai/avatar/abc123.webp")
         );
-        // An absolute URL passes through, so the API can start sending one.
         let absolute = json!({"avatar": "https://cdn.example/a.png"});
         assert_eq!(
             avatar_url("https://tokenstat.ai", &absolute).as_deref(),
             Some("https://cdn.example/a.png")
         );
-        // Absent, empty and blank are all "no picture", not an empty URL.
         for value in [json!({}), json!({"avatar": ""}), json!({"avatar": "   "})] {
             assert_eq!(avatar_url("https://tokenstat.ai", &value), None, "{value}");
         }
@@ -5932,8 +5896,6 @@ mod tests {
         assert!(result["activeBlock"].is_null(), "{out}");
     }
 
-    /// The hover detail is priced, grouped per model × source, and a quiet day
-    /// is a null answer rather than an error.
     #[test]
     fn the_day_detail_answers_with_priced_rows() {
         let mut s = session();
@@ -5989,7 +5951,6 @@ mod tests {
         assert_eq!(rows[0]["tokens"].as_u64(), Some(26), "{out}");
         assert_eq!(rows[1]["src"], "claude_code", "{out}");
 
-        // A day with no events is an answer, not a failure.
         let quiet = call(&mut s, "activity.day", r#"{"date":"2023-11-13"}"#);
         let q: Value = serde_json::from_str(&quiet).expect("json");
         assert_eq!(q["ok"], true, "{quiet}");
@@ -6016,8 +5977,6 @@ mod tests {
                 .is_some_and(|s| !s.is_empty()),
             "{coloured}"
         );
-        // The editor needs these to indent and to toggle a comment, and it must
-        // not carry its own second table of them.
         assert_eq!(v["result"]["syntax"]["lineComment"], "//");
         assert_eq!(v["result"]["syntax"]["indent"], 4);
 
@@ -6151,7 +6110,6 @@ mod tests {
         .unwrap();
         let id = added["result"]["id"].as_str().unwrap().to_string();
 
-        // The tree lists one directory at a time, root first.
         let tree: Value = serde_json::from_str(&call(
             &mut s,
             "workspace.tree",
@@ -6167,7 +6125,6 @@ mod tests {
                 .any(|e| e["name"] == "src" && e["isDir"] == true)
         );
 
-        // Edit, diff, stage, commit: the whole loop the Changes tab drives.
         std::fs::write(dir.join("src/main.rs"), "fn main() {\n    work();\n}\n").unwrap();
         let diff: Value = serde_json::from_str(&call(
             &mut s,
@@ -6202,8 +6159,6 @@ mod tests {
         .unwrap();
         assert_eq!(log["result"][0]["subject"], "feat: work");
 
-        // The newer operation commits the reviewed content once, leaving an
-        // unrelated staged path intact and excluding it from the new tree.
         std::fs::write(dir.join("unrelated.txt"), "staged separately\n").unwrap();
         run(&["add", "unrelated.txt"]);
         std::fs::write(dir.join("src/main.rs"), "fn main() { reviewed(); }\n").unwrap();
@@ -6287,7 +6242,6 @@ mod tests {
                 .any(|file| file.path == "unrelated.txt")
         );
 
-        // A failure comes back as a readable outcome, not as a broken envelope.
         let empty: Value = serde_json::from_str(&call(
             &mut s,
             "workspace.commit",
@@ -6407,7 +6361,6 @@ mod tests {
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["ok"], true, "{out}");
         assert_eq!(v["result"]["exists"], true);
-        // A plain folder is a legitimate workspace with no branch, not an error.
         assert_eq!(v["result"]["git"]["isRepo"], false);
 
         let id = v["result"]["id"].as_str().unwrap().to_string();
@@ -6452,8 +6405,6 @@ mod tests {
     #[cfg(feature = "local-host")]
     #[test]
     fn a_summary_needs_no_params_and_answers_every_folder() {
-        // No id is the whole list. A front end drawing a sidebar asks once
-        // rather than once per folder.
         let parsed: WorkspaceSummaryParams = serde_json::from_str("{}").unwrap();
         assert!(parsed.id.is_none());
         let mut s = session();

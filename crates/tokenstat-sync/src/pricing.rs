@@ -141,7 +141,6 @@ fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<Pr
     })
 }
 
-/// How long the local snapshot has been on disk, if it exists.
 fn local_age(path: &Path) -> Option<Duration> {
     let modified = fs::metadata(path).ok()?.modified().ok()?;
     SystemTime::now().duration_since(modified).ok()

@@ -652,7 +652,6 @@ mod tests {
         assert!(!s.contains("Users"));
         assert!(!s.contains("acquisition"));
         assert!(!s.contains("content"));
-        // The counters, which are the thing under test, are untouched.
         assert!(s.contains("\"input_tokens\":5"));
         assert!(s.contains("claude-opus-4-8"));
     }
@@ -665,7 +664,6 @@ mod tests {
         let ra = filter_object(&a, "", CLAUDE_ALLOW, &mut names);
         let rb = filter_object(&b, "", CLAUDE_ALLOW, &mut names);
         assert_ne!(ra["requestId"], Value::String("real_abc".into()));
-        // Equality survives, so the deduplication fixture still tests dedup.
         assert_eq!(ra["requestId"], rb["requestId"]);
         assert_eq!(ra["message"]["id"], rb["message"]["id"]);
     }
@@ -704,8 +702,6 @@ mod tests {
 
     #[test]
     fn a_path_shaped_value_is_rejected_even_in_an_allowed_field() {
-        // Defence in depth: version is allowed, but a value that looks like a
-        // path is not what a version is, so it does not survive.
         assert!(!is_safe_string("version", "/Users/me/x"));
         assert!(is_safe_string("version", "2.1.219"));
     }

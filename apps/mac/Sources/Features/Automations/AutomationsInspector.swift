@@ -6,10 +6,6 @@
 
 import SwiftUI
 
-/// The selected automation or run. The list stays an overview.
-///
-/// The live transcript used to sit inside the runs card. That buried the list
-/// under a stream. It lives here, next to the job that produced it.
 struct AutomationsInspector: View {
     @Bindable var model: AutomationsModel
     var folders: [WorkspaceFolder]
@@ -17,7 +13,6 @@ struct AutomationsInspector: View {
     var onClose: () -> Void
 
     @State private var editing = false
-    /// Live tail. On by default so a started run stays on the newest line.
     @AppStorage("automations.followLive") private var followLive = true
 
     var body: some View {

@@ -205,7 +205,6 @@ pub(crate) fn unavailable() -> DispatchError {
         "The computer sharing this project is not reachable right now. It needs to be on, with tokenstat open.",
     )
 }
-/// This device could not hold its own connection to the relay.
 fn relay_unreachable() -> DispatchError {
     DispatchError::new(
         "team_relay_unreachable",
@@ -234,7 +233,6 @@ fn relay_refused(reason: &str) -> DispatchError {
         format!("The relay refused this team connection ({code})."),
     )
 }
-/// The sharing computer was reached but did not accept the connection.
 fn host_refused() -> DispatchError {
     DispatchError::new(
         "team_host_refused",

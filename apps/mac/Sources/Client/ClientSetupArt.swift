@@ -56,7 +56,6 @@ struct ClientSetupArt: View {
     }
 }
 
-// MARK: - 1. Which server
 
 /// A rack with a beam passing over it, and the unit it settles on lighting up.
 ///
@@ -102,8 +101,6 @@ private struct FindScene: View {
         }
     }
 
-    /// Which unit the beam is over. Reduce Motion lights the middle one, so the
-    /// resting picture is still a machine that has been found.
     private func lit(_ unit: Int) -> Bool {
         guard !reduceMotion else { return unit == 1 }
         return Int(round(sweep * CGFloat(units - 1))) == unit
@@ -124,7 +121,6 @@ private struct FindScene: View {
     }
 }
 
-// MARK: - 2. How to sign in
 
 /// A key sliding into a shackle that opens. The one thing this step does.
 ///
@@ -150,8 +146,6 @@ private struct UnlockScene: View {
         }
     }
 
-    /// A bow, a shaft and two teeth. A key at this size is three strokes, and
-    /// anything more reads as noise.
     private var key: some View {
         HStack(spacing: 0) {
             Circle()
@@ -198,7 +192,6 @@ private struct UnlockScene: View {
     }
 }
 
-/// The half-loop of a padlock: up one side, over, and down the other.
 private struct Shackle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -217,7 +210,6 @@ private struct Shackle: Shape {
     }
 }
 
-// MARK: - 3. The host key
 
 /// A fingerprint that draws itself, then is recognised.
 ///
@@ -269,13 +261,10 @@ private struct IdentifyScene: View {
 
     private var complete: Bool { reduceMotion || drawn > 0.88 }
 
-    /// Where each ridge starts, staggered so the open side is ragged.
     private func gap(_ arc: Int) -> CGFloat {
         0.30 + CGFloat(arc) * 0.035
     }
 
-    /// Inner ridges are nearly closed, outer ones are shorter, which is what
-    /// gives the shape a core.
     private func span(_ arc: Int) -> CGFloat {
         0.74 - CGFloat(arc) * 0.055
     }
@@ -289,9 +278,7 @@ private struct IdentifyScene: View {
     }
 }
 
-// MARK: - 4. What is on it
 
-/// A short list that ticks itself off, one line at a time.
 private struct InspectScene: View {
     var reduceMotion: Bool
     @State private var checked: CGFloat = 0
@@ -342,12 +329,7 @@ private struct InspectScene: View {
     }
 }
 
-// MARK: - 5. Install
 
-/// A package dropping into the rack, and the bar underneath filling behind it.
-///
-/// The same rack as step one, at the same width, so the machine somebody found
-/// is visibly the machine being filled.
 private struct InstallScene: View {
     var reduceMotion: Bool
     @State private var phase: CGFloat = 0
@@ -400,8 +382,6 @@ private struct InstallScene: View {
         return phase > CGFloat(unit) * 0.3 + 0.08
     }
 
-    /// A box with a seam down it, which reads as something being delivered
-    /// rather than as another rectangle.
     private var package: some View {
         RoundedRectangle(cornerRadius: 4, style: .continuous)
             .strokeBorder(Ink.lead, style: Ink.style)

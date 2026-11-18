@@ -64,7 +64,6 @@ struct BranchPickerPresentation<Label: View>: View {
     }
 }
 
-/// The compact branch control in the Mac workspace header.
 struct BranchChip: View {
     let workspaceID: String
     var git: GitStatus
@@ -137,11 +136,9 @@ private struct BranchPickerContent: View {
     @State private var outcome: GitOutcome?
     @State private var isCreating = false
     @State private var newName = ""
-    /// A switch parked while the unsaved-work prompt is up.
     @State private var pendingAction: PendingBranchAction?
     @State private var confirmingUnsaved = false
 
-    /// A branch switch waiting on the user's answer about unsaved buffers.
     private enum PendingBranchAction {
         case checkout(GitBranch)
         case create(String)

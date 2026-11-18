@@ -267,8 +267,6 @@ fun ChangesSection(
             color = LocalTsColors.current.textSecondary,
             maxLines = 1,
         )
-        // Bring commits in, send them out, and the pull request they belong
-        // to. Pull and Push share the available width and touch size.
         GitTransferActions(
             pull = { actionModifier ->
                 PullButton(
@@ -333,8 +331,6 @@ fun ChangesSection(
     }
 }
 
-/// One changed file, and the way into its diff: name, directory, kind word,
-/// and added/removed counts in the diff pair.
 @Composable
 private fun ChangedFileRow(file: JsonObject, modifier: Modifier = Modifier, onOpen: () -> Unit) {
     val path = file.str("path") ?: ""
@@ -391,8 +387,6 @@ private fun ChangedFileRow(file: JsonObject, modifier: Modifier = Modifier, onOp
                 color = LocalTsColors.current.diffRemoved,
             )
         }
-        // The row opens the diff, so it says so. Every other row in the app
-        // that pushes somewhere carries this chevron.
         Icon(
             ActionIcon.Disclosure.vector,
             null,

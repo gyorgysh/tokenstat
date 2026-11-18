@@ -25,7 +25,6 @@ import Foundation
         precondition(WorkspaceChangeFilter.roots(touchedBy: ["/w/lib/"], among: roots) == ["/w/lib"])
         // A sibling whose name starts with a root's name is not inside it.
         precondition(WorkspaceChangeFilter.roots(touchedBy: ["/w/application/src/"], among: roots).isEmpty)
-        // A mixed batch keeps the real change.
         precondition(WorkspaceChangeFilter.roots(touchedBy: [
             "/w/app/target/", "/w/lib/Sources/",
         ], among: roots) == ["/w/lib"])

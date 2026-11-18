@@ -22,7 +22,6 @@ import SwiftUI
         var ripples: [SIMD4<Float>]
     }
 
-    /// The pointer's position in the backdrop, nil once it has left.
     var target: CGPoint? {
         didSet {
             guard let oldValue, let target else { return }
@@ -142,17 +141,13 @@ enum ChatStartGlassField {
 /// still and only the pointer is left.
 struct ChatStartBackdrop: View {
     var isFullScreen = false
-    /// The page is on screen and nothing is covering it.
     let active: Bool
-    /// Something is being written, so the field brightens a little.
     var lift = false
-    /// The first message is on its way.
     var sending = false
     let pointer: ChatStartPointer
     /// Where the light sits and the waves arrive. A little above the middle
     /// by default, because the composer is.
     var focus = UnitPoint(x: 0.5, y: 0.46)
-    /// The page's coordinate space, which the pointer is measured in.
     static let space = "chatStartBackdrop"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -208,7 +203,6 @@ struct ChatStartBackdrop: View {
         #endif
     }
 
-    /// Moves a pointer sample from the page's space into the pane's.
     private static func local(_ sample: ChatStartPointer.Sample, origin: CGPoint) -> ChatStartPointer.Sample {
         let shift = SIMD2(Float(origin.x), Float(origin.y))
         var moved = sample

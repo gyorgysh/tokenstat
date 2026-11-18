@@ -134,8 +134,6 @@ enum class ActionIcon {
             Home -> Icons.Default.Home
             Help -> Icons.AutoMirrored.Filled.HelpOutline
             Send, Apply -> Icons.AutoMirrored.Filled.Send
-            // A paperclip, like the composer on every other client. A
-            // document sheet reads as "a file", not as "add a file".
             Attach -> Icons.Default.AttachFile
             Dictate -> Icons.Default.Mic
             FastMode -> Icons.Default.Bolt

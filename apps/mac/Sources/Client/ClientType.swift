@@ -29,27 +29,19 @@ enum ClientType {
     static let figure = Theme.font(34, weight: .semibold, relativeTo: .largeTitle)
         .monospacedDigit()
 
-    /// A figure sharing a row with other figures.
     static let figureSmall = Theme.font(22, weight: .semibold, relativeTo: .title2)
         .monospacedDigit()
 
-    /// A sheet's own heading.
     static let screenTitle = Theme.title3.weight(.semibold)
 
-    /// A card's heading.
     static let sectionTitle = Theme.headline
 
-    /// Sentences.
     static let body = Theme.body
 
-    /// A figure's label, a row's name.
     static let label = Theme.subheadline
 
-    /// A date, a count, the quiet second line under a name.
     static let caption = Theme.caption
 
-    /// A number inside a row or a list, where it has to line up with the
-    /// numbers above and below it.
     static let rowFigure = Theme.callout.monospacedDigit()
 
     /// The +N and -N beside an edit.

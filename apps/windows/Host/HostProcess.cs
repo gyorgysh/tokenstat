@@ -238,7 +238,6 @@ internal static class HostProcess
         }
     }
 
-    /// <summary>A helper built in a source checkout rather than installed.</summary>
     private static bool IsDevelopmentBuild(string path) =>
         path.Contains(@"\apps\windows\bin\", StringComparison.OrdinalIgnoreCase)
         || path.Contains(@"\target\debug\", StringComparison.OrdinalIgnoreCase)
@@ -311,7 +310,6 @@ internal static class HostProcess
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool WaitNamedPipe(string lpNamedPipeName, uint nTimeOut);
 
-    /// <summary>The process serving this user's host pipe, when one answers.</summary>
     private static int? PipeServerProcessId()
     {
         try

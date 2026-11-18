@@ -2102,8 +2102,6 @@ mod tests {
     }
     #[test]
     fn a_pairing_code_is_accepted_however_it_was_pasted() {
-        // People paste from a web page: lowercase, dash eaten, a stray space or
-        // quote picked up by the selection. All the same code.
         for raw in [
             "WXYZ-1234",
             "wxyz-1234",

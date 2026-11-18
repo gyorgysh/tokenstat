@@ -1212,7 +1212,6 @@ mod tests {
         assert_eq!(state.preferred_reset_at_ms, Some(reset * 1000));
         let chat = store.current_send_conversation("route-test").unwrap();
         assert_eq!(state.destination(&chat, now_ms()), Some(codex.clone()));
-        // Codex also runs out: nothing is left but Claude's own reset.
         let mut state = state;
         state.tried.push(codex);
         assert_eq!(state.destination(&chat, now_ms()), None);

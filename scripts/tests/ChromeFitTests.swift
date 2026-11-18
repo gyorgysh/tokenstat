@@ -23,7 +23,6 @@ import Foundation
         precondition(!ChromeFit.browserBeside(width: 1200, sidebarShowing: true, persistedBrowser: 611))
         precondition(ChromeFit.browserBeside(width: 1125, sidebarShowing: false, persistedBrowser: 320))
         precondition(!ChromeFit.browserBeside(width: 1124, sidebarShowing: false, persistedBrowser: 320))
-        // A browser dragged very wide floats on ordinary windows.
         precondition(!ChromeFit.browserBeside(width: 1804, sidebarShowing: false, persistedBrowser: 1000))
         precondition(ChromeFit.browserBeside(width: 1805, sidebarShowing: false, persistedBrowser: 1000))
         // The docked maximum leaves the detail minimum; the floating

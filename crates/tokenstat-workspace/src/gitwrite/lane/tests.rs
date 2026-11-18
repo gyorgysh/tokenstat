@@ -30,7 +30,6 @@ struct Fixture {
     lanes: PathBuf,
 }
 
-/// A bare remote, a publisher's clone, and an empty folder for lanes.
 fn fixture() -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
@@ -103,14 +102,12 @@ fn two_lanes_land_one_after_the_other_without_touching_the_main_folder() {
         land(&a, "main", Some("origin"), &[]),
         Landing::Landed { .. }
     ));
-    // b was cut before a landed. It rebases onto a's result and lands too.
     assert!(matches!(
         land(&b, "main", Some("origin"), &[]),
         Landing::Landed { .. }
     ));
     assert_eq!(remote_file(&f, "a.txt"), "one\ntwo\nthree\nfour");
     assert_eq!(remote_file(&f, "b.txt"), "b\nmore");
-    // The publisher's own folder is exactly as it was.
     assert_eq!(
         std::fs::read_to_string(f.main.join("a.txt")).unwrap(),
         "one\ntwo\nthree\n"
@@ -214,7 +211,6 @@ fn a_conflict_is_left_for_the_agent_and_lands_once_resolved() {
             .unwrap()
             .contains("<<<<<<<")
     );
-    // Markers left behind are refused, and the lane goes back to its own work.
     assert!(finish_rebase(&b).is_err());
     assert_eq!(
         std::fs::read_to_string(b.join("a.txt")).unwrap(),
@@ -417,7 +413,6 @@ fn a_prepared_lane_waits_and_lands_later_on_the_newest_target() {
         Landing::Ready { .. }
     ));
     assert_eq!(remote_file(&f, "a.txt"), "one\ntwo\nthree");
-    // Somebody else lands first; the reviewed lane still lands on top.
     std::fs::write(b.join("b.txt"), "b first\n").unwrap();
     commit_all(&b, "First").unwrap();
     assert!(matches!(

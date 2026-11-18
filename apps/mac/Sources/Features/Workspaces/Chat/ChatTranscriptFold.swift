@@ -26,7 +26,6 @@ enum ChatDetail: String, CaseIterable, Sendable {
     case detailed
 }
 
-/// A folded group standing in for several transcript rows.
 struct ChatStepGroup: Equatable, Sendable {
     struct Activity: Equatable, Sendable, Identifiable {
         let id: String
@@ -48,7 +47,6 @@ struct ChatStepGroup: Equatable, Sendable {
     }
 
     var style: Style
-    /// Whether the steps are shown below this line as rows of their own.
     var open: Bool
     /// The rows this line stands for, oldest first. A search hit or a kept
     /// reading place can name one of these, and the group has to be found
@@ -56,7 +54,6 @@ struct ChatStepGroup: Equatable, Sendable {
     var memberIDs: [String]
     /// Tool calls and edits. Thinking is not counted as a step.
     var steps = 0
-    /// Distinct files edited, and the lines those edits added and removed.
     var files = 0
     var added: UInt64 = 0
     var removed: UInt64 = 0
@@ -69,7 +66,6 @@ struct ChatStepGroup: Equatable, Sendable {
     /// Still being added to: the conversation is running and nothing has
     /// come after this group yet.
     var running = false
-    /// The step running right now, for the collapsed line to name.
     var liveVerb: String?
     var liveTarget: String?
     /// A few recent actions, with running calls kept ahead of finished ones
@@ -87,9 +83,7 @@ struct ChatStepGroup: Equatable, Sendable {
     /// Reported spend for the turn this group belongs to, in Minimal, where
     /// the usage row itself is not drawn.
     var cost: Double?
-    /// The first line of a folded thought.
     var preview: String?
-    /// Drawn as Compact draws it: a plain line with no icon or chevron.
     var plain = false
     /// The one step a single-member group stands for: its tool name, and
     /// the file or command it acted on.
@@ -205,7 +199,6 @@ enum ChatTranscriptFold {
     /// live turn adds steps after it and when an older page lands above.
     static func groupID(firstMember id: String) -> String { "g:\(id)" }
 
-    // MARK: Standard
 
     private static func standard(
         _ items: [ChatDisplayItem],
@@ -251,7 +244,6 @@ enum ChatTranscriptFold {
         return out
     }
 
-    // MARK: Compact
 
     /// Every step is one line. Runs of reads and searches still read as
     /// one, even a run of one, because "Explored ChatModel.swift" says what
@@ -307,7 +299,6 @@ enum ChatTranscriptFold {
         return out
     }
 
-    // MARK: Minimal
 
     private static func minimalFold(
         _ items: [ChatDisplayItem],

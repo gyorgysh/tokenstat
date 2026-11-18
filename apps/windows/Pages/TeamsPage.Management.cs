@@ -13,8 +13,6 @@ internal sealed partial class TeamsPage
 {
     private TeamDirectoryClient DirectoryClient() => new(_scope ?? throw new InvalidDataException(), _session, _person ?? throw new InvalidDataException(), _call);
     private static TextBlock TeamText(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
-    /// The card every Teams form and review sits in: the shared card fill,
-    /// hairline and radius, a semibold name and a quieter line under it.
     private static StackPanel TeamCard(string title, string? detail = null)
     {
         var panel = new StackPanel

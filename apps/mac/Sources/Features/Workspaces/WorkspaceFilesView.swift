@@ -103,7 +103,6 @@ struct WorkspaceFilesView: View {
         }
     }
 
-    /// One visible row: an entry and how deep it sits.
     private struct Row: Identifiable {
         let entry: TreeEntry
         let depth: Int

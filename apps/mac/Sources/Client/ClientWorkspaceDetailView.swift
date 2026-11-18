@@ -868,9 +868,6 @@ struct ClientFilesView: View {
     private var fileList: some View {
         List {
             if let errorMessage {
-                // The shared card rather than a red line: it knows what to say
-                // when the device is offline, and a file list is exactly where
-                // a tunnel failure used to arrive as a sentence about sockets.
                 ClientErrorCard(message: errorMessage) {
                     Task { await load() }
                 }

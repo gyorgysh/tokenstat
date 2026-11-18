@@ -23,7 +23,6 @@ internal sealed partial class TeamsPage
     private readonly StackPanel _dockStack = new() { Spacing = Theme.SpaceS };
     private Border? _dock;
 
-    /// The page root: the scrolling screen above, the composer dock below.
     private Grid BuildRoot()
     {
         var root = new Grid();
@@ -62,7 +61,6 @@ internal sealed partial class TeamsPage
         return root;
     }
 
-    /// The leading and trailing row every screen starts with.
     private Grid NavigationRow(string title)
     {
         var row = new Grid { ColumnSpacing = Theme.SpaceM, MinHeight = 32 };
@@ -106,8 +104,6 @@ internal sealed partial class TeamsPage
         AutomationProperties.SetHelpText(badge, L10n.Text("common.teams.preview_detail"));
         return badge;
     }
-    /// The note behind the badge: what works, what does not yet, and that
-    /// the person's own projects are safe whatever happens to Teams.
     private static StackPanel PreviewNote()
     {
         var note = new StackPanel { Spacing = Theme.SpaceS, MaxWidth = 320 };
@@ -118,13 +114,10 @@ internal sealed partial class TeamsPage
         return note;
     }
 
-    /// Back goes first, before the title, where a hand reaches to leave.
     private void NavBack(string name, RoutedEventHandler click) => _leading.Children.Insert(0, Buttons.ToolbarIcon(ActionIcon.Back, name, click));
 
-    /// Tabs sit after the title, as Devices puts its sections first in the row.
     private void Tabs(UIElement tabs) => _leading.Children.Add(tabs);
 
-    /// A quiet icon action at the trailing edge: refresh, drafts, saved asks.
     private Button Tool(ActionIcon icon, string name, RoutedEventHandler click)
     {
         var button = Buttons.ToolbarIcon(icon, name, click);
@@ -132,10 +125,8 @@ internal sealed partial class TeamsPage
         return button;
     }
 
-    /// The trailing action this screen adds, pinned to the right like Add device.
     private T Trail<T>(T element) where T : UIElement { _trailing.Children.Add(element); return element; }
 
-    /// A titled card at the full width of the screen, with the shared mark.
     private Border Section(string title, UIElement body, string? subtitle = null, ActionIcon mark = ActionIcon.Profile, FrameworkElement? accessory = null)
     {
         var card = Chrome.Card(title, body, subtitle, accessory, Chrome.CardMark(mark));
@@ -143,7 +134,6 @@ internal sealed partial class TeamsPage
         return card;
     }
 
-    /// Rows inside a card, divided by hairlines.
     private static StackPanel Rows() => new() { Spacing = 0 };
 
     private static void AddRow(StackPanel rows, UIElement row)
@@ -152,7 +142,6 @@ internal sealed partial class TeamsPage
         rows.Children.Add(row);
     }
 
-    /// A row: what it is on the leading side, what can be done on the trailing side.
     private static Grid Row(UIElement leading, params UIElement[] trailing)
     {
         var row = new Grid { ColumnSpacing = Theme.SpaceM, Padding = new Thickness(0, Theme.SpaceS, 0, Theme.SpaceS), MinHeight = 44 };
@@ -167,8 +156,6 @@ internal sealed partial class TeamsPage
         return row;
     }
 
-    /// A row that opens something: the whole row is the target, a chevron
-    /// says it leads somewhere, and hover tints it like a sidebar row.
     private static Button OpenRow(UIElement content, string name, RoutedEventHandler click)
     {
         var face = new Grid { ColumnSpacing = Theme.SpaceM };
@@ -198,7 +185,6 @@ internal sealed partial class TeamsPage
         return button;
     }
 
-    /// Name over one quiet line, the text block of a row.
     private static StackPanel Labelled(string title, string? detail = null)
     {
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
@@ -207,7 +193,6 @@ internal sealed partial class TeamsPage
         return text;
     }
 
-    /// A role or state, as a small pill.
     private static Border Badge(string text) => new()
     {
         Background = Theme.Brush(static () => Theme.RowHighlight),
@@ -217,7 +202,6 @@ internal sealed partial class TeamsPage
         Child = new TextBlock { Text = text, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Opacity = 0.8 },
     };
 
-    /// A group's first letter on an accent tile, as the Mac marks an organization.
     private static Border Initial(string name) => new()
     {
         Width = 36, Height = 36,
@@ -233,7 +217,6 @@ internal sealed partial class TeamsPage
         },
     };
 
-    /// Mark, then text, then whatever trails it, in one horizontal line.
     private static StackPanel Marked(UIElement mark, UIElement text, params UIElement[] after)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM, VerticalAlignment = VerticalAlignment.Center };
@@ -242,14 +225,12 @@ internal sealed partial class TeamsPage
         return line;
     }
 
-    /// Something for the composer dock. Shows the dock the first time.
     private void Dock(UIElement element)
     {
         _dockStack.Children.Add(element);
         if (_dock is not null) _dock.Visibility = Visibility.Visible;
     }
 
-    /// Buttons that close an editor or a flow, pinned to the trailing edge.
     private static StackPanel ActionRow(params UIElement[] buttons)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Right };

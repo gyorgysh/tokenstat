@@ -806,7 +806,6 @@ mod tests {
         assert!(refuse(
             r#"{"id":8,"method":"ssh.session.open","params":{}}"#
         ));
-        // Agent launches are work even though no terminal is attached.
         assert!(refuse(
             r#"{"id":9,"method":"chat.send","params":{"id":"c1"}}"#
         ));

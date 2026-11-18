@@ -255,7 +255,6 @@ struct Session {
     input_mark: Arc<AtomicU64>,
     last_input_at_ms: AtomicU64,
     last_activity: Arc<Mutex<Option<u64>>>,
-    /// Front ends currently showing this session, by opaque client id.
     viewers: Mutex<HashMap<String, Viewer>>,
     read_offsets: Mutex<HashMap<String, u64>>,
     stream_readers: Mutex<HashSet<String>>,
@@ -420,7 +419,6 @@ impl Manager {
         self.spawn_fresh(req)
     }
 
-    /// The ordinary spawn path: a brand-new pty and a brand-new process.
     fn spawn_fresh(&self, req: &Spawn) -> Result<SessionInfo, PtyError> {
         let id = self.next_session_id();
         let (session, info) = self.build_session(req, id)?;
@@ -686,7 +684,6 @@ impl Manager {
                 .resize(size)
                 .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
-            // Point the shell at the workspace and prove it got there.
             let marker = format!("__TS_READY_{}__", next_marker());
             let quoted = shell_quote(&req.cwd.to_string_lossy());
             {
@@ -1699,7 +1696,6 @@ const POOL_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 /// proven ready when it entered the pool.
 const HANDOFF_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// True while the child process is still running.
 fn session_is_alive(session: &Session) -> bool {
     if !session.alive.load(Ordering::SeqCst) {
         return false;
@@ -1715,7 +1711,6 @@ fn session_is_alive(session: &Session) -> bool {
     }
 }
 
-/// Wait until `needle` appears in the session buffer, or the timeout / exit.
 fn wait_for_marker(session: &Session, needle: &str, timeout: std::time::Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
@@ -2149,7 +2144,6 @@ impl EnvCache {
         }
     }
 
-    /// Wait for the resolve to finish and return its final answer.
     fn wait_ready(&self) -> Option<Arc<LoginEnv>> {
         // A login profile may wait on an unavailable service indefinitely.
         // Callers can use their normal fallback while resolution continues.
@@ -2189,7 +2183,6 @@ impl EnvCache {
         }
     }
 
-    /// Store the resolve's answer and wake everyone waiting for it.
     fn store(&self, env: Option<Arc<LoginEnv>>) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         *state = EnvState::Done(env);
@@ -2291,18 +2284,12 @@ mod tests {
     #[test]
     fn tail_since_starts_at_the_last_keystroke() {
         let data = b"Do you want to proceed?\nrunning the command\n";
-        // Nothing typed yet: the question is live.
         let all = tail_since(data, 0, 0, 8 * 1024);
         assert_eq!(all, data);
-        // Answered after the question printed: only what came next counts,
-        // even though the question is still in the buffer.
         let after = tail_since(data, 0, 24, 8 * 1024);
         assert_eq!(after, b"running the command\n");
-        // A mark older than the window still yields the whole window, and a
-        // mark at the end yields nothing at all.
         assert_eq!(tail_since(data, 100, 4, 8 * 1024), data);
         assert!(tail_since(data, 0, data.len() as u64, 8 * 1024).is_empty());
-        // The cap takes from the end.
         assert_eq!(tail_since(data, 0, 0, 4), b"and\n");
     }
 
@@ -2458,9 +2445,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_env_ready_read_wakes_when_the_resolve_finishes() {
-        // The blocking read exists for callers that genuinely need the login
-        // PATH (the launcher catalog, one-shot harness launches). It must wait
-        // out a resolve that is still running and return the final answer.
         let cache = Arc::new(EnvCache::new());
         let waiting = {
             let cache = Arc::clone(&cache);
@@ -2511,7 +2495,6 @@ mod tests {
         }
     }
 
-    /// The shell profile request a Shell tile produces.
     #[cfg(unix)]
     fn shell_req(cwd: std::path::PathBuf) -> Spawn {
         let shell = login_shell();
@@ -2654,7 +2637,6 @@ mod tests {
         assert_eq!(info.workspace_id.as_deref(), Some("ws-1"));
         assert_eq!((info.rows, info.cols), (30, 100));
 
-        // The handoff transcript starts clean: no cd line, no marker.
         let text = String::from_utf8_lossy(&m.read(&info.id, 0).unwrap().bytes).to_string();
         assert!(
             !text.contains("cd "),
@@ -2665,7 +2647,6 @@ mod tests {
             "handoff must not show the marker: {text:?}"
         );
 
-        // The shell really is in the workspace, not just labelled so.
         m.write(&info.id, b"pwd\r").unwrap();
         assert!(
             wait_for(|| m
@@ -2676,7 +2657,6 @@ mod tests {
         );
 
         m.close(&info.id).unwrap();
-        // The pool gave its only shell away, so nothing is left behind.
         assert!(
             m.pool
                 .lock()
@@ -2696,8 +2676,6 @@ mod tests {
             .unwrap_or_else(PoisonError::into_inner)
             .push(shell);
 
-        // /bin/sh is not the user's login shell, so this is a harness-style
-        // request and must spawn fresh even though a shell is waiting.
         let s = spawn(&m, "echo hello-from-fresh", "echo hello-from-fresh");
         assert!(wait_for(|| m
             .read(&s.id, 0)
@@ -2783,8 +2761,6 @@ mod tests {
             .unwrap_or_else(PoisonError::into_inner)
             .push(shell);
 
-        // The dead shell must not be handed over as a corpse; the click gets
-        // a real spawn and still works.
         let info = m
             .spawn(&shell_req(std::env::temp_dir()))
             .expect("fresh spawn");
@@ -2874,7 +2850,6 @@ mod tests {
         manager.close(&piped.id).unwrap();
     }
 
-    /// A script that stays busy for roughly a minute without needing input.
     fn stay_busy(m: &Manager) -> SessionInfo {
         spawn(m, "sleep 60", "ping -n 61 127.0.0.1 > nul")
     }
@@ -3076,8 +3051,6 @@ mod tests {
         m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
         m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
         let info = m.info(&s.id).expect("info");
-        // Not the phone's rows and not the Mac's cols: each axis is decided on
-        // its own, so nothing a program prints can run off either screen.
         assert_eq!((info.rows, info.cols), (40, 60));
         let _ = m.kill(&s.id);
     }
@@ -3095,8 +3068,6 @@ mod tests {
 
     #[test]
     fn a_viewer_that_detaches_takes_its_constraint_with_it() {
-        // The reported bug: the phone shrank the Mac's terminal and closing it
-        // left the Mac small.
         let m = Manager::new();
         let s = stay_busy(&m);
         m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
@@ -3172,7 +3143,6 @@ mod tests {
 
     #[test]
     fn a_viewerless_resize_still_sets_the_size_outright() {
-        // The old client path, kept working on purpose.
         let m = Manager::new();
         let s = stay_busy(&m);
         m.resize(&s.id, 30, 100).expect("resize");
@@ -3183,7 +3153,6 @@ mod tests {
 
     #[test]
     fn a_viewer_that_grows_releases_the_session_again() {
-        // Rotating the phone to landscape, or the Mac window widening.
         let m = Manager::new();
         let s = stay_busy(&m);
         m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
@@ -3647,7 +3616,6 @@ mod tests {
         )
         .unwrap();
         assert!(child.wait().unwrap().success());
-        // The producer is already gone before any output is consumed.
         let mut actual = Vec::new();
         reader.read_to_end(&mut actual).unwrap();
         assert_eq!(actual, expected.as_bytes());
@@ -3747,7 +3715,6 @@ mod tests {
             .info(&s.id)
             .map(|i| !i.alive)
             .unwrap_or(false)));
-        // Killing twice is not an error: a UI may not know it already died.
         assert!(m.kill(&s.id).is_ok());
         m.close(&s.id).unwrap();
     }

@@ -121,7 +121,6 @@ enum MuseAuthLine {
     ReleasePrefix,
 }
 
-/// A reconnected cursor stream saying its turn again.
 enum CursorReplay {
     /// Waiting for the first record, which is what says where it resumed.
     Pending,
@@ -439,9 +438,6 @@ impl Parser {
     fn emit(&mut self, out: &mut String, piece: Piece) {
         match piece {
             Piece::Text(text) => {
-                // Whether the paragraph so far already ends in a space. `out`
-                // starts empty on a fresh drain chunk, so the running block is
-                // the one that knows.
                 let spaced = self
                     .last_block
                     .chars()
@@ -781,7 +777,6 @@ impl Parser {
         }
         self.cursor_replay = None;
         if text == self.cursor_since(self.cursor_msg_start()) {
-            // The whole message, after its pieces.
             self.cursor_end_message();
             return None;
         }
@@ -807,12 +802,10 @@ impl Parser {
         })
     }
 
-    /// Where the message being written started.
     fn cursor_msg_start(&self) -> usize {
         self.cursor_msg_starts.last().copied().unwrap_or(0)
     }
 
-    /// Close the message: whatever comes next starts a new one.
     fn cursor_end_message(&mut self) {
         self.cursor_repeats = self.cursor_repeats.saturating_add(1);
         self.cursor_open_message_at(self.cursor_turn.len());
@@ -832,8 +825,6 @@ impl Parser {
         }
     }
 
-    /// What the turn has said since a boundary, empty when the index has been
-    /// invalidated by a reset.
     fn cursor_since(&self, at: usize) -> &str {
         if at <= self.cursor_turn.len() && self.cursor_turn.is_char_boundary(at) {
             &self.cursor_turn[at..]
@@ -2100,7 +2091,6 @@ fn looks_like_path(part: &str) -> bool {
         if trimmed.contains('/') {
             return true;
         }
-        // `src/a.rs`: has an extension and no spaces.
         if let Some((_, ext)) = trimmed.rsplit_once('.') {
             return !ext.is_empty()
                 && ext.len() <= 5
@@ -2124,7 +2114,6 @@ fn codex_file_change_detail(item: &Value) -> Option<String> {
                 .and_then(Value::as_str)
                 .filter(|patch| !patch.trim().is_empty())
             {
-                // Keep attribution when several files share one card.
                 return Some(format!("--- {path}\n{patch}"));
             }
             if let (Some(old), Some(new)) = (
@@ -3057,8 +3046,6 @@ fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
     if let Some(hit) = lookup_str(value, &KEYS) {
         return Some(hit);
     }
-    // Fallback: shell description, link, or prompt text. Keeps the collapsed
-    // tool row informative when a backend sends no path-like key.
     const FALLBACK_KEYS: [&str; 10] = [
         "cmd",
         "script",
@@ -3198,7 +3185,6 @@ fn edit_snippet(input: Option<&serde_json::Value>) -> Option<String> {
     Some(render_edit_snippet(old, new))
 }
 
-/// True when a tool input carries an old/new pair worth holding for the end.
 fn has_edit_pair(input: &Value) -> bool {
     edit_snippet(Some(input)).is_some()
 }
@@ -4477,8 +4463,6 @@ mod tests {
             "{events:?}"
         );
 
-        // And it is reported once, not once per line: each one writes the
-        // conversation index to disk.
         let more = opencode.push_events(
             br#"{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"hi"}}
 "#,
@@ -5498,8 +5482,6 @@ mod tests {
 
     #[test]
     fn indentation_after_a_newline_is_not_a_doubled_space() {
-        // A normal string literal, because the newline has to reach the
-        // parser as the two characters JSON spells it with.
         let out = feed(
             "grok",
             "{\"type\":\"text\",\"data\":\"one:\"}\n\

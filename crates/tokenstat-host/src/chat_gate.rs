@@ -575,7 +575,6 @@ fn muse_hook_script(hostd: &Path, socket: &Path, turn_file: &Path) -> Result<Str
     ))
 }
 
-/// The person's settings object, or nothing when it cannot be used as one.
 #[cfg(unix)]
 fn read_muse_settings_object(user_config: Option<&Path>) -> Option<Value> {
     let dir = user_config?;
@@ -1039,7 +1038,6 @@ mod tests {
         assert!(target.exists());
         ensure_credential_file(&source, &target).unwrap();
         assert!(!target.exists());
-        // A first turn with no login remains valid preparation.
         ensure_credential_file(&source, &target).unwrap();
     }
 

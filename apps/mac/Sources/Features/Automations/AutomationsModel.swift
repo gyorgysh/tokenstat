@@ -10,7 +10,6 @@ import Observation
 /// so a live tail cannot grow a SwiftUI `Text` without bound.
 private let transcriptDisplayCap = 256 * 1024
 
-/// Which side of the Automations inspector is showing.
 enum AutomationFocus: Sendable {
     case none
     case job
@@ -68,7 +67,6 @@ final class AutomationsModel {
     private(set) var selectedJobID: String?
     /// Which of the two the inspector should prefer when both are set.
     private(set) var selectedFocus: AutomationFocus = .none
-    /// Transcript text assembled so far for the watched run.
     private(set) var transcriptText: String = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
@@ -146,12 +144,10 @@ final class AutomationsModel {
         }
     }
 
-    /// The newest running run, if any. This is what the screen tails live.
     var liveRun: RunRecord? {
         runs.first(where: \.isRunning) ?? runs.first
     }
 
-    /// Display name of the once-job the Changes pane starts.
     static var autoCommitName: String { AutoCommitJob.name }
 
     /// The reusable Auto commit job for a folder, if one exists.
@@ -634,7 +630,6 @@ final class AutomationsModel {
         syncWatching()
     }
 
-    /// Start or stop the transcript poll to match what is on screen.
     func syncWatching() {
         if transcriptNeedsReset, isVisible {
             transcriptNeedsReset = false
@@ -698,7 +693,6 @@ final class AutomationsModel {
         pollingID = nil
     }
 
-    /// Reload run rows so a live inspector sees ok / error / stopped.
     private func refreshRuns() async {
         do {
             let latest = try await Bridge.automationRuns()

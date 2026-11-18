@@ -71,8 +71,6 @@ object SearchPlaces {
         ),
     )
 
-    /// Every machine on the account, so a name somebody knows finds the
-    /// device rather than making them count rows on Devices.
     private fun devices(
         machineIds: Map<String, String>,
         machinePlatforms: Map<String, String>,

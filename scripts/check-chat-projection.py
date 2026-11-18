@@ -133,7 +133,6 @@ with tempfile.TemporaryDirectory() as directory:
     (work / 'Check.swift').write_text(swift)
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(work / 'ModuleCache'), str(work / 'Check.swift'), '-o', str(work / 'check')], check=True)
     subprocess.run([str(work / 'check')], check=True)
-# The actual application routes each nonempty mutation through publication.
 assert 'ChatDisplayItem.coalesce(events' not in source
 assert 'events.append(contentsOf:' not in source and 'events.insert(contentsOf:' not in source
 assert 'private var displayCache:' in source and '@ObservationIgnored private var displayCache:' not in source

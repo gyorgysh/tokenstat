@@ -25,8 +25,6 @@ struct GettingStartedCard: View {
     /// Whether the account is connected. Not a gate on anything, just which
     /// step of the rail is live.
     let signedIn: Bool
-    /// True while the first scan is running, so the step it belongs to says so
-    /// rather than offering to start a second one.
     let isScanning: Bool
     /// True while `InsightsModel` is inside its post-scan cooldown, where
     /// `scan()` returns immediately. The button has to go with it: a scan that
@@ -107,7 +105,6 @@ struct GettingStartedCard: View {
         ]
     }
 
-    /// The shape of the answer, where the answer will be.
     private var waiting: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ThemeRule()

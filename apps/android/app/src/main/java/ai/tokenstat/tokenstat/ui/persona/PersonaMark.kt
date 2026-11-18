@@ -184,7 +184,6 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
     val centroid = Offset(nodes.sumOf { it.x.toDouble() }.toFloat() / count, nodes.sumOf { it.y.toDouble() }.toFloat() / count)
     val crown = nodes.minByOrNull { it.y } ?: centroid
 
-    // Contact shadow: it shrinks and fades as the body leaves the ground.
     val air = max(0f, 0.95f - maxY)
     val closeness = max(0.30f, 1f - air * 2.6f)
     val shadowW = (maxX - minX) * w * 0.80f * closeness
@@ -291,7 +290,6 @@ private fun DrawScope.drawPersonaIdleFace(
     // The face borrows the body's own squash: wide and flat means narrow eyes
     // further apart, tall and thin means round eyes closer together.
     val aspect = ((maxY - minY) / max(maxX - minX, 1e-4f)).coerceIn(0.45f, 1.7f)
-    // Lean, taken from where the crown sits relative to the middle.
     val tilt = (atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4f)) * 0.25f).coerceIn(-0.12f, 0.12f)
     val heightPoints = (maxY - minY) * h
     val anchorHeight = heightPoints * 0.10f

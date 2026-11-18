@@ -595,7 +595,6 @@ struct ChatAgentChoices {
             ? L10n.text("common.chat.select_agent") : chat.backend
     }
 
-    /// Every row, in the order the sections have always been read in.
     var choices: [PickerChoice<Choice>] {
         var rows = agentOptions.map {
             PickerChoice(value: Choice.agent($0.value), label: $0.label,
@@ -649,7 +648,6 @@ struct ChatAgentChoices {
         return values[section] ?? nil
     }
 
-    /// The search prompt for one step of the panel.
     func searchPrompt(_ section: String) -> String {
         let prompts: [String: String] = [
             L10n.text("apple.chatsetupheader.agent.11b39c93"): L10n.text("apple.chatsetupheader.search_agents.212fd04a"),
@@ -702,7 +700,6 @@ struct ChatAgentChoices {
         return favs + rest
     }
 
-    /// The mark identifies the agent; show the model and selected effort.
     var compactSummary: String {
         var parts = [chat.model.flatMap { $0.isEmpty ? nil : $0 } ?? agentLabel]
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
@@ -1003,7 +1000,6 @@ struct ChatAgentPanel: View {
         }
     }
 
-    /// "Version 2.1.318", then what the last check found.
     @ViewBuilder
     private func versionLine(_ row: AgentUpdateRow) -> some View {
         let parts: [String] = [

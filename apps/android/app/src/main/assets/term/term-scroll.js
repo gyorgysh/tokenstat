@@ -41,7 +41,6 @@
           clearMarker();
           setReading(false);
         } else if (enabled && reading) {
-          // Once the held line ages out, stay at the oldest retained output.
           scrollToLine(marker && !marker.isDisposed ? marker.line : 0);
           if (!marker || marker.isDisposed) rememberPosition();
         } else {

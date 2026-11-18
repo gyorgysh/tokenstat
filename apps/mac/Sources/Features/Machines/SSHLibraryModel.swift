@@ -723,13 +723,11 @@ final class SSHLibraryModel {
         return false
     }
 
-    /// What to do with one arriving record.
     enum MergeVerdict {
         /// The vault's copy is newer, or this device has never seen the record.
         case takeRemote
         /// This device's copy is newer, so the vault is the one that is behind.
         case pushLocal
-        /// The same revision on both sides.
         case same
     }
 
@@ -882,7 +880,6 @@ final class SSHLibraryModel {
             .map { $0 }
     }
 
-    /// How many servers a list holds before a Recent shortcut earns its place.
     static let recentShortcutThreshold = 8
 
     var searching: Bool { !search.trimmingCharacters(in: .whitespaces).isEmpty }

@@ -50,7 +50,6 @@ internal sealed record ChatLaunchChoice(
         }
         catch
         {
-            // A damaged file only costs the remembered setup.
             return null;
         }
     }

@@ -291,7 +291,6 @@ fun friendlyError(raw: String?): FriendlyError {
     if (lower.contains("paid-plan") || lower.contains("not_on_this_plan") ||
         lower.contains("no longer includes remote")
     ) {
-        // Account restrictions need attention before reconnecting.
         return FriendlyError(
             L10n.text("android.tslogic.not_on_this_plan.92dff92e"),
             L10n.text("android.tslogic.reaching_your_devices_from_anywhere_is_par.bfe9ca82"),
@@ -415,7 +414,6 @@ fun friendlyError(raw: String?): FriendlyError {
         )
     }
     if (lower.contains("device limit") || lower.contains("machine_limit")) {
-        // Offers device management rather than a retry.
         return FriendlyError(
             L10n.text("android.tslogic.device_limit_reached.9993b12e"),
             L10n.text("android.tslogic.this_account_is_using_all_the_devices_its.b51162b6"),

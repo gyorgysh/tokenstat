@@ -395,7 +395,6 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
     let request: Request = match serde_json::from_str(line) {
         Ok(r) => r,
         Err(e) => {
-            // No id to echo: it was in the part that would not parse.
             return json!({
                 "id": Value::Null,
                 "ok": false,
@@ -576,7 +575,6 @@ mod tests {
 
     #[test]
     fn a_string_id_survives_too() {
-        // Clients pick their own id type. JavaScript would send a string.
         let dir = temp_dir("strid");
         let s = Mutex::new(session(&dir));
         let out = respond(r#"{"id": "abc", "method": "info"}"#, &s);
@@ -719,7 +717,6 @@ mod tests {
         let mut writer = stream.try_clone().unwrap();
         let mut reader = BufReader::new(stream);
 
-        // Two requests on one connection, to prove the loop keeps going.
         for id in 1..=2 {
             writeln!(writer, r#"{{"id": {id}, "method": "info"}}"#).unwrap();
             writer.flush().unwrap();

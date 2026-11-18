@@ -160,8 +160,6 @@ fn browse_in(
         let path = entry.path();
         let link = entry.file_type().is_ok_and(|kind| kind.is_symlink());
         let Ok(meta) = std::fs::metadata(&path) else {
-            // A link with nothing at the end of it. Worth showing, because
-            // that is a fact about the folder, and not worth stat-ing further.
             entries.push(json!({
                 "name": name,
                 "kind": "unreadable",
@@ -299,7 +297,6 @@ mod tests {
         assert!(resolve(&outside, &roots).is_err());
         // `..` is resolved before the check, not after it.
         assert!(resolve(&inside.join("../.."), &roots).is_err());
-        // And so is a link that points out of the root.
         let escape = root.join("escape");
         std::os::unix::fs::symlink(&outside, &escape).unwrap();
         assert!(resolve(&escape, &roots).is_err());
@@ -338,7 +335,6 @@ mod tests {
         assert_eq!(beta["isRepo"], true);
         assert_eq!(beta["isRegistered"], true);
         assert_eq!(entries[0]["isRegistered"], false);
-        // Hidden is a flag, not a filter: the client decides.
         assert_eq!(entries[2]["hidden"], true);
         let file = &entries[3];
         assert_eq!(file["kind"], "file");
@@ -347,7 +343,6 @@ mod tests {
             !serde_json::to_string(&listing).unwrap().contains("secret"),
             "a listing must never carry a file's contents"
         );
-        // The top of a root has no parent to walk up to.
         assert!(listing["parent"].is_null());
         assert!(browse_in(Some(root.join("notes.txt").to_str().unwrap()), &roots, &[]).is_err());
 

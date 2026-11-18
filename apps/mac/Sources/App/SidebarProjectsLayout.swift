@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// One chat drawn in the chat-centric sidebar list.
 struct SidebarChatEntry: Identifiable, Hashable, Sendable {
     let folder: WorkspaceFolder
     let conversation: ChatConversation
@@ -14,7 +13,6 @@ struct SidebarChatEntry: Identifiable, Hashable, Sendable {
     }
 }
 
-/// Which heading a chat sits under in the chat list.
 enum SidebarChatDay: Hashable, Sendable {
     /// A turn is running right now. Drawn first, whatever its date.
     case working
@@ -35,7 +33,6 @@ enum SidebarChatDay: Hashable, Sendable {
     }
 }
 
-/// One dated heading and the chats under it.
 struct SidebarChatDayGroup: Identifiable, Sendable {
     let day: SidebarChatDay
     let entries: [SidebarChatEntry]
@@ -123,7 +120,6 @@ enum SidebarProjectsLayout {
         }
     }
 
-    /// Chats drawn before "Show more", and how many more each press adds.
     static let chatPageSize = 30
     /// Past this many days, chats share one Older heading instead of a day each.
     static let olderAfterDays = 7

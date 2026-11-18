@@ -87,7 +87,6 @@ extension WorkspacePreference {
     }
 }
 
-/// Drag handle between two terminal halves.
 struct TerminalSplitHandle: View {
     let axis: Axis
     @Binding var fraction: Double

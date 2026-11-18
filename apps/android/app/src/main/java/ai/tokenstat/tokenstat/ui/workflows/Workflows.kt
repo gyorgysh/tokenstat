@@ -537,8 +537,6 @@ private fun orderedWorkflowRuns(runs: List<WorkflowRunRecord>): List<WorkflowRun
     return ordered.mapNotNull { byID[it.id] }
 }
 
-/// The library: search, summary, and one row per graph. Port of the
-/// `ClientWorkflowWorkspace` phone list.
 @Composable
 private fun WorkflowListPage(
     scoped: List<WorkflowGraph>,
@@ -650,8 +648,6 @@ private fun WorkflowListPage(
     }
 }
 
-/// A graph as a name, one quiet line, and whether it is going.
-/// Port of `ClientJobRow`.
 @Composable
 private fun WorkflowJobRow(
     graph: WorkflowGraph,
@@ -707,8 +703,6 @@ private fun WorkflowJobRow(
     }
 }
 
-/// One graph on a phone: the picture, a prompt, Run / Stop / Continue.
-/// Port of `ClientWorkflowDetailView`.
 @Composable
 private fun WorkflowDetailPage(
     graph: WorkflowGraph?,
@@ -868,8 +862,6 @@ private fun WorkflowDetailPage(
     }
 }
 
-/// The graph as named step capsules, top to bottom. The canvas stays on
-/// the Mac; this is the phone reading of the same order.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkflowPicture(graph: WorkflowGraph, currentNodeID: String?) {
@@ -899,8 +891,6 @@ private fun WorkflowPicture(graph: WorkflowGraph, currentNodeID: String?) {
     }
 }
 
-/// Every retained run for one workflow, live first, twenty at a time.
-/// Port of `ClientWorkflowHistoryView`.
 @Composable
 private fun WorkflowHistoryPage(
     graph: WorkflowGraph?,
@@ -972,8 +962,6 @@ private fun WorkflowHistoryPage(
     }
 }
 
-/// One workflow run: steps and the transcript of the selected step.
-/// Port of `ClientWorkflowRunView`.
 @Composable
 private fun WorkflowRunPage(
     model: AppViewModel,

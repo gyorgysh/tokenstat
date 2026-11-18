@@ -46,7 +46,6 @@ struct PersonaDrive {
     /// The rest ellipse, as multipliers on `radius`. Squash and stretch.
     var stretch = CGSize(width: 1, height: 1)
     var radius: CGFloat = PersonaStage.restRadius
-    /// Rotation carries the fixed silhouette and its face together.
     var roll: CGFloat = 0
     /// How hard the body resists losing volume. This is what makes it read as
     /// a water balloon rather than a rubber band loop.

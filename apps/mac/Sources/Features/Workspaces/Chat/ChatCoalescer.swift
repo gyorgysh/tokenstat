@@ -49,7 +49,6 @@ extension ChatDisplayItem {
         var editRevisions: [String: Int] = [:]
 
         func flushText() {
-            // The question block is drawn as its own card below the reply.
             let body = ChatQuestionText.stripping(text, streaming: running).trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty {
                 items.append(

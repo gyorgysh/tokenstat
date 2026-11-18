@@ -207,8 +207,6 @@ struct ClientSetupWizard: View {
         }
     }
 
-    /// Forget a failed entry. The doors go back to saying nothing, and the
-    /// next picked door runs the check again.
     private func clearEntryFailure() {
         entryAttempted = false
         model.failure = nil

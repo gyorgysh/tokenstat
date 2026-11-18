@@ -116,8 +116,6 @@ fun Onboarding(onFinished: () -> Unit) {
         ) {
             Wordmark(size = 18, showsMark = false)
             Spacer(Modifier.weight(1f))
-            // A way past the pitch for anyone who does not want it. On the last
-            // page it would duplicate the button below, so it goes.
             if (page < onboardingPages.lastIndex) {
                 Text(
                     L10n.text("common.skip"),
@@ -127,7 +125,6 @@ fun Onboarding(onFinished: () -> Unit) {
                 )
             }
         }
-        // Named steps and a finite rail make the length clear before the first swipe.
         Column(
             Modifier.widthIn(max = 640.dp).fillMaxWidth()
                 .align(Alignment.CenterHorizontally)
@@ -218,8 +215,6 @@ fun Onboarding(onFinished: () -> Unit) {
                         onClick = { scope.launch { pagerState.animateScrollToPage(page - 1) } },
                     )
                 }
-                // The prominent action, like the client's prominent Continue:
-                // this is the one step the whole screen exists to take.
                 TsProminentButton(
                     label = if (page == onboardingPages.lastIndex) L10n.text("android.onboarding.get_started.61e8d44a") else L10n.text("android.onboarding.continue.31fbef16"),
                     onClick = {

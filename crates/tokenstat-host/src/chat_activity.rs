@@ -208,7 +208,6 @@ impl Activity {
         }
         self.live = current_run && running;
         if running && !current_run {
-            // The next run has reserved this chat but has not reported yet.
             self.plan.clear();
             self.plan_source = None;
             self.plan_reported = false;
@@ -530,7 +529,6 @@ impl Activity {
                             model: text(&input["model"], 160),
                             source: "tool".into(),
                         });
-                        // Only a small allowlist survives the call join.
                         self.remember(
                             call_id,
                             tool,
@@ -607,7 +605,6 @@ impl Activity {
                 {
                     return;
                 }
-                // Replace the provisional call identity with the real task id.
                 if let Some(call_id) = call_id.as_deref() {
                     if call_id != task_id
                         && let Some(index) =
@@ -1206,8 +1203,6 @@ mod tests {
                     Activity::default()
                 };
                 for (index, record) in records.iter().enumerate() {
-                    // The unfiltered handler is the reference, including its
-                    // private pending calls and task list joins.
                     let mut expected = observed.clone();
                     expected.apply(backend, record);
                     let changed = expected != observed;
@@ -1559,7 +1554,6 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // A step starting moves nothing. A step completing does.
         assert_eq!(updates.len(), 3);
         assert_eq!(updates[1][0]["status"], "completed");
         assert_eq!(updates[2][1]["status"], "completed");

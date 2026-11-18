@@ -167,7 +167,6 @@ fn main() {
     let mut context = String::new();
     io::stdin().read_to_string(&mut context).unwrap();
     if context.contains("conflict markers") {
-        // A follow-up after a conflicting landing: resolve every marker.
         let shared = std::path::Path::new("shared.txt");
         assert!(fs::read_to_string(shared).unwrap().contains("<<<<<<<"));
         fs::write(shared, "teammate and agent\n").unwrap();

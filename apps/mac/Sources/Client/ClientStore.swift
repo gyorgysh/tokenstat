@@ -100,7 +100,6 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Website `TIERS[].feats`, shortened for a phone. Same words.
     var feats: [String] {
         switch self {
         case .supporter:
@@ -207,7 +206,6 @@ final class ClientStore {
 
     private var updatesTask: Task<Void, Never>?
     private var intentsTask: Task<Void, Never>?
-    /// Product-page tap waiting on sign-in. One at a time.
     private var pendingIntent: PurchaseIntent?
 
     var isBusy: Bool { isLoading || purchasingProductID != nil || isRestoring }

@@ -495,7 +495,6 @@ fn website_heat_level(value: u64, values: &[u64]) -> u8 {
 /// A trait rather than methods on the type, because the type is in another
 /// crate now and these are of no use to anything that is not a terminal.
 pub trait HeatRender {
-    /// Width of the rendered block in terminal columns.
     fn width(&self) -> usize;
     /// The month header strip, already padded to line up with the columns.
     fn header(&self) -> String;
@@ -590,7 +589,6 @@ mod tests {
     fn a_sparkline_scales_to_its_own_maximum() {
         let line = sparkline(&[1, 50, 100]);
         assert_eq!(line.chars().count(), 3);
-        // The largest value tops out, the smallest still draws.
         let chars: Vec<char> = line.chars().collect();
         assert!(chars[0] != ' ');
         assert!(chars[2] == '█' || chars[2] == '#');
@@ -732,20 +730,16 @@ mod tests {
 
     #[test]
     fn calendar_holds_the_window_open_when_the_archive_is_young() {
-        // A week-old archive still renders a full rolling year of idle cells,
-        // rather than collapsing to the days that happen to have data.
         let days = vec![("2026-07-27".to_string(), 5)];
         let cal = heat_calendar(&days, 53, anchor(), &[]).expect("calendar");
         assert_eq!(cal.weeks, 53);
         assert_eq!(cal.active_days, 1);
-        // A year back from the anchor week: starts in the previous August.
         assert_eq!(cal.first.to_string(), "2025-07-28");
         assert_eq!(cal.months.first().map(|m| m.1), Some("Jul"));
     }
 
     #[test]
     fn calendar_leaves_days_after_the_anchor_blank() {
-        // The rest of this week has not happened. Blank, not idle.
         let days = vec![("2026-07-29".to_string(), 5)];
         let cal = heat_calendar(&days, 2, anchor(), &[]).expect("calendar");
         let last_col = cal.weeks - 1;
@@ -756,14 +750,11 @@ mod tests {
 
     #[test]
     fn calendar_fills_gaps_between_active_days() {
-        // The archive stores only active days. The grid must still show the
-        // idle days between them, or every later column drifts.
         let days = vec![("2026-07-06".to_string(), 5), ("2026-07-10".to_string(), 7)];
         let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 12), &[]).expect("calendar");
         assert_eq!(cal.active_days, 2);
         assert_eq!(cal.total, 12);
         assert_eq!(cal.busiest.map(|b| b.value), Some(7));
-        // Mon and Fri active, Tue to Thu idle: no run longer than one day.
         assert_eq!(cal.streak_best, 1);
     }
 
@@ -779,14 +770,11 @@ mod tests {
 
     #[test]
     fn a_quiet_anchor_day_does_not_break_the_streak() {
-        // Worked through yesterday, nothing logged yet today. The day is not
-        // over, so the streak stands.
         let days: Vec<_> = (26..=28)
             .map(|d| (format!("2026-07-{d:02}"), 100u64))
             .collect();
         let cal = heat_calendar(&days, 4, anchor(), &[]).expect("calendar");
         assert_eq!(cal.streak_current, 3);
-        // Two idle days before the anchor do break it.
         let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 30), &[]).expect("calendar");
         assert_eq!(cal.streak_current, 0);
     }

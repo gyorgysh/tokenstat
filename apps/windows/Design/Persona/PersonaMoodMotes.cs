@@ -57,8 +57,6 @@ internal static class PersonaMoodMotes
                 {
                     break;
                 }
-                // The thought arriving, drawn as the two dots it was already
-                // circling flying apart.
                 for (int i = 0; i < 4; i++)
                 {
                     double angle = i * (Math.PI / 2) - Math.PI / 4;
@@ -157,8 +155,6 @@ internal static class PersonaMoodMotes
                         (1 - life) * (1 - life),
                         angle));
                 }
-                // Confetti outlives the sparks by a couple of seconds, so the
-                // celebration has a tail on it rather than stopping dead.
                 for (int i = 0; i < 9; i++)
                 {
                     double seed = i;
@@ -387,7 +383,6 @@ internal static class PersonaMoodMotes
                 {
                     break;
                 }
-                // The thought it has been walking round with, arriving.
                 double burst = (idea - 0.5) / 0.5;
                 for (int i = 0; i < 3; i++)
                 {
@@ -406,7 +401,6 @@ internal static class PersonaMoodMotes
             case PersonaMood.Typing:
             {
                 var keys = PersonaMoodTiming.Typing(clock);
-                // On the floor, in front of it, which is where a keyboard goes.
                 var keyboard = new PPoint(0.66, PersonaStage.Floor);
                 motes.Add(new PersonaMote(
                     PersonaMote.Kind.Keyboard,
@@ -416,8 +410,6 @@ internal static class PersonaMoodMotes
                     keys.Lit));
                 if (keys.Pause > 0.25)
                 {
-                    // Stopped mid-word with nothing to say next, which is the
-                    // most honest thing this whole cast does.
                     motes.Add(new PersonaMote(
                         PersonaMote.Kind.Mark,
                         new PPoint(crown.X + 0.16, Math.Max(0.12, crown.Y - 0.07)),
@@ -441,20 +433,15 @@ internal static class PersonaMoodMotes
             case PersonaMood.Sipping:
             {
                 var tea = PersonaMoodTiming.Tea(clock);
-                // From the hands to the mouth, and no further.
                 var mouth = anchors.Mouth;
                 var rest = anchors.Hands;
                 motes.Add(new PersonaMote(
                     PersonaMote.Kind.Mug,
                     new PPoint(
-                        // Held out to the side, and brought in towards the
-                        // face to drink.
                         rest.X + 0.080 - tea.Lift * 0.062,
                         rest.Y + (mouth.Y + 0.020 - rest.Y) * tea.Lift),
                     1,
                     1,
-                    // Negative, so the rim tips towards the mouth rather than
-                    // away from it.
                     -tea.Lift * 0.80));
                 for (int step = 0; step < 2; step++)
                 {
@@ -485,8 +472,6 @@ internal static class PersonaMoodMotes
                 var work = PersonaMoodTiming.Sketch(clock);
                 var sheet = new PPoint(0.66, PersonaStage.Floor);
                 motes.Add(new PersonaMote(PersonaMote.Kind.Sheet, sheet));
-                // The wet end of the brush and the mark it is making, and that
-                // is all.
                 var tip = new PPoint(sheet.X + work.Sweep * 0.10, sheet.Y - 0.055);
                 for (int step = 0; step < 3; step++)
                 {
@@ -504,8 +489,6 @@ internal static class PersonaMoodMotes
                 }
                 motes.Add(new PersonaMote(
                     PersonaMote.Kind.Brush,
-                    // Bristles down on the paper, handle up and back towards
-                    // the character, which is the only way anybody holds one.
                     new PPoint(tip.X, tip.Y - 0.085),
                     1,
                     1 - work.Look * 2,
@@ -560,8 +543,6 @@ internal static class PersonaMoodMotes
             case PersonaMood.Gardening:
             {
                 var plot = PersonaMoodTiming.Garden(clock);
-                // Planted in the floor, in its own patch of soil, off to one
-                // side.
                 var root = new PPoint(0.72, PersonaStage.Floor);
                 if (plot.Bloom < 0.5)
                 {
@@ -624,8 +605,6 @@ internal static class PersonaMoodMotes
                 {
                     break;
                 }
-                // The bubble is not there any more, only the argument about
-                // where it went.
                 for (int i = 0; i < 6; i++)
                 {
                     double angle = i * (2 * Math.PI / 6);
@@ -657,7 +636,6 @@ internal static class PersonaMoodMotes
                 }
                 if (snack.Bite > 0.4)
                 {
-                    // Crumbs. Nobody eats a biscuit tidily and neither does this.
                     for (int i = 0; i < 3; i++)
                     {
                         double seed = i;

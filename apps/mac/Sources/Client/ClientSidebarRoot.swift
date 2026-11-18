@@ -253,7 +253,6 @@ struct ClientSidebarRoot: View {
         await workspaces.autoConnectLastHost()
     }
 
-    /// How tall a row is here. See `SidebarMetrics`.
     private var rowHeight: CGFloat {
         input.hasPointer ? SidebarMetrics.pointerRow : SidebarMetrics.touchRow
     }
@@ -758,7 +757,6 @@ struct ClientSidebarRoot: View {
 /// grows the button itself: the wash, the leading bar and the tap area all
 /// follow it, and the type stays where it is.
 enum SidebarMetrics {
-    /// The Mac's row height, which everything here is measured against.
     static let macRow: CGFloat = 28
     /// A pointer is precise, so this is the Mac's row plus the 15 percent that
     /// makes it comfortable rather than exact.

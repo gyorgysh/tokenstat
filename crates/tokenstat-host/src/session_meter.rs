@@ -502,7 +502,6 @@ fn collapse<'a>(events: &[&'a UsageEvent]) -> Vec<Folded<'a>> {
 
 /// One request after the rows that streamed it have been merged.
 struct Folded<'a> {
-    /// A session running total rather than one turn: see `is_rollup`.
     rollup: bool,
     model: &'a str,
     billing: BillingMode,
@@ -929,7 +928,6 @@ fn resolve_logs(
     claim_since(candidates, spawn)
 }
 
-/// Paths sorted by modification time, newest first. Unreadable entries drop.
 fn newest_first(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut stamped: Vec<(SystemTime, PathBuf)> = paths
         .into_iter()
@@ -1282,7 +1280,6 @@ fn child_dirs_born(dir: &Path) -> Vec<(i64, String)> {
 
 struct CachedParse {
     mtime: SystemTime,
-    /// When this parse ran, for stores that are written to continuously.
     at: Instant,
     events: Arc<Vec<UsageEvent>>,
 }
@@ -1814,8 +1811,6 @@ mod tests {
         );
         assert_eq!(first[0].session, "sess-a");
         assert_eq!(second[0].session, "sess-b");
-        // Only the first session exists. The later sibling must get nothing,
-        // not inherit sess-a because claim_since missed.
         let only_first = pick_session(
             Arc::new(vec![older.clone()]),
             spawn("a", 9_000, &[("b", 10_000)]),
@@ -1899,8 +1894,6 @@ mod tests {
     fn missing_catalog_window_keeps_the_used_figure() {
         let bare = PriceTable::parse(BOOK).expect("book");
         let reading = fold_events(&[event("claude-opus-4-5", 100, 0, 10)], &bare).expect("reading");
-        // No catalog at all: no window to draw a bar against, but what the
-        // last turn sent is still known and still worth saying.
         assert_eq!(reading.context_used, Some(100));
         assert_eq!(reading.context_window, None);
         assert!(!reading.context_estimated);
@@ -1927,8 +1920,6 @@ mod tests {
         .expect("book");
         let reading = fold_events(&[event("free", 100, 0, 10)], &free).expect("reading");
         assert_eq!(reading.tokens, 110);
-        // Priced at zero is a figure. An absent one that later appears at
-        // several dollars reads as a surprise rather than as a meter.
         assert_eq!(reading.cost_micros, Some(0));
     }
 
@@ -2089,7 +2080,6 @@ mod tests {
     fn every_harness_with_a_local_log_is_metered() {
         assert_eq!(harness_name("codex"), Some("codex"));
         assert_eq!(harness_name("/usr/local/bin/opencode"), Some("opencode"));
-        // The launcher's second OpenCode tile is the same reader.
         assert_eq!(harness_name("opencode2"), Some("opencode"));
         // Kilo forked OpenCode and kept the schema, but not the database, so
         // it must not resolve to that reader.
@@ -2107,8 +2097,6 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("rollout.jsonl");
         let mut file = std::fs::File::create(&path).expect("create");
-        // Two short lines, then far more than the head budget, so a reader
-        // that took the whole file would be obvious in the result.
         writeln!(file, "{{\"a\":1}}").expect("write");
         writeln!(file, "{{\"b\":2}}").expect("write");
         writeln!(file, "{}", "x".repeat(200_000)).expect("write");

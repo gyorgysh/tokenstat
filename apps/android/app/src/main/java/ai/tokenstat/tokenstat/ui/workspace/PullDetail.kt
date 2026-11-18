@@ -216,8 +216,6 @@ internal fun PullDetailPage(
             val view = (it?.get("pull") as? JsonObject) ?: it
             detail = view
             error = null
-            // The branch to check out is the one this pull request is on,
-            // until the person types another.
             if (checkoutBranch.isBlank()) checkoutBranch = view?.str("headRef").orEmpty()
             loadTimeline(refresh = refresh)
             if (refresh) { diffGeneration++; loadingDiff = false; diffs = emptyList(); selectedPath = null }
@@ -517,8 +515,6 @@ private fun PullHero(view: JsonObject, number: Long) {
     }
 }
 
-/// The tile the hero leads with: a branch, a merge or a draft pencil, in the
-/// colour the state is written in.
 @Composable
 private fun PullStateMark(state: String, draft: Boolean) {
     val colors = LocalTsColors.current
@@ -548,9 +544,6 @@ private fun PullStateMark(state: String, draft: Boolean) {
     }
 }
 
-/// Conversation, Changes and Checks, the checks carrying their count. Port of
-/// `DetailTabs`: pills in a bordered strip, the selected one on the accent's
-/// soft tint.
 @Composable
 private fun PullDetailTabs(selection: PullTab, checks: Int, onSelect: (PullTab) -> Unit) {
     val colors = LocalTsColors.current
@@ -608,8 +601,6 @@ private fun PullDetailTabs(selection: PullTab, checks: Int, onSelect: (PullTab) 
     }
 }
 
-/// The description, then everything that has happened since, then the box to
-/// add to it.
 @Composable
 private fun PullConversationTab(
     view: JsonObject,
@@ -656,7 +647,6 @@ private fun PullConversationTab(
     }
 }
 
-/// One thing somebody wrote: who, when, a rule, then the words.
 @Composable
 private fun PullConversationCard(
     login: String,
@@ -782,8 +772,6 @@ private fun ExpandablePullMarkdown(body: String) {
     val markdown = remember(body) { pullBodyMarkdown(body.trim()) }
     val preview = remember(markdown) {
         if (markdown.length <= 420) markdown else {
-            // Keep complete opening paragraphs when possible. A single long
-            // paragraph is shortened at a word boundary to avoid a huge card.
             val paragraphs = markdown.split(Regex("\\n\\s*\\n"), limit = 3)
             val second = paragraphs.getOrNull(1)
             val opening = if (second != null && (second.length > 70 || '\n' in second))
@@ -805,8 +793,6 @@ private fun ExpandablePullMarkdown(body: String) {
     }
 }
 
-/// Markdown in, a comment out. The gradient says this is the one card on the
-/// page that writes rather than reads.
 @Composable
 private fun PullCommentComposer(
     text: String,
@@ -946,7 +932,6 @@ private fun PullChangesTab(
     }
 }
 
-/// What the head commit reports: the headline first, then every run.
 @Composable
 private fun PullChecksTab(view: JsonObject) {
     val colors = LocalTsColors.current
@@ -997,7 +982,6 @@ private fun PullChecksTab(view: JsonObject) {
     }
 }
 
-/// One check run: the mark, what ran, how long it took, and where to read it.
 @Composable
 private fun PullCheckRow(check: JsonObject) {
     val colors = LocalTsColors.current
@@ -1187,7 +1171,6 @@ private fun PullActorRow(actor: JsonObject?, note: String?) {
     }
 }
 
-/// Everything this pull request can be done to, each one a labelled press.
 @Composable
 private fun PullActionsPanel(
     view: JsonObject,
@@ -1313,8 +1296,6 @@ private fun PullActionsPanel(
     }
 }
 
-/// A round seat with one glyph in it, the port of `ToolbarIconButton`. The
-/// glyph gives way to a spinner while the request it started is in flight.
 @Composable
 private fun PullToolbarIconButton(
     icon: ImageVector,
@@ -1349,8 +1330,6 @@ private fun PullToolbarIconButton(
     }
 }
 
-/// A success or a refusal, above the content it belongs to, with a way to put
-/// it away. Port of `actionBanner`.
 @Composable
 private fun PullNotice(message: String, tint: Color, icon: ImageVector, onDismiss: () -> Unit) {
     val shape = RoundedCornerShape(cardRadiusDp)
@@ -1404,9 +1383,6 @@ private fun PullInlineError(message: String) {
     }
 }
 
-/// The cold page, shaped like the page that replaces it: the title is already
-/// known from the row that was tapped, so only what has to be fetched is a
-/// bar.
 @Composable
 private fun PullDetailSkeleton(summary: JsonObject?, number: Long) {
     val colors = LocalTsColors.current

@@ -19,16 +19,12 @@ import SwiftUI
 /// the original can still see it, and a support conversation is impossible
 /// without it. What changes is what leads.
 struct FriendlyError {
-    /// Four words at most. What went wrong, not what the code was doing.
     var title: String
-    /// One or two sentences: what this means, and what fixes it.
     var message: String
     /// SF Symbol for the state. Chosen per cause, because a wall of identical
     /// warning triangles teaches people to stop reading them.
     var symbol: String
-    /// What the button says, when pressing something can help.
     var actionTitle: String?
-    /// The original text, for the detail line.
     var raw: String
     /// The button should open plans, not retry. iOS uses the in-app paywall.
     var opensPlans: Bool = false
@@ -38,8 +34,6 @@ struct FriendlyError {
     /// when it leads to plans, the retry arrow when it retries.
     var actionIcon: ActionIcon { opensPlans ? .plans : requiresSignIn ? .signIn : .refresh }
 
-    /// Whether this is something the user can fix now, as opposed to something
-    /// that has to be waited out.
     var isActionable: Bool { actionTitle != nil }
 
     // Matching is on substrings of the message rather than typed errors on

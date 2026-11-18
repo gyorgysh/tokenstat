@@ -93,8 +93,6 @@ class SshTunnelStateTest {
 
     @Test
     fun unansweredOnlineReadsAsNotConnected() {
-        // The toggle is on and nothing says the session is up: that is the
-        // state this banner exists for, not silence.
         val state = tunnelStateOf(buildJsonObject { put("tunnel", true) })
         assertTrue(state is TunnelState.NotConnected)
     }

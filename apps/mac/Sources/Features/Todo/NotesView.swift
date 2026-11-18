@@ -15,7 +15,6 @@ import SwiftUI
 struct NotesView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
-    /// The folder this screen is scoped to, or nil for every folder.
     var workspaceID: String?
 
     @State private var draft = ""
@@ -176,15 +175,11 @@ struct NotesView: View {
     }
     #endif
 
-    /// What the list is showing: the folder this screen belongs to, or the
-    /// chip you picked on the global one.
     private var scope: TodoModel.NoteScope {
         if let workspaceID { return .workspace(workspaceID) }
         return picked
     }
 
-    /// How many notes are put away in what is on screen. Scoped, so a folder's
-    /// archive button does not light up for another folder's notes.
     private var archivedCount: Int {
         model.notes(in: scope, archived: true).count
     }

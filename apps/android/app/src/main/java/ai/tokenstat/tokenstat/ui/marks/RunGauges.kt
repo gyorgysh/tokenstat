@@ -116,16 +116,11 @@ const val SLOT_GAUGE_MAX_TILES = 12
 fun slotGaugeDrawn(total: Int, maxTiles: Int = SLOT_GAUGE_MAX_TILES): Int =
     minOf(maxOf(total, 1), maxTiles)
 
-/// The words the gauge stands for, matching the Apple accessibility label.
 fun slotGaugeLabel(filled: Int, total: Int, uncapped: Boolean): String {
     if (uncapped) return L10n.text("android.rungauges.no_limit_on_jobs_at_once.76b43c57")
     return L10n.text("android.rungauges.0_of_1_slots_busy.2b6c328d", "${filled}", "${total}")
 }
 
-/// Concurrency as places at a table, filled by what is running now.
-/// Ported from `SlotGauge`: zero concurrent means no cap on the host, which
-/// has no shape at all, so it says so in words instead of drawing an
-/// infinite row of tiles.
 @Composable
 fun SlotGauge(
     filled: Int,

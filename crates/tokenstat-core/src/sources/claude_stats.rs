@@ -673,16 +673,12 @@ mod tests {
         let daily = vec![day("2026-06-20", "claude-opus-4-8", 44_346_335)];
         let tz = jiff::tz::TimeZone::UTC;
         let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz).events;
-        // Given the whole lifetime total for that model, the split should
-        // reproduce its actual input and output almost exactly.
         assert_eq!(ev[0].counters.input_fresh.unwrap(), 4_018_543);
         assert_eq!(ev[0].counters.output.unwrap(), 40_327_792);
     }
 
     #[test]
     fn a_model_with_no_lifetime_totals_recovers_nothing() {
-        // Nothing to split by, and every guess is expensive in one direction or
-        // the other. A day left unrecovered is what happens without this file.
         let stats = parse(SAMPLE).unwrap();
         let daily = vec![day("2026-06-20", "brand-new-model", 500)];
         let tz = jiff::tz::TimeZone::UTC;
@@ -759,7 +755,6 @@ mod tests {
         assert_eq!(ev.len(), 1);
         let c = &ev[0].counters;
         assert_eq!(c.total(), 576_031_559);
-        // Cache reads carry the day, and output is a rounding error beside them.
         assert!(c.cache_read.unwrap() > 560_000_000, "{c:?}");
         assert!(c.output.unwrap() < 2_500_000, "{c:?}");
         // Under the old in+out reading this was above 571M.
@@ -782,7 +777,6 @@ mod tests {
             },
         );
         let tz = jiff::tz::TimeZone::UTC;
-        // The archive holds the whole day, so nothing is missing.
         assert!(
             backfill_events(&stats, &daily, &seen, &tz)
                 .events
@@ -799,7 +793,6 @@ mod tests {
         // priced a day at $14,278: 9.7 billion derived output tokens against a
         // lifetime total of 90 million.
         let stats = parse(CACHE_HEAVY).unwrap();
-        // A day claiming far more than this model ever produced in total.
         let daily = vec![day("2026-08-11", "claude-opus-5", 900_000_000_000)];
         let tz = jiff::tz::TimeZone::UTC;
         let recovered = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);

@@ -7,11 +7,6 @@ import SwiftUI
 import UIKit
 #endif
 
-/// What the detail side of the library is showing.
-///
-/// A value rather than a pile of `@State` booleans, because the old screen had
-/// one flag per sheet and no way to say "editing this host": adding was the
-/// only thing it could express.
 enum SSHLibraryRoute: Hashable {
     case host(String)
     case newHost(folder: String?)
@@ -99,12 +94,6 @@ struct SSHLibraryView: View {
 
     // MARK: - The screen
 
-    /// One pushed screen, on the stack it was opened from.
-    ///
-    /// The Mac used to present this same view in a sheet with a list pane and a
-    /// detail pane inside it. It has a sidebar section and three columns of its
-    /// own now, so what is left here is the phone's shape, which was already
-    /// the right one.
     private var content: some View {
         listSide
             .navigationTitle(L10n.text("apple.sshlibraryview.ssh.01c4d3c2"))
@@ -324,7 +313,6 @@ struct SSHLibraryView: View {
         .themedRow()
     }
 
-    /// One live session, as a way back into it.
     private func sessionRow(_ session: SSHLiveTerminal) -> some View {
         HStack(spacing: Theme.Space.s) {
             Circle()
@@ -601,12 +589,6 @@ struct SSHHostRow: View {
     let host: SSHHost
     let folder: String?
     let searching: Bool
-    /// Connect to this server. Nil where the row is not a place to do it.
-    ///
-    /// The row used to carry no way to connect at all: it was in the context
-    /// menu and nowhere else, which on a phone is a long press nobody finds,
-    /// and on the Mac is a right click on a screen whose whole purpose is
-    /// reaching a server.
     var onConnect: (() -> Void)?
 
     private var platform: String? { SSHHostPlatformCache.shared.label(for: host) }
@@ -700,10 +682,6 @@ struct SearchField: View {
     }
 }
 
-/// A message attached to the thing that produced it.
-///
-/// The old screen printed errors as loose red text between a picker and an
-/// empty state, which reads as part of the layout rather than as a problem.
 struct InlineBanner: View {
     enum Kind { case danger, info }
     let text: String

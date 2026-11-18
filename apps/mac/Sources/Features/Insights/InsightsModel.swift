@@ -34,7 +34,6 @@ final class InsightsModel {
         }
     }
 
-    /// Which breakdown the content pane is showing.
     enum Tab: String, CaseIterable, Hashable {
         case overview, models, projects, harnesses, sessions
 
@@ -125,7 +124,6 @@ final class InsightsModel {
     /// dismissable back to whatever they had selected before.
     private(set) var focusedDay: String?
 
-    /// Show one day. Called from the heatmap.
     func focusOn(day: String) {
         guard focusedDay != day else { return }
         focusedDay = day

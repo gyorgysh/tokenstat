@@ -71,8 +71,6 @@ export default async function tokenstatGate() {
       });
     },
     "tool.execute.after": async (input, output) => {
-      // The action has already happened. Keep its true result even if the
-      // post-tool telemetry channel is temporarily unavailable.
       try {
         await hostHook("post", {
           tool_name: input.tool,

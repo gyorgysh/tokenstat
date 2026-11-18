@@ -71,7 +71,6 @@ internal sealed class PersonaEngine
     /// </summary>
     private double _softening;
 
-    /// <summary>The ring-out after an impact, and the clock it runs on.</summary>
     private double _jiggle;
 
     private double _jiggleClock;
@@ -127,7 +126,6 @@ internal sealed class PersonaEngine
         _random = seed == 0 ? 0x9E3779B97F4A7C15ul : seed;
         Body = new PersonaSoftBody(lumps: Traits.Lumps);
         Settle();
-        // A new face announces itself rather than appearing mid-breath.
         Body.Impulse(new PVector(0, -0.75));
         Body.Pulse(0.10);
     }
@@ -236,7 +234,6 @@ internal sealed class PersonaEngine
         }
 
         bool quiet = Mood == PersonaMood.Sleeping || Mood == PersonaMood.Failed || Mood == PersonaMood.Waiting;
-        // Shape belongs to the seed; moods animate the same plush character.
         if (Mood is PersonaMood.Bouncing or PersonaMood.Dancing)
         {
             _rollVelocity += (1.25 - _rollVelocity) * FixedStep * 4;
@@ -333,10 +330,6 @@ internal sealed class PersonaEngine
         AddDust();
     }
 
-    /// <summary>
-    /// The ground answering back. Two puffs per landing, thrown outwards from
-    /// where the body actually hit rather than from the middle of the frame.
-    /// </summary>
     private void AddDust()
     {
         foreach (var grain in _dust)
@@ -359,17 +352,8 @@ internal sealed class PersonaEngine
         }
     }
 
-    /// <summary>
-    /// Zero to one, clamped. The two props overlap only in the middle third of
-    /// a shift: the old one is most of the way gone before the new one is
-    /// really there.
-    /// </summary>
     private static double Ramp(double value) => Math.Clamp(value, 0, 1);
 
-    /// <summary>
-    /// Take a prop down to nothing, or bring it up from nothing. It shrinks as
-    /// well as fades, because something set down moves away from the hands.
-    /// </summary>
     private void Fade(int start, double amount)
     {
         for (int i = start; i < Motes.Count; i++)
@@ -395,8 +379,6 @@ internal sealed class PersonaEngine
         _leaving = (Mood, Clock);
         _shift = 1;
         _blinkHold = 0.13;
-        // A gather. The body dips and springs back, which is the beat that
-        // makes the change look like a decision rather than an edit.
         Body.Pulse(-0.13);
 
         Mood = next;
@@ -515,8 +497,6 @@ internal sealed class PersonaEngine
                 {
                     break;
                 }
-                // The blow, and the body arriving behind it. A hammer that
-                // lands without the shoulder following through is being waved.
                 if (Crossed(PersonaMoodTiming.BlowPeriod, previous + 0.07, now + 0.07))
                 {
                     Body.Pulse(-0.06);
@@ -566,7 +546,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Failed:
-                // A shake it cannot absorb, then it stops fighting.
                 if (now < 0.34 && Crossed(0.085, previous, now))
                 {
                     double side = (int)(previous / 0.085) % 2 == 0 ? -1 : 1;
@@ -576,8 +555,6 @@ internal sealed class PersonaEngine
                 {
                     Body.Slump(0.85);
                 }
-                // It has another go every few seconds, gets a third of the way
-                // up, and gives that up as well.
                 if (now > 1.5 && Struck(4.4, 0.55, previous - 1.5, now - 1.5))
                 {
                     Body.Impulse(new PVector(0, -0.62));
@@ -589,7 +566,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Idle:
-                // A shift of weight, so a resting character is not a loop.
                 if (Crossed(5.4, previous, now))
                 {
                     double side = NextUnit() > 0.5 ? 1 : -1;
@@ -602,8 +578,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Thinking:
-                // The idea arrives as a jolt. It is the one moment in this
-                // mood that is not churn, so it has to land like one.
                 if (Struck(7.2, 0.84, previous, now))
                 {
                     Body.Impulse(new PVector(0, -0.80));
@@ -633,8 +607,6 @@ internal sealed class PersonaEngine
             case PersonaMood.Pacing:
                 if (PersonaMoodTiming.PacingIdea(now) < 0.25)
                 {
-                    // A footfall, and a heavier one at each turn where it
-                    // plants and pushes off the other way.
                     if (Crossed(0.42, previous, now))
                     {
                         Body.Impulse(new PVector(0, -0.32));
@@ -654,8 +626,6 @@ internal sealed class PersonaEngine
 
             case PersonaMood.Typing:
             {
-                // Keystrokes, not hops. A small local knock at the hands for
-                // each one, fast and uneven.
                 var keys = PersonaMoodTiming.Typing(now);
                 if (keys.Tap > 0.5 && Crossed(0.078, previous, now))
                 {
@@ -684,8 +654,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Reading:
-                // Something on the page. The body has to move for it, or the
-                // face is reacting to nothing.
                 if (Struck(8.4, 0.66, previous, now))
                 {
                     if (PersonaMoodTiming.ReadingGag(now).Shock > 0)
@@ -701,7 +669,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Sipping:
-                // Hot. The whole body finds out at once.
                 if (Struck(PersonaMoodTiming.TeaPeriod, 0.30, previous, now))
                 {
                     Body.Impulse(new PVector(0, -0.55));
@@ -710,9 +677,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Sketching:
-                // A small knock at each end of the sweep, where the hand
-                // changes direction. That is the only impulse a brush stroke
-                // has in it.
                 if (PersonaMoodTiming.Sketch(now).Look < 0.25 && Crossed(0.725, previous, now))
                 {
                     Body.Poke(Body.Anchors.Hands, -0.16, 0.24);
@@ -728,7 +692,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Sleeping:
-                // A twitch, in the middle of a good dream.
                 if (Struck(13.0, 0.62, previous, now))
                 {
                     Body.Poke(Body.Crown, -0.22, 0.28);
@@ -736,7 +699,6 @@ internal sealed class PersonaEngine
                 break;
 
             case PersonaMood.Ok:
-                // Once is a result. Twice is a celebration.
                 if (now < 0.7 && Crossed(0.62, previous, now))
                 {
                     Body.Impulse(new PVector(0, -0.72));
@@ -747,7 +709,6 @@ internal sealed class PersonaEngine
             case PersonaMood.Bubbling:
                 if (Struck(5.4, 0.60, previous, now))
                 {
-                    // It knew. It has always known. It is surprised anyway.
                     Body.Poke(Body.Anchors.Mouth, -0.95, 0.34);
                     Body.Impulse(new PVector(-0.30, -0.18));
                     _blinkHold = 0.12;
@@ -824,10 +785,6 @@ internal sealed class PersonaEngine
         }
     }
 
-    /// <summary>
-    /// Put the body at the mood's resting shape with no motion in it. Used on
-    /// the first frame, and whenever motion is off.
-    /// </summary>
     private void Settle()
     {
         _leaving = null;

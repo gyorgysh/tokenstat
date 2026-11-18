@@ -83,8 +83,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows-app
-          # Main-branch runs save so the next dispatch restores warm.
-          # Label runs on PRs stay restore-only, like the release caches.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: actions/setup-dotnet@v6
@@ -132,8 +130,6 @@ jobs:
       - name: Verify published Windows application startup
         timeout-minutes: 3
         env:
-          # Exercise the exact published binaries without moving them through
-          # the per-user installer on this disposable runner.
           TOKENSTAT_DEV: '1'
           VERSION: ${{ needs.version.outputs.version }}
         shell: pwsh
@@ -327,8 +323,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: cli-${{ matrix.target }}
-          # Main-branch runs save so the next dispatch restores warm.
-          # Label runs on PRs stay restore-only, like the release caches.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
@@ -378,8 +372,6 @@ jobs:
           compression-level: 0
 
   hostd:
-    # Preview only: x86_64 Linux. No aarch64 target (unlike release) to keep
-    # preview builds fast; ARM64 Linux is covered by the release matrix.
     name: hostd ${{ matrix.target }}
     needs: version
     if: >
@@ -405,8 +397,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: hostd-${{ matrix.target }}
-          # Main-branch runs save so the next dispatch restores warm.
-          # Label runs on PRs stay restore-only, like the release caches.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build

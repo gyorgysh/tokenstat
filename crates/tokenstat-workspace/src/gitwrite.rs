@@ -348,7 +348,6 @@ mod tests {
         assert!(commit(&dir, "feat: add a").ok);
         let log = crate::git::log(&dir, 1);
         assert_eq!(log[0].subject, "feat: add a");
-        // And the tree is clean again, which is the actual proof it committed.
         assert!(crate::git::status(&dir).files.is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -486,8 +485,6 @@ mod tests {
     #[test]
     fn a_failure_carries_gits_own_words() {
         let dir = repo("failure");
-        // Nothing staged, so git refuses and explains why. That explanation is
-        // what the window shows, so it has to survive the round trip.
         let outcome = commit(&dir, "feat: nothing");
         assert!(!outcome.ok);
         assert!(!outcome.message.is_empty());

@@ -31,7 +31,6 @@ struct ClientWorkspaceToolsView: View {
         case sessions = "Sessions"
     }
 
-    /// Fixtures open on Changes to show a working tab. Production starts on Files.
     var initial: Surface = .files
 
     @State private var surface: Surface = .files

@@ -11,9 +11,7 @@ import SwiftUI
 /// only splits that text.
 struct TranscriptView: View {
     var text: String
-    /// Shown when `text` is empty (waiting, or nothing readable).
     var empty: String
-    /// Automation runs use the same compact activity lines as chat.
     var compactTools = false
 
     var body: some View {
