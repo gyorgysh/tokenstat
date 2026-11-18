@@ -649,10 +649,10 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
                         }
-                                .onAppear { rowMounts.appeared() }
-                                .onDisappear { rowMounts.disappeared() }
                         ForEach(rows) { item in
                             transcriptRow(item, chat: chat, spinning: spinning)
+                                .onAppear { rowMounts.appeared() }
+                                .onDisappear { rowMounts.disappeared() }
                         }
                     }
                     if sliceOffset == 0 {
@@ -906,10 +906,10 @@ struct ChatView: View {
             .task(id: settleMood) {
                 guard settleMood == .ok else { return }
                 try? await Task.sleep(for: .milliseconds(480))
+                settleMood = nil
+            }
             .task(id: isActive) {
                 await watchMountedRows(proxy)
-            }
-                settleMood = nil
             }
         }
         #if os(macOS)
@@ -1202,6 +1202,8 @@ struct ChatView: View {
     /// The ForEach is a bounded slice, so walking it is cheap. A slice that
     /// has dropped the newest rows is not the end, and pinning it would pin
     /// a sentinel under old messages.
+    private var canScrollToEnd: Bool { sliceOffset == 0 }
+
     /// See `TranscriptRowMounts`. Pinning again does not rebuild the rows:
     /// the end sentinel sits outside the lazy stack. Scrolling to the top of
     /// the last row does, because the stack has to build that row to place
@@ -1238,8 +1240,6 @@ struct ChatView: View {
             pinToLatest(proxy, animated: false)
         }
     }
-
-    private var canScrollToEnd: Bool { sliceOffset == 0 }
 
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
         // A pending request owns the view. Streaming text must not scroll it
