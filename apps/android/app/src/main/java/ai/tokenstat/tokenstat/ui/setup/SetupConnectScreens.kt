@@ -206,8 +206,6 @@ private fun SetupLabeledField(title: String, value: String, placeholder: String,
     }
 }
 
-// MARK: - 1. Which server
-
 @Composable
 fun SetupWhereStep(
     model: AppViewModel,
@@ -309,8 +307,6 @@ fun SetupWhereStep(
     }
 }
 
-// MARK: - 2. How to sign in
-
 @Composable
 fun SetupCredentialStep(
     model: AppViewModel,
@@ -394,8 +390,6 @@ fun SetupCredentialStep(
         }
     }
 }
-
-// MARK: - 3. The host key
 
 @Composable
 fun SetupFingerprintStep(
@@ -490,8 +484,6 @@ fun SetupFingerprintStep(
         }
     }
 }
-
-// MARK: - 4. What is on the machine
 
 @Composable
 fun SetupCheckStep(
@@ -611,8 +603,6 @@ fun SetupCheckStep(
         }
     }
 }
-
-// MARK: - 5. Install
 
 @Composable
 fun SetupInstallStep(
@@ -804,8 +794,6 @@ private fun SetupAgentChoice(id: String, name: String, detail: String, selected:
         )
     }
 }
-
-// MARK: - 6. Finish
 
 @Composable
 fun SetupFinishStep(

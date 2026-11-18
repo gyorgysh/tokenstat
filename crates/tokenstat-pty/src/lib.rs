@@ -3054,8 +3054,6 @@ mod tests {
         );
     }
 
-    // --- viewer-scoped sizing -----------------------------------------------
-    //
     // A pty has one size and can have two front ends. These pin the rule that
     // makes a phone and a Mac watching the same session both correct: the
     // session is the smallest geometry any live viewer can show, and a viewer

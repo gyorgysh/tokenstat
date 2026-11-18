@@ -419,7 +419,6 @@ private fun RemainingArt(reduceMotion: Boolean, active: Boolean) {
         animationSpec = tween(900, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
         label = "remaining",
     )
-    // The angular accent to secondary to accent sweep from `RemainingArt`.
     val sweep = Brush.sweepGradient(listOf(colors.accent, colors.secondary, colors.accent))
     Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(132.dp)) {

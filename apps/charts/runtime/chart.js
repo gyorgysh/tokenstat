@@ -711,7 +711,6 @@
                 "\r\n";
             mime = "text/csv";
         } else {
-            // Export the visible chart together with title, source, and current series selection.
             const width = Math.min(1600, Math.max(720, chart.getWidth()));
             const title = wrapText(spec.title, width - 40, "600 18px Manrope"),
                 subtitle = wrapText(spec.subtitle, width - 40, "12px Manrope");

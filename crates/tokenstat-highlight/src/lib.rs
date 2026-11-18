@@ -504,7 +504,6 @@ pub fn spans(language: Language, text: &str) -> Result<Vec<Span>, HighlightError
                 stack.pop();
             }
             HighlightEvent::Source { start, end } => {
-                // Advance to the start of this run, counting what was skipped.
                 cursor_u16 += utf16_len(text, cursor_byte, start);
                 let width = utf16_len(text, start, end);
                 let start_u16 = cursor_u16;

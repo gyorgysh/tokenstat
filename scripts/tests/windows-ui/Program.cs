@@ -457,7 +457,6 @@ public sealed partial class SmokeApp : Application
                     video.SetMediaPlayer(null);
                     streamer.Close();
                     player.Source = null;
-                    // Match ScreenPage teardown: release the previous decoder before reopening.
                 }
                 for (var iteration = 0; iteration < 3; iteration++)
                 {

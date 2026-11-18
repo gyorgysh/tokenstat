@@ -370,7 +370,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             calendar = null;
         }
         _calendar = calendar;
-        // What came back, not what was asked for.
         _delivered = Format.Text(calendar, "scope", "local");
         if (_delivered != "account")
         {
@@ -1634,8 +1633,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             _inspectorRoot.Children.Add(child);
         }
-        // The footer action, like the Mac: the pinned day opened as a full
-        // report in Insights.
         var open = ActionIconGlyph.Button(
             L10n.Text("windows.homepage.open_in_insights.5529d386"),
             ActionIcon.Next,

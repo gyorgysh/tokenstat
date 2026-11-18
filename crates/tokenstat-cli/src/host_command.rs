@@ -539,7 +539,6 @@ fn approve(
         println!("Nothing was changed.");
         return Ok(());
     }
-    // Dedupe: `1,1` must not issue the grant twice.
     let mut seen = std::collections::HashSet::new();
     let chosen: Vec<String> = chosen
         .into_iter()
@@ -611,7 +610,6 @@ fn resolve_target(target: &str, pending: &[Value]) -> Result<String> {
         );
     }
     let lowered = needle.to_ascii_lowercase();
-    // Full key first: exact, no ambiguity.
     if let Some(hit) = pending.iter().find(|request| {
         request["peerId"]
             .as_str()
@@ -619,7 +617,6 @@ fn resolve_target(target: &str, pending: &[Value]) -> Result<String> {
     }) {
         return Ok(hit["peerId"].as_str().unwrap_or_default().to_owned());
     }
-    // Key prefix, when it names exactly one request.
     let prefix: Vec<String> = pending
         .iter()
         .filter_map(|request| request["peerId"].as_str())
@@ -635,7 +632,6 @@ fn resolve_target(target: &str, pending: &[Value]) -> Result<String> {
             prefix.len()
         );
     }
-    // Device label, when it names exactly one request.
     let labels: Vec<String> = pending
         .iter()
         .filter(|request| {
@@ -702,7 +698,6 @@ fn prompt_choices(pending: &[Value], keys: &[String]) -> Result<Vec<String>> {
     if let Ok(single) = resolve_target(&answer, pending) {
         return Ok(vec![single]);
     }
-    // Comma-separated numbers like `1,3` approve several at once.
     if answer.contains(',') {
         let mut out = Vec::new();
         for part in answer.split(',') {
@@ -1106,7 +1101,6 @@ mod tests {
         .to_string();
         assert!(error.contains("older host"), "{error}");
         assert!(!error.contains("unknown workspace"), "{error}");
-        // Anything else is passed through as it arrived.
         let error = older_host("invites", anyhow::anyhow!("Cannot reach the host")).to_string();
         assert_eq!(error, "Cannot reach the host");
     }

@@ -4180,8 +4180,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 Ok(json!({"renamed": true, "id": p.id, "name": p.name.trim()}))
             }
 
-            // Say what this computer is, again.
-            //
             // The record is published at login and never retried, so one failed
             // call there left the machine unknown to the account and every call
             // that needs a device (the vault, above all) refused from then on. The

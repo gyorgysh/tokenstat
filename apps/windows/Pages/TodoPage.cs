@@ -133,8 +133,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(FilterBar());
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_boardHost);
-        // A wireframe until the first load lands. RenderBoard clears the
-        // host, so real content replaces it, like Home's skeleton.
         _boardHost.Children.Add(Motion.SkeletonCard());
         Content = new ScrollViewer
         {

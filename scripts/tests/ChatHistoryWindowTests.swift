@@ -9,11 +9,9 @@ struct ChatHistoryWindowTests {
     }
 
     static func main() {
-        // Empty draws nothing, expanded or not.
         require(ChatHistoryWindow.visible(count: 0, selected: nil, expanded: false) == 0..<0, "empty collapsed")
         require(ChatHistoryWindow.visible(count: 0, selected: nil, expanded: true) == 0..<0, "empty expanded")
 
-        // Five by default, ten when expanded.
         require(ChatHistoryWindow.visible(count: 30, selected: nil, expanded: false) == 0..<5, "collapsed five")
         require(ChatHistoryWindow.visible(count: 30, selected: nil, expanded: true) == 0..<10, "expanded ten")
         require(ChatHistoryWindow.visible(count: 3, selected: nil, expanded: false) == 0..<3, "short list intact")
@@ -29,7 +27,6 @@ struct ChatHistoryWindowTests {
         require(ChatHistoryWindow.previews(in: chats, limit: 0) { _ in false }.isEmpty, "zero warm budget")
         require(ChatHistoryWindow.previews(in: Array(chats.suffix(3)), limit: 10) { _ in false } == [27, 28, 29], "short preview window")
 
-        // A selection in the first five changes nothing.
         require(ChatHistoryWindow.visible(count: 30, selected: 2, expanded: false) == 0..<5, "shallow selection")
 
         // A selection past the collapsed few opens the warm ten around it,
@@ -38,7 +35,6 @@ struct ChatHistoryWindowTests {
         require(ChatHistoryWindow.visible(count: 30, selected: 25, expanded: false) == 20..<30, "far selection windows")
         require(ChatHistoryWindow.visible(count: 30, selected: 29, expanded: false) == 20..<30, "last row clamps")
 
-        // A stale index is not a selection.
         require(ChatHistoryWindow.visible(count: 30, selected: 99, expanded: false) == 0..<5, "stale selection")
 
         // Looping stays inside the warm ten, never walks the archive.

@@ -90,7 +90,6 @@ internal sealed class NewChatPage : Page
         var content = new StackPanel { Spacing = 26, MaxWidth = 620, HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(24, 48, 24, 96) };
 
-        // Introduction: the mark, the title, and what is needed to begin.
         var intro = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
         var logo = Marks.LogoMark(36);
         logo.HorizontalAlignment = HorizontalAlignment.Center; logo.Margin = new Thickness(0, 5, 0, 5);
@@ -124,7 +123,6 @@ internal sealed class NewChatPage : Page
         Grid.SetColumn(_catalogProgress, 1); choice.Children.Add(_catalogProgress);
         Grid.SetColumn(_retry, 2); choice.Children.Add(_retry);
 
-        // The field: plain text on the card, no box of its own.
         _draft.PlaceholderText = Copy("prompt"); AutomationProperties.SetName(_draft, Copy("prompt")); AutomationProperties.SetAutomationId(_draft, "newChat.composer");
         _draft.Background = Theme.PanelBrush; _draft.BorderThickness = new Thickness(0); _draft.Padding = new Thickness(2, 6, 2, 6);
         foreach (var key in new[] { "TextControlBackgroundFocused", "TextControlBackgroundPointerOver" }) _draft.Resources[key] = Theme.PanelBrush;

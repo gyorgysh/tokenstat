@@ -6,7 +6,6 @@
 
 import SwiftUI
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// What another computer is doing, and the two ways in.

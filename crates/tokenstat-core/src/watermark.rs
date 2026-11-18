@@ -190,7 +190,6 @@ mod tests {
     #[test]
     fn partial_trailing_lines_are_not_consumed() {
         assert_eq!(last_complete_line_end(b"a\nb\n"), 4);
-        // A line still being written must not advance the offset past it.
         assert_eq!(last_complete_line_end(b"a\nb\npartial"), 4);
         assert_eq!(last_complete_line_end(b"no newline at all"), 0);
     }
@@ -201,7 +200,6 @@ mod tests {
         let mut b = a.clone();
         a.extend_from_slice(b"tail one");
         b.extend_from_slice(b"tail two, much longer");
-        // Only the head is signed, so appends never invalidate it.
         assert_eq!(head_signature(&a), head_signature(&b));
     }
 

@@ -426,7 +426,6 @@ jobs:
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO build
 
-  # Compile the shared Rust layer and the iOS app on both simulator architectures.
   apple-client:
     needs: checks
     if: needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true' || needs.checks.outputs.apple == 'true' || needs.checks.outputs.charts == 'true'
@@ -461,7 +460,6 @@ jobs:
       - name: Ensure the Metal toolchain
         run: scripts/ensure-metal-toolchain.sh
 
-      # Compile the phone root and shared views without requiring signing.
       - name: Generate the Xcode project
         run: |
           brew install xcodegen

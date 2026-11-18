@@ -622,7 +622,6 @@ mod tests {
         assert_eq!(bar(0.0, 10), "");
         assert!(!bar(0.01, 10).is_empty());
         assert_eq!(bar(1.0, 10).chars().count(), 10);
-        // Never exceeds the requested width.
         assert!(bar(2.0, 5).chars().count() <= 5);
     }
 
@@ -650,7 +649,6 @@ mod tests {
         assert_eq!(width(&pad_right("averylongprojectname", 8)), 8);
         assert_eq!(width(&pad_right("averylongprojectname", 3)), 3);
         assert_eq!(width(&pad_right("averylongprojectname", 1)), 1);
-        // Exact fit must not elide. YYYY-MM-DD is ten columns.
         assert_eq!(pad_right("2026-07-29", 10), "2026-07-29");
         assert_eq!(pad_left("2026-07-29", 10), "2026-07-29");
     }

@@ -47,7 +47,6 @@ internal static class HostSplash
         var mark = Marks.LogoMark(56, animated: waiting, loops: true);
         mark.HorizontalAlignment = HorizontalAlignment.Center;
         column.Children.Add(mark);
-        // The mark is already above, so this is the word only.
         var word = Marks.Wordmark(22, fills: false, showsMark: false);
         word.HorizontalAlignment = HorizontalAlignment.Center;
         column.Children.Add(word);

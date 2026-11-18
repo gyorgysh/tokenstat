@@ -264,7 +264,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     // replacements can be written. See `replace_recovered`.
     let mut pending_recovery: Option<(Vec<crate::model::UsageEvent>, String)> = None;
 
-    // Claude Code.
     if let Some(projects) = claude_code::discover(&home) {
         let files = claude_code::shards(&projects);
         report.files_found += files.len() as u64;
@@ -897,7 +896,6 @@ fn read_shard(
     let (head_sig, sig_len) = if start == 0 {
         watermark::head_signature(&tail)
     } else if let Some(w) = previous {
-        // Append: same signed prefix as before.
         (w.head_sig.clone(), w.sig_len)
     } else {
         let len = head_for_sig.len().min(watermark::HEAD_BYTES);

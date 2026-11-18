@@ -553,7 +553,6 @@ mod tests {
         ledger.save().unwrap();
         let reloaded = Ledger::load(path, 2_000).unwrap();
         assert_eq!(reloaded.get(&key(None, "m-1")), Some(&receipt(1_000)));
-        // One device's id is not another's.
         assert!(reloaded.get(&key(Some("phone"), "m-1")).is_none());
     }
 

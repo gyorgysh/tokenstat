@@ -500,7 +500,6 @@ fun ChatAgentSheet(
                     icon = { ChatAgentRowMark(it) },
                     accessory = { value ->
                         ChatAgentRowExtras(value, backends, quotaReadings, enabled = updatingAgent == null && !locked, ::updateAgent)
-                        // The favourite star, on model rows only.
                         val id = (value as? ChatAgentChoice.Model)?.id
                         if (!id.isNullOrEmpty() && backendId.isNotEmpty()) {
                             val starred = id in pinned

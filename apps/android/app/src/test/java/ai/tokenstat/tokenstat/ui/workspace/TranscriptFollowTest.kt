@@ -110,7 +110,6 @@ class TranscriptFollowTest {
         // The last item is not even laid out: far from the end.
         assertFalse(isAtBottom(lastVisibleIndex = 7, totalItems = 10, distancePx = 0, thresholdPx = 56f))
         assertFalse(isAtBottom(lastVisibleIndex = null, totalItems = 10, distancePx = 0, thresholdPx = 56f))
-        // Nothing to scroll: already there.
         assertTrue(isAtBottom(lastVisibleIndex = null, totalItems = 0, distancePx = 0, thresholdPx = 56f))
     }
 }

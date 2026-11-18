@@ -358,7 +358,6 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
         sub.push_str(&format!(" On a {} day streak.", cal.streak_current));
     }
     println!("  {DIM}{sub}{DIM:#}");
-    // State the metric used by the heatmap.
     println!(
         "  {DIM}{} to {} {} total tokens per day, including cache{DIM:#}",
         cal.first,

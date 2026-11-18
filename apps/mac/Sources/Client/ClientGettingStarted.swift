@@ -6,7 +6,6 @@
 
 import SwiftUI
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// What to do next, on a phone whose account has nothing on it yet.

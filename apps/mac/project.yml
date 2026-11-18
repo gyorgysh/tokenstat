@@ -435,7 +435,6 @@ targets:
         # will notarize.
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Use Face ID or Touch ID to unlock your SSH vault on this device."
-        # Chat dictation. Asked the first time the mic button is pressed.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "tokenstat listens while you dictate a message, and only while the mic button is on."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Your speech becomes the text of your message. Recognition runs on this device when your language supports it, otherwise Apple processes it."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

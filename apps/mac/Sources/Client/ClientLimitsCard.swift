@@ -6,7 +6,6 @@
 
 import SwiftUI
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// How much of each plan is left, on Home rather than in a tab of its own.

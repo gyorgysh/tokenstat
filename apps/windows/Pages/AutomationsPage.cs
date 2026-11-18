@@ -122,8 +122,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         _root.Children.Add(_searchBox);
         Grid.SetRow(_listHost, 2);
         _root.Children.Add(_listHost);
-        // A wireframe until the first load lands. RenderList clears the host,
-        // so real content replaces it, like Home's skeleton.
         _listHost.Children.Add(Motion.SkeletonCard());
         Content = new Border { Padding = new Thickness(Theme.SpaceM), Child = _root };
         RenderDetail();

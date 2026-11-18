@@ -248,15 +248,6 @@ struct ScreenViewerView: View {
                     .background(.ultraThinMaterial, in: Capsule())
             }
         }
-        // Said once, not twice.
-        //
-        // The key row's first button already reads "Release" while the button
-        // is down, so this capsule sat on top of it saying the same thing in
-        // more words, over a strip too narrow for both: the row's last keycap
-        // was cut in half to make room for a control that was already on the
-        // row. It belongs to the shapes that have no key row instead, which
-        // are exactly the ones where a held button would otherwise be
-        // invisible.
         .overlay(alignment: .bottom) {
             if dragLatched, !showsKeyBar {
                 HStack(spacing: Theme.Space.s) {

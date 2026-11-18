@@ -115,8 +115,6 @@ function Ensure-UserPath([string]$Dir) {
   Ok "added $Dir to user PATH (open a new terminal)"
 }
 
-# --- main -------------------------------------------------------------------
-
 $target = Get-TargetTriple
 $ver = Get-LatestVersion
 $asset = "tokenstat-$ver-$target.zip"

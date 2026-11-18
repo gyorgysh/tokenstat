@@ -239,7 +239,6 @@ fn main() {
         return;
     }
     if mode == "edit" {
-        // A lane agent's whole job: change a file in its own folder.
         let file = args.get(4).map_or("lane-edit.txt", String::as_str);
         fs::write(file, "Fictional lane change\n").unwrap();
     }

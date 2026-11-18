@@ -182,7 +182,6 @@ fun withTurnChanges(
         }
         out.add(item)
     }
-    // The turn still running gets its card when it ends.
     if (!running) changes[turn]?.let { out.add(it) }
     return out
 }
@@ -252,7 +251,6 @@ private fun foldStandard(
     val run = ArrayList<ChatDisplayItem>()
 
     fun flushRun(trailing: Boolean) {
-        // One read is a row like any other.
         if (run.size >= 2) {
             emitGroup(makeGroup(ChatStepGroup.Style.Explored, run, running && trailing), run, out, isOpen)
         } else {
@@ -463,7 +461,6 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
         searches = searches,
         pages = pages,
         failures = failures,
-        // A step still running is running whatever came after it.
         running = anyRunning || running,
         liveVerb = liveVerb,
         liveTarget = liveTarget,

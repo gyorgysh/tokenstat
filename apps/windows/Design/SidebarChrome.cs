@@ -275,7 +275,6 @@ internal static class SidebarChrome
                     action.IsHitTestVisible = action.Opacity > 0;
                     shown |= action.Opacity > 0;
                 }
-                // The counts give their seat to the actions while they show.
                 if (Counts((owner as ContentControl)?.Content) is { } counts) counts.Opacity = shown ? 0 : 1;
             }
             void RefreshFocus()

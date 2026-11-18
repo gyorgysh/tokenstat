@@ -162,7 +162,6 @@ struct ClientChatComposer: View {
                         model.showingCommandStats = true
                     })
                 }
-                // Show Hide only when the keyboard can be dismissed.
                 if focused {
                     Button(L10n.text("apple.clientchatcomposer.hide_keyboard.f6b0718e"), .hideKeyboard, action: hideKeyboard)
                         .modifier(ComposerChromeButton())

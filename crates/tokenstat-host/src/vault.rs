@@ -1967,7 +1967,6 @@ mod tests {
         // The account could not be asked. Saying "no vault" here is what sent
         // a machine off to create a second one.
         assert!(vault_exists(false, true, SCHEMA));
-        // Nothing local either, so there is nothing to claim.
         assert!(!vault_exists(false, true, 0));
     }
 

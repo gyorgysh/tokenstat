@@ -723,7 +723,6 @@ mod tests {
         assert_eq!(normalized_host("0.0.0.0"), None);
         assert_eq!(normalized_host("localhost"), None);
         assert_eq!(normalized_host("my.localhost"), None);
-        // hostnames with digits are fine
         assert_eq!(
             normalized_host("ghe.example.com"),
             Some("ghe.example.com".into())

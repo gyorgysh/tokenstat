@@ -6,7 +6,6 @@
 
 import Foundation
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// `YYYY-MM-DD` as a person reads it, in one place.

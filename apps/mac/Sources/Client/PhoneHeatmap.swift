@@ -9,7 +9,6 @@ import SwiftUI
 import UIKit
 #endif
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// The year of activity, sized for a thumb.

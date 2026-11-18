@@ -6,7 +6,6 @@
 
 import Foundation
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// Every pull to refresh in the client goes through here.

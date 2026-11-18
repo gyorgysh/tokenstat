@@ -1591,7 +1591,6 @@ mod tests {
             "the reason the numbers are old is the fresh one, not the cached one"
         );
 
-        // Nothing remembered means nothing invented.
         assert!(!merged[1].stale);
         assert!(merged[1].windows.is_empty());
     }

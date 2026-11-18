@@ -7,7 +7,6 @@
 import AuthenticationServices
 import SwiftUI
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// Sign-in, presented over the app instead of in another one.

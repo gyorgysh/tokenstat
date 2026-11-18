@@ -390,8 +390,6 @@ struct Pending {
     written: bool,
 }
 
-/// App-server totals are cumulative across resumed turns. Emit only the
-/// increments observed during this launch, never the restored thread total.
 /// Keeps a Codex run open across the turns of an active goal.
 ///
 /// Codex continues an active goal on its own: when a turn completes it starts
@@ -450,6 +448,8 @@ impl GoalContinuation {
     }
 }
 
+/// App-server totals are cumulative across resumed turns. Emit only the
+/// increments observed during this launch, never the restored thread total.
 #[derive(Default)]
 struct CodexUsage {
     previous: Option<Value>,

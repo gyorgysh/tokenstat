@@ -225,7 +225,6 @@ internal static class ChatAgentPicker
                     if (text.Length > 0) options.Add((text, text));
                 }
             }
-            // A saved model the host no longer lists stays visible and marked.
             var saved = Format.Text(Chat(), name);
             if (saved.Length > 0 && options.All(option => option.Item1 != saved)) options.Insert(1, (saved, saved));
             return options;

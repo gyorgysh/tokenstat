@@ -453,7 +453,6 @@ class PortedLogicTest {
         assertEquals(listOf("old-approval"), kept.map { it.id })
     }
 
-    // RecentPlaces — newest first, capped at twenty, invalid rows dropped.
     @Test
     fun recentPlacesRecordAndTrim() {
         val scope = RecentPlaces.scopeKey("", "ada")
@@ -476,9 +475,7 @@ class PortedLogicTest {
         // Path-shaped names never land in the store.
         val bad = RecentPlaces.record(emptyList(), "peer1", "ws1", "/tmp/evil", RecentPlaces.Kind.WORKSPACE, null, 1000L)
         assertEquals("Repository", bad.first().workspaceName)
-        // A chat without an item id is not a place.
         assertEquals(0, RecentPlaces.record(emptyList(), "peer1", "ws1", "X", RecentPlaces.Kind.CHAT, null, 1000L).size)
-        // Twenty at most, newest first.
         var many: List<RecentPlaces.Place> = emptyList()
         for (i in 0 until 25) {
             many = RecentPlaces.record(many, "peer", "ws$i", "Folder $i", RecentPlaces.Kind.WORKSPACE, null, i.toLong())
@@ -500,7 +497,6 @@ class PortedLogicTest {
         assertEquals(terminal, RecentPlaces.continuePlaces(terminal))
     }
 
-    // PinnedWork — eight pins, newest first, full shelf refuses.
     @Test
     fun pinsKeepEightAndRefuseTheNinth() {
         val scope = "account|host|ada"
@@ -513,7 +509,6 @@ class PortedLogicTest {
         val (_, refused) = PinnedWork.pin(stored, scope, "peer", "ws8", PinnedWork.Kind.WORKSPACE, null, "Folder 8", "Folder 8", 100L)
         assertEquals(false, refused)
         assertEquals(8, PinnedWork.pins(stored, scope).size)
-        // Re-pinning moves to the top and refreshes the label.
         val (moved, ok) = PinnedWork.pin(stored, scope, "peer", "ws0", PinnedWork.Kind.WORKSPACE, null, "Renamed", "Folder 0", 100L)
         assertEquals(true, ok)
         assertEquals("ws0", moved.first().workspaceId)
@@ -653,7 +648,6 @@ class PortedLogicTest {
         // "plan" means the Plan card, not every setting that mentions a plan.
         val plan = SearchPlaces.rank("plan", places)
         assertEquals("account:account:plans", plan.first().id)
-        // A machine name finds the device.
         val device = SearchPlaces.rank("build", places)
         assertTrue(device.any { it.id == "device:peer-1" })
     }
@@ -670,7 +664,6 @@ class PortedLogicTest {
         assertNull(SearchPlaces.destinationOf(unknown) { null })
     }
 
-    // RunHistoryStrip trimming and summary.
     @Test
     fun runStripTrimsTheFrontAndSummarises() {
         val ticks = (1..10).map { RunTick("r$it", "ok", "run $it") }

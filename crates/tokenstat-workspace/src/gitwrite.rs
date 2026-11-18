@@ -474,7 +474,6 @@ mod tests {
         let dir = repo("empty-stage");
         std::fs::write(dir.join("b.txt"), "x\n").unwrap();
         assert!(!stage(&dir, &[]).ok);
-        // Nothing was staged as a side effect.
         assert!(
             crate::git::status(&dir)
                 .files

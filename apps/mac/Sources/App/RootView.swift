@@ -2146,7 +2146,6 @@ struct RootView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { dismissOverlay() }
 
-                // Same reason as the column. See there.
                 boundedInspector { inspectorContent }
                     .frame(width: currentInspectorWidth)
                     .frame(maxHeight: .infinity)
@@ -4933,7 +4932,6 @@ private struct SidebarRowLabel: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: Theme.Space.xs)
-            // Hide a zero count. Zero is not news.
             if let trailing, trailing != "0" {
                 Text(trailing)
                     .font(Theme.numeric(11))

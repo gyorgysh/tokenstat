@@ -568,7 +568,6 @@ mod tests {
         let b = parse_file(&p(), &input);
         assert_eq!(a.events[0].id, b.events[0].id);
         assert_eq!(a.events[1].id, b.events[1].id);
-        // Distinct requests must not collide.
         assert_ne!(a.events[0].id, a.events[1].id);
     }
 

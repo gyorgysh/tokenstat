@@ -2075,7 +2075,6 @@ mod tests {
             denial_message("DENIED brand_new"),
             "the relay refused the connection: brand_new"
         );
-        // Anything that is not a denial passes through untouched.
         assert_eq!(denial_message("READY"), "READY");
         assert_eq!(team_moved("TEAM-MOVED repo_0123abc"), Some("repo_0123abc"));
         for bad in [

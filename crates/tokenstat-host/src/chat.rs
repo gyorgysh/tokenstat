@@ -8432,7 +8432,6 @@ mod tests {
             json!(start),
             "the first record is stamped with where the page starts"
         );
-        // Every record's text survived, accents and all.
         for (index, event) in events.iter().enumerate() {
             let n = 420 + index;
             let padding = "é".repeat(n % 17);
@@ -15657,7 +15656,6 @@ mod tests {
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
 
-        // Nothing has happened yet, so there is nothing to hand over.
         assert!(store.handover(&chat).unwrap().is_none());
 
         store

@@ -544,7 +544,6 @@ fn filter_object(
             format!("{prefix}.{k}")
         };
 
-        // A container survives when anything beneath it is allowed.
         let is_prefix = allow.iter().any(|a| a.starts_with(&format!("{path}.")));
         let is_leaf = allow.contains(&path.as_str());
         if !is_prefix && !is_leaf {

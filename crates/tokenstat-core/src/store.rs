@@ -1789,7 +1789,6 @@ mod tests {
         .unwrap();
         let r = s.report(GroupBy::Month, &Query::default()).unwrap();
         assert_eq!(r.len(), 2);
-        // Chronological, oldest month first.
         assert_eq!(r[0].key, "2023-11");
         assert_eq!(r[1].key, "2023-12");
         assert_eq!(r[0].events, 2);
@@ -1821,7 +1820,6 @@ mod tests {
         assert_eq!(rows[1].source, "codex");
         assert_eq!(rows[1].tokens(), 16);
 
-        // A day with no events is an empty list, not an error.
         assert!(s.day_detail("2023-11-13").unwrap().is_empty());
     }
 

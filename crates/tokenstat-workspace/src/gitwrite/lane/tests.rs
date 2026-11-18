@@ -391,7 +391,6 @@ fn a_teammates_landing_reaches_a_clean_checkout_and_leaves_others_alone() {
         "landed\n"
     );
     assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Current);
-    // Another branch, or local commits of its own, are left for the person.
     git(&f.main, &["checkout", "-q", "-b", "feature"]);
     assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::OtherBranch);
     git(&f.main, &["checkout", "-q", "main"]);

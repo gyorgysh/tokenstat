@@ -73,7 +73,6 @@ internal sealed partial class TeamsPage
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, sendTitle);
             check!.Visibility = model.Pending ? Visibility.Visible : Visibility.Collapsed;
             check.IsEnabled = !model.Busy;
-            // Recovery tools only when there is writing to recover.
             var recovering = model.RecoveredText is not null || model.Error is not null || !model.Loaded;
             if (copy is not null) copy.Visibility = recovering ? Visibility.Visible : Visibility.Collapsed;
             if (reload is not null) reload.Visibility = recovering ? Visibility.Visible : Visibility.Collapsed;

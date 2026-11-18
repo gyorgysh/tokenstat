@@ -1250,7 +1250,6 @@ internal sealed partial class ChatPage
         else
         {
             var block = SnippetBlock(lines, item.Kind == ItemKind.Edit ? EditSnippetLines : ToolSnippetLines);
-            // The output without the box a card draws around it.
             block.Background = null;
             block.Padding = new Thickness(0);
             stack.Children.Add(BoundedOutput(block, lines));

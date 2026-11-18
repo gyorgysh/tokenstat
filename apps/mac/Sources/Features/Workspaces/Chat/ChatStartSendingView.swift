@@ -70,7 +70,6 @@ struct ChatStartMeter: View {
                                   width: bar.rect.width * scale, height: bar.rect.height * scale)
                 let face = RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: rect)
 
-                // The empty glass.
                 context.fill(face, with: .color(bar.color.opacity(dark ? 0.10 : 0.14)))
                 context.stroke(face, with: .color(bar.color.opacity(dark ? 0.45 : 0.55)), lineWidth: 0.8)
 
@@ -85,7 +84,6 @@ struct ChatStartMeter: View {
                 clipped.fill(Path(fill), with: .linearGradient(
                     Gradient(colors: [bar.color.opacity(0.95), bar.color.opacity(0.70)]),
                     startPoint: CGPoint(x: fill.midX, y: fill.minY), endPoint: CGPoint(x: fill.midX, y: fill.maxY)))
-                // A fine bright meniscus on top of the level.
                 if height > 1 {
                     clipped.fill(Path(CGRect(x: fill.minX, y: fill.minY, width: fill.width, height: 1)),
                                  with: .color(.white.opacity(dark ? 0.55 : 0.70)))

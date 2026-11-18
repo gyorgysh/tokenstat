@@ -282,7 +282,6 @@ struct ClientRootView: View {
             store.start()
             await launch.prepare()
             // Name this phone before anything asks the account who is on it.
-            // See `ClientDeviceName`.
             await ClientDeviceName.publish()
             await account.load()
             if let signed = account.account {

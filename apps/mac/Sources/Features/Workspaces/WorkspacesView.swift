@@ -292,7 +292,6 @@ struct WorkspaceChangesView: View {
                     tint: Theme.warning
                 )
             } else if let git = folder.git, git.isRepo, !git.files.isEmpty {
-                // Only show the scroll list when there is real content.
                 ScrollViewReader { _ in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: Theme.Space.m) {

@@ -108,8 +108,6 @@ fn load_trimmed(path: &Path) -> Option<TrimmedCatalog> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-// ---------------------------------------------------------------- wire types
-
 /// The hosted catalog, as far as we care about it. Unknown fields are dropped
 /// on purpose: the contract says new ones may appear and clients must ignore them.
 #[derive(Debug, Deserialize)]
@@ -205,8 +203,6 @@ struct WireCheapest {
     output: Option<f64>,
 }
 
-// ------------------------------------------------------------- trimmed types
-
 /// What actually lands on disk. Field names are short because this file has one
 /// row per model and there are thousands of them.
 #[derive(Debug, Serialize, Deserialize)]
@@ -292,8 +288,6 @@ struct TrimmedCheapest {
     input: f64,
     output: f64,
 }
-
-// ------------------------------------------------------------------ trimming
 
 fn trim_catalog(body: &str) -> anyhow::Result<TrimmedCatalog> {
     let wire: WireCatalog =
@@ -431,8 +425,6 @@ fn trim_offer(o: &WireOffer) -> TrimmedOffer {
         cw1h: o.cache_write_1h.unwrap_or(write_5m),
     }
 }
-
-// --------------------------------------------------------------------- plans
 
 /// Plans are already small and already the shape core wants, so this is a
 /// validate-and-reserialize rather than a trim.

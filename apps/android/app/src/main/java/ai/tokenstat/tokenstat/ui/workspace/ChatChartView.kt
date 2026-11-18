@@ -193,7 +193,6 @@ internal class ChartWebSurface(context: Context) : WebView(context) {
             Base64.encodeToString(bytes, Base64.NO_WRAP)
         }
         val settings = if (previous != null && sameSettings) previous.settings else {
-            // The bundled labels depend only on L10n's current locale.
             if (wordsLocale != locale) { words = JSONObject(ChartWords.all()); wordsLocale = locale }
             JSONObject().put("dark", dark).put("locale", locale).put("reducedMotion", reducedMotion)
                 .put("strings", words).toString()

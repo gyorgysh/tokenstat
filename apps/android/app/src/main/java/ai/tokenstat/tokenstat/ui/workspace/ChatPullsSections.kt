@@ -1407,7 +1407,6 @@ fun ChatSection(
             }
         }
     }
-    // What is already waiting for this conversation, from disk.
     LaunchedEffect(openId, peer, workspace, projectOwner) {
         val id = openId
         if (id == null) {
@@ -3191,7 +3190,6 @@ fun PullsSection(
         return
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // The pushed header says "Pull requests" already.
         if (!HostContracts.supportsPulls(protocol)) {
             Text(L10n.text("android.chatpullssections.update_the_host_to_read_pull_requests_need.ab169427"), style = MaterialTheme.typography.bodySmall)
             return

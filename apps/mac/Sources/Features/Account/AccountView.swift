@@ -1346,7 +1346,6 @@ private struct NoticesTextPane: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
         textView.isGrammarCheckingEnabled = false
-        // A 565 KB document is searched, not reread.
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
         textView.font = AppFonts.terminal(size: DisplayFit.dp(11))

@@ -694,7 +694,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 if (check?.bool("allowed") != true) return@launch
                 // Access is confirmed now; the host's workspace scan may
                 // still spend seconds collecting Git status for every folder.
-                // Show the live connection and a separate loading state.
                 warmSession.setLoadingFolders(true)
                 warmSession.setConnected(last, true)
                 warmSession.setError(null)

@@ -105,7 +105,6 @@ fn parse(body: &str) -> Option<Value> {
 /// used one left the chat with no plan. The host still reads a todo tool
 /// into the same card when an agent calls one anyway.
 pub fn rule(backend: &str) -> Option<String> {
-    // A plain shell is not an agent.
     (backend != "sh").then(|| {
         format!(
             "{WHEN} keep a visible plan. Write a fenced code block in your reply on its \

@@ -934,8 +934,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             var profiles = (Format.Items(catalog) ?? new JsonArray()).OfType<JsonNode>().ToArray();
             host.Children.Add(LauncherHeading(L10n.Text("windows.workspacepage.run_an_agent.b7046310")));
             var tiles = new FlowPanel { MinimumItemWidth = LauncherTileMinWidth, Spacing = Theme.SpaceM };
-            // Like the Mac: the launcher's tools, then More, then the catalog
-            // when it is open.
             var visible = new List<UIElement>();
             var extra = new List<UIElement>();
             foreach (var profile in profiles)

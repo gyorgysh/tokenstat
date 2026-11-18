@@ -184,7 +184,6 @@ internal static class ChatDetailFold
             }
             output.Add(item);
         }
-        // The turn still running gets its card when it ends.
         if (!running && changes.TryGetValue(turn, out var last)) output.Add(last);
         return output;
     }
@@ -290,7 +289,6 @@ internal static class ChatDetailFold
 
         void FlushRun(bool trailing)
         {
-            // One read is a row like any other.
             if (run.Count >= 2) Emit(Make(ChatStepGroupStyle.Explored, run, running && trailing), run, output, isOpen);
             else output.AddRange(run);
             run.Clear();
@@ -500,7 +498,6 @@ internal static class ChatDetailFold
             Searches = searches,
             Pages = pages,
             Failures = failures,
-            // A step still running is running whatever came after it.
             Running = anyRunning || running,
             LiveVerb = liveVerb,
             LiveTarget = liveTarget,

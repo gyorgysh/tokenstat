@@ -319,10 +319,6 @@ fn tick() {
     t.readings = readings;
 }
 
-/// Fold the grace clock into the state machine's answer.
-///
-/// Grace is for quiet stretches between tokens. A lifecycle hook that said
-/// idle is authoritative and cancels it.
 fn reported_attention(
     hook: Option<&HookRecord>,
     fallback: impl FnOnce() -> Option<Attention>,
@@ -985,7 +981,6 @@ mod tests {
             state = step(state, 40.0, false, None);
         }
         assert!(state.working);
-        // A single quiet sample must not flip it.
         state = step(state, 3.0, false, None);
         assert!(state.working);
     }

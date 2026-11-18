@@ -313,21 +313,18 @@ class AuthoringLogicTest {
 
     @Test
     fun scheduleBuildStaysExactUntilTouched() {
-        // A 90-second interval survives a load untouched.
         val loaded = ScheduleFields.load(AutomationSchedule(ScheduleKind.INTERVAL, everySeconds = 90))
         assertEquals(90L, loaded.builtSchedule.everySeconds)
         assertNull(loaded.validation)
         // Touching the picker rounds through whole minutes, minimum 60.
         val touched = loaded.copy(intervalMinutes = "90", intervalTouched = true)
         assertEquals(5400L, touched.builtSchedule.everySeconds)
-        // Weekly keeps the host bitset until a day is picked.
         val weekly = ScheduleFields.load(AutomationSchedule(ScheduleKind.WEEKLY, weekday = 2, weekdays = 0b101))
         assertEquals("Monday, Wednesday", weekly.weeklyDayLabel)
         assertEquals(0b101, weekly.builtSchedule.weekdays)
         val picked = weekly.copy(weekday = 4, weeklyDayEdited = true)
         assertEquals("Friday", picked.weeklyDayLabel)
         assertEquals(0, picked.builtSchedule.weekdays)
-        // Custom needs at least one day once every day is unticked.
         assertEquals(
             "Pick at least one day for a custom schedule.",
             ScheduleFields(scheduleKind = ScheduleKind.CUSTOM, customDays = 0).validation,
@@ -454,7 +451,6 @@ class AuthoringLogicTest {
             "Two steps share the id n2.",
             WorkflowGraphRules.stepsIssue(listOf(start, agent, agent.copy()), listOf(WorkflowEdge("in", "n2"))),
         )
-        // A cycle without a Loop step is illegal; through a loop it is fine.
         val a = WorkflowNode(id = "a", kind = WorkflowNodeKind.AGENT, backend = "codex")
         val b = WorkflowNode(id = "b", kind = WorkflowNodeKind.AGENT, backend = "codex")
         assertEquals(

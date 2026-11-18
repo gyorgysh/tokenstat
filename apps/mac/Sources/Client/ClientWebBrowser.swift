@@ -7,7 +7,6 @@
 import SwiftUI
 import WebKit
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// Presents website pages without sending the person away from the app.

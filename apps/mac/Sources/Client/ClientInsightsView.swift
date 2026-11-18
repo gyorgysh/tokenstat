@@ -7,7 +7,6 @@
 import SwiftUI
 import Charts
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// Where the money went, across every device on the account.

@@ -115,7 +115,6 @@ if ($userPath -and ($userPath -split ";" | Where-Object { $_ -eq $BinDir })) {
   }
 }
 
-# 3. Optional data purge.
 if ($Purge) {
   $hasData = (Test-Path -LiteralPath $DataDir) -or (Test-Path -LiteralPath $CacheDir)
   if (-not $hasData) {

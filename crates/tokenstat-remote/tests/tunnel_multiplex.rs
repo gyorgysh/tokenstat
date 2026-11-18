@@ -199,7 +199,6 @@ fn two_machines_pair_and_call_over_one_multiplexed_tunnel() {
     let session_a = TunnelSession::spawn(&endpoint, &ident_a, "token");
     let session_b = TunnelSession::spawn(&endpoint, &ident_b, "token");
 
-    // B answers inbound channels: handshake, echo one message.
     let (tx, rx) = mpsc::channel();
     let inbound = session_b.take_inbound().expect("inbound receiver");
     let responder = std::sync::Arc::clone(&session_b);
@@ -212,7 +211,6 @@ fn two_machines_pair_and_call_over_one_multiplexed_tunnel() {
         let _ = tx.send(request);
     });
 
-    // A waits for the session to come up, then dials B.
     for _ in 0..200 {
         if session_a.status().connected {
             break;

@@ -244,7 +244,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _period = value;
             ++_scopeGeneration;
-            // Choosing a period is choosing to stop looking at one day.
             _focusDay = null;
             _selectedKey = null;
             _visible = FirstPage;

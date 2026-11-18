@@ -925,7 +925,6 @@ private struct ClientNoticesTextView: UIViewRepresentable {
         view.textColor = .label
         view.alwaysBounceVertical = true
         view.adjustsFontForContentSizeCategory = true
-        // Find is useful in a 500 KB notices file.
         view.isFindInteractionEnabled = true
         view.font = Self.scaledFont(for: view.traitCollection)
         return view

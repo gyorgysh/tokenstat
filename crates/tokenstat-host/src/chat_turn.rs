@@ -522,7 +522,6 @@ mod tests {
             .expect("the brief still travels");
         assert!(name_at < brief_at, "{}", composed.standing_text);
 
-        // And a conversation with no persona is not given a name.
         let anonymous = compose(Inputs {
             prompt: "hi",
             persona_name: "",

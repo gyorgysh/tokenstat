@@ -366,7 +366,6 @@ fn walk_back(trace: &[Vec<i64>], offset: i64, n: i64, m: i64) -> Vec<Op> {
 
 /// Hunks with `CONTEXT` lines either side, the way `git diff` draws them.
 fn patch(a: &[&str], b: &[&str], ops: &[Op]) -> String {
-    // Where each op sits in the old and new text.
     let mut at = Vec::with_capacity(ops.len());
     let (mut i, mut j) = (0usize, 0usize);
     for op in ops {

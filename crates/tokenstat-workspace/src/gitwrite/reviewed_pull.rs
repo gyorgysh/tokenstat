@@ -466,7 +466,6 @@ mod tests {
         assert_eq!(reviewed.state, State::FastForward);
         assert_eq!(reviewed.incoming, 1);
         assert_eq!(reviewed.outgoing, 0);
-        // A second push after review is not taken: apply moves to what was shown.
         push_from_other(&f, "later");
         let outcome = pull(dir, &reviewed).unwrap();
         assert!(outcome.ok, "{}", outcome.message);

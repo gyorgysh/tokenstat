@@ -2192,7 +2192,6 @@ private struct SegmentButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                // Empty symbol is text-only (period chips: 7d / 30d / All).
                 if !symbol.isEmpty {
                     Image(systemName: symbol)
                         .font(.system(size: 11, weight: .medium))

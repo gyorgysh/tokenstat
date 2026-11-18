@@ -256,9 +256,7 @@ mod tests {
     #[test]
     fn a_rate_that_doubles_is_a_large_move() {
         assert!(moved_over_half(4.0, 8.0));
-        // More than a 50% drop, but not the exact half mark.
         assert!(moved_over_half(8.0, 3.0));
-        // Exactly halving is not "over half".
         assert!(!moved_over_half(8.0, 4.0));
     }
 
@@ -266,7 +264,6 @@ mod tests {
     fn small_moves_and_unknown_rates_are_fine() {
         assert!(!moved_over_half(4.0, 5.0));
         assert!(!moved_over_half(0.0, 0.0));
-        // First appearance of a rate is not a "move", it is a new entry.
         assert!(moved_over_half(0.0, 4.0));
     }
 

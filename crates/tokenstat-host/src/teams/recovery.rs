@@ -206,7 +206,6 @@ mod tests {
 
     #[test]
     fn a_live_group_on_the_same_boot_keeps_the_fence() {
-        // This test process is alive, so its id must never read as gone.
         assert!(!proven_gone(
             &record(Some("1.0"), std::process::id()),
             Some("1.0")

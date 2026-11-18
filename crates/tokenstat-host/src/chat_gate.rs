@@ -983,16 +983,13 @@ mod tests {
 
         ensure_symlink(&source, &target).unwrap();
         assert_eq!(std::fs::read_link(&target).unwrap(), source);
-        // Second run with the same source is a no-op, not an error.
         ensure_symlink(&source, &target).unwrap();
 
-        // A stale regular file is replaced, never silently reused.
         std::fs::remove_file(&target).unwrap();
         std::fs::write(&target, b"stale").unwrap();
         ensure_symlink(&source, &target).unwrap();
         assert_eq!(std::fs::read_link(&target).unwrap(), source);
 
-        // A link elsewhere is repointed too.
         let other = root.path().join("other.json");
         std::fs::write(&other, b"{}").unwrap();
         std::fs::remove_file(&target).unwrap();
@@ -1014,7 +1011,6 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         let target = home.join("auth.json");
 
-        // A stale regular file from a previous run is replaced, never reused.
         std::fs::write(&target, b"stale").unwrap();
         ensure_credential_file(&source, &target).unwrap();
         assert_eq!(
@@ -1022,7 +1018,6 @@ mod tests {
             std::fs::read(&source).unwrap()
         );
 
-        // A second run with the same source is a no-op, not an error.
         ensure_credential_file(&source, &target).unwrap();
         assert_eq!(
             std::fs::read(&target).unwrap(),

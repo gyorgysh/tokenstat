@@ -9,7 +9,6 @@ import Foundation
 import UIKit
 #endif
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// What to call this phone on every other screen of the account.

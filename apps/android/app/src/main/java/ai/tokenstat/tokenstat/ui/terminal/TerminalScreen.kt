@@ -1167,7 +1167,6 @@ class TerminalBridge {
                     onProgress()
                 }
                 if (transportError != null) {
-                    // The host answered, so the outage is over.
                     transportError = null
                     onProgress()
                 }

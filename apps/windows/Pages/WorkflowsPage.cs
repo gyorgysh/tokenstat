@@ -78,8 +78,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_searchBox);
         _root.Children.Add(_listHost);
-        // A wireframe until the first load lands. RenderList clears the host,
-        // so real content replaces it, like Home's skeleton.
         _listHost.Children.Add(Motion.SkeletonCard());
         Content = new ScrollViewer
         {

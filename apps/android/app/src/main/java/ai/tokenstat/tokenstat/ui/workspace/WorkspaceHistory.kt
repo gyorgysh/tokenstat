@@ -120,8 +120,6 @@ fun HistorySection(
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        // No second "History": the pushed header above already names the
-        // section, and repeating it cost a row for nothing.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.End,

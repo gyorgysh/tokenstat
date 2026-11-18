@@ -145,7 +145,6 @@ struct TeamSharedChatsView: View {
             }
         }
         .onAppear {
-            // One repository needs no choice. Picking it saves an empty step.
             if store.selectedRepositoryId == nil, availableRepositories.count == 1 {
                 store.selectedRepositoryId = availableRepositories[0].id
             }

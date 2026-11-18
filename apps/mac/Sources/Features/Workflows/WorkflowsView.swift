@@ -503,9 +503,6 @@ private struct WorkflowRow: View {
                             .font(Theme.font(13, weight: isSelected ? .semibold : .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        // The graph itself, and where a live run has got to.
-                        // The old caption said "7 nodes", which is the one fact
-                        // about a workflow nobody needs.
                         MiniGraph(
                             nodes: graph.nodes,
                             edges: graph.edges,

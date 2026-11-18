@@ -692,7 +692,6 @@ mod tests {
 
         store.forget(&key(1));
         assert!(store.get(&key(1)).is_none(), "forgotten is gone");
-        // And so it arrives as a stranger rather than as a refusal.
         assert_eq!(
             store.seen(&key(1), "a", None, "2026-08-04T12:00:00Z"),
             Trust::Pending

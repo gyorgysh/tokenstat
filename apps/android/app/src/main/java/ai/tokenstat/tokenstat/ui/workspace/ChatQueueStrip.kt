@@ -78,7 +78,6 @@ fun ChatQueueStrip(
     if (items.isEmpty()) return
     val colors = LocalTsColors.current
     var showingQueue by remember { mutableStateOf(false) }
-    // A queue that emptied while its list was open has nothing left to show.
     LaunchedEffect(items.isEmpty()) { if (items.isEmpty()) showingQueue = false }
     val shape = RoundedCornerShape(16.dp)
     Column(

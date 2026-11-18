@@ -39,7 +39,6 @@ final class SSHHostPlatformCache {
         guard let entry = entries[host.id],
               now.timeIntervalSince(entry.saved) < 90 * 86400
         else { return nil }
-        // An edited endpoint invalidates old metadata.
         if !entry.hostname.isEmpty,
            (entry.hostname != host.hostname.lowercased() || entry.port != host.port)
         { return nil }

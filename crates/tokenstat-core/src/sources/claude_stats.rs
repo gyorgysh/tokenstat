@@ -585,8 +585,6 @@ mod tests {
         assert!(parse("not json").is_none());
     }
 
-    // --- basis detection ----------------------------------------------------
-
     #[test]
     fn a_daily_sum_above_lifetime_in_out_can_only_be_a_total() {
         // The retained days are a subset of lifetime, so on the in+out basis
@@ -603,8 +601,6 @@ mod tests {
         assert_eq!(detect_basis(&stats, &daily), DailyBasis::InputOutput);
     }
 
-    // --- backfill -----------------------------------------------------------
-
     #[test]
     fn backfill_skips_days_the_transcripts_already_cover() {
         let stats = parse(SAMPLE).unwrap();
@@ -612,7 +608,6 @@ mod tests {
             day("2026-06-20", "claude-opus-4-8", 1000),
             day("2026-06-21", "claude-opus-4-8", 2000),
         ];
-        // The 21st is fully accounted for by transcripts already.
         let seen = have(
             "2026-06-21",
             "claude-opus-4-8",
@@ -752,8 +747,6 @@ mod tests {
         );
     }
 
-    // --- the regression this all exists for ---------------------------------
-
     #[test]
     fn a_cache_heavy_day_is_not_recovered_as_generated_tokens() {
         // Real numbers from the install that priced one day at $14,278. The day
@@ -765,14 +758,12 @@ mod tests {
         let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz).events;
         assert_eq!(ev.len(), 1);
         let c = &ev[0].counters;
-        // The parts still add back up to exactly what the vendor reported.
         assert_eq!(c.total(), 576_031_559);
         // Cache reads carry the day, and output is a rounding error beside them.
         assert!(c.cache_read.unwrap() > 560_000_000, "{c:?}");
         assert!(c.output.unwrap() < 2_500_000, "{c:?}");
         // Under the old in+out reading this was above 571M.
         assert!(c.output.unwrap() * 200 < c.cache_read.unwrap(), "{c:?}");
-        // Nothing is left unknown once the day is stated on the total basis.
         assert!(!c.has_unknown());
     }
 

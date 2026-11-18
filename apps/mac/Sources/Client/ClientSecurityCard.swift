@@ -9,7 +9,6 @@ import SwiftUI
 import UIKit
 #endif
 
-// The client is iOS and iPadOS only.
 #if !os(macOS)
 
 /// What protects a connection between this phone and a computer, in the words

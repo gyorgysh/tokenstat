@@ -221,8 +221,6 @@ fn print_table(
         );
     }
 
-    // A single summary line rather than a repeated footer: the eye should land
-    // on the data, not the chrome.
     println!(
         "  {DIM}{}{DIM:#}  {BOLD}{}{BOLD:#} total across {} {}",
         ui::pad_right("", key_w),
