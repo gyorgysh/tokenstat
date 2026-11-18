@@ -68,6 +68,13 @@ This mode checks mounted-conversation search placement; it does not exercise
 the search sheet or substitute for the full reconnect run. Add `--desktop-only`
 for a Mac-only check.
 
+`--phone-only --reading-soak` runs only the iPhone reader and streams into it
+until the run's `stop` file exists, for testing by hand (scrolling, locking,
+switching apps). A file named `offline` in the run folder cuts the phone's
+connection until it is removed. The simulator cannot read a checkout on an
+external volume, so pass `--runs-dir` with a folder on the internal disk when
+the repository lives on one.
+
 `account-server.cjs` provides the loopback account routes needed for native
 relay setup. It uses the website's account functions and the relay fixture's
 in-memory database. Run `node scripts/tests/chat-history-relay.cjs` to check

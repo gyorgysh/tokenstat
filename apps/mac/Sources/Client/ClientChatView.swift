@@ -194,11 +194,13 @@ private struct ClientChatContent: View {
             navigation.leaveChat(owner: viewer)
         }
         .task {
+            let returning = loaded
             await session.load(workspaceID: workspaceID, peer: peer)
             guard !Task.isCancelled, model.error == nil,
                   model.isReady(for: workspaceID), model.peer == peer else { return }
             if await openRequestedChat() { return }
-            if openConversationOnAppear { await session.openMostRecent() }
+            if openConversationOnAppear { await session.openMostRecent(); return }
+            if returning, opened == nil, !refreshing { await foregroundRefresh() }
         }
         .task(id: requestedChatLoadIdentity) {
             guard visible, loaded, model.error == nil,
@@ -743,6 +745,7 @@ struct ClientChatThread: View {
     @State private var window = TranscriptWindow()
     @State private var scrollAccess = ClientTranscriptScrollAccess()
     @State private var readingFrames = ClientTranscriptReadingFrames()
+    @State private var rowMounts = TranscriptRowMounts()
     @State private var readingHold = ChatReadingHold()
     @State private var readingDelivery = TranscriptScrollDelivery()
     @State private var readerMoved = false
@@ -1895,6 +1898,8 @@ struct ClientChatThread: View {
                                     && ((model.hasEarlier && measuringRows) || !follow.atEnd),
                                 holdingReading: preservesReadingMark
                             )
+                            .onAppear { rowMounts.appeared() }
+                            .onDisappear { rowMounts.disappeared() }
                         }
                     }
                     if sliceOffset == 0 {
@@ -2189,6 +2194,9 @@ struct ClientChatThread: View {
                     if follow.arrived, quiet >= 3 { return }
                 }
             }
+            .task(id: "\(isActive)-\(scenePhase == .active)") {
+                await watchMountedRows(proxy)
+            }
             .task(id: settleMood) {
                 guard settleMood == .ok else { return }
                 do { try await Task.sleep(for: .milliseconds(480)) } catch { return }
@@ -2458,6 +2466,55 @@ struct ClientChatThread: View {
     /// The ForEach is a bounded slice, so walking it is cheap. A slice that
     /// has dropped the newest rows is not the end.
     private var canScrollToEnd: Bool { sliceOffset == 0 }
+
+    /// A lazy stack can be left holding none of its rows while the scroll
+    /// view sits at a real offset among them. Placement pins the end on
+    /// estimated heights, the estimates shrink as a long reply is measured
+    /// (or the keyboard resizes the viewport), and the stack drops the rows
+    /// it built without asking again which ones are on screen. On iPhone
+    /// that is a transcript of plain theme background, rows and Jump to
+    /// latest gone, until the person drags it or reopens the chat.
+    ///
+    /// Pinning again does not help: the end sentinel sits outside the lazy
+    /// stack and a scroll to it builds nothing. Neither does a one-point
+    /// move. A viewport-sized move does, so a following reader is moved up
+    /// one screen and pinned back to the end. Anyone else is moved a point
+    /// and back, which keeps their place. Bounded, so a chat that really has
+    /// nothing to build cannot keep moving the view.
+    private func watchMountedRows(_ proxy: ScrollViewProxy) async {
+        guard isActive, scenePhase == .active else { return }
+        var repairs = 0
+        var consecutiveEmptySamples = 0
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            guard isActive, scenePhase == .active, follow.active else { continue }
+            // The opening cover only hides the stack, so repair under it:
+            // the rows are back by the time it lifts.
+            if rowMounts.count > 0 || visibleItems.isEmpty
+                || model.openingConversation || follow.scrolling || scrollAccess.readerIsTouching {
+                consecutiveEmptySamples = 0
+                if rowMounts.count > 0 { repairs = 0 }
+                continue
+            }
+            consecutiveEmptySamples += 1
+            guard consecutiveEmptySamples >= 2, repairs < 3, scrollAccess.isEligible else { continue }
+            repairs += 1
+            consecutiveEmptySamples = 0
+            traceViewport("unmounted-repair")
+            let following = follow.pinned || follow.atEnd
+            follow.markDrivenInstant()
+            guard scrollAccess.nudge(by: following ? -scrollAccess.viewportHeight : 1) else { continue }
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            if following {
+                follow.markDrivenInstant()
+                lastSilentPinAt = .distantPast
+                pinToLatest(proxy, animated: false)
+            } else {
+                scrollAccess.nudge(by: -1)
+            }
+        }
+    }
 
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
         // A pending request owns the view. Streaming text must not scroll it
@@ -3069,6 +3126,23 @@ private final class ClientTranscriptScrollAccess {
         return (visible, native.minY - global.minY)
     }
 
+    var viewportHeight: CGFloat { view?.bounds.height ?? 0 }
+
+    /// Move the visible region by `distance`, clamped to the content. The
+    /// lazy stack inside measures which rows are on screen at the new place.
+    /// Never while a finger is on it.
+    @discardableResult
+    func nudge(by distance: CGFloat) -> Bool {
+        guard isEligible, let view, !view.isTracking, !view.isDragging, !view.isDecelerating else { return false }
+        let offset = view.contentOffset
+        let minimum = -view.adjustedContentInset.top
+        let maximum = max(minimum, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
+        let target = min(max(offset.y + distance, minimum), maximum)
+        guard abs(target - offset.y) >= 0.5 else { return false }
+        view.setContentOffset(CGPoint(x: offset.x, y: target), animated: false)
+        return true
+    }
+
     var readerIsMoving: Bool {
         guard let view else { return false }
         return view.isDragging || view.isDecelerating
@@ -3166,8 +3240,8 @@ private struct ClientTranscriptReadingGesture: ViewModifier {
 
 #if DEBUG
 @MainActor
-private enum ClientViewportTrace {
-    private static let enabled = ProcessInfo.processInfo.environment["TOKENSTAT_VIEWPORT_TRACE"] == "1"
+enum ClientViewportTrace {
+    static let enabled = ProcessInfo.processInfo.environment["TOKENSTAT_VIEWPORT_TRACE"] == "1"
     static func note(_ event: String, mark: ChatReadingMark? = nil, scroll: UIScrollView? = nil,
                      frame: CGRect? = nil, details: String = "") {
         guard enabled else { return }
@@ -3175,7 +3249,24 @@ private enum ClientViewportTrace {
         let geometry = scroll.map {
             "offset=\($0.contentOffset) bounds=\($0.bounds) insets=\($0.adjustedContentInset) content=\($0.contentSize)"
         } ?? "no-scroll"
-        print("chat-viewport \(event) \(place) frame=\(String(describing: frame)) \(geometry) \(details)")
+        let line = "chat-viewport \(Date().timeIntervalSince1970) \(event) \(place) frame=\(String(describing: frame)) \(geometry) \(details)"
+        print(line)
+        append(line)
+    }
+
+    /// The simulator drops a launch's stdout redirect, so a debug trace
+    /// also lands in the app's caches folder.
+    static func append(_ line: String) {
+        guard enabled, let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        let url = folder.appendingPathComponent("viewport-trace.log")
+        let data = Data((line + "\n").utf8)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
     }
 }
 #endif

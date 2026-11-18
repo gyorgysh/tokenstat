@@ -759,6 +759,22 @@ struct ChatScrollViewportKey: PreferenceKey {
     }
 }
 
+/// How many transcript rows a lazy stack holds right now. A lazy stack can
+/// drop every row it built while its scroll view rests among them: the end
+/// was pinned on estimated heights, the estimates changed as a long reply
+/// was measured, and nothing asks the stack again which rows are on screen.
+/// The transcript is then plain background until something scrolls it.
+/// Zero here while the conversation has rows is how both chat screens see
+/// that and move the view to make the stack build again.
+///
+/// A plain class so rows coming and going never invalidate the transcript.
+@MainActor
+final class TranscriptRowMounts {
+    private(set) var count = 0
+    func appeared() { count += 1 }
+    func disappeared() { count = max(0, count - 1) }
+}
+
 struct TranscriptBottomSentinel: View {
     var body: some View {
         Color.clear

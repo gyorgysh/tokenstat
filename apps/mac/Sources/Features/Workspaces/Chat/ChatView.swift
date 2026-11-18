@@ -204,6 +204,7 @@ struct ChatView: View {
     /// changes, and pulses share one ~150ms gate, same as the growth repins.
     /// Animated pins (a jump, an approval card) always go through.
     @State private var lastSilentPinAt = Date.distantPast
+    @State private var rowMounts = TranscriptRowMounts()
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
     /// geometry readers exist for the stretch that can need an anchor and
@@ -650,6 +651,8 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
                         }
+                                .onAppear { rowMounts.appeared() }
+                                .onDisappear { rowMounts.disappeared() }
                         ForEach(rows) { item in
                             transcriptRow(item, chat: chat, spinning: spinning)
                         }
@@ -905,6 +908,9 @@ struct ChatView: View {
             .task(id: settleMood) {
                 guard settleMood == .ok else { return }
                 try? await Task.sleep(for: .milliseconds(480))
+            .task(id: isActive) {
+                await watchMountedRows(proxy)
+            }
                 settleMood = nil
             }
         }
@@ -1198,6 +1204,43 @@ struct ChatView: View {
     /// The ForEach is a bounded slice, so walking it is cheap. A slice that
     /// has dropped the newest rows is not the end, and pinning it would pin
     /// a sentinel under old messages.
+    /// See `TranscriptRowMounts`. Pinning again does not rebuild the rows:
+    /// the end sentinel sits outside the lazy stack. Scrolling to the top of
+    /// the last row does, because the stack has to build that row to place
+    /// it, and the end is pinned again after. Only a reader following the
+    /// end is moved. Anyone else is scrolling themselves, which rebuilds the
+    /// rows anyway. Bounded, so a chat that really has nothing to build
+    /// cannot keep moving the view.
+    private func watchMountedRows(_ proxy: ScrollViewProxy) async {
+        guard isActive else { return }
+        var repairs = 0
+        var emptySamples = 0
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            // The opening cover only hides the stack, so repair under it:
+            // the rows are back by the time it lifts.
+            if rowMounts.count > 0 || visibleItems.isEmpty
+                || model.openingConversation || follow.scrolling || !follow.pinned {
+                emptySamples = 0
+                if rowMounts.count > 0 { repairs = 0 }
+                continue
+            }
+            emptySamples += 1
+            guard emptySamples >= 2, repairs < 3, let last = visibleItems.last?.id else { continue }
+            repairs += 1
+            emptySamples = 0
+            follow.markDrivenInstant()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo(last, anchor: .top) }
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            follow.markDrivenInstant()
+            lastSilentPinAt = .distantPast
+            pinToLatest(proxy, animated: false)
+        }
+    }
+
     private var canScrollToEnd: Bool { sliceOffset == 0 }
 
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {

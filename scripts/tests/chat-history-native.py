@@ -193,8 +193,8 @@ def producer_binary(run_root):
 
 
 async def run(args):
-    run_root = ROOT / "target/chat-performance" / f"history-encrypted-run-{uuid.uuid4().hex[:8]}"
-    run_root.mkdir(mode=0o700)
+    run_root = args.runs_dir / f"history-encrypted-run-{uuid.uuid4().hex[:8]}"
+    run_root.mkdir(mode=0o700, parents=True)
     print("Fixture root:", run_root, flush=True)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -215,7 +215,7 @@ async def run(args):
     booted_here = False
     handles = []
     commands = {"desktop": 0, "phone": 0}
-    roles = ["desktop"] if args.desktop_only else list(proxies)
+    roles = ["desktop"] if args.desktop_only else ["phone"] if args.phone_only else list(proxies)
     proofs = []
     recovery_ms = {}
 
@@ -356,44 +356,45 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 "proxies": {role: proxy.status() for role, proxy in proxies.items()}})
             return
 
-        app = args.mac_app
-        metadata = plistlib.loads((app / "Contents/Info.plist").read_bytes())
-        assert metadata.get("CFBundleIdentifier") == DESKTOP, "Use the generated HistoryMac QA app"
-        desktop_executable = app / "Contents/MacOS" / metadata["CFBundleExecutable"]
-        log = (run_root / "desktop.log").open("w"); handles.append(log)
-        desktop_environment = client_environment("desktop")
-        desktop_environment["TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH"] = str(args.desktop_width)
-        if reader_daemon:
-            desktop_environment["TOKENSTAT_NATIVE_HISTORY_READER_SOCKET"] = reader_info["socket"]
-        # Launch once through AppKit, with an explicit private environment.
-        # A bare executable can restore no windows; a later `open -a` may
-        # start another copy without the fixture environment instead.
-        launch = ["open", "-n", "-F", "-W", "--stdout", str(run_root / "desktop.log"),
-            "--stderr", str(run_root / "desktop.log")]
-        for key in ["TOKENSTAT_NATIVE_HISTORY_ROLE", "TOKENSTAT_NATIVE_HISTORY_FIXTURE",
-                    "TOKENSTAT_NATIVE_HISTORY_DESKTOP_LOCAL", "TOKENSTAT_NATIVE_HISTORY_RTL",
-                    "TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH",
-                    "TOKENSTAT_NATIVE_HISTORY_RELAY", "TOKENSTAT_NATIVE_HISTORY_READER_SOCKET",
-                    "TOKENSTAT_DATA_DIR", "TOKENSTAT_IDENTITY_DIR", "TOKENSTAT_API_BASE",
-                    "HOME", "ZDOTDIR", "HISTFILE", "PATH"]:
-            if key in desktop_environment:
-                launch += ["--env", key + "=" + desktop_environment[key]]
-        if args.direct_launch:
-            desktop = subprocess.Popen([str(desktop_executable), desktop_marker,
-                "-ApplePersistenceIgnoreState", "YES"], env=desktop_environment,
-                stdout=log, stderr=log)
-        else:
-            desktop = subprocess.Popen(launch + [str(app), "--args", desktop_marker], stdout=log, stderr=log)
-        process = await wait(lambda: read_json(run_root / "desktop/process.json"))
-        desktop_pid = process["pid"]
-        assert isinstance(desktop_pid, int) and desktop_pid > 1
-        if args.direct_launch:
-            # A direct SwiftUI launch can start without a window after a prior
-            # window was closed. Ask Launch Services to reopen only when the
-            # sole matching executable is the fixture-owned process.
-            await asyncio.sleep(2)
-            if not state("desktop") and sole_owned_desktop(desktop_pid, desktop_executable, desktop_marker):
-                await command("open", "-a", str(app))
+        if not args.phone_only:
+            app = args.mac_app
+            metadata = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+            assert metadata.get("CFBundleIdentifier") == DESKTOP, "Use the generated HistoryMac QA app"
+            desktop_executable = app / "Contents/MacOS" / metadata["CFBundleExecutable"]
+            log = (run_root / "desktop.log").open("w"); handles.append(log)
+            desktop_environment = client_environment("desktop")
+            desktop_environment["TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH"] = str(args.desktop_width)
+            if reader_daemon:
+                desktop_environment["TOKENSTAT_NATIVE_HISTORY_READER_SOCKET"] = reader_info["socket"]
+            # Launch once through AppKit, with an explicit private environment.
+            # A bare executable can restore no windows; a later `open -a` may
+            # start another copy without the fixture environment instead.
+            launch = ["open", "-n", "-F", "-W", "--stdout", str(run_root / "desktop.log"),
+                "--stderr", str(run_root / "desktop.log")]
+            for key in ["TOKENSTAT_NATIVE_HISTORY_ROLE", "TOKENSTAT_NATIVE_HISTORY_FIXTURE",
+                        "TOKENSTAT_NATIVE_HISTORY_DESKTOP_LOCAL", "TOKENSTAT_NATIVE_HISTORY_RTL",
+                        "TOKENSTAT_NATIVE_HISTORY_DESKTOP_WIDTH",
+                        "TOKENSTAT_NATIVE_HISTORY_RELAY", "TOKENSTAT_NATIVE_HISTORY_READER_SOCKET",
+                        "TOKENSTAT_DATA_DIR", "TOKENSTAT_IDENTITY_DIR", "TOKENSTAT_API_BASE",
+                        "HOME", "ZDOTDIR", "HISTFILE", "PATH"]:
+                if key in desktop_environment:
+                    launch += ["--env", key + "=" + desktop_environment[key]]
+            if args.direct_launch:
+                desktop = subprocess.Popen([str(desktop_executable), desktop_marker,
+                    "-ApplePersistenceIgnoreState", "YES"], env=desktop_environment,
+                    stdout=log, stderr=log)
+            else:
+                desktop = subprocess.Popen(launch + [str(app), "--args", desktop_marker], stdout=log, stderr=log)
+            process = await wait(lambda: read_json(run_root / "desktop/process.json"))
+            desktop_pid = process["pid"]
+            assert isinstance(desktop_pid, int) and desktop_pid > 1
+            if args.direct_launch:
+                # A direct SwiftUI launch can start without a window after a prior
+                # window was closed. Ask Launch Services to reopen only when the
+                # sole matching executable is the fixture-owned process.
+                await asyncio.sleep(2)
+                if not state("desktop") and sole_owned_desktop(desktop_pid, desktop_executable, desktop_marker):
+                    await command("open", "-a", str(app))
         if not args.desktop_only:
             inventory = json.loads(await command("xcrun", "simctl", "list", "devices", "available", "--json"))
             device = next(device for devices in inventory["devices"].values()
@@ -412,6 +413,30 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 "--stderr=" + str(run_root / "phone-errors.log"), args.simulator, PHONE, env=launch_environment)
         print("Native QA apps launched:", ", ".join(roles), flush=True)
         await wait(lambda: all(state(role) and state(role)["loaded"] for role in roles), 180)
+        if args.reading_soak:
+            assert args.phone_only, "Reading soak drives the iPhone by hand"
+            await visible("network-start")
+            emit({"type": "text", "data": "\n\n" + "\n\n".join(f"soak paragraph {index} " + "reading padding " * 40
+                for index in range(60))})
+            print("Soak streaming; touch", run_root / "stop", "to finish", flush=True)
+            tick = 0
+            deadline = time.monotonic() + 840
+            while not (run_root / "stop").exists() and time.monotonic() < deadline:
+                live()
+                offline = (run_root / "offline").exists()
+                if offline != proxies["phone"].offline:
+                    proxies["phone"].set_offline(offline)
+                    print("phone offline" if offline else "phone online", flush=True)
+                tick += 1
+                body = f"\n\nsoaktick{tick} " + ("streamed words " * 30 if tick % 5 == 0 else "")
+                emit({"type": "text", "data": body})
+                if tick % 20 == 0:
+                    current = state("phone") or {}
+                    print(f"tick {tick} events={current.get('events')} blank={current.get('blankSamples')}", flush=True)
+                await asyncio.sleep(0.4)
+            emit({"type": "end", "stopReason": "end_turn"})
+            atomic_json(run_root / "result.json", {"ok": True, "ticks": tick, "states": {role: state(role) for role in roles}})
+            return
         if args.layout:
             assert not args.desktop_only, "Layout QA requires an iPhone"
             await native("phone", expected="network-start")
@@ -816,6 +841,11 @@ if __name__ == "__main__":
     parser.add_argument("--automation-compact", action="store_true", help="Render the compact automation transcript on Mac")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--probe-only", action="store_true", help="Verify the producer and encrypted FFI setup before opening apps")
+    # The simulator cannot read or write a checkout on an external volume.
+    parser.add_argument("--runs-dir", type=Path, default=ROOT / "target/chat-performance",
+                        help="Where each run keeps its fixture and artifacts; must be readable by the simulator")
+    parser.add_argument("--phone-only", action="store_true", help="Run the iPhone reader without the Mac app")
+    parser.add_argument("--reading-soak", action="store_true", help="Stream into the iPhone until the run's stop file exists, for hand testing")
     parser.add_argument("--desktop-only", action="store_true", help="Verify the Mac view before the combined phone run")
     parser.add_argument("--direct-launch", action="store_true", help="Launch the owned Mac executable directly when Launch Services is unavailable")
     parser.add_argument("--desktop-width", type=int, default=760, metavar="POINTS",

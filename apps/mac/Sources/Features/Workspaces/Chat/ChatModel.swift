@@ -5056,7 +5056,11 @@ final class ChatModel {
         sharingRecoveryNotice = nil
         #if DEBUG
         if ProcessInfo.processInfo.environment["TOKENSTAT_VIEWPORT_TRACE"] == "1" {
-            print("chat-selection model=\(ObjectIdentifier(self)) cause=\(reason) chat=\(selected?.id ?? "none") workspace=\(workspaceID ?? "none") generation=\(selectionGeneration)->\(selectionGeneration &+ 1) events=\(events.count)")
+            let line = "chat-selection model=\(ObjectIdentifier(self)) cause=\(reason) chat=\(selected?.id ?? "none") workspace=\(workspaceID ?? "none") generation=\(selectionGeneration)->\(selectionGeneration &+ 1) events=\(events.count)"
+            print(line)
+            #if !os(macOS)
+            ClientViewportTrace.append(line)
+            #endif
         }
         #endif
         pollWatcher.cancel()

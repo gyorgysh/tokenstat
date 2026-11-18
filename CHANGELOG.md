@@ -5,6 +5,13 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
+## [Unreleased]
+
+### Fixed
+
+- A long chat no longer turns into a blank screen after opening it, returning to the app, or bringing up the keyboard on iPhone and iPad, or after a resize on the Mac. The messages come back by themselves instead of needing a scroll or leaving the chat.
+- On iPhone and iPad, a repository's chat list shows chats started elsewhere when you come back to it, without a pull to refresh.
+
 ## [1.20.0] - 2026-11-14
 
 ### Improved
