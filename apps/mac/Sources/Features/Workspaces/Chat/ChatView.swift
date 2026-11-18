@@ -284,6 +284,41 @@ struct ChatView: View {
                         }
                     }
                 }
+                // Pin and Continue sat inside the menu above, and people did
+                // not find them there. They are the two things somebody does
+                // to keep a conversation going later, so they get a seat.
+                if !showingOverview, model.selected != nil, let reference = model.currentReference {
+                    let pinned = pins.isPinned(reference)
+                    let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
+                    ToolbarIconButton(
+                        systemImage: (pinned ? ActionIcon.pinned : ActionIcon.pin).symbol,
+                        help: pinned ? L10n.text("apple.chatview.unpin_from_home.df00f5de")
+                            : full ? L10n.text("apple.chatview.home_holds_eight_pins_unpin_one_to_make_ro.7d0eb1cf")
+                            : L10n.text("apple.chatview.pin_to_home.db029e6f"),
+                        isAccent: pinned,
+                        isEnabled: pinned || !full
+                    ) {
+                        Task {
+                            if pinned {
+                                await PinnedWorkActions.unpin(reference)
+                            } else {
+                                await PinnedWorkActions.pin(
+                                    reference,
+                                    label: model.selected?.title ?? L10n.text("apple.chatview.chat.460b3a7d"),
+                                    folderName: workspaceName ?? L10n.text("apple.chatview.project.98595978")
+                                )
+                            }
+                        }
+                    }
+                }
+                if !showingOverview, model.currentReference != nil, model.savedCopy == nil {
+                    ToolbarIconButton(
+                        systemImage: ActionIcon.device.symbol,
+                        help: L10n.text("apple.chatview.continue_on_another_device.b5836f9a")
+                    ) {
+                        showingHandoff = true
+                    }
+                }
                 ToolbarIconButton(
                     systemImage: "plus",
                     help: L10n.text("apple.chatview.new_chat.db18382a"),
@@ -622,6 +657,7 @@ struct ChatView: View {
         // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
+        let split = TranscriptSlice.split(rows)
         ScrollViewReader { proxy in
             ScrollView {
                 // Keep the bottom target measured even when a tall lazy row
@@ -649,11 +685,15 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
                         }
-                        ForEach(rows) { item in
+                        ForEach(split.lazy) { item in
                             transcriptRow(item, chat: chat, spinning: spinning)
-                                .onAppear { rowMounts.appeared() }
-                                .onDisappear { rowMounts.disappeared() }
+                                .transcriptRowMount(item.id, in: rowMounts)
                         }
+                    }
+                    // See `TranscriptSlice.measuredTail`.
+                    ForEach(split.measured) { item in
+                        transcriptRow(item, chat: chat, spinning: spinning)
+                            .transcriptRowMount(item.id, in: rowMounts)
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript, let chat = model.selected {
@@ -1219,10 +1259,10 @@ struct ChatView: View {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             // The opening cover only hides the stack, so repair under it:
             // the rows are back by the time it lifts.
-            if rowMounts.count > 0 || visibleItems.isEmpty
+            if rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
                 || model.openingConversation || follow.scrolling || !follow.pinned {
                 emptySamples = 0
-                if rowMounts.count > 0 { repairs = 0 }
+                if rowMounts.showsRows(viewportHeight: window.viewportHeight) { repairs = 0 }
                 continue
             }
             emptySamples += 1

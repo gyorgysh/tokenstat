@@ -32,11 +32,23 @@ struct ClientChatMenu: View {
 
     var body: some View {
         Menu {
-            if pinReference != nil {
-                PinToggleButton(reference: pinReference, label: conversation.title, folderName: folderName,
-                                isMenuItem: true, onRefused: {
-                    model.error = L10n.text("apple.chatview.home_holds_eight_pins_unpin_one_to_make_ro.7d0eb1cf")
-                })
+            // Pin and Continue were rows among a dozen and people read past
+            // them. A control group draws them as the large pair of buttons
+            // at the head of the menu, the way the system shows the actions
+            // a menu is mostly opened for.
+            if pinReference != nil || onHandoff != nil {
+                ControlGroup {
+                    if pinReference != nil {
+                        PinToggleButton(reference: pinReference, label: conversation.title, folderName: folderName,
+                                        isMenuItem: true, onRefused: {
+                            model.error = L10n.text("apple.chatview.home_holds_eight_pins_unpin_one_to_make_ro.7d0eb1cf")
+                        })
+                    }
+                    if let onHandoff {
+                        Button(L10n.text("apple.clientchatview.continue_on_another_device.b5836f9a"), .device, action: onHandoff)
+                            .disabled(conversation.teamShare != nil)
+                    }
+                }
             }
             if let onTools {
                 Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source, action: onTools)
@@ -64,16 +76,10 @@ struct ClientChatMenu: View {
                     }
                 }.disabled(conversation.teamShare != nil || copying || !ownsProject)
             }
-            if onSetup != nil || onHandoff != nil {
+            if let onSetup {
                 Divider()
-                if let onSetup {
-                    Button(L10n.text("apple.clientchatview.setup.7013af4c"), .settings, action: onSetup)
-                        .disabled(conversation.teamShare != nil)
-                }
-                if let onHandoff {
-                    Button(L10n.text("apple.clientchatview.continue_on_another_device.b5836f9a"), .device, action: onHandoff)
-                        .disabled(conversation.teamShare != nil)
-                }
+                Button(L10n.text("apple.clientchatview.setup.7013af4c"), .settings, action: onSetup)
+                    .disabled(conversation.teamShare != nil)
             }
             Section {
                 ChatDetailMenuPicker()

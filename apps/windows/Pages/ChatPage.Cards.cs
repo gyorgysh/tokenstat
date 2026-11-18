@@ -559,6 +559,105 @@ internal sealed partial class ChatPage
         if (_turnReviews.TryGetValue(id, out var files)) ReviewTurnChangesRequested?.Invoke(files, path);
     }
 
+    /// <summary>
+    /// The point where a conversation changed hands, and what the incoming
+    /// agent was told. A banner in the brand gradient rather than a divider:
+    /// people missed the thin caption, and a change of agent changes what
+    /// every reply below it can know. The same banner as the Mac and phones.
+    /// </summary>
+    private UIElement HandoffBanner(DisplayItem item)
+    {
+        var expanded = _expandedCards.TryGetValue(item.Id, out var open) && open;
+        var agent = string.IsNullOrEmpty(item.Target)
+            ? L10n.Text("windows.chatpage.another_agent.03a23179")
+            : char.ToUpperInvariant(item.Target[0]) + item.Target[1..];
+        var header = new Grid { ColumnSpacing = Theme.SpaceM };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new Border
+        {
+            Width = 34,
+            Height = 34,
+            CornerRadius = new CornerRadius(17),
+            Background = HandoffGradient(1, 1),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new FontIcon
+            {
+                Glyph = "\uE895",
+                FontSize = 16,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        });
+        var title = new TextBlock
+        {
+            Text = L10n.Text("windows.chatpage.handed_to_0.902d7234", agent),
+            FontSize = 15,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(title, 1);
+        header.Children.Add(title);
+        if (!string.IsNullOrEmpty(item.Text))
+        {
+            var toggle = Buttons.Secondary(
+                expanded ? L10n.Text("windows.chatpage.hide_summary.4cf94a81") : L10n.Text("windows.chatpage.what_it_was_told.4b2128b2"),
+                expanded ? ActionIcon.Collapse : ActionIcon.More,
+                (_, _) => ToggleCard(item.Id, !expanded), small: true);
+            toggle.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(toggle, 2);
+            header.Children.Add(toggle);
+        }
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        stack.Children.Add(header);
+        if (expanded && !string.IsNullOrEmpty(item.Text))
+        {
+            stack.Children.Add(new Border
+            {
+                Background = Theme.Brush(static () => Theme.Panel),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(Theme.SpaceS),
+                Child = new TextBlock
+                {
+                    Text = item.Text,
+                    FontFamily = Fonts.Mono,
+                    FontSize = 12,
+                    TextWrapping = TextWrapping.Wrap,
+                    IsTextSelectionEnabled = true,
+                },
+            });
+        }
+        return new Border
+        {
+            Background = HandoffGradient(0.16, 0.10),
+            BorderBrush = HandoffGradient(0.7, 0.7),
+            BorderThickness = new Thickness(1.5),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(Theme.SpaceM),
+            Margin = new Thickness(0, Theme.SpaceS, 0, Theme.SpaceS),
+            Child = stack,
+        };
+    }
+
+    private static LinearGradientBrush HandoffGradient(double accentAlpha, double secondaryAlpha)
+    {
+        static Color Faded(Color color, double alpha) => Color.FromArgb((byte)Math.Round(255 * alpha), color.R, color.G, color.B);
+        var stops = new GradientStopCollection
+        {
+            new GradientStop { Color = Faded(Theme.Accent, accentAlpha), Offset = 0 },
+            new GradientStop { Color = Faded(Theme.Secondary, secondaryAlpha), Offset = 1 },
+        };
+        return new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops = stops,
+        };
+    }
+
     private UIElement ChangesCard(string id, IReadOnlyList<ChangedFile> files)
     {
         const int shownFiles = 4;

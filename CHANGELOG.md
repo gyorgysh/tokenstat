@@ -7,9 +7,15 @@ desktop is a review build. Newest first.
 
 ## [1.21.0]
 
+### Changed
+
+- A handoff to another agent now shows as a bright banner in the chat, with the agent's name and what it was told behind a tap, instead of a thin divider that was easy to miss. Windows shows handoffs for the first time.
+- Pin and Continue on another device are easier to find. On iPhone and iPad they are the two large buttons at the top of the chat menu, on the Mac they sit in the chat's toolbar, and on Android Pin leads the menu in the accent colour.
+
 ### Fixed
 
-- A long chat no longer turns into a blank screen after opening it, returning to the app, or bringing up the keyboard on iPhone and iPad, or after a resize on the Mac. The messages come back by themselves instead of needing a scroll or leaving the chat.
+- A long chat no longer turns into a blank screen after opening it, returning to the app, or bringing up the keyboard on iPhone and iPad, or after a resize on the Mac. It also opens at the real end of the last reply instead of partway through it. The messages come back by themselves instead of needing a scroll or leaving the chat.
+- Jump to latest appears when a chat reopens at the place you were reading, not only after you scroll.
 - On iPhone and iPad, a repository's chat list shows chats started elsewhere when you come back to it, without a pull to refresh.
 
 ## [1.20.0] - 2026-11-14

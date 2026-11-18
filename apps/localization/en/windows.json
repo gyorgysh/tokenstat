@@ -2302,5 +2302,9 @@
   "windows.chatpage.search_agents.212fd04a": "Search agents",
   "windows.chatpage.search_models.10421935": "Search models",
   "windows.chatpage.search_efforts.f7909b52": "Search efforts",
-  "windows.chatpage.nothing_matches.965b516d": "Nothing matches"
+  "windows.chatpage.nothing_matches.965b516d": "Nothing matches",
+  "windows.chatpage.handed_to_0.902d7234": "Handed to {0}",
+  "windows.chatpage.what_it_was_told.4b2128b2": "What it was told",
+  "windows.chatpage.hide_summary.4cf94a81": "Hide summary",
+  "windows.chatpage.another_agent.03a23179": "another agent"
 }

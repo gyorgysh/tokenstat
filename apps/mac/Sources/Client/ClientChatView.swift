@@ -746,6 +746,8 @@ struct ClientChatThread: View {
     @State private var scrollAccess = ClientTranscriptScrollAccess()
     @State private var readingFrames = ClientTranscriptReadingFrames()
     @State private var rowMounts = TranscriptRowMounts()
+    @State private var transcriptRebuild = 0
+    @State private var lastTranscriptRebuild = Date.distantPast
     @State private var readingHold = ChatReadingHold()
     @State private var readingDelivery = TranscriptScrollDelivery()
     @State private var readerMoved = false
@@ -1810,12 +1812,80 @@ struct ClientChatThread: View {
         }
     }
 
+    private func transcriptRow(_ item: ChatDisplayItem, chat: ChatConversation, spinning: String?) -> some View {
+        Group {
+            if item.id == model.signInGateRowID, model.savedCopy == nil,
+               let backend = model.backend(for: chat.backend) {
+                ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
+                                   recoveryFailureID: model.signInFailureID)
+            } else {
+                ClientChatEventRow(
+                    item: item,
+                    attachmentData: attachmentData(for: item),
+                    defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
+                    agentLabel: { backend in
+                        model.backend(for: backend)?.label ?? backend.capitalized
+                    },
+                    isPending: pendingApproval(item),
+                    resolve: { approval, choice in
+                        let owner = model.currentReference
+                        Task { await model.resolve(approval, choice: choice, owner: owner) }
+                    },
+                    attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
+                    imageResources: model.imageResources(for: item.imageAttachments),
+                    openAttachmentFile: { attachment, url in previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name) },
+                    attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
+                    attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
+                    downloadAttachment: { attachment in
+                        Task { await model.downloadResponseAttachment(attachment) }
+                    },
+                    openAttachment: open(_:data:),
+                    faceSeed: model.faceSeed,
+                    isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
+                    animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
+                    expandsOutput: detail.level == .detailed,
+                    compactTools: detail.level == .minimal,
+                    toggleGroup: {
+                        beginViewportChoice()
+                        model.toggleGroup($0)
+                    },
+                    onToggleOutput: beginViewportChoice,
+                    answerQuestion: { question, text in
+                        Task { await model.answerQuestion(question, answer: text) }
+                    },
+                    answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
+                    canAnswerQuestions: !model.isSharedSource && model.savedCopy == nil && !model.isShowingCachedTranscript,
+                    reviewChanges: { changes, path in
+                        recordedTurnReview = ClientRecordedTurnReview(changes: changes, focus: path)
+                    }
+                )
+                .equatable()
+            }
+        }
+        // No geometry readers mid-fling: each one reports per
+        // frame, and a fast scroll turns those reports into a
+        // transaction per frame that placement never drains.
+        // Readers return 0.35s after the last moved frame, via
+        // `scrolling`, before any paging decision needs them.
+        // Also wherever the reader has stopped above the
+        // latest turn: that place is worth keeping. Never
+        // mid-scroll, which is a report per row per frame.
+        .clientTranscriptRowFrame(
+            item.id,
+            watched: (!follow.scrolling || (follow.settling && !follow.pinned))
+                && ((model.hasEarlier && measuringRows) || !follow.atEnd),
+            holdingReading: preservesReadingMark
+        )
+        .transcriptRowMount(item.id, in: rowMounts)
+    }
+
     private func transcript(_ chat: ChatConversation) -> some View {
         // Once per pass, not once per reader of it. `visibleItems` copies the
         // window out of the conversation every time it is asked, and the
         // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
+        let split = TranscriptSlice.split(rows)
         return ScrollViewReader { proxy in
             ScrollView {
                 // Keep the bottom target measured even when a tall lazy row
@@ -1834,73 +1904,13 @@ struct ClientChatThread: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .accessibilityLabel(L10n.text("apple.clientchatview.show_earlier_messages.b6badd18"))
                         }
-                        ForEach(rows) { item in
-                            Group {
-                                if item.id == model.signInGateRowID, model.savedCopy == nil,
-                                   let backend = model.backend(for: chat.backend) {
-                                    ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
-                                                       recoveryFailureID: model.signInFailureID)
-                                } else {
-                                    ClientChatEventRow(
-                                        item: item,
-                                        attachmentData: attachmentData(for: item),
-                                        defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
-                                        agentLabel: { backend in
-                                            model.backend(for: backend)?.label ?? backend.capitalized
-                                        },
-                                        isPending: pendingApproval(item),
-                                        resolve: { approval, choice in
-                                            let owner = model.currentReference
-                                            Task { await model.resolve(approval, choice: choice, owner: owner) }
-                                        },
-                                        attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
-                                        imageResources: model.imageResources(for: item.imageAttachments),
-                                        openAttachmentFile: { attachment, url in previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name) },
-                                        attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
-                                        attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
-                                        downloadAttachment: { attachment in
-                                            Task { await model.downloadResponseAttachment(attachment) }
-                                        },
-                                        openAttachment: open(_:data:),
-                                        faceSeed: model.faceSeed,
-                                        isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
-                                        animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
-                                        expandsOutput: detail.level == .detailed,
-                                        compactTools: detail.level == .minimal,
-                                        toggleGroup: {
-                                            beginViewportChoice()
-                                            model.toggleGroup($0)
-                                        },
-                                        onToggleOutput: beginViewportChoice,
-                                        answerQuestion: { question, text in
-                                            Task { await model.answerQuestion(question, answer: text) }
-                                        },
-                                        answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
-                                        canAnswerQuestions: !model.isSharedSource && model.savedCopy == nil && !model.isShowingCachedTranscript,
-                                        reviewChanges: { changes, path in
-                                            recordedTurnReview = ClientRecordedTurnReview(changes: changes, focus: path)
-                                        }
-                                    )
-                                    .equatable()
-                                }
-                            }
-                            // No geometry readers mid-fling: each one reports per
-                            // frame, and a fast scroll turns those reports into a
-                            // transaction per frame that placement never drains.
-                            // Readers return 0.35s after the last moved frame, via
-                            // `scrolling`, before any paging decision needs them.
-                            // Also wherever the reader has stopped above the
-                            // latest turn: that place is worth keeping. Never
-                            // mid-scroll, which is a report per row per frame.
-                            .clientTranscriptRowFrame(
-                                item.id,
-                                watched: (!follow.scrolling || (follow.settling && !follow.pinned))
-                                    && ((model.hasEarlier && measuringRows) || !follow.atEnd),
-                                holdingReading: preservesReadingMark
-                            )
-                            .onAppear { rowMounts.appeared() }
-                            .onDisappear { rowMounts.disappeared() }
+                        ForEach(split.lazy) { item in
+                            transcriptRow(item, chat: chat, spinning: spinning)
                         }
+                    }
+                    // See `TranscriptSlice.measuredTail`.
+                    ForEach(split.measured) { item in
+                        transcriptRow(item, chat: chat, spinning: spinning)
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript, let chat = model.selected {
@@ -1936,6 +1946,9 @@ struct ClientChatThread: View {
                     }
                 }
             }
+            // A new scroll view, for `watchMountedRows` when moving the view
+            // did not make the lazy stack build again.
+            .id(transcriptRebuild)
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $transcriptDropTargeted, receive: receive)
             .scrollDismissesKeyboard(.immediately)
             // No tap-to-dismiss gesture here: `.scrollDismissesKeyboard`
@@ -2475,25 +2488,28 @@ struct ClientChatThread: View {
     /// that is a transcript of plain theme background, rows and Jump to
     /// latest gone, until the person drags it or reopens the chat.
     ///
+    /// A fling through a very long reply can leave it the same way.
+    ///
     /// Pinning again does not help: the end sentinel sits outside the lazy
     /// stack and a scroll to it builds nothing. Neither does a one-point
-    /// move. A viewport-sized move does, so a following reader is moved up
-    /// one screen and pinned back to the end. Anyone else is moved a point
-    /// and back, which keeps their place. Bounded, so a chat that really has
-    /// nothing to build cannot keep moving the view.
+    /// move. A screen-sized move does, so the view goes one screen away and
+    /// comes back: to the end for a following reader, to the same offset for
+    /// anyone else, which keeps their place. Bounded, so a chat that really
+    /// has nothing to build cannot keep moving the view.
     private func watchMountedRows(_ proxy: ScrollViewProxy) async {
         guard isActive, scenePhase == .active else { return }
         var repairs = 0
+        var rebuilds = 0
         var consecutiveEmptySamples = 0
         while !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard isActive, scenePhase == .active, follow.active else { continue }
             // The opening cover only hides the stack, so repair under it:
             // the rows are back by the time it lifts.
-            if rowMounts.count > 0 || visibleItems.isEmpty
+            if rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
                 || model.openingConversation || follow.scrolling || scrollAccess.readerIsTouching {
                 consecutiveEmptySamples = 0
-                if rowMounts.count > 0 { repairs = 0 }
+                if rowMounts.showsRows(viewportHeight: window.viewportHeight) { repairs = 0; rebuilds = 0 }
                 continue
             }
             consecutiveEmptySamples += 1
@@ -2501,17 +2517,33 @@ struct ClientChatThread: View {
             repairs += 1
             consecutiveEmptySamples = 0
             traceViewport("unmounted-repair")
+            // A screen's move first. If the stack is still empty after it,
+            // its estimates are too far off for any move to reach a row:
+            // start a new scroll view, as leaving and reopening the chat
+            // does. Placement then restores the end or the reading place.
+            if repairs > 1 {
+                guard rebuilds < 3, Date().timeIntervalSince(lastTranscriptRebuild) > 5 else { continue }
+                lastTranscriptRebuild = Date()
+                rebuilds += 1
+                repairs = 0
+                traceViewport("unmounted-rebuild")
+                transcriptRebuild &+= 1
+                continue
+            }
             let following = follow.pinned || follow.atEnd
+            let screen = scrollAccess.viewportHeight
+            // Up a screen where there is room, down a screen at the top.
+            let step = scrollAccess.canMove(by: -screen) ? -screen : screen
             follow.markDrivenInstant()
-            guard scrollAccess.nudge(by: following ? -scrollAccess.viewportHeight : 1) else { continue }
+            guard scrollAccess.nudge(by: step) else { continue }
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
+            follow.markDrivenInstant()
             if following {
-                follow.markDrivenInstant()
                 lastSilentPinAt = .distantPast
                 pinToLatest(proxy, animated: false)
             } else {
-                scrollAccess.nudge(by: -1)
+                scrollAccess.nudge(by: -step)
             }
         }
     }
@@ -3127,6 +3159,15 @@ private final class ClientTranscriptScrollAccess {
     }
 
     var viewportHeight: CGFloat { view?.bounds.height ?? 0 }
+
+    /// Whether the offset can move by `distance` without hitting an edge.
+    func canMove(by distance: CGFloat) -> Bool {
+        guard let view else { return false }
+        let minimum = -view.adjustedContentInset.top
+        let maximum = max(minimum, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
+        let target = view.contentOffset.y + distance
+        return target >= minimum && target <= maximum
+    }
 
     /// Move the visible region by `distance`, clamped to the content. The
     /// lazy stack inside measures which rows are on screen at the new place.

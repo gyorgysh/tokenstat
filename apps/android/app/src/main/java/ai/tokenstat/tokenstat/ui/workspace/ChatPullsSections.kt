@@ -492,6 +492,28 @@ fun ChatSection(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, L10n.text("android.chatpullssections.chat_actions.8ba35bb8")) }
             DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                // Pin was one plain row among five and people read past it.
+                // It leads now, in the accent, with its glyph.
+                val pinned = homeStores.isPinned(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id)
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (pinned) L10n.text("android.chatpullssections.unpin.ee3c7161") else L10n.text("android.chatpullssections.pin.ff1cee74"),
+                            color = LocalTsColors.current.accent,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon((if (pinned) ActionIcon.Pinned else ActionIcon.Pin).vector, null, tint = LocalTsColors.current.accent)
+                    },
+                    onClick = {
+                        menu = false
+                        if (ownsProject() && !homeStores.togglePin(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id, chat.str("title") ?: L10n.text("android.chatpullssections.chat.460b3a7d"), folderName)) {
+                            actionError = L10n.text("android.chatpullssections.pinned_work_holds_eight_items_unpin_one_be.e716eb5e")
+                        }
+                    },
+                )
+                HorizontalDivider()
                 DropdownMenuItem(text = { Text(L10n.text("common.rename")) }, enabled = !chat.bol("running"), onClick = { menu = false; pendingRename = chat })
                 if (HostContracts.supportsChatFork(protocol)) {
                     DropdownMenuItem(text = { Text(L10n.text("android.chatpullssections.fork_chat.dfbcbb35")) }, onClick = {
@@ -507,13 +529,6 @@ fun ChatSection(
                         }
                     })
                 }
-                val pinned = homeStores.isPinned(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id)
-                DropdownMenuItem(text = { Text(if (pinned) L10n.text("android.chatpullssections.unpin.ee3c7161") else L10n.text("android.chatpullssections.pin.ff1cee74")) }, onClick = {
-                    menu = false
-                    if (ownsProject() && !homeStores.togglePin(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id, chat.str("title") ?: L10n.text("android.chatpullssections.chat.460b3a7d"), folderName)) {
-                        actionError = L10n.text("android.chatpullssections.pinned_work_holds_eight_items_unpin_one_be.e716eb5e")
-                    }
-                })
                 DropdownMenuItem(text = { Text(L10n.text("android.chatpullssections.project_sessions.82394d83")) }, onClick = { menu = false; onOpenSection("Sessions") })
                 DropdownMenuItem(text = { Text(L10n.text("android.chatpullssections.delete_chat.93291d9c")) }, onClick = { menu = false; pendingDelete = chat })
             }

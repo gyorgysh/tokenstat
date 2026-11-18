@@ -54,7 +54,7 @@ ALLOWED = [
 # Permit only the known native menu separators, identified by both adjacent
 # menu statements; a Divider added elsewhere in the file must still fail.
 MENU_SEPARATORS = [
-    ("Client/ClientChatMenu.swift", "if onSetup != nil || onHandoff != nil {", "if let onSetup {"),
+    ("Client/ClientChatMenu.swift", "if let onSetup {", "Button(L10n.text(\"apple.clientchatview.setup.7013af4c\"), .settings, action: onSetup)"),
     ("Client/ClientChatMenu.swift", "if onDelete != nil {", "Button(L10n.text(\"apple.clientchatview.delete_chat.93291d9c\"), .delete, role: .destructive) {"),
     ("Features/Terminals/ChatTerminalPane.swift", "if !ssh.hosts.isEmpty {", "Menu(L10n.text(\"apple.rootview.servers.68d7beb6\")) {"),
     ("Features/Terminals/ChatTerminalPane.swift", "if layout.isSplit {", "TerminalSwapButton(layout: layout) { terminals.swapPanes(in: folder.id) }"),

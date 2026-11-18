@@ -165,7 +165,7 @@ struct PinToggleButton: View {
                     (pinned ? ActionIcon.pinned : ActionIcon.pin).label(pinned ? L10n.text("apple.clientpinnedworksection.pinned.f20c8794") : L10n.text("apple.clientpinnedworksection.pin.ff1cee74"))
                         .labelStyle(.iconOnly)
                         .font(ClientType.body)
-                        .foregroundStyle(pinned ? Theme.accent : refused ? Theme.danger : .secondary)
+                        .foregroundStyle(refused ? Theme.danger : Theme.accent)
                         .frame(width: 44, height: 44)
                         .contentShape(.rect)
                 }

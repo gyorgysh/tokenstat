@@ -371,53 +371,16 @@ private struct ClientChatResponseAttachment: View {
 
 }
 
-/// The point where a conversation changed hands, and what the incoming agent
-/// was told. Same promise as the Mac: the summary is disclosed, never hidden.
+/// The point where a conversation changed hands. Same banner as the Mac, in
+/// the phone's type.
 struct ClientChatHandoffRow: View {
     let agent: String
     let brief: String
-    @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(spacing: Theme.Space.s) {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(Theme.font(10, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                Text(L10n.text("apple.clientchatrows.handed_to_0.902d7234", "\(agent)"))
-                    .font(ClientType.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                Spacer(minLength: 0)
-                if !brief.isEmpty {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.14)) { expanded.toggle() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(expanded ? L10n.text("apple.clientchatrows.hide.ac20a57b") : L10n.text("apple.clientchatrows.what_it_was_told.4b2128b2"))
-                            Image(systemName: "chevron.right")
-                                .font(Theme.font(9, weight: .semibold))
-                                .rotationEffect(.degrees(expanded ? 90 : 0))
-                        }
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            if expanded {
-                Text(brief)
-                    .font(ClientType.code)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.Space.s)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-        }
-        .padding(.vertical, Theme.Space.xs)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(L10n.text("apple.clientchatrows.handed_to_0_with_a_summary_of_the_conversa.136c6fc3", "\(agent)"))
+        ChatHandoffBanner(agent: agent, brief: brief,
+                          titleFont: ClientType.label.weight(.semibold),
+                          captionFont: ClientType.caption, briefFont: ClientType.code)
     }
 }
 

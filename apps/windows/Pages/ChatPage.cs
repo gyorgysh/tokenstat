@@ -1277,6 +1277,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Plan => $"{item.Id}|{_running}|{string.Join(";", item.Plan?.Select(step => step.Text + ":" + step.Status) ?? [])}",
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}|{item.CostUnknown}",
         ItemKind.Failed => $"{item.Id}|{item.Text}",
+        ItemKind.Handoff => $"{item.Id}|{item.Target}|{item.Text}|{_expandedCards.GetValueOrDefault(item.Id)}",
         ItemKind.Changes => $"{item.Id}|{string.Join(",", item.Changes?.Select(file => $"{file.Path}:{file.Added}:{file.Removed}") ?? Enumerable.Empty<string>())}|{_expandedCards.GetValueOrDefault(item.Id)}",
         _ => item.Id,
     });
@@ -1407,6 +1408,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Gallery => ImageGalleryRow(item),
         ItemKind.Usage => UsageLine(item),
         ItemKind.Failed => FailedRow(item),
+        ItemKind.Handoff => HandoffBanner(item),
         ItemKind.Group when item.Group is { } group => StepGroupRow(item.Id, group),
         ItemKind.Question when item.Question is { } question => QuestionCard(question),
         ItemKind.Changes when item.Changes is { } files => ChangesCard(item.Id, files),
@@ -2741,6 +2743,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             if (row is null) continue;
             var kind = Format.Text(row, "kind");
+            if (kind == "handoff")
+            {
+                FlushText();
+                FlushThinking();
+                items.Add(new DisplayItem
+                {
+                    Id = "handoff-" + Format.Long(row, "atMs") + "-" + items.Count,
+                    Kind = ItemKind.Handoff,
+                    Target = Format.Text(row, "to"),
+                    Text = Format.Text(row, "brief"),
+                });
+                continue;
+            }
             if (kind == "user")
             {
                 FlushText();

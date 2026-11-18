@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.Sync
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import ai.tokenstat.tokenstat.AppViewModel
@@ -205,7 +209,7 @@ internal fun TranscriptItemRow(
                 HorizontalDivider(Modifier.weight(1f), color = LocalTsColors.current.border)
             }
         }
-        is ChatDisplayItem.Handoff -> HandoffRow(to = item.to, brief = item.brief)
+        is ChatDisplayItem.Handoff -> TranscriptHandoffBanner(to = item.to, brief = item.brief)
         is ChatDisplayItem.Thinking -> {
             MarkdownText(
                 text = item.text,
@@ -355,34 +359,58 @@ private fun AssistantPanel(text: String, agentName: String, live: Boolean) {
     }
 }
 
+/// The point where a conversation changed hands, and what the incoming agent
+/// was told. A banner rather than a divider: people missed the thin caption,
+/// and a change of agent changes what every reply below it can know. The
+/// brand gradient marks it, the one place in a transcript that uses it.
 @Composable
-private fun HandoffRow(to: String, brief: String) {
+internal fun TranscriptHandoffBanner(to: String, brief: String) {
     val colors = LocalTsColors.current
     var expanded by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(cardRadius)
+    val gradient = Brush.linearGradient(listOf(colors.accent, colors.secondary))
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = Space.xs),
-        verticalArrangement = Arrangement.spacedBy(Space.xs),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            Text(
-                L10n.text("android.transcriptrows.handed_to_0.902d7234", "${to.ifBlank { L10n.text("android.transcriptrows.another_agent.03a23179") }}"),
-                style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-                color = colors.accent,
-                modifier = Modifier.weight(1f),
+            .padding(vertical = Space.s)
+            .background(
+                Brush.horizontalGradient(listOf(colors.accent.copy(alpha = 0.16f), colors.secondary.copy(alpha = 0.10f))),
+                shape,
             )
-            if (brief.isNotBlank()) {
+            .border(1.5.dp, Brush.linearGradient(listOf(colors.accent.copy(alpha = 0.7f), colors.secondary.copy(alpha = 0.7f))), shape)
+            .padding(Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+            Box(Modifier.size(34.dp).background(gradient, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Sync, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    if (expanded) L10n.text("android.transcriptrows.hide.ac20a57b") else L10n.text("android.transcriptrows.what_it_was_told.4b2128b2"),
-                    style = TextStyle(fontSize = 12.sp),
-                    color = colors.textSecondary,
-                    modifier = Modifier.clickable { expanded = !expanded },
+                    L10n.text("android.transcriptrows.handed_to_0.902d7234", "${to.ifBlank { L10n.text("android.transcriptrows.another_agent.03a23179") }}"),
+                    style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                    color = colors.textPrimary,
                 )
+                if (brief.isNotBlank()) {
+                    Text(
+                        if (expanded) L10n.text("android.transcriptrows.hide.ac20a57b") else L10n.text("android.transcriptrows.what_it_was_told.4b2128b2"),
+                        style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+                        color = colors.accent,
+                        modifier = Modifier.clickable { expanded = !expanded },
+                    )
+                }
             }
         }
         if (expanded && brief.isNotBlank()) {
-            Text(brief, style = TsType.mono(11), color = colors.textSecondary)
+            Text(
+                brief,
+                style = TsType.mono(11),
+                color = colors.textSecondary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.panel, RoundedCornerShape(10.dp))
+                    .padding(Space.s),
+            )
         }
     }
 }

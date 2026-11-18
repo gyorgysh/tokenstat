@@ -23,6 +23,8 @@ internal sealed partial class ChatPage
         Changes,
         /// <summary>The plan as last reported. A newer report replaces the older row.</summary>
         Plan,
+        /// <summary>The conversation changed agents. Target is the agent, Text what it was told.</summary>
+        Handoff,
     }
 
     internal sealed record PlanStepItem(string Text, string Status);

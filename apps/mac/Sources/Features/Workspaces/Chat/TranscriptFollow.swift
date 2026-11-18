@@ -152,6 +152,22 @@ enum TranscriptSlice {
         return Array(items[span])
     }
 
+    /// How many of the newest built rows sit outside the lazy stack.
+    ///
+    /// A lazy stack estimates rows it has not measured, and the end the view
+    /// pins to sits below the stack, so the end is only as true as those
+    /// estimates. A few short rows and one reply tens of thousands of points
+    /// tall put it in the middle of that reply, or past every row the stack
+    /// built, which is a blank transcript. The newest rows are measured
+    /// exactly instead: they are what a following reader is looking at.
+    static let measuredTail = 6
+
+    /// The built rows, split into the lazy head and the measured tail.
+    static func split(_ rows: [ChatDisplayItem]) -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
+        let cut = max(0, rows.count - measuredTail)
+        return (rows[..<cut], rows[cut...])
+    }
+
     static func hiddenAbove(count: Int, olderOffset: Int) -> Int {
         range(count: count, olderOffset: olderOffset).lowerBound
     }
@@ -439,6 +455,11 @@ final class TranscriptFollowState {
             paused = false
             pinned = true
             set(jump: false)
+        } else if !pinned && !atEnd {
+            // A settle that put somebody back on their reading place ends
+            // away from the end. Every frame while it held cleared the pill,
+            // and nothing raised it again until the reader scrolled.
+            set(jump: true)
         }
     }
 
@@ -759,20 +780,65 @@ struct ChatScrollViewportKey: PreferenceKey {
     }
 }
 
-/// How many transcript rows a lazy stack holds right now. A lazy stack can
-/// drop every row it built while its scroll view rests among them: the end
-/// was pinned on estimated heights, the estimates changed as a long reply
-/// was measured, and nothing asks the stack again which rows are on screen.
-/// The transcript is then plain background until something scrolls it.
-/// Zero here while the conversation has rows is how both chat screens see
-/// that and move the view to make the stack build again.
+/// Which transcript rows a lazy stack holds right now, and where it put them.
+///
+/// A lazy stack can be left drawing nothing while its scroll view rests among
+/// its rows: the end was pinned on estimated heights and the estimates
+/// changed as a long reply was measured, or a fling crossed a reply too tall
+/// to estimate. It drops the rows it built, or keeps them where it thought
+/// they were, and nothing asks it again which rows are on screen. The
+/// transcript is plain background until something scrolls it. No mounted
+/// row inside the viewport while the conversation has rows is how both chat
+/// screens see that and move the view to make the stack build again.
 ///
 /// A plain class so rows coming and going never invalidate the transcript.
 @MainActor
 final class TranscriptRowMounts {
-    private(set) var count = 0
-    func appeared() { count += 1 }
-    func disappeared() { count = max(0, count - 1) }
+    /// Mounted rows by id, with their frame in the viewport's space once
+    /// known. Nil until the first geometry report, and on systems without one.
+    private var frames: [String: CGRect?] = [:]
+
+    func appeared(_ id: String) { if frames[id] == nil { frames[id] = .some(nil) } }
+    func disappeared(_ id: String) { frames[id] = nil }
+    func placed(_ id: String, _ frame: CGRect) { if frames[id] != nil { frames[id] = frame } }
+
+    /// Whether any mounted row reaches into a viewport of this height. A row
+    /// with no frame yet counts, so a system without geometry reports falls
+    /// back to "anything mounted".
+    func showsRows(viewportHeight: CGFloat) -> Bool {
+        frames.values.contains { frame in
+            guard let frame, viewportHeight > 0 else { return true }
+            return frame.maxY > 0 && frame.minY < viewportHeight
+        }
+    }
+}
+
+extension View {
+    /// Report this row to `TranscriptRowMounts`. Geometry goes to a plain
+    /// object, so a scroll reports without redrawing anything.
+    func transcriptRowMount(_ id: String, in mounts: TranscriptRowMounts) -> some View {
+        modifier(TranscriptRowMount(id: id, mounts: mounts))
+    }
+}
+
+private struct TranscriptRowMount: ViewModifier {
+    let id: String
+    let mounts: TranscriptRowMounts
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, iOS 18.0, *) {
+            content
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptFollow.spaceName)) } action: { frame in
+                    mounts.placed(id, frame)
+                }
+                .onAppear { mounts.appeared(id) }
+                .onDisappear { mounts.disappeared(id) }
+        } else {
+            content
+                .onAppear { mounts.appeared(id) }
+                .onDisappear { mounts.disappeared(id) }
+        }
+    }
 }
 
 struct TranscriptBottomSentinel: View {

@@ -714,60 +714,9 @@ private struct TurnElapsedClock: View {
 struct ChatHandoffRow: View {
     let agent: String
     let brief: String
-    @State private var expanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(spacing: Theme.Space.s) {
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(height: 1)
-                    .frame(maxWidth: 40)
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(Theme.font(10, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                Text(L10n.text("apple.chateventrow.handed_to_0.902d7234", "\(agent)"))
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                    .fixedSize()
-                if !brief.isEmpty {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.14)) { expanded.toggle() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(expanded ? L10n.text("apple.chateventrow.hide_summary.4cf94a81") : L10n.text("apple.chateventrow.what_it_was_told.4b2128b2"))
-                            Image(systemName: "chevron.right")
-                                .font(Theme.font(9, weight: .semibold))
-                                .rotationEffect(.degrees(expanded ? 90 : 0))
-                        }
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(height: 1)
-            }
-            if expanded {
-                Text(brief)
-                    .font(Theme.monoText(11))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.Space.s)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                    }
-                    .transition(.opacity)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(brief.isEmpty ? L10n.text("apple.chateventrow.handed_to_0.902d7234", agent) : L10n.text("apple.chateventrow.handed_to_0_with_a_summary_of_the_conversa.136c6fc3", agent))
+        ChatHandoffBanner(agent: agent, brief: brief)
     }
 }
 
