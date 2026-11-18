@@ -282,7 +282,7 @@ private struct LimitActionStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .labelStyle(Glyph(size: fontSize))
-            .font(.system(size: fontSize, weight: .semibold))
+            .font(Theme.font(fontSize, weight: .semibold))
             .lineLimit(1)
             .minimumScaleFactor(0.85)
             .foregroundStyle(prominent ? Color.white : Color.primary)
@@ -305,7 +305,7 @@ private struct LimitActionStyle: ButtonStyle {
         func makeBody(configuration: Configuration) -> some View {
             HStack(spacing: 7) {
                 configuration.icon
-                    .font(.system(size: size, weight: .semibold))
+                    .font(Theme.font(size, weight: .semibold))
                     .frame(width: size + 3, height: size + 3)
                 configuration.title
             }
