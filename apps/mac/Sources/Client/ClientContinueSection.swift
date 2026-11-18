@@ -20,38 +20,58 @@ struct ClientContinueSection: View {
     }
 
     var body: some View {
-        if !places.isEmpty {
+        if let featured = places.first(where: { $0.id.kind == .chat }) ?? places.first {
+            let otherPlaces = places.filter { $0.id != featured.id }
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ClientSectionTitle(title: L10n.text("apple.clientcontinuesection.pick_up_where_you_left_off.47173482"), mark: "mark_activity")
-                VStack(spacing: 0) {
-                    ForEach(places) { place in
-                        if dynamicTypeSize.isAccessibilitySize {
-                            VStack(alignment: .leading, spacing: 0) {
-                                placeLink(place)
-                                pinButton(place).padding(.horizontal, Theme.Space.m)
-                            }
-                        } else {
-                            HStack(spacing: 0) {
-                                placeLink(place)
-                                pinButton(place).padding(.trailing, Theme.Space.xs)
-                            }
-                        }
-                        if place.id != places.last?.id {
-                            ThemeRule().padding(.horizontal, Theme.Space.m)
+                placeRow(featured, isFeatured: featured.id.kind == .chat)
+                    .cardSurface()
+                    .overlay(alignment: .leading) {
+                        if featured.id.kind == .chat {
+                            Capsule()
+                                .fill(Theme.accent)
+                                .frame(width: 3)
+                                .padding(.vertical, Theme.Space.m)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
                         }
                     }
+                    .accessibilityIdentifier("home.continue.latest")
+                if !otherPlaces.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(otherPlaces) { place in
+                            placeRow(place)
+                            if place.id != otherPlaces.last?.id {
+                                ThemeRule().padding(.horizontal, Theme.Space.m)
+                            }
+                        }
+                    }
+                    .cardSurface()
                 }
-                .cardSurface()
             }
             .accessibilityIdentifier("home.continue")
         }
     }
 
-    private func placeLink(_ place: ClientRecentPlaces.Place) -> some View {
+    @ViewBuilder private func placeRow(_ place: ClientRecentPlaces.Place, isFeatured: Bool = false) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 0) {
+                placeLink(place, isFeatured: isFeatured)
+                pinButton(place).padding(.horizontal, Theme.Space.m)
+            }
+        } else {
+            HStack(spacing: 0) {
+                placeLink(place, isFeatured: isFeatured)
+                pinButton(place).padding(.trailing, Theme.Space.xs)
+            }
+        }
+    }
+
+    private func placeLink(_ place: ClientRecentPlaces.Place, isFeatured: Bool) -> some View {
         ClientOwnedNavigationLink {
             ClientSavedPlaceView(place: place)
         } label: {
-            row(place)
+            row(place, isFeatured: isFeatured)
         }
         .buttonStyle(.plain)
     }
@@ -87,12 +107,18 @@ struct ClientContinueSection: View {
         )
     }
 
-    private func row(_ place: ClientRecentPlaces.Place) -> some View {
+    private func detail(_ place: ClientRecentPlaces.Place) -> Text {
         let machine = account.account?.machines.first { $0.publicIdentity == place.id.peer }
         let state = machine == nil ? L10n.text("apple.clientcontinuesection.no_longer_linked.e409e8a7")
             : connectivity.isOffline ? L10n.text("apple.clientcontinuesection.you_are_offline.4d5c9439")
             : machine?.online == true ? L10n.text("apple.clientcontinuesection.awake.9123b5f4")
             : machine?.online == false ? L10n.text("apple.clientcontinuesection.asleep.60135e8f") : L10n.text("apple.clientcontinuesection.status_unknown.e412d872")
+        return Text("\(machine?.displayName ?? L10n.text("apple.clientcontinuesection.machine.8f1cc42d")) · \(state) · ")
+            + Text(place.openedAt, style: .relative)
+    }
+
+    private func row(_ place: ClientRecentPlaces.Place, isFeatured: Bool) -> some View {
+        let subtitle = isFeatured ? Text(verbatim: "\(place.workspaceName) · ") + detail(place) : detail(place)
         return HStack(spacing: Theme.Space.m) {
             Image(systemName: place.symbol)
                 .font(ClientType.body)
@@ -100,20 +126,20 @@ struct ClientContinueSection: View {
                 .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 24)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text(place.title)
+                Text(isFeatured ? L10n.text("common.home_continue_chat") : place.title)
                     .font(ClientType.label.weight(.semibold))
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                (Text("\(machine?.displayName ?? L10n.text("apple.clientcontinuesection.machine.8f1cc42d")) · \(state) · ")
-                    + Text(place.openedAt, style: .relative))
+                subtitle
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if !dynamicTypeSize.isAccessibilitySize {
                 Image(systemName: "chevron.right")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(isFeatured ? ClientType.caption.weight(.semibold) : ClientType.caption)
+                    .foregroundStyle(isFeatured ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
                     .accessibilityHidden(true)
             }
         }

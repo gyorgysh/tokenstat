@@ -302,6 +302,10 @@ async def run(args):
             "remote::history_tests::native::serve_fixture", "--ignored", "--nocapture"],
             cwd=ROOT, env=environment, stdout=log, stderr=log)
         fixture = await wait(lambda: read_json(run_root / "fixture.json"))
+        if args.limit_notice:
+            handoff_agent = run_root / "bin" / "codex"
+            handoff_agent.write_bytes((run_root / "bin" / "grok").read_bytes())
+            handoff_agent.chmod(0o700)
         host, port = fixture["address"].rsplit(":", 1)
         if not relay:
             for proxy in proxies.values():
@@ -436,6 +440,20 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 await asyncio.sleep(0.4)
             emit({"type": "end", "stopReason": "end_turn"})
             atomic_json(run_root / "result.json", {"ok": True, "ticks": tick, "states": {role: state(role) for role in roles}})
+            return
+        if args.limit_notice:
+            assert args.phone_only, "The limit notice is checked by hand on the iPhone"
+            await visible("network-start")
+            reset = int(time.time() * 1000) + 3600000
+            emit({"type": "error", "error": {"code": "usage_limit_reached",
+                  "message": "Controlled QA usage limit", "resets_at": reset}})
+            emit({"type": "end", "stopReason": "error"})
+            print("Limit notice ready; touch", run_root / "stop", "to finish", flush=True)
+            deadline = time.monotonic() + 840
+            while not (run_root / "stop").exists() and time.monotonic() < deadline:
+                live()
+                await asyncio.sleep(0.5)
+            atomic_json(run_root / "result.json", {"ok": True, "states": {role: state(role) for role in roles}})
             return
         if args.layout:
             assert not args.desktop_only, "Layout QA requires an iPhone"
@@ -846,6 +864,7 @@ if __name__ == "__main__":
                         help="Where each run keeps its fixture and artifacts; must be readable by the simulator")
     parser.add_argument("--phone-only", action="store_true", help="Run the iPhone reader without the Mac app")
     parser.add_argument("--reading-soak", action="store_true", help="Stream into the iPhone until the run's stop file exists, for hand testing")
+    parser.add_argument("--limit-notice", action="store_true", help="End the iPhone turn on a usage limit and hold it for testing by hand")
     parser.add_argument("--desktop-only", action="store_true", help="Verify the Mac view before the combined phone run")
     parser.add_argument("--direct-launch", action="store_true", help="Launch the owned Mac executable directly when Launch Services is unavailable")
     parser.add_argument("--desktop-width", type=int, default=760, metavar="POINTS",

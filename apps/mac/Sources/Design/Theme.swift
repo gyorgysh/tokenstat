@@ -1897,6 +1897,7 @@ struct ThemedEditor: View {
 /// the same thing and belongs to this app.
 struct BrandCheckboxStyle: ToggleStyle {
     var iconOnly = false
+    @Environment(\.isEnabled) private var isEnabled
     /// Same treatment as `ThemedFieldBox.defaultFont`: the Mac has one text
     /// size and fixed rows, the phone takes a style that grows with Larger
     /// Text.
@@ -1908,34 +1909,32 @@ struct BrandCheckboxStyle: ToggleStyle {
         #endif
     }
 
+    /// A finger needs 44 points. The box is 18, and inside a scrolling
+    /// transcript a tap that lands a little above it started a scroll
+    /// instead, which read as a checkbox that would not check.
+    static func minimumHeight(iconOnly: Bool) -> CGFloat? {
+        #if os(macOS)
+        iconOnly ? 44 : nil
+        #else
+        44
+        #endif
+    }
+
     func makeBody(configuration: Configuration) -> some View {
         Button {
             configuration.isOn.toggle()
         } label: {
             HStack(spacing: Theme.Space.s) {
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(configuration.isOn ? Theme.accent : Theme.panel)
-                    .frame(width: 18, height: 18)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 5)
-                            .strokeBorder(configuration.isOn ? Theme.accent : Theme.border)
-                    )
-                    .overlay {
-                        if configuration.isOn {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
+                BrandCheckboxBox(isOn: configuration.isOn)
                 if !iconOnly {
                     configuration.label
                         .font(Self.labelFont)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(isEnabled ? .primary : .secondary)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
                 }
             }
-            .frame(minWidth: iconOnly ? 44 : nil, minHeight: iconOnly ? 44 : nil)
+            .frame(minWidth: iconOnly ? 44 : nil, minHeight: Self.minimumHeight(iconOnly: iconOnly))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -1945,6 +1944,29 @@ struct BrandCheckboxStyle: ToggleStyle {
         // changing it. `BrandToggleChip` in this file already says it.
         .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
         .accessibilityValue(configuration.isOn ? L10n.text("apple.theme.on.13001175") : L10n.text("apple.theme.off.ca7981b4"))
+    }
+}
+
+private struct BrandCheckboxBox: View {
+    let isOn: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 5)
+            .fill(isOn ? Theme.accent : Theme.background)
+            .frame(width: 18, height: 18)
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(isOn ? Theme.accent : Color.secondary.opacity(0.75), lineWidth: 1.5)
+            )
+            .overlay {
+                if isOn {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .opacity(isEnabled ? 1 : 0.4)
     }
 }
 

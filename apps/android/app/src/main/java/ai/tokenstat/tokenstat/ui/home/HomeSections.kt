@@ -41,12 +41,14 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -361,67 +363,31 @@ fun ContinueSection(
 ) {
     val colors = LocalTsColors.current
     val shown = RecentPlaces.continuePlaces(places)
-    if (shown.isEmpty()) return
+    val featured = shown.firstOrNull { it.id.kind == RecentPlaces.Kind.CHAT } ?: shown.firstOrNull() ?: return
+    val showResume = featured.id.kind == RecentPlaces.Kind.CHAT
+    val rest = shown.filter { it.id != featured.id }
     var refused by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         SectionLabel(L10n.text("android.homesections.pick_up_where_you_left_off.47173482"))
-        TsCard {
-            Column {
-                shown.forEachIndexed { index, place ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable { onOpen(place) }.padding(vertical = 12.dp),
-                    ) {
-                        Icon(
-                            when (place.id.kind) {
-                                RecentPlaces.Kind.WORKSPACE -> Icons.Default.Folder
-                                RecentPlaces.Kind.CHAT -> Icons.Default.ChatBubbleOutline
-                                RecentPlaces.Kind.TERMINAL -> Icons.Default.Terminal
-                            },
-                            null,
-                            tint = colors.accent,
-                            modifier = Modifier.width(24.dp),
-                        )
-                        Spacer(Modifier.width(Space.m))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                RecentPlaces.title(place),
-                                fontWeight = FontWeight.SemiBold,
-                                color = colors.textPrimary,
-                                maxLines = 2,
-                            )
-                            val name = machineName(place.id.peer)
-                            val state = machineRowState(name != null, offline, name?.let { machineOnline(place.id.peer) })
-                            Text(
-                                "${name ?: L10n.text("android.homesections.machine.8f1cc42d")} · $state · ${RelativeClock.label(place.openedAtMs)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.textSecondary,
-                                maxLines = 2,
-                            )
-                        }
-                        // Terminal sessions end, so they are not pinnable:
-                        // keeping a link to a dead shell is worse than no pin.
-                        if (place.id.kind != RecentPlaces.Kind.TERMINAL) {
-                            val pinned = isPinned(place)
-                            IconButton(onClick = {
-                                refused = !onTogglePin(place)
-                            }) {
-                                Icon(
-                                    (if (pinned) ActionIcon.Pinned else ActionIcon.Pin).vector,
-                                    if (pinned) L10n.text("android.homesections.pinned.f20c8794") else L10n.text("android.homesections.pin.ff1cee74"),
-                                    tint = when {
-                                        pinned -> colors.accent
-                                        refused -> colors.danger
-                                        else -> colors.textSecondary
-                                    },
-                                )
-                            }
-                        }
-                        Icon(Icons.Default.ChevronRight, null, tint = colors.textSecondary)
-                    }
-                    if (index != shown.lastIndex) {
-                        HorizontalDivider(color = colors.border)
-                    }
+        val pin: (RecentPlaces.Place) -> Unit = { refused = !onTogglePin(it) }
+        TsCard(modifier = if (showResume) Modifier.drawWithContent {
+            drawContent()
+            val width = 3.dp.toPx()
+            val inset = Space.m.toPx()
+            drawRoundRect(
+                color = colors.accent,
+                topLeft = Offset(if (layoutDirection == LayoutDirection.Ltr) 0f else size.width - width, inset),
+                size = Size(width, (size.height - 2 * inset).coerceAtLeast(0f)),
+                cornerRadius = CornerRadius(width / 2),
+            )
+        } else Modifier) {
+            ContinuePlaceRow(featured, machineName, machineOnline, offline, onOpen, isPinned, refused, pin, isFeatured = showResume)
+        }
+        if (rest.isNotEmpty()) TsCard {
+            rest.forEachIndexed { index, place ->
+                ContinuePlaceRow(place, machineName, machineOnline, offline, onOpen, isPinned, refused, pin)
+                if (index != rest.lastIndex) {
+                    HorizontalDivider(color = colors.border)
                 }
             }
         }
@@ -432,6 +398,86 @@ fun ContinueSection(
                 color = colors.danger,
             )
         }
+    }
+}
+
+private fun placeIcon(place: RecentPlaces.Place) =
+    when (place.id.kind) {
+        RecentPlaces.Kind.WORKSPACE -> Icons.Default.Folder
+        RecentPlaces.Kind.CHAT -> Icons.Default.ChatBubbleOutline
+        RecentPlaces.Kind.TERMINAL -> Icons.Default.Terminal
+    }
+
+private fun placeDetail(
+    place: RecentPlaces.Place,
+    machineName: (String) -> String?,
+    machineOnline: (String) -> Boolean?,
+    offline: Boolean,
+): String {
+    val name = machineName(place.id.peer)
+    val state = machineRowState(name != null, offline, name?.let { machineOnline(place.id.peer) })
+    return "${name ?: L10n.text("android.homesections.machine.8f1cc42d")} · $state · ${RelativeClock.label(place.openedAtMs)}"
+}
+
+@Composable
+private fun PlacePinButton(
+    place: RecentPlaces.Place,
+    isPinned: (RecentPlaces.Place) -> Boolean,
+    refused: Boolean,
+    onTogglePin: (RecentPlaces.Place) -> Unit,
+) {
+    if (place.id.kind == RecentPlaces.Kind.TERMINAL) return
+    val colors = LocalTsColors.current
+    val pinned = isPinned(place)
+    IconButton(onClick = { onTogglePin(place) }) {
+        Icon(
+            (if (pinned) ActionIcon.Pinned else ActionIcon.Pin).vector,
+            if (pinned) L10n.text("android.homesections.pinned.f20c8794") else L10n.text("android.homesections.pin.ff1cee74"),
+            tint = when {
+                pinned -> colors.accent
+                refused -> colors.danger
+                else -> colors.textSecondary
+            },
+        )
+    }
+}
+
+@Composable
+private fun ContinuePlaceRow(
+    place: RecentPlaces.Place,
+    machineName: (String) -> String?,
+    machineOnline: (String) -> Boolean?,
+    offline: Boolean,
+    onOpen: (RecentPlaces.Place) -> Unit,
+    isPinned: (RecentPlaces.Place) -> Boolean,
+    refused: Boolean,
+    onTogglePin: (RecentPlaces.Place) -> Unit,
+    isFeatured: Boolean = false,
+) {
+    val colors = LocalTsColors.current
+    val detail = placeDetail(place, machineName, machineOnline, offline)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clickable { onOpen(place) }.padding(vertical = 12.dp),
+    ) {
+        Icon(placeIcon(place), null, tint = colors.accent, modifier = Modifier.width(24.dp))
+        Spacer(Modifier.width(Space.m))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (isFeatured) L10n.text("common.home_continue_chat") else RecentPlaces.title(place),
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary,
+                maxLines = 2,
+            )
+            Text(
+                if (isFeatured) "${place.workspaceName} · $detail" else detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+                maxLines = 2,
+            )
+        }
+        PlacePinButton(place, isPinned, refused, onTogglePin)
+        Icon(Icons.Default.ChevronRight, null, tint = if (isFeatured) colors.accent else colors.textSecondary)
     }
 }
 

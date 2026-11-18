@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -40,13 +41,16 @@ fun BrandCheckbox(
     onToggle: () -> Unit,
     label: String,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = LocalTsColors.current
     val boxShape = RoundedCornerShape(5.dp)
     Row(
         modifier
+            .alpha(if (enabled) 1f else 0.45f)
             .toggleable(
                 value = checked,
+                enabled = enabled,
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
                 role = Role.Checkbox,
@@ -61,8 +65,8 @@ fun BrandCheckbox(
             Modifier
                 .size(18.dp)
                 .clip(boxShape)
-                .background(if (checked) colors.accent else colors.panel)
-                .border(1.dp, if (checked) colors.accent else colors.border, boxShape),
+                .background(if (checked) colors.accent else colors.background)
+                .border(1.5.dp, if (checked) colors.accent else colors.textSecondary.copy(alpha = 0.75f), boxShape),
             contentAlignment = Alignment.Center,
         ) {
             if (checked) {

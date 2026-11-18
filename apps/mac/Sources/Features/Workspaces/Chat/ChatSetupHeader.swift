@@ -387,6 +387,7 @@ struct ChatComposerControls<Chrome: View>: View {
                 anchorsToLeadingEdge: true
             ) { agentPanel }
             .onAppear { enforceBypassOnly() }
+            .onChange(of: model.agentPickerRequest) { _, _ in if !locked { pickingAgent = true } }
             .onChange(of: pickingAgent) { _, presented in agentPickerFocus(presented) }
             .onDisappear { if pickingAgent { agentPickerFocus(false) } }
             .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }

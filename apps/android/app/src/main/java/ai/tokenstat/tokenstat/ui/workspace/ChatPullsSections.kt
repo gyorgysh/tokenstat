@@ -1885,7 +1885,11 @@ fun ChatSection(
                             item(key = "routing-limit") {
                                 ChatRoutingControls(openChat, backends,
                                     { method, params -> model.workspaceSection(peer, method, params) },
-                                    { scope.launch { refreshChats() } }, showSection = false)
+                                    { refreshChats() }, showSection = false,
+                                    onHandOff = {
+                                        if (draft.isBlank()) draft = L10n.text("common.continue")
+                                        showingAgent = true
+                                    })
                             }
                         }
                         // The turn in progress, with the conversation's own
@@ -2855,7 +2859,7 @@ private fun ChatSetupDialog(
             if (chat != null) {
                 ChatRoutingControls(chat, backends,
                     { method, params -> model.workspaceSection(peer, method, params) },
-                    onChanged, showNotice = false)
+                    { onChanged() }, showNotice = false)
             }
 
     }

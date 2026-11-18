@@ -101,6 +101,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private JsonArray _chats = new();
     private readonly ChatSteerOverlay _steerOverlay = new();
     private JsonArray _backends = new();
+    private Button? _composerAgent;
     private JsonArray _personas = new();
     private readonly ChatHistoryBuffer _history = new();
     private JsonArray _events { get => _history.Events; set => _history.Events = value; }
@@ -2022,7 +2023,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var locked = Busy();
         var row = new FlowPanel { Spacing = Theme.SpaceS };
-        row.Children.Add(CompactAgentMenu(locked));
+        var agent = CompactAgentMenu(locked);
+        _composerAgent = agent as Button;
+        row.Children.Add(agent);
         var setup = ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
         {
             _setupExpanded = true;

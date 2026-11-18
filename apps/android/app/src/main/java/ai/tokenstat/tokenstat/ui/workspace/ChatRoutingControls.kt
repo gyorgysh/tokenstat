@@ -5,8 +5,21 @@ import ai.tokenstat.tokenstat.ui.components.*
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.theme.*
+import android.text.format.DateUtils
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +32,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
@@ -47,10 +61,11 @@ internal fun ChatRoutingControls(
     chat: JsonObject,
     backends: List<JsonObject>,
     call: suspend (String, JsonObject) -> JsonElement,
-    onChanged: () -> Unit,
+    onChanged: suspend () -> Unit,
     showNotice: Boolean = true,
     showSection: Boolean = true,
     showShortcut: Boolean = false,
+    onHandOff: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val colors = LocalTsColors.current
@@ -116,102 +131,18 @@ internal fun ChatRoutingControls(
             }
         }
         if (showNotice && limit != null)
-            TsCard {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text(
-                        if (limit.routeText("kind") == "usage")
-                            L10n.text(
-                                "common.chat_limit_reached",
-                                agentLabel(limit.routeText("provider")),
-                            )
-                        else if (limit.routeText("kind") == "throttle")
-                            L10n.text(
-                                "common.chat_throttled",
-                                agentLabel(limit.routeText("provider")),
-                            )
-                        else
-                            L10n.text(
-                                "common.chat_route_failure",
-                                agentLabel(limit.routeText("provider")),
-                            ),
-                        style = TsType.headline,
-                    )
-                    Text(
-                        limit.routeText("reason"),
-                        style = TsType.footnote,
-                        color = LocalTsColors.current.textSecondary,
-                    )
-                    val reset = (limit["resetsAtMs"] as? JsonPrimitive)?.longOrNull
-                    Text(
-                        if (reset == null) L10n.text("common.chat_reset_unknown")
-                        else
-                            L10n.text(
-                                "common.chat_resets_at",
-                                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-                                    .format(Date(reset)),
-                            )
-                    )
-                    state?.routeText("note")?.takeIf { it.isNotBlank() }?.let { Text(it) }
-                    if (state?.bol("needsDeliveryCheck") == true)
-                        Text(L10n.text("common.chat_route_delivery"))
-                    val nextReset = state?.get("nextReset") as? JsonObject
-                    (nextReset?.get("atMs") as? JsonPrimitive)?.longOrNull?.let { at ->
-                        val destination = nextReset["destination"] as? JsonObject
-                        if (destination?.routeText("backend") != limit.routeText("provider"))
-                            Text(
-                                L10n.text(
-                                    "common.chat_route_waiting_for",
-                                    destination?.routeText("backend").orEmpty(),
-                                    DateFormat.getDateTimeInstance(
-                                            DateFormat.MEDIUM,
-                                            DateFormat.SHORT,
-                                        )
-                                        .format(Date(at)),
-                                )
-                            )
-                    }
-                    if (reset != null || nextReset != null)
-                        BrandCheckbox(
-                            checked = policy?.bol("waitForReset") == true,
-                            onToggle = {
-                                val changed =
-                                    JsonObject(
-                                        policy.orEmpty() +
-                                            ("waitForReset" to
-                                                JsonPrimitive(policy?.bol("waitForReset") != true))
-                                    )
-                                apply("chat.routing", buildJsonObject { put("routing", changed) })
-                            },
-                            label = L10n.text("common.chat_wait_reset"),
-                        )
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        TsAccentButton(
-                            label = L10n.text("common.chat_route_retry"),
-                            icon = ActionIcon.Refresh.vector,
-                            small = true,
-                            enabled =
-                                !chat.bol("running") && state?.bol("needsDeliveryCheck") != true,
-                            onClick = {
-                                apply(
-                                    "chat.routeAction",
-                                    buildJsonObject { put("choice", "resume") },
-                                )
-                            },
-                        )
-                        TsSecondaryButton(
-                            label = L10n.text("common.cancel"),
-                            icon = ActionIcon.Dismiss.vector,
-                            small = true,
-                            onClick = {
-                                apply(
-                                    "chat.routeAction",
-                                    buildJsonObject { put("choice", "cancel") },
-                                )
-                            },
-                        )
-                    }
-                }
-            }
+            RoutingLimitCard(
+                chat = chat,
+                state = state,
+                policy = policy,
+                limit = limit,
+                backends = backends,
+                applying = applying,
+                agentLabel = ::agentLabel,
+                apply = ::apply,
+                onRouting = { showing = true },
+                onHandOff = onHandOff,
+            )
         if (showSection) ChatSetupDisclosure(
             title = L10n.text("common.chat_routing"),
             summary = L10n.text(if (policy?.bol("enabled") == true) {
@@ -266,7 +197,7 @@ private fun ChatRoutingDialog(
     backends: List<JsonObject>,
     call: suspend (String, JsonObject) -> JsonElement,
     dismiss: () -> Unit,
-    changed: () -> Unit,
+    changed: suspend () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     fun agentLabel(id: String): String =
@@ -785,5 +716,183 @@ private fun ChatRoutingDialog(
                 )
             }
         }
+    }
+}
+
+
+@Composable
+private fun RoutingLimitCard(
+    chat: JsonObject,
+    state: JsonObject?,
+    policy: JsonObject?,
+    limit: JsonObject,
+    backends: List<JsonObject>,
+    applying: Boolean,
+    agentLabel: (String) -> String,
+    apply: (String, JsonObject) -> Unit,
+    onRouting: () -> Unit,
+    onHandOff: (() -> Unit)?,
+) {
+    val colors = LocalTsColors.current
+    val shape = RoundedCornerShape(cardRadius)
+    val provider = limit.routeText("provider")
+    val reset = (limit["resetsAtMs"] as? JsonPrimitive)?.longOrNull
+    val nextReset = state?.get("nextReset") as? JsonObject
+    val deliveryCheck = state?.bol("needsDeliveryCheck") == true
+    val waitAvailable = (reset != null || nextReset != null) && !deliveryCheck
+    val saved = policy?.bol("waitForReset") == true
+    var pendingWait by remember(chat.routeText("id")) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(saved, applying) { if (!applying) pendingWait = null }
+    val waiting = pendingWait ?: saved
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.danger.copy(alpha = 0.08f))
+            .border(1.dp, colors.danger.copy(alpha = 0.35f), shape)
+            .padding(Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(colors.danger, colors.danger.copy(alpha = 0.75f)))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (limit.routeText("kind") == "usage") Icons.Filled.HourglassTop else Icons.Filled.Warning,
+                    null,
+                    tint = Color.White,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    when (limit.routeText("kind")) {
+                        "usage" -> L10n.text("common.chat_limit_reached", agentLabel(provider))
+                        "throttle" -> L10n.text("common.chat_throttled", agentLabel(provider))
+                        else -> L10n.text("common.chat_route_failure", agentLabel(provider))
+                    },
+                    style = TsType.headline,
+                    color = colors.textPrimary,
+                )
+                Text(
+                    if (reset == null) L10n.text("common.chat_reset_unknown")
+                    else L10n.text(
+                        "common.chat_resets_in",
+                        DateUtils.getRelativeTimeSpanString(reset, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
+                            .toString()
+                            // "In 58 minutes" sits mid-sentence here.
+                            .let { if (Locale.getDefault().language == "en") it.replaceFirstChar { c -> c.lowercase() } else it },
+                        DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(reset)),
+                    ),
+                    style = TsType.footnote,
+                    color = colors.textSecondary,
+                )
+            }
+        }
+        limit.routeText("reason").takeIf { it.isNotBlank() }?.let {
+            Text(it, style = TsType.footnote, color = colors.textSecondary)
+        }
+        (nextReset?.get("atMs") as? JsonPrimitive)?.longOrNull?.let { at ->
+            val destination = nextReset["destination"] as? JsonObject
+            if (destination?.routeText("backend") != provider)
+                Text(
+                    L10n.text(
+                        "common.chat_route_waiting_for",
+                        destination?.routeText("backend").orEmpty(),
+                        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(at)),
+                    ),
+                    style = TsType.footnote,
+                    color = colors.textSecondary,
+                )
+        }
+        if (deliveryCheck) Text(L10n.text("common.chat_route_delivery"), style = TsType.footnote, color = colors.warning)
+        state?.routeText("note")?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = TsType.footnote, color = colors.textSecondary)
+        }
+        val tileShape = RoundedCornerShape(10.dp)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(tileShape)
+                .background(colors.background.copy(alpha = 0.6f))
+                .border(1.dp, colors.border, tileShape)
+                .padding(horizontal = Space.m),
+        ) {
+            BrandCheckbox(
+                checked = waiting,
+                enabled = waitAvailable && !applying,
+                onToggle = {
+                    val next = !waiting
+                    pendingWait = next
+                    val changed = JsonObject(policy.orEmpty() + ("waitForReset" to JsonPrimitive(next)))
+                    apply("chat.routing", buildJsonObject { put("routing", changed) })
+                },
+                label = L10n.text("common.chat_wait_reset"),
+            )
+            if (!waitAvailable && !deliveryCheck)
+                Text(
+                    L10n.text("common.chat_wait_reset_unavailable"),
+                    style = TsType.footnote,
+                    color = colors.textSecondary,
+                    modifier = Modifier.padding(bottom = Space.s),
+                )
+        }
+        val busy = chat.bol("running") || applying || deliveryCheck
+        val actions = buildList {
+            if (onHandOff != null)
+                add(LimitAction(L10n.text("common.chat_hand_off_now"), ActionIcon.Routing.vector, true, !chat.bol("running") && !applying, onHandOff))
+            add(LimitAction(L10n.text("common.chat_route_retry"), ActionIcon.Refresh.vector, false, !busy) {
+                apply("chat.routeAction", buildJsonObject { put("choice", "resume") })
+            })
+            add(LimitAction(L10n.text("common.chat_routing"), ActionIcon.Settings.vector, false, true, onRouting))
+            if (state?.bol("waiting") == true)
+                add(LimitAction(L10n.text("common.cancel"), ActionIcon.Dismiss.vector, false, true) {
+                    apply("chat.routeAction", buildJsonObject { put("choice", "cancel") })
+                })
+        }
+        actions.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                row.forEach { LimitActionCell(it, Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+private class LimitAction(
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val prominent: Boolean,
+    val enabled: Boolean,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun LimitActionCell(action: LimitAction, modifier: Modifier) {
+    val colors = LocalTsColors.current
+    val shape = RoundedCornerShape(10.dp)
+    val content = if (action.prominent) Color.White else colors.textPrimary
+    Row(
+        modifier
+            .heightIn(min = 48.dp)
+            .alpha(if (action.enabled) 1f else 0.42f)
+            .clip(shape)
+            .background(if (action.prominent) colors.accent else colors.panel)
+            .border(1.dp, if (action.prominent) Color.Transparent else colors.border, shape)
+            .clickable(enabled = action.enabled, role = Role.Button, onClick = action.onClick)
+            .padding(horizontal = Space.s),
+        horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(action.icon, null, tint = content, modifier = Modifier.size(18.dp))
+        Text(
+            action.label,
+            style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold),
+            color = content,
+            maxLines = 1,
+        )
     }
 }

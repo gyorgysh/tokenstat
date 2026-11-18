@@ -32,41 +32,23 @@ internal sealed partial class ChatPage
         var accountGeneration = AppServices.AccountGeneration;
         var snapshot = _openChat;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
-        async Task ApplyAsync(string method, JsonObject extra)
+        async Task<bool> ApplyAsync(string method, JsonObject extra)
         {
             try
             {
-                if (!Current() || snapshot?["sendRevision"] is null) return;
+                if (!Current() || snapshot?["sendRevision"] is null) return false;
                 var request = new JsonObject { ["id"] = chat, ["expectedRevision"] = Format.Long(snapshot, "sendRevision") };
                 foreach (var item in extra) request[item.Key] = item.Value?.DeepClone();
                 await CallChatAsync(method, request);
-                if (!Current()) return;
+                if (!Current()) return true;
                 await RefreshCatalogAsync();
                 if (Current()) { _openChat = FindChat(chat); PaintConversation(); StartPoll(); }
+                return true;
             }
-            catch (Exception ex) { if (Current()) Banner(ex.Message); }
+            catch (Exception ex) { if (Current()) Banner(ex.Message); return false; }
         }
         if (snapshot?["routing"] is JsonObject state && state["limit"] is JsonObject limit)
-        {
-            body.Children.Add(new TextBlock { Text = (Format.Text(limit, "kind") == "usage" ? L10n.Text("common.chat_limit_reached", Format.Text(limit, "provider")) : Format.Text(limit, "kind") == "throttle" ? L10n.Text("common.chat_throttled", Format.Text(limit, "provider")) : L10n.Text("common.chat_route_failure", Format.Text(limit, "provider"))), TextWrapping = TextWrapping.Wrap, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            body.Children.Add(Muted(Format.Text(limit, "reason")));
-            var reset = limit["resetsAtMs"] is null ? (long?)null : Format.Long(limit, "resetsAtMs");
-            body.Children.Add(Muted(reset.HasValue ? L10n.Text("common.chat_resets_at", ChatRoutingChoices.Moment(reset.Value).LocalDateTime.ToString("g")) : L10n.Text("common.chat_reset_unknown")));
-            var nextReset = state["nextReset"] as JsonObject;
-            if(nextReset is not null && Format.Text(nextReset["destination"], "backend") != Format.Text(limit, "provider")) body.Children.Add(Muted(L10n.Text("common.chat_route_waiting_for", Format.Text(nextReset["destination"], "backend"), ChatRoutingChoices.Moment(Format.Long(nextReset, "atMs")).ToLocalTime().ToString("g"))));
-            if (Format.Flag(state, "needsDeliveryCheck")) body.Children.Add(Muted(L10n.Text("common.chat_route_delivery")));
-            if (Format.Text(state, "note") is string note && note.Length > 0) body.Children.Add(Muted(note));
-            var policy = state["policy"] as JsonObject;
-            var wait = new CheckBox { Content = L10n.Text("common.chat_wait_reset"), IsChecked = Format.Flag(policy, "waitForReset"), IsEnabled = (reset.HasValue || nextReset is not null) && !Format.Flag(state, "needsDeliveryCheck") };
-            wait.Click += async (_, _) => { var changed = (JsonObject?)policy?.DeepClone() ?? new JsonObject(); changed["waitForReset"] = wait.IsChecked == true; await ApplyAsync("chat.routing", new JsonObject { ["routing"] = changed }); };
-            body.Children.Add(wait);
-            var actions = new FlowPanel { Spacing = Theme.SpaceS };
-            var retry = ActionIconGlyph.Button(L10n.Text("common.chat_route_retry"), ActionIcon.Refresh, async (_, _) => await ApplyAsync("chat.routeAction", new JsonObject { ["choice"] = "resume" }));
-            retry.IsEnabled = !Format.Flag(snapshot, "running") && !Format.Flag(state, "needsDeliveryCheck");
-            actions.Children.Add(retry);
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Dismiss, async (_, _) => await ApplyAsync("chat.routeAction", new JsonObject { ["choice"] = "cancel" })));
-            body.Children.Add(actions);
-        }
+            body.Children.Add(RoutingLimitCard(snapshot, state, limit, ApplyAsync));
         var routing = new StackPanel { Spacing = Theme.SpaceS };
         var routePolicy = snapshot?["routing"]?["policy"];
         var mode = Format.Flag(routePolicy, "enabled") ? Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_combined_mode") : L10n.Text("common.chat_route_fallback_mode") : Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_wait_mode") : L10n.Text("common.chat_route_manual");
@@ -77,6 +59,141 @@ internal sealed partial class ChatPage
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(configure, "chat.routing.setup");
         body.Children.Add(SetupSection(L10n.Text("common.chat_routing"), routing, ActionIcon.Settings, mode, configure));
         return body;
+    }
+
+    private UIElement RoutingLimitCard(JsonObject snapshot, JsonObject state, JsonObject limit, Func<string, JsonObject, Task<bool>> apply)
+    {
+        static Windows.UI.Color Faded(Windows.UI.Color color, double alpha) => Windows.UI.Color.FromArgb((byte)Math.Round(255 * alpha), color.R, color.G, color.B);
+        var provider = Format.Text(limit, "provider");
+        var kind = Format.Text(limit, "kind");
+        var name = provider.Length > 0 ? char.ToUpperInvariant(provider[0]) + provider[1..] : provider;
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        var header = new Grid { ColumnSpacing = Theme.SpaceM };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.Children.Add(new Border
+        {
+            Width = 32,
+            Height = 32,
+            CornerRadius = new CornerRadius(16),
+            Background = new Microsoft.UI.Xaml.Media.LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = new Microsoft.UI.Xaml.Media.GradientStopCollection
+                {
+                    new Microsoft.UI.Xaml.Media.GradientStop { Color = Theme.Danger, Offset = 0 },
+                    new Microsoft.UI.Xaml.Media.GradientStop { Color = Faded(Theme.Danger, 0.75), Offset = 1 },
+                },
+            },
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new FontIcon
+            {
+                Glyph = kind == "usage" ? "\uE916" : "\uE7BA",
+                FontSize = 15,
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        });
+        var titles = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        titles.Children.Add(new TextBlock
+        {
+            Text = kind == "usage" ? L10n.Text("common.chat_limit_reached", name) : kind == "throttle" ? L10n.Text("common.chat_throttled", name) : L10n.Text("common.chat_route_failure", name),
+            FontSize = 15,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var reset = limit["resetsAtMs"] is null ? (long?)null : Format.Long(limit, "resetsAtMs");
+        if (reset.HasValue)
+        {
+            var moment = ChatRoutingChoices.Moment(reset.Value).LocalDateTime;
+            var minutes = Math.Max(1, (int)Math.Round((moment - DateTime.Now).TotalMinutes));
+            var relative = minutes < 90 ? L10n.Text("windows.homepage.in_0_minutes.f10e22e6", minutes) : L10n.Text("windows.homepage.in_0_hours.f583918e", Math.Round(minutes / 60.0));
+            titles.Children.Add(Muted(L10n.Text("common.chat_resets_in", relative, moment.ToString("t"))));
+        }
+        else titles.Children.Add(Muted(L10n.Text("common.chat_reset_unknown")));
+        Grid.SetColumn(titles, 1);
+        header.Children.Add(titles);
+        stack.Children.Add(header);
+        if (Format.Text(limit, "reason") is string reason && reason.Length > 0) stack.Children.Add(Muted(reason));
+        var nextReset = state["nextReset"] as JsonObject;
+        if (nextReset is not null && Format.Text(nextReset["destination"], "backend") != provider) stack.Children.Add(Muted(L10n.Text("common.chat_route_waiting_for", Format.Text(nextReset["destination"], "backend"), ChatRoutingChoices.Moment(Format.Long(nextReset, "atMs")).ToLocalTime().ToString("g"))));
+        var deliveryCheck = Format.Flag(state, "needsDeliveryCheck");
+        if (deliveryCheck) stack.Children.Add(Muted(L10n.Text("common.chat_route_delivery")));
+        if (Format.Text(state, "note") is string note && note.Length > 0) stack.Children.Add(Muted(note));
+        var policy = state["policy"] as JsonObject;
+        var waitAvailable = (reset.HasValue || nextReset is not null) && !deliveryCheck;
+        var wait = new CheckBox { Content = L10n.Text("common.chat_wait_reset"), IsChecked = Format.Flag(policy, "waitForReset"), IsEnabled = waitAvailable, MinHeight = 40 };
+        wait.Click += async (_, _) =>
+        {
+            var requested = wait.IsChecked == true;
+            var changed = (JsonObject?)policy?.DeepClone() ?? new JsonObject();
+            changed["waitForReset"] = requested;
+            wait.IsEnabled = false;
+            var saved = await apply("chat.routing", new JsonObject { ["routing"] = changed });
+            if (!saved) wait.IsChecked = !requested;
+            wait.IsEnabled = waitAvailable;
+        };
+        var tileContent = new StackPanel();
+        tileContent.Children.Add(wait);
+        if (!waitAvailable && !deliveryCheck) tileContent.Children.Add(Muted(L10n.Text("common.chat_wait_reset_unavailable")));
+        stack.Children.Add(new Border
+        {
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Faded(Theme.Background, 0.6)),
+            BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Theme.Border),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(Theme.SpaceM, Theme.SpaceXs, Theme.SpaceM, Theme.SpaceXs),
+            Child = tileContent,
+        });
+        var running = Format.Flag(snapshot, "running");
+        var cells = new List<Button>();
+        var handoff = ActionIconGlyph.PrimaryButton(L10n.Text("common.chat_hand_off_now"), ActionIcon.Routing, (_, _) => HandOffNow());
+        handoff.IsEnabled = !running;
+        cells.Add(handoff);
+        var retry = ActionIconGlyph.Button(L10n.Text("common.chat_route_retry"), ActionIcon.Refresh, async (_, _) => await apply("chat.routeAction", new JsonObject { ["choice"] = "resume" }));
+        retry.IsEnabled = !running && !deliveryCheck;
+        cells.Add(retry);
+        cells.Add(ActionIconGlyph.Button(L10n.Text("common.chat_routing"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync()));
+        if (Format.Flag(state, "waiting"))
+            cells.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Dismiss, async (_, _) => await apply("chat.routeAction", new JsonObject { ["choice"] = "cancel" })));
+        var actions = new Grid { ColumnSpacing = Theme.SpaceS, RowSpacing = Theme.SpaceS };
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        for (var index = 0; index < cells.Count; index++)
+        {
+            if (index % 2 == 0) actions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var cell = cells[index];
+            cell.HorizontalAlignment = HorizontalAlignment.Stretch;
+            cell.HorizontalContentAlignment = HorizontalAlignment.Center;
+            cell.MinHeight = 40;
+            Grid.SetRow(cell, index / 2);
+            Grid.SetColumn(cell, index % 2);
+            if (index == cells.Count - 1 && index % 2 == 0) Grid.SetColumnSpan(cell, 2);
+            actions.Children.Add(cell);
+        }
+        stack.Children.Add(actions);
+        return new Border
+        {
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Faded(Theme.Danger, 0.08)),
+            BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Faded(Theme.Danger, 0.35)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(Theme.SpaceM),
+            Child = stack,
+        };
+    }
+
+    private void HandOffNow()
+    {
+        if (string.IsNullOrWhiteSpace(_draft.Text))
+        {
+            _draft.Text = L10n.Text("common.continue");
+            _draft.SelectionStart = _draft.Text.Length;
+        }
+        if (_composerAgent is { Flyout: { } flyout, XamlRoot: not null } button) flyout.ShowAt(button);
+        else _draft.Focus(FocusState.Programmatic);
     }
 
     private async Task ShowRoutingAsync()

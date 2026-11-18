@@ -468,6 +468,8 @@ final class ChatModel {
 
     // MARK: - Unsent words
 
+    var agentPickerRequest: UInt64 = 0
+
     /// What is in the composer.
     ///
     /// It lives here rather than in the view because it belongs to the

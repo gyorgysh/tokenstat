@@ -264,6 +264,7 @@ ALLOWED = [
     ("Features/Machines/SSHVaultView.swift", "Button(button, icon, action: perform)"),
     ("Features/Machines/SSHLiveTerminal.swift", "Button(action, icon) {"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
+    ("Design/Theme.swift", "BrandCheckboxBox(isOn: configuration.isOn)"),
     ("Design/Theme.swift", "Button(title) { action() }"),
     # Custom-schedule weekday cells. The whole surface is the day name, same
     # as the time-limit chips: a glyph on Mo would be a second mark on a
