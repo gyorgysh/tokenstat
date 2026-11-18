@@ -1876,7 +1876,7 @@ struct ClientChatThread: View {
                 && ((model.hasEarlier && measuringRows) || !follow.atEnd),
             holdingReading: preservesReadingMark
         )
-        .transcriptRowMount(item.id, in: rowMounts)
+        .transcriptRowMount(in: rowMounts)
     }
 
     private func transcript(_ chat: ChatConversation) -> some View {
@@ -1915,6 +1915,7 @@ struct ClientChatThread: View {
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript, let chat = model.selected {
                             ChatRoutingNotice(model: model, chat: chat)
+                                .id(chat.id)
                         }
                         if !model.isShowingCachedTranscript, let mood = liveMood {
                             ChatWorkingIndicator(
@@ -2207,7 +2208,7 @@ struct ClientChatThread: View {
                     if follow.arrived, quiet >= 3 { return }
                 }
             }
-            .task(id: "\(isActive)-\(scenePhase == .active)") {
+            .task(id: "\(isActive)-\(scenePhase == .active)-\(model.selectionGeneration)") {
                 await watchMountedRows(proxy)
             }
             .task(id: settleMood) {
@@ -2498,7 +2499,7 @@ struct ClientChatThread: View {
     /// has nothing to build cannot keep moving the view.
     private func watchMountedRows(_ proxy: ScrollViewProxy) async {
         guard isActive, scenePhase == .active else { return }
-        var repairs = 0
+        var nudged = false
         var rebuilds = 0
         var consecutiveEmptySamples = 0
         while !Task.isCancelled {
@@ -2506,30 +2507,33 @@ struct ClientChatThread: View {
             guard isActive, scenePhase == .active, follow.active else { continue }
             // The opening cover only hides the stack, so repair under it:
             // the rows are back by the time it lifts.
-            if rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
+            let showsRows = rowMounts.showsRows(viewportHeight: window.viewportHeight)
+            if showsRows || visibleItems.isEmpty
                 || model.openingConversation || follow.scrolling || scrollAccess.readerIsTouching {
                 consecutiveEmptySamples = 0
-                if rowMounts.showsRows(viewportHeight: window.viewportHeight) { repairs = 0; rebuilds = 0 }
+                if showsRows { nudged = false; rebuilds = 0 }
                 continue
             }
             consecutiveEmptySamples += 1
-            guard consecutiveEmptySamples >= 2, repairs < 3, scrollAccess.isEligible else { continue }
-            repairs += 1
+            guard consecutiveEmptySamples >= 2, scrollAccess.isEligible else { continue }
             consecutiveEmptySamples = 0
             traceViewport("unmounted-repair")
             // A screen's move first. If the stack is still empty after it,
             // its estimates are too far off for any move to reach a row:
             // start a new scroll view, as leaving and reopening the chat
             // does. Placement then restores the end or the reading place.
-            if repairs > 1 {
+            if nudged {
                 guard rebuilds < 3, Date().timeIntervalSince(lastTranscriptRebuild) > 5 else { continue }
                 lastTranscriptRebuild = Date()
                 rebuilds += 1
-                repairs = 0
+                nudged = false
                 traceViewport("unmounted-rebuild")
                 transcriptRebuild &+= 1
                 continue
             }
+            nudged = true
+            guard let attachment = scrollAccess.attachmentIdentity,
+                  let originalOffset = scrollAccess.view?.contentOffset.y else { continue }
             let following = follow.pinned || follow.atEnd
             let screen = scrollAccess.viewportHeight
             // Up a screen where there is room, down a screen at the top.
@@ -2538,12 +2542,14 @@ struct ClientChatThread: View {
             guard scrollAccess.nudge(by: step) else { continue }
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
+            guard isActive, scenePhase == .active, follow.active, scrollAccess.matches(attachment),
+                  !scrollAccess.readerIsTouching else { continue }
             follow.markDrivenInstant()
-            if following {
+            if following && follow.pinned {
                 lastSilentPinAt = .distantPast
                 pinToLatest(proxy, animated: false)
             } else {
-                scrollAccess.nudge(by: -step)
+                scrollAccess.move(to: originalOffset)
             }
         }
     }
@@ -3174,11 +3180,17 @@ private final class ClientTranscriptScrollAccess {
     /// Never while a finger is on it.
     @discardableResult
     func nudge(by distance: CGFloat) -> Bool {
+        guard let view else { return false }
+        return move(to: view.contentOffset.y + distance)
+    }
+
+    @discardableResult
+    func move(to offsetY: CGFloat) -> Bool {
         guard isEligible, let view, !view.isTracking, !view.isDragging, !view.isDecelerating else { return false }
         let offset = view.contentOffset
         let minimum = -view.adjustedContentInset.top
         let maximum = max(minimum, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
-        let target = min(max(offset.y + distance, minimum), maximum)
+        let target = min(max(offsetY, minimum), maximum)
         guard abs(target - offset.y) >= 0.5 else { return false }
         view.setContentOffset(CGPoint(x: offset.x, y: target), animated: false)
         return true

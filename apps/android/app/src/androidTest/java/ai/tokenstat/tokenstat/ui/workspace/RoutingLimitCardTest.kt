@@ -47,7 +47,7 @@ import org.junit.runner.RunWith
 class RoutingLimitCardTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    private fun chat(wait: Boolean) = buildJsonObject {
+    private fun chat(wait: Boolean, resetsAt: Long = System.currentTimeMillis() + 59 * 60_000L) = buildJsonObject {
         put("id", "qa-limit")
         put("backend", "grok")
         put("sendRevision", 3)
@@ -60,7 +60,7 @@ class RoutingLimitCardTest {
                 put("kind", "usage")
                 put("provider", "grok")
                 put("reason", "You have reached your usage limit.")
-                put("resetsAtMs", System.currentTimeMillis() + 59 * 60_000L)
+                put("resetsAtMs", resetsAt)
             })
             put("waiting", wait)
             put("needsDeliveryCheck", false)
@@ -112,6 +112,8 @@ class RoutingLimitCardTest {
         colors = LightColors
         compose.waitForIdle()
         save("limit-light-checked")
+        current = chat(true, resetsAt = System.currentTimeMillis() - 60_000)
+        compose.onNodeWithText("Reported reset time passed", substring = true).assertExists()
         compose.onNodeWithText("Hand off now").performClick()
         assertEquals(true, handedOff)
     }

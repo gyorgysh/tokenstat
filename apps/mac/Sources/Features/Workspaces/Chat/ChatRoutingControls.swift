@@ -177,6 +177,7 @@ struct ChatRoutingNotice: View {
         case .cancel:
             Button(L10n.text("common.cancel"), .dismiss) { change(action: "cancel") }
                 .buttonStyle(LimitActionStyle())
+                .disabled(saving)
         }
     }
 
@@ -190,7 +191,11 @@ struct ChatRoutingNotice: View {
     private func resetLine(_ limit: ChatProviderLimit) -> String {
         guard let instant = limit.resetsAtMs else { return L10n.text("common.chat_reset_unknown") }
         let date = Date(timeIntervalSince1970: Double(instant) / 1000)
-        return L10n.text("common.chat_resets_in", RelativeClock.phrase(for: date),
+        let relative = RelativeClock.phrase(for: date)
+        if date <= Date() {
+            return L10n.text("common.chat_reset_elapsed", date.formatted(date: .abbreviated, time: .shortened))
+        }
+        return L10n.text("common.chat_resets_in", relative,
                          date.formatted(date: .omitted, time: .shortened))
     }
 
@@ -224,6 +229,7 @@ struct ChatRoutingNotice: View {
     }
 
     private func setWait(_ value: Bool, state: ChatRoutingState) {
+        guard !saving else { return }
         pendingWait = value
         var policy = state.policy
         policy.waitForReset = value
@@ -238,7 +244,7 @@ struct ChatRoutingNotice: View {
     }
 
     private func change(policy: ChatRoutingPolicy? = nil, action: String? = nil, revert: Bool = false) {
-        guard let owner = model.currentReference, model.selected?.id == chat.id else {
+        guard !saving, let owner = model.currentReference, model.selected?.id == chat.id else {
             if revert { pendingWait = nil }
             return
         }

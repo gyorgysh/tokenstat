@@ -418,7 +418,6 @@ print(json.dumps({'events':len(result['result']['events'])}))
         print("Native QA apps launched:", ", ".join(roles), flush=True)
         await wait(lambda: all(state(role) and state(role)["loaded"] for role in roles), 180)
         if args.reading_soak:
-            assert args.phone_only, "Reading soak drives the iPhone by hand"
             await visible("network-start")
             emit({"type": "text", "data": "\n\n" + "\n\n".join(f"soak paragraph {index} " + "reading padding " * 40
                 for index in range(60))})
@@ -442,7 +441,6 @@ print(json.dumps({'events':len(result['result']['events'])}))
             atomic_json(run_root / "result.json", {"ok": True, "ticks": tick, "states": {role: state(role) for role in roles}})
             return
         if args.limit_notice:
-            assert args.phone_only, "The limit notice is checked by hand on the iPhone"
             await visible("network-start")
             reset = int(time.time() * 1000) + 3600000
             emit({"type": "error", "error": {"code": "usage_limit_reached",
@@ -862,15 +860,19 @@ if __name__ == "__main__":
     # The simulator cannot read or write a checkout on an external volume.
     parser.add_argument("--runs-dir", type=Path, default=ROOT / "target/chat-performance",
                         help="Where each run keeps its fixture and artifacts; must be readable by the simulator")
-    parser.add_argument("--phone-only", action="store_true", help="Run the iPhone reader without the Mac app")
-    parser.add_argument("--reading-soak", action="store_true", help="Stream into the iPhone until the run's stop file exists, for hand testing")
-    parser.add_argument("--limit-notice", action="store_true", help="End the iPhone turn on a usage limit and hold it for testing by hand")
-    parser.add_argument("--desktop-only", action="store_true", help="Verify the Mac view before the combined phone run")
+    clients = parser.add_mutually_exclusive_group()
+    clients.add_argument("--phone-only", action="store_true", help="Run the iPhone reader without the Mac app")
+    clients.add_argument("--desktop-only", action="store_true", help="Run the Mac reader without the iPhone app")
+    manual = parser.add_mutually_exclusive_group()
+    manual.add_argument("--reading-soak", action="store_true", help="Stream into the iPhone until the run's stop file exists, for hand testing")
+    manual.add_argument("--limit-notice", action="store_true", help="End the iPhone turn on a usage limit and hold it for testing by hand")
     parser.add_argument("--direct-launch", action="store_true", help="Launch the owned Mac executable directly when Launch Services is unavailable")
     parser.add_argument("--desktop-width", type=int, default=760, metavar="POINTS",
                         help="Set the native Mac transcript width (320–1600 points)")
     parser.add_argument("--desktop-local", action="store_true", help="Use the producer's local socket on Mac, with the iPhone still encrypted")
     arguments = parser.parse_args()
+    if (arguments.reading_soak or arguments.limit_notice) and not arguments.phone_only:
+        parser.error("--reading-soak and --limit-notice each require --phone-only")
     if not 320 <= arguments.desktop_width <= 1600:
         parser.error("--desktop-width must be between 320 and 1600 points")
     if arguments.unbroken_code is not None and not 1 <= arguments.unbroken_code <= 1000000:

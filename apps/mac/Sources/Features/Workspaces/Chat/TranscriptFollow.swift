@@ -794,20 +794,21 @@ struct ChatScrollViewportKey: PreferenceKey {
 /// A plain class so rows coming and going never invalidate the transcript.
 @MainActor
 final class TranscriptRowMounts {
-    /// Mounted rows by id, with their frame in the viewport's space once
-    /// known. Nil until the first geometry report, and on systems without one.
-    private var frames: [String: CGRect?] = [:]
+    final class Row {
+        var frame: CGRect?
+    }
 
-    func appeared(_ id: String) { if frames[id] == nil { frames[id] = .some(nil) } }
-    func disappeared(_ id: String) { frames[id] = nil }
-    func placed(_ id: String, _ frame: CGRect) { if frames[id] != nil { frames[id] = frame } }
+    private var mounted: [ObjectIdentifier: Row] = [:]
+
+    func appeared(_ row: Row) { mounted[ObjectIdentifier(row)] = row }
+    func disappeared(_ row: Row) { mounted[ObjectIdentifier(row)] = nil }
 
     /// Whether any mounted row reaches into a viewport of this height. A row
     /// with no frame yet counts, so a system without geometry reports falls
     /// back to "anything mounted".
     func showsRows(viewportHeight: CGFloat) -> Bool {
-        frames.values.contains { frame in
-            guard let frame, viewportHeight > 0 else { return true }
+        mounted.values.contains { row in
+            guard let frame = row.frame, viewportHeight > 0 else { return true }
             return frame.maxY > 0 && frame.minY < viewportHeight
         }
     }
@@ -816,27 +817,27 @@ final class TranscriptRowMounts {
 extension View {
     /// Report this row to `TranscriptRowMounts`. Geometry goes to a plain
     /// object, so a scroll reports without redrawing anything.
-    func transcriptRowMount(_ id: String, in mounts: TranscriptRowMounts) -> some View {
-        modifier(TranscriptRowMount(id: id, mounts: mounts))
+    func transcriptRowMount(in mounts: TranscriptRowMounts) -> some View {
+        modifier(TranscriptRowMount(mounts: mounts))
     }
 }
 
 private struct TranscriptRowMount: ViewModifier {
-    let id: String
     let mounts: TranscriptRowMounts
+    @State private var row = TranscriptRowMounts.Row()
 
     func body(content: Content) -> some View {
         if #available(macOS 15.0, iOS 18.0, *) {
             content
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptFollow.spaceName)) } action: { frame in
-                    mounts.placed(id, frame)
+                    row.frame = frame
                 }
-                .onAppear { mounts.appeared(id) }
-                .onDisappear { mounts.disappeared(id) }
+                .onAppear { mounts.appeared(row) }
+                .onDisappear { mounts.disappeared(row) }
         } else {
             content
-                .onAppear { mounts.appeared(id) }
-                .onDisappear { mounts.disappeared(id) }
+                .onAppear { mounts.appeared(row) }
+                .onDisappear { mounts.disappeared(row) }
         }
     }
 }

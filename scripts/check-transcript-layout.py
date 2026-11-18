@@ -14,7 +14,25 @@ metrics = source[source.index("struct TranscriptMetrics:"):source.index("@availa
 follow = source[source.index("@Observable\nfinal class TranscriptFollowState"):source.index("struct ChatScrollContentKey:")]
 delivery = source[source.index("final class TranscriptScrollDelivery"):source.index("/// Report where the transcript is scrolled,")]
 slice = source[source.index("enum TranscriptSlice"):source.index("struct TranscriptMetrics:")]
+mounts_start = source.index("@MainActor\nfinal class TranscriptRowMounts")
+mounts_end = source.index("\nextension View {", mounts_start)
+row_mounts = source[mounts_start:mounts_end].replace("CGRect", "CoreGraphics.CGRect")
 tests = r'''
+@MainActor func checkRowMounts() {
+    let mounts = TranscriptRowMounts()
+    let older = TranscriptRowMounts.Row()
+    older.frame = CoreGraphics.CGRect(x: 0, y: 800, width: 200, height: 40)
+    mounts.appeared(older)
+    assert(!mounts.showsRows(viewportHeight: 400), "early geometry must be retained when the row mounts")
+    let replacement = TranscriptRowMounts.Row()
+    replacement.frame = CoreGraphics.CGRect(x: 0, y: 100, width: 200, height: 40)
+    mounts.appeared(replacement)
+    mounts.disappeared(older)
+    assert(mounts.showsRows(viewportHeight: 400), "a departing row must not erase a replacement's frame")
+    replacement.frame = CoreGraphics.CGRect(x: 0, y: 450, width: 200, height: 40)
+    assert(!mounts.showsRows(viewportHeight: 400))
+}
+MainActor.assumeIsolated { checkRowMounts() }
 func metrics(_ top: CGFloat, _ height: CGFloat = 1000) -> TranscriptMetrics {
     TranscriptMetrics(distanceFromTop: top, distanceFromBottom: height - top - 400,
                       contentHeight: height, viewportHeight: 400)
@@ -266,10 +284,10 @@ print("PASS: deferred/coalesced corrections, no re-entry, cancellation, wheel ge
 with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
     path = Path(directory) / "main.swift"
     path.write_text(
-        "import Foundation\nimport Observation\n"
+        "import Foundation\nimport Observation\nimport CoreGraphics\n"
         "enum TranscriptFollow { static let threshold: CGFloat = 56 }\n"
         "struct ChatDisplayItem: Identifiable { let id: String }\n"
-        + slice + metrics + delivery + follow + tests
+        + slice + metrics + delivery + follow + row_mounts + tests
     )
     subprocess.run(["swift", str(path)], check=True)
 

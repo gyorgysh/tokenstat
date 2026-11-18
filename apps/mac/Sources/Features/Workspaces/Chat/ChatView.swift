@@ -687,17 +687,18 @@ struct ChatView: View {
                         }
                         ForEach(split.lazy) { item in
                             transcriptRow(item, chat: chat, spinning: spinning)
-                                .transcriptRowMount(item.id, in: rowMounts)
+                                .transcriptRowMount(in: rowMounts)
                         }
                     }
                     // See `TranscriptSlice.measuredTail`.
                     ForEach(split.measured) { item in
                         transcriptRow(item, chat: chat, spinning: spinning)
-                            .transcriptRowMount(item.id, in: rowMounts)
+                            .transcriptRowMount(in: rowMounts)
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript, let chat = model.selected {
                             ChatRoutingNotice(model: model, chat: chat)
+                                .id(chat.id)
                         }
                         if !model.isShowingCachedTranscript, let mood = liveMood {
                             ChatWorkingIndicator(
@@ -948,7 +949,7 @@ struct ChatView: View {
                 try? await Task.sleep(for: .milliseconds(480))
                 settleMood = nil
             }
-            .task(id: isActive) {
+            .task(id: ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)) {
                 await watchMountedRows(proxy)
             }
         }
@@ -1260,7 +1261,7 @@ struct ChatView: View {
             // The opening cover only hides the stack, so repair under it:
             // the rows are back by the time it lifts.
             if rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
-                || model.openingConversation || follow.scrolling || !follow.pinned {
+                || model.openingConversation || follow.scrolling || !follow.pinned || !canScrollToEnd {
                 emptySamples = 0
                 if rowMounts.showsRows(viewportHeight: window.viewportHeight) { repairs = 0 }
                 continue
@@ -1275,6 +1276,7 @@ struct ChatView: View {
             withTransaction(transaction) { proxy.scrollTo(last, anchor: .top) }
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
+            guard isActive, follow.pinned, !follow.scrolling, canScrollToEnd else { continue }
             follow.markDrivenInstant()
             lastSilentPinAt = .distantPast
             pinToLatest(proxy, animated: false)

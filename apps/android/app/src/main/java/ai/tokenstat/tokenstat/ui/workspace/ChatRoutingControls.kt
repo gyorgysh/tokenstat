@@ -780,6 +780,9 @@ private fun RoutingLimitCard(
                 )
                 Text(
                     if (reset == null) L10n.text("common.chat_reset_unknown")
+                    else if (reset <= System.currentTimeMillis()) L10n.text(
+                        "common.chat_reset_elapsed", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(reset)),
+                    )
                     else L10n.text(
                         "common.chat_resets_in",
                         DateUtils.getRelativeTimeSpanString(reset, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)

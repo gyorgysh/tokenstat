@@ -76,6 +76,17 @@ internal sealed partial class ChatPage {
         Check(progress.Count == 2 && progress[0].Text == "Working" && progress[1].Kind == ChatPage.ItemKind.Plan && progress[1].Plan![0].Status == "completed" && progress[1].Plan![1].Status == "inProgress", "The latest checklist must move last and keep intervening messages");
         plan.Add(JsonNode.Parse("""{"kind":"agent","atMs":4,"event":{"kind":"plan","initial":false,"steps":[]}}"""));
         Check(planPage.Coalesce(plan).Count == 1, "Clearing a plan must remove its placeholder");
+        if (Enum.IsDefined(typeof(ItemKind), "Handoff")) {
+            var handoffs = (JsonArray)JsonNode.Parse("""
+            [{"kind":"handoff","seq":42,"atMs":5,"to":"codex","brief":"Check the renderer"}]
+            """)!;
+            var handoffPage = new ChatPage(handoffs);
+            var handoff = handoffPage.Coalesce(handoffs).Single();
+            handoffs.Insert(0, JsonNode.Parse("""{"kind":"user","seq":1,"atMs":1,"text":"Earlier message"}"""));
+            var afterPrepend = handoffPage.Coalesce(handoffs).Last();
+            Check(handoff.Kind.ToString() == "Handoff" && handoff.Target == "codex" && handoff.Text == "Check the renderer", "The handoff must retain its agent and brief");
+            Check(afterPrepend.Id == handoff.Id, "Paging older history must preserve the handoff's expansion identity");
+        }
         foreach (var (value, expected) in new (JsonNode?, string)[] {
             (JsonValue.Create("text 😀"), "text 😀"), (JsonValue.Create(""), ""),
             (JsonValue.Create(42), "42"), (JsonValue.Create(true), "true"),

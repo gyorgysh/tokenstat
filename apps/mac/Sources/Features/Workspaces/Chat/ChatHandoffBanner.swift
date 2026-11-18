@@ -79,7 +79,6 @@ struct ChatHandoffBanner: View {
                 .strokeBorder(gradient.opacity(0.7), lineWidth: 1.5)
         }
         .padding(.vertical, Theme.Space.s)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(brief.isEmpty ? L10n.text("apple.chateventrow.handed_to_0.902d7234", agent) : L10n.text("apple.chateventrow.handed_to_0_with_a_summary_of_the_conversa.136c6fc3", agent))
+        .accessibilityElement(children: .contain)
     }
 }

@@ -123,6 +123,7 @@
   "common.chat_return_preferred": "Return to the preferred model after reset",
   "common.chat_route_order": "Try agents in this order",
   "common.chat_reset_unknown": "Reset time is unavailable.",
+  "common.chat_reset_elapsed": "Reported reset time passed ({0}).",
   "common.chat_resets_at": "Resets {0}",
   "common.chat_resets_in": "Resets {0}, at {1}",
   "common.chat_wait_reset_unavailable": "No reset time was reported, so there is nothing to wait for. Hand off or try again later.",

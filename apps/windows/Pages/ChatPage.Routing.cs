@@ -9,6 +9,8 @@ using Tokenstat.Navigation;
 namespace Tokenstat.Pages;
 internal sealed partial class ChatPage
 {
+    private (int Conversation, long Account)? _routingMutationOwner;
+
     private static string RoutingActivityLabel(string kind) => kind switch
     {
         "usage" => L10n.Text("common.chat_route_event_usage"),
@@ -30,13 +32,16 @@ internal sealed partial class ChatPage
         if (_openId is not string chat) return body;
         var generation = _openGeneration;
         var accountGeneration = AppServices.AccountGeneration;
+        var owner = (generation, accountGeneration);
         var snapshot = _openChat;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
+        bool CanMutate() => Current() && !SharedSource && _routingMutationOwner != owner;
         async Task<bool> ApplyAsync(string method, JsonObject extra)
         {
+            if (!CanMutate() || snapshot?["sendRevision"] is null) return false;
+            _routingMutationOwner = owner;
             try
             {
-                if (!Current() || snapshot?["sendRevision"] is null) return false;
                 var request = new JsonObject { ["id"] = chat, ["expectedRevision"] = Format.Long(snapshot, "sendRevision") };
                 foreach (var item in extra) request[item.Key] = item.Value?.DeepClone();
                 await CallChatAsync(method, request);
@@ -46,9 +51,10 @@ internal sealed partial class ChatPage
                 return true;
             }
             catch (Exception ex) { if (Current()) Banner(ex.Message); return false; }
+            finally { if (_routingMutationOwner == owner) _routingMutationOwner = null; }
         }
         if (snapshot?["routing"] is JsonObject state && state["limit"] is JsonObject limit)
-            body.Children.Add(RoutingLimitCard(snapshot, state, limit, ApplyAsync));
+            body.Children.Add(RoutingLimitCard(snapshot, state, limit, ApplyAsync, CanMutate));
         var routing = new StackPanel { Spacing = Theme.SpaceS };
         var routePolicy = snapshot?["routing"]?["policy"];
         var mode = Format.Flag(routePolicy, "enabled") ? Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_combined_mode") : L10n.Text("common.chat_route_fallback_mode") : Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_wait_mode") : L10n.Text("common.chat_route_manual");
@@ -61,7 +67,8 @@ internal sealed partial class ChatPage
         return body;
     }
 
-    private UIElement RoutingLimitCard(JsonObject snapshot, JsonObject state, JsonObject limit, Func<string, JsonObject, Task<bool>> apply)
+    private UIElement RoutingLimitCard(JsonNode snapshot, JsonObject state, JsonObject limit,
+        Func<string, JsonObject, Task<bool>> apply, Func<bool> canMutate)
     {
         static Windows.UI.Color Faded(Windows.UI.Color color, double alpha) => Windows.UI.Color.FromArgb((byte)Math.Round(255 * alpha), color.R, color.G, color.B);
         var provider = Format.Text(limit, "provider");
@@ -107,10 +114,16 @@ internal sealed partial class ChatPage
         var reset = limit["resetsAtMs"] is null ? (long?)null : Format.Long(limit, "resetsAtMs");
         if (reset.HasValue)
         {
-            var moment = ChatRoutingChoices.Moment(reset.Value).LocalDateTime;
-            var minutes = Math.Max(1, (int)Math.Round((moment - DateTime.Now).TotalMinutes));
-            var relative = minutes < 90 ? L10n.Text("windows.homepage.in_0_minutes.f10e22e6", minutes) : L10n.Text("windows.homepage.in_0_hours.f583918e", Math.Round(minutes / 60.0));
-            titles.Children.Add(Muted(L10n.Text("common.chat_resets_in", relative, moment.ToString("t"))));
+            var moment = ChatRoutingChoices.Moment(reset.Value).ToLocalTime();
+            var remaining = moment - DateTimeOffset.Now;
+            if (remaining <= TimeSpan.Zero)
+                titles.Children.Add(Muted(L10n.Text("common.chat_reset_elapsed", moment.ToString("g"))));
+            else
+            {
+                var minutes = Math.Max(1, (int)Math.Round(remaining.TotalMinutes));
+                var relative = minutes < 90 ? L10n.Text("windows.homepage.in_0_minutes.f10e22e6", minutes) : L10n.Text("windows.homepage.in_0_hours.f583918e", Math.Round(minutes / 60.0));
+                titles.Children.Add(Muted(L10n.Text("common.chat_resets_in", relative, moment.ToString("t"))));
+            }
         }
         else titles.Children.Add(Muted(L10n.Text("common.chat_reset_unknown")));
         Grid.SetColumn(titles, 1);
@@ -149,8 +162,11 @@ internal sealed partial class ChatPage
         });
         var running = Format.Flag(snapshot, "running");
         var cells = new List<Button>();
-        var handoff = ActionIconGlyph.PrimaryButton(L10n.Text("common.chat_hand_off_now"), ActionIcon.Routing, (_, _) => HandOffNow());
-        handoff.IsEnabled = !running;
+        var handoff = ActionIconGlyph.PrimaryButton(L10n.Text("common.chat_hand_off_now"), ActionIcon.Merge, (_, _) =>
+        {
+            if (canMutate() && !Busy()) HandOffNow();
+        });
+        handoff.IsEnabled = !running && !SharedSource;
         cells.Add(handoff);
         var retry = ActionIconGlyph.Button(L10n.Text("common.chat_route_retry"), ActionIcon.Refresh, async (_, _) => await apply("chat.routeAction", new JsonObject { ["choice"] = "resume" }));
         retry.IsEnabled = !running && !deliveryCheck;

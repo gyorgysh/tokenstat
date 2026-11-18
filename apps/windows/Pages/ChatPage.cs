@@ -2752,7 +2752,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 FlushThinking();
                 items.Add(new DisplayItem
                 {
-                    Id = "handoff-" + Format.Long(row, "atMs") + "-" + items.Count,
+                    Id = "handoff-" + Format.Text(row, "seq", $"{Format.Long(row, "atMs")}-{items.Count}"),
                     Kind = ItemKind.Handoff,
                     Target = Format.Text(row, "to"),
                     Text = Format.Text(row, "brief"),
