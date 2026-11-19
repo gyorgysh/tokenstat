@@ -5,25 +5,26 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
-## [1.21.0]
+## [1.21.0] - 2026-11-19
 
 ### Changed
 
 - Handoffs between agents show as a banner with the new agent's name and what it was told. Windows shows handoffs for the first time.
-- Pin and Continue on another device are easier to find: at the top of the chat menu on iPhone and iPad, in the chat toolbar on Mac, and first in the menu on Android.
+- Find Pin and Continue on another device in the chat toolbar on Mac and at the top of the chat menu on iPhone, iPad and Android.
 
 ### Improved
 
-- On Mac, the sidebar, toolbar and inspector header share one Liquid Glass surface. The opacity slider still applies, and a soft sheen can be turned off in Glass highlights.
+- On Mac, the sidebar, toolbar and inspector header share one Liquid Glass surface. Adjust its opacity or turn off the sheen in Glass highlights.
 - On Mac, rows, cards and buttons respond to hover and clicks, and chat controls animate when they change. Reduce Motion turns this off.
 - The composer is shorter and chat titles use more of the toolbar.
-- Chat characters have bigger eyes that look around, blink, wink and change expression smoothly, on every platform.
-- Switching chats on Mac is faster, and the longest pauses are about half as long.
+- Chat characters have bigger eyes that look around, blink, wink and change expression.
+- In All devices on Mac, the Models and Coding tools charts put each name and token total above its bar.
+- Plan Limits shows the separate weekly Gemini 4 Argon allowance when Antigravity reports it on a Pro plan.
 
 ### Fixed
 
-- Clicking a chat no longer makes it jump. It opens at the latest message.
-- The changes and pull request strip above the composer no longer flickers.
+- Mac chats open at the latest message. Scrolling down past it keeps the transcript in place.
+- The changes and pull request strip stays visible while it refreshes.
 - A long chat no longer goes blank after opening it, returning to the app, showing the keyboard on iPhone and iPad, or resizing on Mac.
 - A chat with a failed turn no longer keeps the computer busy while open.
 - On Mac, dragging the sidebar or inspector edge follows the pointer, and the inspector can't be dragged out of the window.

@@ -2,6 +2,9 @@
 
 import OSLog
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 private struct ChatConversationOverview: View {
     @Bindable var model: ChatModel
@@ -711,7 +714,7 @@ struct ChatView: View {
                             .transcriptRowMount(in: rowMounts)
                     }
                     if sliceOffset == 0 {
-                        if !model.isShowingCachedTranscript, let chat = model.selected {
+                        if !model.isShowingCachedTranscript, let chat = model.selected, chat.routing?.limit != nil {
                             ChatRoutingNotice(model: model, chat: chat)
                                 .id(chat.id)
                         }
@@ -737,6 +740,9 @@ struct ChatView: View {
                 .padding(.bottom, sliceOffset == 0 ? 0 : verticalPadding)
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
+                #if os(macOS)
+                .background { TranscriptScrollBounds().allowsHitTesting(false) }
+                #endif
                 .chatScrollContent()
             }
             .transcriptOpensAtEnd()
@@ -1680,3 +1686,25 @@ private struct OpeningSkeleton: View {
             }
     }
 }
+
+#if os(macOS)
+/// Keep the native clip view within its document while the reader is at an
+/// edge. A rubber-band frame can make the lazy history change its estimates
+/// and trigger a follow correction while the scroll view is springing back.
+private struct TranscriptScrollBounds: NSViewRepresentable {
+    func makeNSView(context: Context) -> Reporter { Reporter() }
+    func updateNSView(_ view: Reporter, context: Context) { view.clampScrolling() }
+
+    final class Reporter: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            clampScrolling()
+        }
+
+        func clampScrolling() {
+            guard let scrollView = enclosingScrollView, scrollView.verticalScrollElasticity != .none else { return }
+            scrollView.verticalScrollElasticity = .none
+        }
+    }
+}
+#endif

@@ -543,7 +543,7 @@ final class TranscriptFollowState {
         // Motion only: growth under a still viewport is a stream arriving,
         // not a gesture, and rows stay interactive while it is followed.
         let readerMoved = moved && metrics.readerIsScrolling != false
-        trackScrolling(moved: moved)
+        trackScrolling(moved: readerMoved)
 
         // Small growth or a shorter viewport stays inside the threshold and
         // left the last row (the token count) hidden under the composer.

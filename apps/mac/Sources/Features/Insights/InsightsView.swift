@@ -766,30 +766,45 @@ private struct AccountInsightsContent: View {
                     Text(plotted.last?.key ?? "")
                 }.font(Theme.caption).foregroundStyle(.secondary)
             } else {
-                Chart(plotted) { row in
-                    BarMark(x: .value(L10n.text("apple.insightsview.tokens.a039dfb9"), row.counters.total),
-                        y: .value(model.cut.label, model.cut.title(for: row.key)))
-                        .foregroundStyle(Theme.accent.gradient)
-                        .cornerRadius(3)
-                        .accessibilityLabel(model.cut.title(for: row.key))
-                        .accessibilityValue(L10n.text("apple.insightsview.0_tokens.624f11b9", "\(formatTokens(row.counters.total))"))
-                }
-                .chartXAxis {
-                    AxisMarks { value in
-                        AxisGridLine().foregroundStyle(Theme.border)
-                        AxisValueLabel {
-                            if let tokens = value.as(Double.self) {
-                                Text(formatTokens(InsightDayAxis.tokenCount(tokens))).font(Theme.caption2)
-                            }
-                        }
-                    }
-                }
-                .chartYScale(domain: plotted.map { model.cut.title(for: $0.key) })
-                .frame(height: CGFloat(max(1, plotted.count)) * 28 + 24)
+                usageRanking(plotted)
             }
         }
         .padding(Theme.Space.m)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+    }
+
+    private func usageRanking(_ rows: [Bucket]) -> some View {
+        let maximum = Double(max(1, rows.first?.counters.total ?? 0))
+        return VStack(alignment: .leading, spacing: Theme.Space.m) {
+            ForEach(rows) { row in
+                let title = model.cut.title(for: row.key)
+                let total = row.counters.total
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(title)
+                            .lineLimit(2)
+                        Spacer(minLength: Theme.Space.s)
+                        Text(formatTokens(total))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .fixedSize()
+                    }
+                    .font(Theme.caption)
+                    GeometryReader { geometry in
+                        Capsule().fill(Theme.accent.opacity(0.10))
+                            .overlay(alignment: .leading) {
+                                Capsule().fill(Theme.accent.gradient)
+                                    .frame(width: geometry.size.width * (Double(total) / maximum))
+                            }
+                    }
+                    .frame(height: 5)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(title)
+                .accessibilityValue(L10n.text("apple.insightsview.0_tokens.624f11b9", "\(total.formatted())"))
+            }
+        }
+        .padding(.top, Theme.Space.xs)
     }
 
 }

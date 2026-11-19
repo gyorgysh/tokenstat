@@ -86,6 +86,7 @@ anchor.repin = { anchorPins += 1; return true }
 anchor.note(native(6688, 7270, 63, scrolling: false))
 anchor.note(native(6634, 7270, 117, scrolling: false))
 assert(anchor.pinned && !anchor.showJump, "layout anchor adjustment must not stop following")
+assert(!anchor.scrolling, "layout adjustments must not cycle the reader-only scroll state")
 drain()
 assert(anchorPins == 1, "anchor adjustment must coalesce with the growth correction")
 anchor.note(native(6751, 7270, 0, scrolling: false))
@@ -97,6 +98,7 @@ for driven in [false, true] {
     if driven { gesture.markDriven() }
     gesture.note(native(6651, 7270, 100, scrolling: true))
     assert(!gesture.pinned && gesture.showJump, "native scroll must release follow, including during a pin")
+    assert(gesture.scrolling, "a real gesture gates row hit testing and anchor measurement")
     gesture.note(native(6751, 7270, 0, scrolling: true))
     assert(gesture.pinned && !gesture.showJump, "scrolling back to the bottom must resume follow")
 }
