@@ -75,7 +75,7 @@ enum L10n { static func text(_ key: String) -> String { key } }
     func showDropNotice(_ text: String) {}
 ''']
 pieces += [member(mac, signature) for signature in [
-    '    private var acceptsDrops:', '    private func receive(_ providers:', '    private func receive(_ drops:']]
+    '    private var showsDropTargets:', '    private var acceptsDrops:', '    private func receive(_ providers:', '    private func receive(_ drops:']]
 pieces += ['}\n@MainActor final class ClientView {\n let model = Model(); var isActive = true; var dropPresentation: UInt64 = 1; func showDropNotice(_ text: String) {}\n']
 pieces += [member(client, signature) for signature in [
     '    private var acceptsDrops:', '    private func receive(_ providers:', '    private func receive(_ drops: [ChatInboxDrop])',
@@ -104,7 +104,7 @@ pieces += [r'''
         policy.showingOverview = true; precondition(!policy.acceptsDrops); policy.showingOverview = false
         policy.model.sending = true; precondition(!policy.acceptsDrops); policy.model.sending = false
         policy.model.folderID = "wrong"; precondition(!policy.acceptsDrops); policy.model.folderID = "workspace"
-        policy.model.ready = false; precondition(!policy.acceptsDrops); policy.model.ready = true
+        policy.model.ready = false; precondition(!policy.acceptsDrops); precondition(policy.showsDropTargets, "The list read must not redraw the pane's drop targets"); policy.model.ready = true
         WorkCacheAccess.readable = false; precondition(!policy.acceptsDrops); WorkCacheAccess.readable = true
         policy.model.savedCopy = true; precondition(policy.acceptsDrops, "Readable offline drafts keep the composer's attachment behavior")
         policy.model.currentReference = nil; policy.model.selected = nil; policy.model.chats = []

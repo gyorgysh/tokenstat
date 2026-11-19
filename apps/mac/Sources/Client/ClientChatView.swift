@@ -804,6 +804,7 @@ struct ClientChatThread: View {
     /// The folder's live git state, for the changes pill and the chip.
     @State private var folderGit: GitStatus?
     @State private var branchPull: BranchPull?
+    @State private var folderStateOwner: String?
     /// Same strip as the list: reopening onto a stale transcript says what
     /// is happening until the explicit poll below answers.
     @State private var refreshing = false
@@ -1017,24 +1018,36 @@ struct ClientChatThread: View {
             .padding(.bottom, Theme.Space.xs)
     }
 
+    /// The strip above the composer belongs to the folder, so moving between
+    /// chats in one folder keeps it while it is checked again. Clearing it
+    /// on every open emptied the strip and moved the composer twice.
     private func loadFolderState() async {
-        folderGit = nil
-        branchPull = nil
-        guard let folder, let peer = model.peer, model.savedCopy == nil else { return }
+        guard let folder, let peer = model.peer, model.savedCopy == nil else {
+            folderGit = nil
+            branchPull = nil
+            folderStateOwner = nil
+            return
+        }
         let workspace = model.folderID ?? folder.id
+        let place = "\(peer)|\(workspace)"
+        if folderStateOwner != place {
+            folderGit = nil
+            branchPull = nil
+            folderStateOwner = place
+        }
         let owner = model.currentReference
         let status = try? await GitCommitTarget(peer: peer, workspaceID: workspace).status()
         guard !Task.isCancelled, owner == model.currentReference, model.peer == peer,
-              model.savedCopy == nil else { return }
-        folderGit = status?.git
+              model.savedCopy == nil, folderStateOwner == place else { return }
+        if let status { folderGit = status.git }
         guard folderGit?.isRepo == true else {
             branchPull = nil
             return
         }
-        let answer = try? await Bridge.branchPull(workspaceID: workspace, peer: peer, branch: folderGit?.branch, refresh: true)
-        guard !Task.isCancelled, owner == model.currentReference, model.peer == peer,
-              model.savedCopy == nil else { return }
-        branchPull = answer?.pull
+        guard let answer = try? await Bridge.branchPull(workspaceID: workspace, peer: peer, branch: folderGit?.branch, refresh: true),
+              !Task.isCancelled, owner == model.currentReference, model.peer == peer,
+              model.savedCopy == nil, folderStateOwner == place else { return }
+        branchPull = answer.pull
     }
 
     private var chat: ChatConversation? {

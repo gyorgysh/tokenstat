@@ -353,11 +353,13 @@ extension ChatDisplayItem {
             lines += 1 + run / 140
             return min(1200, Double(lines) * 16 + 24)
         }
+        // Rows sit at least eight points apart in a transcript.
+        let gap: Double = 8
         switch kind {
-        case let .user(text), let .thinking(text), let .failed(text): return prose(text)
-        case let .assistant(text, _): return prose(text)
-        case let .handoff(_, brief): return min(prose(brief), 60)
-        default: return 20
+        case let .user(text), let .thinking(text), let .failed(text): return prose(text) + gap
+        case let .assistant(text, _): return prose(text) + gap
+        case let .handoff(_, brief): return min(prose(brief), 60) + gap
+        default: return 20 + gap
         }
     }
 

@@ -161,13 +161,16 @@ enum TranscriptSlice {
     /// built, which is a blank transcript. The newest rows are measured
     /// exactly instead: they are what a following reader is looking at.
     ///
-    /// Only as many as cover the end, though. Every measured row is laid out
+    /// Enough to cover the window: a chat of one-line tool rows needs dozens,
+    /// and with six the rest of the window was estimated rows correcting
+    /// their heights above the end as it opened. Only as many as cover the
+    /// end, though. Every measured row is laid out
     /// and painted in full whether or not it is on screen, and six long
     /// replies are thousands of points of text drawn on every switch to a
     /// chat. The tail stops once its rows' height floor reaches
     /// `measuredCover`, which is taller than any window, and never holds
     /// fewer than `measuredMinimum`.
-    static let measuredTail = 6
+    static let measuredTail = 40
     static let measuredMinimum = 2
     static let measuredCover = 2400.0
 

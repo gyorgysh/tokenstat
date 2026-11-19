@@ -238,6 +238,7 @@ struct ChatView: View {
     @State private var showingHandoff = false
     /// The pull request for the folder's branch, from `pulls.branch`.
     @State private var branchPull: BranchPull?
+    @State private var branchPullOwner: String?
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -443,7 +444,7 @@ struct ChatView: View {
                     onStop: { Task { await model.stop() } },
                     onAttach: { item, owner in await model.attach(item, to: owner) },
                     onRemove: { model.removeAttachment($0) },
-                    acceptsDrops: acceptsDrops,
+                    acceptsDrops: showsDropTargets,
                     onDropProviders: { providers in
                         receive(providers)
                     },
@@ -489,7 +490,7 @@ struct ChatView: View {
         paneContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .desktopPaneBackground()
-        .chatDropSurface(enabled: acceptsDrops, isTargeted: $paneDropTargeted, receive: receive)
+        .chatDropSurface(enabled: showsDropTargets, isTargeted: $paneDropTargeted, receive: receive)
         .overlay {
             if dropExperienceVisible {
                 ChatDropExperience()
@@ -521,11 +522,18 @@ struct ChatView: View {
         // Asked again when the branch moves and when a turn ends, since an
         // agent may have just opened the pull request.
         .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {
-            branchPull = nil
+            // The chip belongs to the folder and branch, not to this ask.
+            // Clearing it on every ask emptied the strip above the composer
+            // whenever a turn started or ended, and the composer jumped twice.
+            let owner = "\(workspaceID)|\(git?.branch ?? "")"
+            if branchPullOwner != owner {
+                branchPull = nil
+                branchPullOwner = owner
+            }
             guard isActive, git?.isRepo == true, !model.busy else { return }
-            let answer = try? await Bridge.branchPull(workspaceID: workspaceID, branch: git?.branch, refresh: true)
-            guard !Task.isCancelled else { return }
-            branchPull = answer?.pull
+            guard let answer = try? await Bridge.branchPull(workspaceID: workspaceID, branch: git?.branch, refresh: true),
+                  !Task.isCancelled, branchPullOwner == owner else { return }
+            if answer.pull != branchPull { branchPull = answer.pull }
         }
         .onChange(of: isActive) { _, active in
             dropPresentation &+= 1
@@ -734,7 +742,7 @@ struct ChatView: View {
                 .chatScrollContent()
             }
             .transcriptOpensAtEnd()
-            .chatDropSurface(enabled: acceptsDrops, isTargeted: $transcriptDropTargeted, receive: receive)
+            .chatDropSurface(enabled: showsDropTargets, isTargeted: $transcriptDropTargeted, receive: receive)
             // Cover the build-up, do not hide the stack. Opacity 0 is how a
             // lazy stack skipped measuring the last prompt: those rows were
             // not visible, so they stayed at estimated height until a click
@@ -1437,14 +1445,22 @@ struct ChatView: View {
     }
 
     private var dropExperienceVisible: Bool {
-        acceptsDrops && (paneDropTargeted || transcriptDropTargeted || composerDropTargeted)
+        (paneDropTargeted || transcriptDropTargeted || composerDropTargeted) && showsDropTargets
+    }
+
+    /// Whether the pane offers itself as a drop target. Leaves out the
+    /// folder's list read, which flips on every switch into another folder
+    /// and re-ran the whole pane to say so. A drop that lands while that
+    /// read is out is refused by `acceptsDrops` when it arrives.
+    private var showsDropTargets: Bool {
+        isActive && !showingOverview && !model.sending
+            && model.folderID == workspaceID
+            && (model.currentReference.map(WorkCacheAccess.canRead)
+                ?? (model.savedCopy == nil && model.selected == nil && model.chats.isEmpty))
     }
 
     private var acceptsDrops: Bool {
-        isActive && !showingOverview && !model.sending
-            && model.folderID == workspaceID && model.isReady(for: workspaceID)
-            && (model.currentReference.map(WorkCacheAccess.canRead)
-                ?? (model.savedCopy == nil && model.selected == nil && model.chats.isEmpty))
+        showsDropTargets && model.isReady(for: workspaceID)
     }
 
     @discardableResult
@@ -1714,6 +1730,11 @@ private struct OpeningSkeleton: View {
         opening && coverArmed && !transcriptReady && model.recentMessagePreview.isEmpty
     }
 
+    /// Before the wireframe is armed, with nothing cached to stand in.
+    private var showsBlank: Bool {
+        opening && !coverArmed && !transcriptReady && model.recentMessagePreview.isEmpty
+    }
+
     private var transcriptReady: Bool {
         follow.arrived && !model.openingConversation
     }
@@ -1727,6 +1748,12 @@ private struct OpeningSkeleton: View {
                     .frame(maxWidth: ReadingRoom.laneWidth)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.background)
+            } else if showsBlank {
+                // Inside the grace period nothing is drawn over a fast open,
+                // but its first page lands at the top of a new scroll view
+                // and is pinned to the end a frame later. The plain pane
+                // colour hides that frame without flashing the wireframe.
+                Theme.background
             }
         }
         .allowsHitTesting(showsSkeleton)
