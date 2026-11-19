@@ -518,7 +518,19 @@ jobs:
 
       - name: Release lint and bundle
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
-        run: gradle -p apps/android lintRelease bundleRelease
+        run: |
+          log=$(mktemp)
+          trap 'rm -f "$log"' EXIT
+          for attempt in 1 2 3; do
+            if gradle -p apps/android lintRelease bundleRelease 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]] || ! grep -qF 'Received status code 429 from server' "$log"; then
+              exit 1
+            fi
+            echo "A Maven request was rate limited. Retrying the Android release build."
+            sleep "$((attempt * 30))"
+          done
 
       - name: Verify native symbols are embedded
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
