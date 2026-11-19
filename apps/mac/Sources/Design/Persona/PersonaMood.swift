@@ -529,6 +529,7 @@ enum PersonaMood: Hashable, CaseIterable {
             face.mouthCurve = 0.34 - sigh * 0.70
             face.mouthOpen = 0.10 + sigh * 0.30
             face.mouthWidth = 0.58
+            face.droop = sigh * 0.45
             if sigh > 0.55 { face.eyes = .contentArc }
 
         case .ok:
@@ -545,6 +546,7 @@ enum PersonaMood: Hashable, CaseIterable {
             let retry = PersonaMood.failedRetry(clock)
             face.openness = 1 - melt * 0.66
             face.brow = 0.35 + melt * 0.35
+            face.droop = 0.35 + melt * 0.55
             face.gaze = CGPoint(x: 0, y: 0.30 + melt * 0.25)
             face.lift = -melt * 0.05
             face.mouthCurve = -0.8
@@ -1793,6 +1795,37 @@ struct PersonaFacePose {
     /// How far the tongue is out of an open mouth. Effort, delight, or a
     /// deliberate raspberry, depending on the rest of the face.
     var tongue: CGFloat = 0
+    /// How far the lower lids have pushed up into a smile, nought to one.
+    /// At one the eyes are two crescents, the shape `happyArc` names. Being a
+    /// number rather than a shape is what lets an eye smile slowly.
+    var cheer: CGFloat = 0
+    /// How far the outer ends of the upper lids have dropped. Sorry, tired,
+    /// or let down, depending on the mouth.
+    var droop: CGFloat = 0
+
+    /// The same expression with its named eye shapes turned into lid
+    /// positions. A pleased crescent is a lower lid pushed all the way up and
+    /// a contented arc is a shut eye, so both can be eased into and out of
+    /// like any other number instead of swapping under a blink.
+    func expressed() -> PersonaFacePose {
+        var out = self
+        switch eyes {
+        case .normal: break
+        case .happyArc:
+            // Moods that asked for arcs also narrowed the lid, because an arc
+            // used to be drawn inside whatever the lid left. A crescent is
+            // the whole eye with the lower lid up, so it wants the lid open.
+            out.cheer = 1
+            out.squint = 0
+            out.openness = 1
+        case .contentArc:
+            out.openness = 0
+            out.cheer = 0
+            out.blinks = false
+        }
+        out.eyes = .normal
+        return out
+    }
 
     /// One expression part way into another. Used while a mood is changing,
     /// so the face is crossfading at the same time as the body rather than
@@ -1814,6 +1847,8 @@ struct PersonaFacePose {
         out.eyeScale = mix(from.eyeScale, to.eyeScale)
         out.blush = mix(from.blush, to.blush)
         out.tongue = mix(from.tongue, to.tongue)
+        out.cheer = mix(from.cheer, to.cheer)
+        out.droop = mix(from.droop, to.droop)
         // Eye shape is a decision, not a quantity. Half a star is not an
         // expression, so it changes at the midpoint, under the blink.
         out.eyes = k < 0.5 ? from.eyes : to.eyes
@@ -1837,6 +1872,8 @@ struct PersonaFacePose {
         eyeScale += (target.eyeScale - eyeScale) * k
         blush += (target.blush - blush) * k
         tongue += (target.tongue - tongue) * k
+        cheer += (target.cheer - cheer) * k
+        droop += (target.droop - droop) * k
         blinks = target.blinks
         eyes = target.eyes
     }

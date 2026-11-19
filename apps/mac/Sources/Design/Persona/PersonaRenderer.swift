@@ -169,83 +169,81 @@ enum PersonaRenderer {
         // is the single biggest reason the character reads as one material.
         let aspect = clamp(bounds.height / max(bounds.width, 1e-4), 0.45, 1.7)
 
-        // Lean, taken from where the crown sits relative to the middle. The
-        // face tilts with the body for free, in every mood.
-        let tilt = clamp(atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4)) * 0.25, -0.12, 0.12)
+        // Lean, taken from where the crown sits relative to the middle, plus
+        // the head following the eyes. The face tilts with the body for free,
+        // in every mood, and tips toward whatever it is looking at.
+        let lean = clamp(atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4)) * 0.25, -0.12, 0.12)
+        let tilt = lean + engine.headTilt
 
         let heightPoints = bounds.height * rect.height
-        let anchorHeight = heightPoints * (0.10 + face.lift)
+        // Eyes just above the middle. Low, wide-set features are most of
+        // what reads as young and friendly; high ones read as a forehead.
+        let anchorHeight = heightPoints * (0.05 + face.lift)
         let origin = CGPoint(
             x: rect.minX + centroid.x * rect.width,
             y: rect.minY + centroid.y * rect.height
         )
-        func place(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint {
+
+        // The features sit on the body as if it were a ball. Looking to one
+        // side turns that ball a little, so the eyes slide toward the edge,
+        // the far one narrows and the whole face comes round, which is what
+        // makes a glance read as the creature turning rather than as two dots
+        // moving. A turn past the edge hides a feature behind the body.
+        let sphereX = max(1, bounds.width * rect.width * 0.5)
+        let sphereY = max(1, heightPoints * 0.5)
+        let gazeX = clamp(face.gaze.x + engine.look.x, -1.3, 1.3)
+        let gazeY = clamp(face.gaze.y + engine.look.y, -1.3, 1.3)
+        let turn = engine.yaw + gazeX * 0.30
+        let nod = gazeY * 0.20
+        func project(_ dx: CGFloat, _ dy: CGFloat) -> (point: CGPoint, width: CGFloat, height: CGFloat, facing: CGFloat) {
+            let theta = asin(clamp(dx / sphereX, -0.98, 0.98)) + turn
+            let phi = asin(clamp(dy / sphereY, -0.98, 0.98)) + nod
+            return (CGPoint(x: sphereX * sin(theta), y: sphereY * sin(phi)), max(0, cos(theta)), max(0.2, cos(phi)), cos(theta))
+        }
+        func place(_ offset: CGPoint) -> CGPoint {
             CGPoint(
-                x: origin.x + dx * cos(tilt) - dy * sin(tilt),
-                y: origin.y + dx * sin(tilt) + dy * cos(tilt)
+                x: origin.x + offset.x * cos(tilt) - offset.y * sin(tilt),
+                y: origin.y + offset.x * sin(tilt) + offset.y * cos(tilt)
             )
         }
+        func onFace(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint { place(project(dx, dy).point) }
 
-        // The face rides the body when rolling and disappears around its
-        // back when turning. Keeping this in a clipped layer avoids layout work.
-        let facing = cos(engine.yaw)
-        guard facing > 0 else { return }
-        context.opacity *= min(1, facing * 4)
         context.translateBy(x: origin.x, y: origin.y)
         context.rotate(by: .radians(Double(engine.roll)))
-        context.translateBy(x: sin(engine.yaw) * bounds.width * rect.width * 0.24, y: 0)
-        context.scaleBy(x: max(0.08, facing), y: 1)
         context.translateBy(x: -origin.x, y: -origin.y)
 
         let count = traits.eyeCount
         // Small marks need proportionally bigger features or the face turns
         // into two specks. Three fixed steps, not a curve, so the 26pt seat
         // beside a message and the 30pt header look like the same creature.
-        let lod: CGFloat = unit < 24 ? 1.35 : unit < 34 ? 1.15 : 1.0
-        let radius = unit * 0.047 * lod * clamp(face.eyeScale, 0.8, 1.25)
-        let spread = unit * 0.235 * clamp(face.spread, 0.85, 1.15) / max(sqrt(aspect), 0.6)
-        let openness = max(0.02, face.openness * (1 - engine.blink * 0.96) * aspect)
+        let lod: CGFloat = unit < 24 ? 1.28 : unit < 34 ? 1.12 : 1.0
+        let radius = unit * 0.060 * lod * clamp(face.eyeScale, 0.8, 1.25)
+        let spread = unit * 0.25 * clamp(face.spread, 0.85, 1.15) / max(sqrt(aspect), 0.6)
+        let tall = clamp(sqrt(aspect), 0.75, 1.3)
 
         for index in 0..<count {
             let offset = CGFloat(index) - CGFloat(count - 1) / 2
-            let centre = place(
-                offset * spread + face.gaze.x * radius * 0.34,
-                -anchorHeight + face.gaze.y * radius * 0.30
+            let side: CGFloat = offset < 0 ? -1 : 1
+            let spot = project(offset * spread, -anchorHeight)
+            guard spot.facing > 0.02 else { continue }
+            let centre = place(spot.point)
+            let winked = engine.winkSide == side ? engine.wink : 0
+            drawEye(
+                in: &context,
+                centre: centre,
+                radius: radius,
+                width: spot.width,
+                height: spot.height * tall,
+                side: side,
+                face: face,
+                blink: winked > 0 ? max(winked, engine.blink) : engine.blink,
+                cheer: max(face.cheer, winked),
+                tilt: tilt,
+                unit: unit,
+                ink: ink,
+                shape: traits.eyeShape,
+                opacity: min(1, spot.facing * 4)
             )
-            // The lower lid takes a bite out of the bottom of the eye.
-            // Concentration reads as a lid: shrinking the whole eye instead
-            // just makes the creature look further away.
-            let lid = radius * 2 * openness * min(max(face.squint, 0), 0.8)
-            let frame = CGRect(
-                x: centre.x - radius,
-                y: centre.y - radius * openness,
-                width: radius * 2,
-                height: max(radius * 0.10, radius * 2 * openness - lid)
-            )
-            switch face.eyes {
-            case .happyArc:
-                drawArcEye(in: &context, frame: frame, unit: unit, ink: ink, flipped: false)
-            case .contentArc:
-                drawArcEye(in: &context, frame: frame, unit: unit, ink: ink, flipped: true)
-            case .normal:
-                let eye: Path
-                switch traits.eyeShape {
-                case .pixel: eye = Path(roundedRect: frame, cornerRadius: radius * 0.32)
-                case .oval: eye = Path(ellipseIn: frame.insetBy(dx: radius * 0.16, dy: 0))
-                case .round: eye = Path(ellipseIn: frame)
-                }
-                context.fill(eye, with: .color(ink))
-                if unit >= 28, openness > 0.35 {
-                    context.drawLayer { highlight in
-                        highlight.clip(to: eye)
-                        let glint = radius * 0.22
-                        highlight.fill(Path(ellipseIn: CGRect(
-                            x: centre.x - radius * 0.42, y: centre.y - radius * 0.48,
-                            width: glint * 2, height: glint * 2)),
-                            with: .color(.white.opacity(0.88)))
-                    }
-                }
-            }
 
             if unit >= 40, abs(face.brow) > 0.45 {
                 drawBrow(
@@ -260,22 +258,26 @@ enum PersonaRenderer {
             }
         }
 
-        if unit >= 26 {
+        let facing = min(1, max(0, cos(turn)) * 4)
+        guard facing > 0.01 else { return }
+        context.opacity *= facing
+
+        if unit >= 22 {
             drawBlush(
                 in: &context,
-                place: place,
+                place: onFace,
                 anchorHeight: anchorHeight,
                 radius: radius,
                 spread: spread,
                 unit: unit,
-                amount: max(0.24, face.blush)
+                amount: max(0.32, face.blush)
             )
         }
 
         guard unit >= 21 else { return }
         drawMouth(
             in: &context,
-            place: place,
+            place: onFace,
             anchorHeight: anchorHeight,
             radius: radius,
             unit: unit,
@@ -285,29 +287,133 @@ enum PersonaRenderer {
         )
     }
 
-    private static func drawArcEye(
+    /// One eye: a solid shape with its lids cut out of it.
+    ///
+    /// Every expression is lid positions, not a different drawing. The upper
+    /// lid comes down to shut it, tips inward for focus and outward for a
+    /// sorry droop. The lower lid rises flat for a squint and as a curve for
+    /// a smile, and pushed all the way it leaves a crescent. Because they are
+    /// all numbers the eye can travel from any of them to any other, which is
+    /// what lets a face change its mind on screen instead of swapping.
+    private static func drawEye(
         in context: inout GraphicsContext,
-        frame: CGRect,
+        centre: CGPoint,
+        radius: CGFloat,
+        width widthScale: CGFloat,
+        height heightScale: CGFloat,
+        side: CGFloat,
+        face: PersonaFacePose,
+        blink: CGFloat,
+        cheer: CGFloat,
+        tilt: CGFloat,
         unit: CGFloat,
         ink: Color,
-        flipped: Bool
+        shape: PersonaTraits.EyeShape,
+        opacity: CGFloat
     ) {
-        var arc = Path()
-        let lift = frame.width * 0.55
-        if flipped {
-            arc.move(to: CGPoint(x: frame.minX, y: frame.midY - lift * 0.3))
-            arc.addQuadCurve(
-                to: CGPoint(x: frame.maxX, y: frame.midY - lift * 0.3),
-                control: CGPoint(x: frame.midX, y: frame.midY + lift * 0.9)
+        let wide = clamp(face.openness, 0, 1.3)
+        let closing = clamp(blink, 0, 1)
+        // A blink squeezes the eye a little wider as it shuts, and its small
+        // overshoot on the way out (a negative blink) opens it a little taller.
+        let width = radius * 2 * (shape == .oval ? 0.86 : 1) * widthScale * (1 + closing * 0.10)
+        let height = radius * 2 * (shape == .oval ? 1.14 : 1)
+            * min(1.4, heightScale * max(1, wide)) * (1 - min(0, blink) * 0.9)
+        let open = clamp(min(wide, 1) * (1 - closing), 0, 1)
+        // A squint is a small smile of the lower lid, not a flat cut: a flat
+        // one squared the eye off and every busy mood looked cross.
+        let squint = clamp(face.squint, 0, 0.8)
+        let smile = clamp(max(cheer, squint * 0.45), 0, 1)
+        let focus = clamp((face.brow - 0.15) / 0.85, 0, 1) * (1 - clamp(face.droop, 0, 1)) * 0.55
+        let droop = clamp(face.droop, 0, 1)
+
+        context.drawLayer { layer in
+            layer.opacity = opacity
+            layer.translateBy(x: centre.x, y: centre.y)
+            layer.rotate(by: .radians(Double(tilt)))
+            let frame = CGRect(x: -width / 2, y: -height / 2, width: width, height: height)
+            let eye: Path = shape == .pixel
+                ? Path(roundedRect: frame, cornerRadius: min(width, height) * 0.32)
+                : Path(ellipseIn: frame)
+            layer.fill(eye, with: .color(ink))
+
+            // Two catchlights, a big one high and a small one low on the far
+            // side. The single most effective thing for making a dark eye
+            // look wet and alive, and the lids cut them like the eye.
+            if unit >= 22, open > 0.3 {
+                let size = min(width, height)
+                let big = size * 0.30
+                layer.fill(Path(ellipseIn: CGRect(
+                    x: -width * 0.22 - big / 2, y: frame.minY + height * 0.30 - big / 2,
+                    width: big, height: big)), with: .color(.white.opacity(0.92)))
+                let small = size * 0.13
+                layer.fill(Path(ellipseIn: CGRect(
+                    x: width * 0.16 - small / 2, y: frame.minY + height * 0.64 - small / 2,
+                    width: small, height: small)), with: .color(.white.opacity(0.62)))
+            }
+
+            // Where the lids meet when shut: below the middle, as on a face.
+            let meet = frame.minY + height * 0.68
+            let shut = 1 - open
+            let upper = frame.minY + (meet - frame.minY) * shut
+            let innerX = side < 0 ? frame.maxX : frame.minX
+            let outerX = side < 0 ? frame.minX : frame.maxX
+            let innerY = upper + height * 0.30 * focus
+            let outerY = upper + height * 0.40 * droop
+            func lidY(_ x: CGFloat) -> CGFloat {
+                innerY + (outerY - innerY) * (x - innerX) / (outerX - innerX)
+            }
+            let left = frame.minX - width
+            let right = frame.maxX + width
+            var upperLid = Path()
+            upperLid.move(to: CGPoint(x: left, y: frame.minY - height))
+            upperLid.addLine(to: CGPoint(x: right, y: frame.minY - height))
+            // The lid's edge arches, most of all half way down, so a heavy
+            // lid leaves a rounded eye rather than one sliced off with a
+            // ruler. Fully open or fully shut it is straight, so a blink
+            // still closes.
+            upperLid.addLine(to: CGPoint(x: right, y: lidY(right)))
+            upperLid.addQuadCurve(
+                to: CGPoint(x: left, y: lidY(left)),
+                control: CGPoint(x: 0, y: lidY(0) - height * (1.6 * shut * (1 - shut) + 0.26 * min(1, focus + droop)))
             )
-        } else {
-            arc.move(to: CGPoint(x: frame.minX, y: frame.midY + lift * 0.3))
-            arc.addQuadCurve(
-                to: CGPoint(x: frame.maxX, y: frame.midY + lift * 0.3),
-                control: CGPoint(x: frame.midX, y: frame.midY - lift * 1.5)
+            upperLid.closeSubpath()
+
+            let base = frame.maxY - (frame.maxY - meet) * shut
+                - height * 0.30 * squint
+            var lowerLid = Path()
+            lowerLid.move(to: CGPoint(x: left, y: base - height * 0.10 * smile))
+            lowerLid.addQuadCurve(
+                to: CGPoint(x: right, y: base - height * 0.10 * smile),
+                control: CGPoint(x: 0, y: base - height * 1.35 * smile)
             )
+            lowerLid.addLine(to: CGPoint(x: right, y: frame.maxY + height))
+            lowerLid.addLine(to: CGPoint(x: left, y: frame.maxY + height))
+            lowerLid.closeSubpath()
+
+            layer.blendMode = .destinationOut
+            layer.fill(upperLid, with: .color(.black))
+            layer.fill(lowerLid, with: .color(.black))
+            layer.blendMode = .normal
+
+            // A shut eye is still an expression: a curve up when pleased, down
+            // when content or asleep. It fades in as the lids close, so a
+            // blink and a smile both pass through it without a cut.
+            let line = clamp((0.24 - open) / 0.18, 0, 1)
+            if line > 0 {
+                let sag = height * 0.22 * (smile > 0.5 ? -1 : 1) - height * 0.10 * droop
+                var arc = Path()
+                arc.move(to: CGPoint(x: frame.minX, y: meet - sag * 0.25))
+                arc.addQuadCurve(
+                    to: CGPoint(x: frame.maxX, y: meet - sag * 0.25),
+                    control: CGPoint(x: 0, y: meet + sag)
+                )
+                layer.stroke(
+                    arc,
+                    with: .color(ink.opacity(Double(line))),
+                    style: StrokeStyle(lineWidth: max(1, unit * 0.024), lineCap: .round)
+                )
+            }
         }
-        context.stroke(arc, with: .color(ink), lineWidth: max(1, unit * 0.023))
     }
 
     private static func drawBlush(
@@ -393,7 +499,7 @@ enum PersonaRenderer {
         let curve = min(max(face.mouthCurve + resting, -1.1), 1.1)
         // An open mouth widens as it opens. Without it a loud syllable is a
         // tall narrow wedge rather than a vowel.
-        let half = unit * 0.060 * min(face.mouthWidth, 1.2) * traits.mouthWidth
+        let half = unit * 0.052 * min(face.mouthWidth, 1.2) * traits.mouthWidth
             * (1 + min(max(face.mouthOpen, 0), 1.2) * 0.22)
         let open = min(max(0, face.mouthOpen), 0.8) * unit * 0.065
         let baseY = -anchorHeight + unit * 0.12

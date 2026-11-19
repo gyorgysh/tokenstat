@@ -79,7 +79,29 @@ final class PersonaEngine {
     private var lastTime: TimeInterval?
     private var pending: CGFloat = 0
     private var blinkCountdown: CGFloat = 2.5
-    private var blinkHold: CGFloat = 0
+    /// Seconds into the current blink, or negative between blinks.
+    private var blinkAge: CGFloat = -1
+    private var blinkLength: CGFloat = 0.17
+    /// One blink in five or so comes as a pair, which is most of what makes
+    /// blinking look like a habit rather than a timer.
+    private var blinkAgain = false
+    /// A wink: one eye, held a little, in the moods that are enjoying
+    /// themselves. Minus one is the left eye, plus one the right, zero none.
+    private(set) var winkSide: CGFloat = 0
+    private var winkAge: CGFloat = -1
+    private var winkCountdown: CGFloat = 7
+
+    /// Where the eyes are looking on top of the mood's own gaze, in eye
+    /// radii. It jumps between fixations rather than drifting: a saccade is
+    /// fast, then the eyes hold, which is how attention looks from outside.
+    private(set) var look = CGPoint.zero
+    private var lookVelocity = CGVector.zero
+    private var lookTarget = CGPoint.zero
+    private var fixation: CGFloat = 0.8
+    /// The head leaning into where it looks, in radians. Underdamped on
+    /// purpose: a glance that tips the head and settles back is curiosity.
+    private(set) var headTilt: CGFloat = 0
+    private var headTiltVelocity: CGFloat = 0
     private var beatIndex = 0
     private var launches = 0
     private var random: UInt64
@@ -91,7 +113,7 @@ final class PersonaEngine {
         traits = PersonaTraits(seed: seed)
         body = PersonaSoftBody(lumps: traits.lumps)
         random = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
-        face = mood.face(clock: 0, traits: traits)
+        face = mood.face(clock: 0, traits: traits).expressed()
         blinkCountdown = 1.4 + nextUnit() * 3.0
         dust = Array(repeating: (x: PersonaStage.centreX, age: 10, weight: 0), count: 4)
     }
@@ -186,13 +208,13 @@ final class PersonaEngine {
         // one frame, so it never has a moment where it visibly changes its
         // mind.
         let arriving = mood.drive(clock: now, traits: traits)
-        let arrivingFace = mood.face(clock: now, traits: traits)
+        let arrivingFace = mood.face(clock: now, traits: traits).expressed()
         var drive: PersonaDrive
         let target: PersonaFacePose
         if let leaving, shift > 0 {
             let done = 1 - shift
             drive = .blend(leaving.mood.drive(clock: leaving.clock, traits: traits), arriving, by: done)
-            target = .blend(leaving.mood.face(clock: leaving.clock, traits: traits), arrivingFace, by: done)
+            target = .blend(leaving.mood.face(clock: leaving.clock, traits: traits).expressed(), arrivingFace, by: done)
         } else {
             drive = arriving
             target = arrivingFace
@@ -235,7 +257,62 @@ final class PersonaEngine {
         // The face eases toward the mood's pose rather than being set to it,
         // which is what makes a change of mood read as an expression moving.
         face.ease(towards: target, rate: Self.fixedStep * 11)
+        advanceGaze(Self.fixedStep)
         advanceBlink(Self.fixedStep)
+    }
+
+    // MARK: - Gaze
+
+    /// How far this mood's eyes wander between fixations, in eye radii.
+    /// Asleep and let down they do not. Busy they stay near the work, idle
+    /// they look around the room.
+    private var wander: CGFloat {
+        switch mood {
+        case .sleeping, .failed: 0
+        case .idle, .waiting, .stargazing, .gardening: 0.55
+        case .thinking, .pacing: 0.45
+        case .working, .typing, .reading, .sketching, .gaming: 0.18
+        default: 0.32
+        }
+    }
+
+    private func advanceGaze(_ dt: CGFloat) {
+        let reach = face.openness > 0.3 ? wander : 0
+        fixation -= dt
+        if fixation <= 0 {
+            // Mostly small hops near the last place, now and then a proper
+            // look somewhere else. A uniform pick reads as a scanner.
+            let far = nextUnit() < 0.3
+            let angle = nextUnit() * 2 * .pi
+            let distance = reach * (far ? 0.7 + nextUnit() * 0.3 : nextUnit() * 0.45)
+            let next = CGPoint(x: cos(angle) * distance, y: sin(angle) * distance * 0.6)
+            let jump = hypot(next.x - lookTarget.x, next.y - lookTarget.y)
+            lookTarget = next
+            fixation = 0.45 + nextUnit() * (far ? 2.4 : 1.4)
+            // A big look often brings a blink along with it.
+            if jump > 0.45, blinkAge < 0, face.blinks, nextUnit() < 0.35 {
+                startBlink(0.26)
+            }
+        }
+        if reach == 0 { lookTarget = .zero }
+        // Critically damped and quick: there and still in about a tenth of a
+        // second, with no wobble, because eyes do not wobble.
+        let omega: CGFloat = 34
+        lookVelocity.dx += ((lookTarget.x - look.x) * omega * omega - 2 * omega * lookVelocity.dx) * dt
+        lookVelocity.dy += ((lookTarget.y - look.y) * omega * omega - 2 * omega * lookVelocity.dy) * dt
+        look.x += lookVelocity.dx * dt
+        look.y += lookVelocity.dy * dt
+
+        // The head follows the eyes, late and softly, and overshoots a touch.
+        let tiltTarget = clamp(-(look.x + face.gaze.x * 0.5) * 0.10, -0.16, 0.16)
+        let stiffness: CGFloat = 70
+        let damping: CGFloat = 2 * 0.55 * sqrt(stiffness)
+        headTiltVelocity += ((tiltTarget - headTilt) * stiffness - headTiltVelocity * damping) * dt
+        headTilt += headTiltVelocity * dt
+    }
+
+    private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
+        min(max(value, lower), upper)
     }
 
     /// Turn a landing into a splat.
@@ -337,7 +414,7 @@ final class PersonaEngine {
         // happens behind one.
         leaving = (mood, clock)
         shift = 1
-        blinkHold = 0.13
+        startBlink(0.30)
         // A gather. The body dips and springs back, which is the beat that
         // makes the change look like a decision rather than an edit.
         body.pulse(-0.13)
@@ -605,7 +682,7 @@ final class PersonaEngine {
                 // It knew. It has always known. It is surprised anyway.
                 body.poke(at: body.anchors.mouth, strength: -0.95, reach: 0.34)
                 body.impulse(CGVector(dx: -0.30, dy: -0.18))
-                blinkHold = 0.12
+                startBlink(0.26)
             }
 
         case .snacking:
@@ -634,31 +711,90 @@ final class PersonaEngine {
 
     // MARK: - Blink
 
+    private func startBlink(_ length: CGFloat) {
+        blinkAge = 0
+        blinkLength = length
+        blinkAgain = nextUnit() < 0.2
+    }
+
     private func advanceBlink(_ dt: CGFloat) {
-        if blinkHold > 0 {
-            blinkHold -= dt
-            if blinkHold <= 0 {
-                blinkCountdown = 2.2 + nextUnit() * 3.4
+        if blinkAge >= 0 {
+            blinkAge += dt
+            if blinkAge >= blinkLength {
+                if blinkAgain {
+                    blinkAgain = false
+                    blinkAge = 0
+                    blinkLength = 0.26
+                } else {
+                    blinkAge = -1
+                    blinkCountdown = 1.6 + nextUnit() * 4.4
+                }
             }
-            return
+        } else if face.blinks {
+            blinkCountdown -= dt
+            if blinkCountdown <= 0 {
+                startBlink(0.30)
+            }
         }
-        guard face.blinks else { return }
-        blinkCountdown -= dt
-        if blinkCountdown <= 0 {
-            blinkHold = 0.10
+        advanceWink(dt)
+    }
+
+    private var winks: Bool {
+        switch mood {
+        case .idle, .ok, .dancing, .juggling, .bouncing, .waiting: true
+        default: false
         }
     }
 
+    private func advanceWink(_ dt: CGFloat) {
+        if winkAge >= 0 {
+            winkAge += dt
+            if winkAge >= 0.62 { winkAge = -1; winkSide = 0 }
+            return
+        }
+        guard winks, face.blinks, blinkAge < 0 else { return }
+        winkCountdown -= dt
+        if winkCountdown <= 0 {
+            winkCountdown = 6 + nextUnit() * 9
+            winkAge = 0
+            winkSide = nextUnit() < 0.5 ? -1 : 1
+        }
+    }
+
+    /// How shut one eye is from a wink, zero to one. Quick in, held long
+    /// enough to be read as meant, and out.
+    var wink: CGFloat {
+        guard winkAge >= 0 else { return 0 }
+        let t = winkAge
+        if t < 0.08 { return t / 0.08 }
+        if t < 0.42 { return 1 }
+        let x = min(1, (t - 0.42) / 0.20)
+        return 1 - x * x * (3 - 2 * x)
+    }
+
     /// How shut the eyes are from blinking alone, zero to one.
+    ///
+    /// Fast down, a beat shut, then open a touch past where it started and
+    /// back. A real blink is not symmetric, a straight down-and-up reads as a
+    /// flicker, and the small overshoot on the way out is what makes the eye
+    /// look awake rather than reset. Negative means wider than at rest.
     var blink: CGFloat {
-        guard blinkHold > 0 else { return 0 }
-        // Fast down, slower up: a real blink is not symmetric. The hold may
-        // be longer than the down phase (a mood change blinks at 0.13), so
-        // the progress is clamped to start of the cycle: dividing by 0.10
-        // without it turned an over-long hold negative, and the renderer
-        // widened the eyes instead of shutting them.
-        let progress = max(0, min(1, 1 - blinkHold / 0.10))
-        return progress < 0.35 ? progress / 0.35 : max(0, 1 - (progress - 0.35) / 0.65)
+        guard blinkAge >= 0 else { return 0 }
+        let close: CGFloat = 0.06
+        let hold = close + 0.035
+        let t = blinkAge
+        if t < close {
+            let x = t / close
+            return x * x
+        }
+        if t < hold { return 1 }
+        let open = hold + max(0.05, (blinkLength - hold) * 0.45)
+        if t < open {
+            let x = (t - hold) / (open - hold)
+            return 1 - 1.08 * x * x * (3 - 2 * x)
+        }
+        let x = min(1, (t - open) / max(0.01, blinkLength - open))
+        return -0.08 * (1 - x * x * (3 - 2 * x))
     }
 
     // MARK: - Rest
@@ -674,8 +810,15 @@ final class PersonaEngine {
             y: PersonaStage.floor - drive.radius * drive.stretch.height * body.restBottom
         )
         body.reset(centre: centre, stretch: drive.stretch, radius: drive.radius)
-        face = mood.face(clock: 0, traits: traits)
-        blinkHold = 0
+        face = mood.face(clock: 0, traits: traits).expressed()
+        blinkAge = -1
+        winkAge = -1
+        winkSide = 0
+        look = .zero
+        lookTarget = .zero
+        lookVelocity = .zero
+        headTilt = 0
+        headTiltVelocity = 0
         pending = 0
         softening = 0
         jiggle = 0
