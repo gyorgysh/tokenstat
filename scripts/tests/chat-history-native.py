@@ -237,10 +237,10 @@ async def run(args):
             await asyncio.sleep(0.02)
         raise TimeoutError(f"Native history fixture timed out; inspect {run_root}")
 
-    async def native(role, action="snapshot", expected=None):
+    async def native(role, action="snapshot", expected=None, **parameters):
         commands[role] += 1
         number = commands[role]
-        request = {"id": number, "action": action}
+        request = {"id": number, "action": action, **parameters}
         if expected:
             request["expected"] = expected
         atomic_json(run_root / role / "command.json", request)
@@ -564,6 +564,63 @@ print(json.dumps({'events':len(result['result']['events'])}))
             if args.serve:
                 await wait(lambda: (run_root / "stop").exists(), 700)
             return
+        if args.desktop_scrollback:
+            def lines(start, end):
+                return "".join(
+                    ("\n\n## Everyday objects\n\n" if (index - 1) % 25 == 0 else "")
+                    + f"{index}. The object on the shelf is ready to be used again today.\n"
+                    for index in range(start, end + 1)
+                )
+
+            def geometry(result):
+                return max(result["scrolls"], key=lambda scroll: scroll["contentHeight"])
+
+            emit({"type": "text", "data": "\n\n" + lines(1, 300) + "\nstartingmarker"})
+            await visible("startingmarker")
+
+            async def stream_list():
+                for index in range(301, 401):
+                    emit({"type": "text", "data": ("\n" if index == 301 else "") + lines(index, index)})
+                    await asyncio.sleep(0.15)
+
+            stream = asyncio.create_task(stream_list())
+            try:
+                wheel = await native("desktop", "wheel", delta=48)
+                offsets = wheel["wheelOffsets"]
+                assert offsets[0] - offsets[-1] > 300, offsets
+                assert all(after <= before + 2 for before, after in zip(offsets, offsets[1:])), offsets
+                await asyncio.sleep(0.35)
+                samples = []
+                for _ in range(12):
+                    samples.append(geometry(await native("desktop", "scroll-geometry")))
+                    await asyncio.sleep(0.35)
+                positions = [sample["offset"] for sample in samples]
+                assert samples[-1]["contentHeight"] > samples[0]["contentHeight"] + 200, samples
+                assert max(positions) - min(positions) <= 2, samples
+                second_wheel = await native("desktop", "wheel", delta=48)
+                moved = second_wheel["wheelOffsets"]
+                assert moved[0] - moved[-1] > 300, moved
+                assert all(after <= before + 2 for before, after in zip(moved, moved[1:])), moved
+                await stream
+                end = geometry(await native("desktop", "scroll-geometry"))
+                assert abs(end["offset"] - moved[-1]) <= 2, (end, moved)
+                emit({"type": "text", "data": "\n\nfinalscrollbackmarker"})
+                emit({"type": "end", "stopReason": "end_turn"})
+                await wait(lambda: not state("desktop")["running"])
+                await asyncio.sleep(0.6)
+                finished = geometry(await native("desktop", "scroll-geometry"))
+                assert abs(finished["offset"] - moved[-1]) <= 2, (finished, moved)
+                await native("desktop", "wheel", delta=-1000)
+                await visible("finalscrollbackmarker")
+                bottom = await native("desktop", "wheel", delta=-150)
+                assert max(bottom["wheelOffsets"]) - min(bottom["wheelOffsets"]) <= 2, bottom
+                atomic_json(run_root / "result.json", {"ok": True, "samples": samples,
+                    "firstWheel": offsets, "secondWheel": moved, "end": end,
+                    "finished": finished, "pastBottom": bottom["wheelOffsets"]})
+                prove("The Mac transcript holds position during streaming and completion, and stays still at the bottom")
+            finally:
+                stream.cancel()
+            return
         if args.smooth_stream:
             transcript = Path(fixture["transcript"])
             start = transcript.stat().st_size
@@ -843,6 +900,7 @@ if __name__ == "__main__":
     parser.add_argument("--mac-app", type=Path, default=QA / "mac/Build/Products/Debug/HistoryMac.app")
     parser.add_argument("--phone-app", type=Path, default=QA / "phone/Build/Products/Debug-iphonesimulator/HistoryPhone.app")
     parser.add_argument("--relay", action="store_true", help="Use the owned loopback relay and disposable account")
+    parser.add_argument("--desktop-scrollback", action="store_true", help="Exercise Mac wheel scrolling during a 400-line reply")
     parser.add_argument("--smooth-stream", action="store_true", help="Verify readable streaming batches and idle/completion flushes")
     parser.add_argument("--tall-prose", action="store_true", help="Verify long lists, short paragraphs and explicit line breaks")
     parser.add_argument("--prose-edges", action="store_true", help="Check tall quotes and unbroken emoji at large accessibility sizes")
@@ -871,6 +929,8 @@ if __name__ == "__main__":
                         help="Set the native Mac transcript width (320–1600 points)")
     parser.add_argument("--desktop-local", action="store_true", help="Use the producer's local socket on Mac, with the iPhone still encrypted")
     arguments = parser.parse_args()
+    if arguments.desktop_scrollback and not arguments.desktop_only:
+        parser.error("--desktop-scrollback requires --desktop-only")
     if (arguments.reading_soak or arguments.limit_notice) and not arguments.phone_only:
         parser.error("--reading-soak and --limit-notice each require --phone-only")
     if not 320 <= arguments.desktop_width <= 1600:

@@ -180,10 +180,13 @@ fun TranscriptSkeleton(modifier: Modifier = Modifier) {
         val lane = maxWidth
         var used = 0.dp
         var count = 0
-        while (used < maxHeight && count < 40) {
+        while (count < 40) {
             val turn = transcriptTurns[count % transcriptTurns.size]
-            used += (transcriptLine + transcriptLineGap) * turn.lines - transcriptLineGap +
-                (if (turn.mine) transcriptBubblePadding * 2 else 0.dp) + transcriptTurnGap
+            val height = (transcriptLine + transcriptLineGap) * turn.lines - transcriptLineGap +
+                (if (turn.mine) transcriptBubblePadding * 2 else 0.dp)
+            val next = used + height + if (count == 0) 0.dp else transcriptTurnGap
+            if (next > maxHeight) break
+            used = next
             count += 1
         }
         Column(

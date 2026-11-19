@@ -130,23 +130,48 @@ private final class ReadRefusal: @unchecked Sendable {
         }.value
     }
 
-    private func scrollGeometry() -> [[String: Any]] {
-        #if os(macOS)
+    #if os(macOS)
+    private func desktopScrollViews() -> [NSScrollView] {
         var pending = NSApplication.shared.windows.filter(\.isVisible).compactMap(\.contentView)
-        var result: [[String: Any]] = []
+        var scrolls: [NSScrollView] = []
         while let view = pending.popLast() {
             pending.append(contentsOf: view.subviews)
-            if let scroll = view as? NSScrollView, scroll.bounds.height > 100 {
-                result.append(["type": String(describing: type(of: scroll)),
-                    "offset": scroll.contentView.bounds.minY,
-                    "contentHeight": scroll.documentView?.frame.height ?? 0,
-                    "viewportWidth": scroll.contentView.bounds.width,
-                    "viewportHeight": scroll.contentView.bounds.height,
-                    "insetBottom": scroll.contentInsets.bottom,
-                    "flipped": scroll.documentView?.isFlipped ?? false])
-            }
+            if let scroll = view as? NSScrollView, scroll.bounds.height > 100 { scrolls.append(scroll) }
         }
-        return result
+        return scrolls
+    }
+
+    private func wheel(_ delta: Int32) async throws -> [Double] {
+        guard let scroll = desktopScrollViews().max(by: {
+            ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0)
+        }) else { throw CocoaError(.coderValueNotFound) }
+        var samples = [Double(scroll.contentView.bounds.minY)]
+        for index in 0...12 {
+            let phase: CGScrollPhase = index == 0 ? .began : index == 12 ? .ended : .changed
+            guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                      wheelCount: 1, wheel1: index == 12 ? 0 : delta, wheel2: 0, wheel3: 0)
+            else { throw CocoaError(.featureUnsupported) }
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+            guard let native = NSEvent(cgEvent: event) else { throw CocoaError(.featureUnsupported) }
+            scroll.scrollWheel(with: native)
+            try await Task.sleep(for: .milliseconds(16))
+            samples.append(Double(scroll.contentView.bounds.minY))
+        }
+        return samples
+    }
+    #endif
+
+    private func scrollGeometry() -> [[String: Any]] {
+        #if os(macOS)
+        return desktopScrollViews().map { scroll in
+            ["type": String(describing: type(of: scroll)),
+             "offset": scroll.contentView.bounds.minY,
+             "contentHeight": scroll.documentView?.frame.height ?? 0,
+             "viewportWidth": scroll.contentView.bounds.width,
+             "viewportHeight": scroll.contentView.bounds.height,
+             "insetBottom": scroll.contentInsets.bottom,
+             "flipped": scroll.documentView?.isFlipped ?? false]
+        }
         #else
         var pending = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows).filter(\.isKeyWindow).flatMap(\.subviews)
@@ -373,6 +398,15 @@ private final class ReadRefusal: @unchecked Sendable {
                     : (pickerBackend == "opencode" ? "provider/a-very-long-model-name-with-a-suffix" : "gpt-6.1-sol")
             case "image-paging": prepareImageFixtures(); layoutPage = "image-paging"
             case "verify-image-pager": try await verifyImagePager()
+            #if os(macOS)
+            case "wheel", "scroll-geometry":
+                let samples = if request["action"] as? String == "wheel" {
+                    try await wheel(Int32(clamping: request["delta"] as? Int ?? 0))
+                } else { [Double]() }
+                try save(["id": id, "ok": true, "scrolls": scrollGeometry(), "wheelOffsets": samples],
+                         "result-\(id).json")
+                return
+            #endif
             case "snapshot": break
             case "new-chat-layout", "list-layout", "tab-layout", "repository-chats": layoutPage = request["action"] as? String
             case "light": layoutScheme = .light

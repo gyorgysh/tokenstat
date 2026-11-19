@@ -211,6 +211,31 @@ struct ChatView: View {
     /// changes, and pulses share one ~150ms gate, same as the growth repins.
     /// Animated pins (a jump, an approval card) always go through.
     @State private var lastSilentPinAt = Date.distantPast
+    // The boundary between eager and lazy rows changes their SwiftUI identity.
+    // Keep it fixed while an existing reply grows.
+    private final class MeasuredTail {
+        struct Key: Equatable {
+            let generation: UInt64
+            let count: Int
+            let first: String?
+            let last: String?
+        }
+
+        private var key: Key?
+        private var start = 0
+
+        func split(_ rows: [ChatDisplayItem], generation: UInt64)
+            -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
+            let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id)
+            if next != key {
+                start = TranscriptSlice.measuredTailStart(rows)
+                key = next
+            }
+            return TranscriptSlice.split(rows, measuredFrom: start)
+        }
+    }
+
+    @State private var measuredTail = MeasuredTail()
     @State private var rowMounts = TranscriptRowMounts()
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
@@ -671,7 +696,8 @@ struct ChatView: View {
         // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
-        let split = TranscriptSlice.split(rows)
+        let split = measuredTail.split(rows, generation: model.selectionGeneration)
+        let liveRowID = model.busy && sliceOffset == 0 && !model.isShowingCachedTranscript ? rows.last?.id : nil
         let presentation = ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)
         #if os(macOS)
         let verticalPadding = Theme.Space.m
@@ -706,13 +732,13 @@ struct ChatView: View {
                             .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
                         }
                         ForEach(split.lazy) { item in
-                            transcriptRow(item, chat: chat, spinning: spinning)
+                            transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
                                 .transcriptRowMount(in: rowMounts)
                         }
                     }
                     // See `TranscriptSlice.measuredTail`.
                     ForEach(split.measured) { item in
-                        transcriptRow(item, chat: chat, spinning: spinning)
+                        transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
                             .transcriptRowMount(in: rowMounts)
                     }
                     if sliceOffset == 0 {
@@ -748,6 +774,7 @@ struct ChatView: View {
                 .chatScrollContent()
             }
             .transcriptOpensAtEnd()
+            .preserveStreamingScrollback(model.busy && !follow.pinned && !follow.settling, window: window)
             .chatDropSurface(enabled: showsDropTargets, isTargeted: $transcriptDropTargeted, receive: receive)
             .overlay {
                 if settledSelection != Self.selectionKey(presentation) {
@@ -760,7 +787,7 @@ struct ChatView: View {
                 TranscriptProbe.shared.noteMetrics()
                 TranscriptProbe.shared.pinned = follow.pinned
                 TranscriptProbe.shared.scrolling = follow.scrolling
-                TranscriptProbe.shared.built = visibleItems.count
+                TranscriptProbe.shared.built = rows.count
                 #endif
                 // The slice flag first: note() treats a hidden newest as
                 // far from the end. Then the pin, then the window, which
@@ -961,7 +988,7 @@ struct ChatView: View {
         ChatReadingIdentity(reference: presentation.reading.reference, generation: presentation.reading.generation)
     }
 
-    private func transcriptRow(_ item: ChatDisplayItem, chat: ChatConversation, spinning: String?) -> some View {
+    private func transcriptRow(_ item: ChatDisplayItem, chat: ChatConversation, spinning: String?, isLive: Bool) -> some View {
         let owner = model.currentReference
         let generation = model.selectionGeneration
         return Group {
@@ -995,7 +1022,7 @@ struct ChatView: View {
                             && WorkCacheAccess.canRead(owner)
                     },
                     faceSeed: model.faceSeed,
-                    isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
+                    isLive: isLive,
                     animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
                     expandsOutput: detail.level == .detailed,
                     compactTools: detail.level == .minimal,

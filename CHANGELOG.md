@@ -5,21 +5,25 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
-## [1.22.0]
+## [1.22.0] - 2026-11-20
+
+### Added
+
+- On Mac, choose Auto, Light, Dark or OLED in Appearance. Pick Default, Ink, Ember or Aurora, or copy a prompt for your agent and import the theme it makes.
+- The Mac sidebar starts with Glass and highlights on at 95% opacity. Your saved settings carry over.
 
 ### Improved
 
-- On iPhone, a chat's top bar has a menu button, the chat name and repository in the middle, and one menu for everything else. The menu button, or a swipe from the left edge, opens a panel with the app's sections and the repository's chats.
-- The Pick up where you left off card on iPhone, iPad and Android names the repository and keeps the time in one spot. Times under a minute read "just now", so the card no longer shifts every few seconds.
-- Loading placeholders for chats and lists are quieter and fill the screen on Mac, iPhone, iPad, Android and Windows.
-- The agent picker has one Refresh button. It reloads agents, models and limits together.
+- On iPhone, a swipe from the left edge or a tap on the chat menu button opens the current repository’s chats and shortcuts to the app’s other sections. The chat title and repository sit together at the top.
+- The Pick up where you left off card on iPhone, iPad and Android shows the repository. It reads “just now” for the first minute.
+- Loading placeholders for chats and lists fill the available space on Mac, iPhone, iPad, Android and Windows.
+- Refresh in the agent picker now reloads agents, models and limits together.
 
 ### Fixed
 
-- On Mac, chat text no longer flickers while it scrolls or streams.
-- A long reply no longer freezes the app as it streams in, so you can scroll back and read while it is still being written.
-- Unlocking an iPhone or iPad no longer leaves an open chat stuck on its loading placeholder. It comes back where you were reading.
-- A chat started with the new chat button shows in its repository's chat list right away.
+- On Mac, chat text stays in place when you scroll back to read during a long reply. Scrolling past the newest message no longer bounces the transcript upward.
+- Unlocking an iPhone or iPad returns you to the open chat at your reading position.
+- Chats started with the new chat button appear in their repository’s chat list right away.
 
 ## [1.21.0] - 2026-11-19
 

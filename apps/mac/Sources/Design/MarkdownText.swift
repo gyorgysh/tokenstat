@@ -221,6 +221,14 @@ private enum MarkdownCache {
     /// back through the view's task when the interval is up, so a stream that
     /// arrives faster than a person can read it costs twenty whole-message
     /// parses a second rather than one per token.
+    static var appearanceKey: String {
+        #if os(macOS)
+        return MacAppearance.shared.markdownCacheKey
+        #else
+        return ""
+        #endif
+    }
+
     static let live = LiveMarkdown()
 }
 
@@ -780,7 +788,7 @@ private struct MessageMarkdownContent: View {
             // replaced at most once per `LiveMarkdown.cadence`; a token that
             // arrives sooner keeps the revision on screen and is picked up by
             // the body's task.
-            let slot = "\(liveID.utf8.count):\(liveID):\(cacheScope):\(style.rawValue):\(maximumCharacters)"
+            let slot = "\(MarkdownCache.appearanceKey):\(liveID.utf8.count):\(liveID):\(cacheScope):\(style.rawValue):\(maximumCharacters)"
             self.liveSlot = slot
             let cache = MarkdownCache.live
             if let shown = cache.take(slot: slot, text: markdown) {
@@ -805,7 +813,7 @@ private struct MessageMarkdownContent: View {
             // rebuilding every `Text` chain there was the per-edge cost that
             // brought the hitches back. The scope names the caller's font set,
             // which is baked into the chains and cannot be keyed from `Font`.
-            let key = "\(cacheScope):\(style.rawValue):\(maximumCharacters):\(markdown)"
+            let key = "\(MarkdownCache.appearanceKey):\(cacheScope):\(style.rawValue):\(maximumCharacters):\(markdown)"
             self.liveSlot = ""
             needsRefresh = false
             cachedSegments = MarkdownCache.segments.value(for: key) {
@@ -966,7 +974,7 @@ private struct MarkdownCodeBlock: View {
     }
 
     // Reuse scrolling chunks across sizes, and separate each wrapping budget.
-    private var renderedKey: String { (needsScroller ? "s" : "w\(maximumCharacters)") + key }
+    private var renderedKey: String { MarkdownCache.appearanceKey + (needsScroller ? "s" : "w\(maximumCharacters)") + key }
 
     private func chunks(_ value: AttributedString) -> [AttributedString] {
         MarkdownTextChunks.splitCode(value, scrollsHorizontally: needsScroller, maximum: maximumCharacters)

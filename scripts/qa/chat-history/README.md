@@ -49,6 +49,11 @@ noise but still requires the marker's characters in the captured image.
 Each reader also refuses a latest-page read and verifies that the previously
 loaded conversation remains visible, then resumes normal reads.
 
+`--desktop-only --desktop-local --desktop-scrollback` exercises a native
+Mac wheel gesture on a 400-line numbered reply. It checks that the offset
+moves in the intended direction during two gestures, holds when the viewport
+rests as content grows, and holds when scrolling past the newest line.
+
 `--desktop-only --retained-stress` keeps the Mac chat mounted as the app does,
 repeatedly hides it, changes its width, streams text, and checks the latest
 message after bringing it forward. Captures use AppKit's bitmap rendering;

@@ -355,7 +355,6 @@ private struct ClientRecentChatContent: View {
     @State private var loadingLive = false
     @State private var visible = false
     @State private var loadGeneration: UInt64 = 0
-    @State private var showingChatSwitcher = false
     @State private var drawerOpen = false
     private var showingChatSidebar: Bool {
         get { session.presentation.sidebarVisible }
@@ -481,11 +480,21 @@ private struct ClientRecentChatContent: View {
                 }
                 threadContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                     .modifier(ClientChatDrawer(open: $drawerOpen,
-                        width: min(320, geometry.size.width * 0.82)) {
+                        width: min(320, geometry.size.width * 0.82),
+                        allowsEdgeSwipe: model.savedCopy == nil && geometry.size.width < 600
+                            && model.chats.contains { $0.id == chatID }) {
                         ClientChatDrawerPanel(place: folderName, chats: model.chats, currentID: chatID,
                             isUnread: { ClientChatReadState.shared.isUnread(peer: peer, chat: $0) },
                             onClose: { drawerOpen = false }, onChats: leave,
+                            beforeNavigate: {
+                                guard ownsDrawer else { return false }
+                                model.saveDraftNow()
+                                if rootChatReference != nil { navigation.presentedChat = nil }
+                                return true
+                            },
                             onNewChat: {
+                                guard ownsDrawer else { return }
+                                drawerOpen = false
                                 model.saveDraftNow()
                                 navigation.openNewChat(repositoryID: "remote:\(peer):\(workspaceID)")
                             }, onSelect: select)
@@ -501,18 +510,6 @@ private struct ClientRecentChatContent: View {
         .background(Theme.background)
         .clientTabBarHidden(!loaded || model.chats.contains(where: { $0.id == chatID }))
         .navigationBarBackButtonHidden(model.savedCopy == nil && workbenchWidth > 0 && workbenchWidth < 600)
-        .sheet(isPresented: $showingChatSwitcher) {
-            NavigationStack {
-                chatSwitcher
-                    .navigationTitle(L10n.text("apple.clientchatview.conversations.1d432f58"))
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(L10n.text("common.close")) { showingChatSwitcher = false }
-                        }
-                    }
-            }
-        }
         .onAppear {
             if navigation.presentedChat == nil { publishChat() }
         }
@@ -524,13 +521,18 @@ private struct ClientRecentChatContent: View {
         }
     }
 
+    private var ownsDrawer: Bool {
+        visible && publicationLayout == navigation.stackGeneration
+            && presentationScope != nil && presentationScope == WorkSessionContext.shared.scope
+            && (rootChatReference == nil || rootChatReference == navigation.presentedChat?.reference)
+    }
+
     private func select(_ chat: ChatConversation) {
         guard visible, publicationLayout == navigation.stackGeneration,
               let presentationScope, presentationScope == WorkSessionContext.shared.scope,
               model.draftReference(for: chat.id, in: workspaceID)?.scope == presentationScope,
               rootChatReference == nil || rootChatReference == navigation.presentedChat?.reference
         else { return }
-        showingChatSwitcher = false
         drawerOpen = false
         guard chat.id != chatID else { return }
         model.saveDraftNow()
@@ -642,9 +644,7 @@ private struct ClientRecentChatContent: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    if drawerOpen { drawerOpen = false }
-                    else if showingChatSwitcher { showingChatSwitcher = false }
-                    else { withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false } }
+                    withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false }
                 } label: {
                     Image(systemName: "sidebar.left")
                         .frame(minWidth: 44, minHeight: 44)

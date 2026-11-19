@@ -102,6 +102,19 @@ for driven in [false, true] {
     gesture.note(native(6751, 7270, 0, scrolling: true))
     assert(gesture.pinned && !gesture.showJump, "scrolling back to the bottom must resume follow")
 }
+let growingRetreat = TranscriptFollowState()
+growingRetreat.note(native(6751, 7270, 0, scrolling: false))
+var pinsDuringRetreat = 0
+growingRetreat.repin = { pinsDuringRetreat += 1; return true }
+growingRetreat.note(native(6751, 7278, 8, scrolling: false))
+growingRetreat.note(native(6747, 7281, 15, scrolling: true))
+growingRetreat.note(native(6761, 7281, 1, scrolling: false))
+drain()
+assert(!growingRetreat.pinned && pinsDuringRetreat == 0,
+       "growth must not mask the first upward gesture or rearm follow through layout")
+growingRetreat.note(native(6762, 7281, 0, scrolling: true))
+assert(growingRetreat.pinned, "a deliberate scroll down resumes following")
+
 let settlingAnchor = TranscriptFollowState()
 settlingAnchor.note(native(6751, 7270, 0, scrolling: false))
 settlingAnchor.settle(true)

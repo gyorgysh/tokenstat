@@ -161,8 +161,13 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
         func apply(animated: Bool) {
             guard parent != nil else { return }
             guard let tabs = ClientTabBarHost.controller(from: self) ?? tabs else { return }
+            if let previous = self.tabs, previous !== tabs { restore() }
             self.tabs = tabs
-            if hidden { Self.hiders.add(self) } else { Self.hiders.remove(self) }
+            guard hidden else {
+                restore()
+                return
+            }
+            Self.hiders.add(self)
             let reportedHidden: Bool
             if #available(iOS 18, *) {
                 reportedHidden = tabs.isTabBarHidden
@@ -179,11 +184,9 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
                 platterHidden = true
             }
             let viewHidden = barHidden && platterHidden
-            if reportedHidden == hidden && viewHidden == hidden {
-                return
-            }
-            ClientTabBarHost.setHidden(hidden, on: tabs, animated: animated)
-            hidByUs = hidden
+            guard !reportedHidden || !viewHidden else { return }
+            ClientTabBarHost.setHidden(true, on: tabs, animated: animated)
+            hidByUs = true
         }
 
         func restore() {

@@ -13,6 +13,34 @@ xcodegen generate --spec apps/mac/project.yml
 
 Open `apps/mac/Tokenstat.xcodeproj` and select the Tokenstat scheme and a Mac, iPhone or iPad destination. The iPhone app embeds the paired TokenstatWatch app and its complication extension. Regenerate after changing sources or the project specification. Use a destination instead of a global `-sdk` override when building the iPhone scheme, so embedded Watch targets retain their watchOS SDK.
 
+## Mac appearance and custom themes
+
+Open your account settings and find **Appearance**. **Auto** follows macOS.
+**Light** and **Dark** stay fixed. **OLED** uses black for the app's main
+surfaces and keeps the accents from your selected color theme. Default, Ink,
+Ember and Aurora work in every mode. In OLED mode the sidebar is opaque.
+
+### Ask an agent to make a theme
+
+Choose **Copy agent prompt** and paste it into your preferred coding agent.
+Describe your colors or give the agent a reference image. The prompt includes
+the current palette and asks the agent to show its proposed colors before it
+writes a JSON file. Choose **Import theme…** to open and apply that file.
+
+Import a custom theme with the same name to update it. Keep a copy of the JSON
+file if you want to share it or use it on another Mac. To remove a theme,
+select its swatch and choose **Remove theme**.
+
+### Theme file format
+
+Use version `1`, a name between 1 and 40 characters, and seven opaque
+`#RRGGBB` colors in both `light` and `dark`. The copied prompt includes a
+complete example. The theme controls the main surfaces, borders, selection,
+and two accents. The app uses system text styles, so surfaces and selections
+must stay light in the light palette and dark in the dark palette. Accent and
+secondary colors need a contrast ratio of at least 4.5:1 on the background,
+sidebar, and panel. The app reads colors from the file and applies them locally.
+
 ## Shortcuts, Siri and discovery
 
 Shortcuts expose Open Screen, Open Project, Usage, Refresh, Search and Activity Streak. Screens include Home, Workspaces, Insights, Devices, SSH, Account and Search. Project actions can open Terminals, Chats, Changes, History, Pull Requests, Tasks, Notes, Workflows, Automations, Files or Browser. Search accepts a query and opens the existing app search interface.

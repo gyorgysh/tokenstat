@@ -167,7 +167,7 @@ enum TranscriptSlice {
     static let measuredCover = 2400.0
 
     /// The built rows, split into the lazy head and the measured tail.
-    static func split(_ rows: [ChatDisplayItem]) -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
+    static func measuredTailStart(_ rows: [ChatDisplayItem]) -> Int {
         var count = 0
         var covered = 0.0
         for row in rows.reversed() {
@@ -175,7 +175,12 @@ enum TranscriptSlice {
             covered += row.tailHeightFloor
             if count >= measuredTail || (count >= measuredMinimum && covered >= measuredCover) { break }
         }
-        let cut = rows.count - count
+        return rows.count - count
+    }
+
+    static func split(_ rows: [ChatDisplayItem], measuredFrom start: Int? = nil)
+        -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
+        let cut = start ?? measuredTailStart(rows)
         return (rows[..<cut], rows[cut...])
     }
 
@@ -540,6 +545,7 @@ final class TranscriptFollowState {
         let resized = abs(metrics.viewportHeight - lastViewportHeight) > 0.5
         if grew || shrank || moved || resized { layoutRevision &+= 1 }
         readerIsScrolling = metrics.readerIsScrolling == true
+        if readerIsScrolling { repinDelivery.cancel() }
         // Motion only: growth under a still viewport is a stream arriving,
         // not a gesture, and rows stay interactive while it is followed.
         let readerMoved = moved && metrics.readerIsScrolling != false
@@ -577,10 +583,9 @@ final class TranscriptFollowState {
             // hand on the trackpad. Nothing here may out-argue that: the
             // chase after Jump to latest would otherwise drag somebody back
             // for the length of its budget.
-            let retreated = readerMoved
-                && !grew
-                && !shrank
-                && (pinned || Date() >= programmaticUntil)
+            let retreat = lastOffset - metrics.distanceFromTop
+            let retreated = readerMoved && (pinned || Date() >= programmaticUntil)
+                && (readerIsScrolling ? retreat > 2 : !grew && !shrank)
                 && metrics.distanceFromBottom > lastDistanceFromBottom + 8
             lastContentHeight = metrics.contentHeight
             lastOffset = metrics.distanceFromTop
@@ -648,6 +653,13 @@ final class TranscriptFollowState {
         } else if readerMoved {
             undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
         }
+        // On native scroll phases, an upward gesture can coincide with growth
+        // and can start well inside the normal bottom tolerance.
+        if pinned, readerIsScrolling, metrics.distanceFromTop < prevOffset - 0.5,
+           metrics.distanceFromBottom > max(2, prevBottom + 0.5) {
+            stopFollowing()
+            return
+        }
         let pastContent = metrics.viewportPastContent
         if metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent,
            (grew && !moved) || metrics.readerIsScrolling == false || pastContent {
@@ -669,7 +681,7 @@ final class TranscriptFollowState {
                 repinDelivery.submit(after: delay) { [weak self] in
                     guard let self, self.active, self.pinned,
                           !self.atEnd, !self.sliceHidesNewest,
-                          !self.suppressed, !self.settling else { return }
+                          !self.suppressed, !self.settling, !self.readerIsScrolling else { return }
                     if pastContent {
                         guard self.viewportPastContent, !self.pastContentRecoveryAttempted else { return }
                         self.pastContentRecoveryAttempted = true
@@ -708,9 +720,7 @@ final class TranscriptFollowState {
                 && metrics.distanceFromBottom > prevBottom + 2
             let userMoved = farMovedFrames >= 4 || (undrivenDrift > 24 && farMovedFrames >= 2)
             if stableRetreat || (userMoved && (!driven || retreatingFrames >= 4)) {
-                pinned = false
-                undrivenDrift = 0
-                set(jump: true)
+                stopFollowing()
             }
         } else if metrics.distanceFromBottom <= 10 {
             // Back on the latest turn with a scroll of one's own: follow
@@ -719,10 +729,12 @@ final class TranscriptFollowState {
             // Home also clears the drift tab: micro-scrolls from a while ago
             // must not unpin a far frame later.
             undrivenDrift = 0
-            if readerMoved {
+            let returnedByScrolling = readerMoved
+                && (metrics.distanceFromTop > prevOffset || (paused && metrics.distanceFromBottom <= 2))
+            if returnedByScrolling {
                 paused = false
             }
-            if !paused {
+            if !paused, pinned || returnedByScrolling {
                 pinned = true
                 undrivenDrift = 0
                 set(jump: false)
@@ -746,6 +758,7 @@ final class TranscriptFollowState {
     /// the end on purpose, so it keeps it.
     func stopFollowing() {
         guard !settling else { return }
+        repinDelivery.cancel()
         pinned = false
         undrivenDrift = 0
         farMovedFrames = 0
@@ -1202,6 +1215,23 @@ extension View {
         }
     }
 
+    @ViewBuilder
+    func preserveStreamingScrollback(_ preserve: Bool, window: TranscriptWindow) -> some View {
+        #if os(macOS)
+        if #available(macOS 15.0, *) {
+            transaction { transaction in
+                if preserve, !window.isRestoringPage {
+                    transaction.scrollContentOffsetAdjustmentBehavior = .disabled
+                }
+            }
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+
     /// Follow the transcript's scroll position.
     func chatScrollMetrics(_ note: @escaping (TranscriptMetrics) -> Void) -> some View {
         modifier(TranscriptScrollMetrics(note: note))
@@ -1227,6 +1257,8 @@ extension View {
 /// a conversation used to arrive with nothing loading.
 final class TranscriptWindow {
     var viewportHeight: CGFloat = 0
+    private var readerIsScrolling = false
+    var isRestoringPage: Bool { held != nil }
     /// How far the top of the loaded conversation is above the viewport.
     /// Large at the bottom of a long chat, zero at the very beginning.
     var distanceFromTop: CGFloat = .greatestFiniteMagnitude
@@ -1395,6 +1427,7 @@ final class TranscriptWindow {
     var nearTopChanged: ((Bool) -> Void)?
 
     func note(_ metrics: TranscriptMetrics) {
+        readerIsScrolling = metrics.readerIsScrolling == true
         viewportHeight = metrics.viewportHeight
         distanceFromTop = metrics.distanceFromTop
         updateNearTop(metrics)
@@ -1406,7 +1439,7 @@ final class TranscriptWindow {
             release()
             return
         }
-        if held != nil, Date() > heldUntil { release() }
+        if held != nil, readerIsScrolling || Date() > heldUntil { release() }
         if let held, changed {
             heldFrames -= 1
             if heldFrames <= 0 { release() }
@@ -1452,7 +1485,7 @@ final class TranscriptWindow {
 
     private func scheduleRestore(_ anchor: TranscriptAnchor) {
         restoreDelivery.submit { [weak self] in
-            guard let self, !self.followingEnd, self.held?.id == anchor.id,
+            guard let self, !self.followingEnd, !self.readerIsScrolling, self.held?.id == anchor.id,
                   Date() <= self.heldUntil else { return }
             self.restore?(anchor)
         }
@@ -1702,17 +1735,11 @@ func loadEarlier(_ model: ChatModel, window: TranscriptWindow) async {
         return
     }
     let before = model.displayItems.count
-    // Armed before the request, so the reader's place is already claimed when
-    // the rows land. The scroll callback corrects on every frame the
-    // insertion changes the height, including the first one.
-    //
-    // The automatic path only asks when there is an anchor. The button at the
-    // top of the transcript asks whatever the geometry says, and if it says
-    // nothing is on screen to hold, the page still has to arrive: pressing it
-    // is somebody looking at the boundary, so the rows landing under their
-    // eyes is the answer they asked for.
-    if let anchor = window.anchor { window.hold(anchor) } else { window.release() }
-    await model.loadEarlier()
+    await model.loadEarlier {
+        // Take the anchor at publication, after the request and projection.
+        // Stream layout during the request has no page insertion to correct.
+        if let anchor = window.anchor { window.hold(anchor) } else { window.release() }
+    }
     guard model.selectionGeneration == generation else { return }
     // Set this before another geometry callback can request a page. The
     // view updates its exact slice state on the next render.

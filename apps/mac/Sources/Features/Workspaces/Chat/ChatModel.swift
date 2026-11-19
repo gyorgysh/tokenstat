@@ -4292,6 +4292,7 @@ final class ChatModel {
     private func publishEvents(id: String, generation: UInt64,
                                canPublish: () -> Bool = { true },
                                rebasesWindow: Bool = true, recordsChanged: Bool = true,
+                               beforeCommit: (() -> Void)? = nil,
                                transform: ([ChatTimelineEvent]) -> [ChatTimelineEvent]) async -> Bool {
         let initialRevision = eventsRevision
         while !Task.isCancelled, selectionMatches(id: id, generation: generation), canPublish() {
@@ -4305,6 +4306,7 @@ final class ChatModel {
             guard rebasesWindow || eventsRevision == initialRevision else { return false }
             guard revision == eventsRevision, backend == selected?.backend,
                   running == (selected?.running == true) else { continue }
+            if let beforeCommit, displayCache != rows { beforeCommit() }
             if recordsChanged { events = next }
             commitDisplay(rows)
             return true
@@ -4563,14 +4565,15 @@ final class ChatModel {
     ///
     /// Called by the transcript as the top comes near, so the page is usually
     /// already there by the time somebody reaches it.
-    func loadEarlier() async {
+    func loadEarlier(beforePrepend: (() -> Void)? = nil) async {
         // The copy holds no earlier pages, and fetching them would mix live
         // rows into a snapshot the banner describes as saved.
         guard savedCopy == nil, let selected else { return }
-        await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false)
+        await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false, beforePrepend: beforePrepend)
     }
 
-    private func loadEarlier(id: String, generation: UInt64, quiet: Bool) async {
+    private func loadEarlier(id: String, generation: UInt64, quiet: Bool,
+                             beforePrepend: (() -> Void)? = nil) async {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
         guard !pagingUnavailable, hasEarlier, !earlierInFlight,
               let cursor = earlierCursor
@@ -4618,7 +4621,7 @@ final class ChatModel {
                 // the archive, so a repeat is cheap to spot.
                 guard await publishEvents(id: id, generation: generation, canPublish: {
                     requestedEpoch == self.eventsEpoch && cursor == self.earlierCursor
-                }, transform: { held in
+                }, beforeCommit: beforePrepend, transform: { held in
                     let oldest = held.first?.seq ?? UInt64.max
                     let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
                     return fresh + held

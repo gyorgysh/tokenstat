@@ -23,12 +23,42 @@ import UIKit
 /// window into the text, and columns of numbers are hard enough to read
 /// already. So `sidebarMaterial` for the edges, flat colours for the middle.
 enum Theme {
-    static let accent = Color.adaptive(light: hex(0x6A3DFF), dark: hex(0x8B5CF6))
-    static let secondary = Color.adaptive(light: hex(0xC026D3), dark: hex(0xE879F9))
+    private struct PaletteColor {
+        let key: KeyPath<AppearanceColors, String>
+        let fallback: Color
+        let blackInOLED: Bool
 
-    static let background = Color.adaptive(light: hex(0xFBFBFD), dark: hex(0x08070D))
-    static let sidebar = Color.adaptive(light: hex(0xF3F2F8), dark: hex(0x12101D))
-    static let panel = Color.adaptive(light: .white, dark: hex(0x100E1A))
+        init(_ key: KeyPath<AppearanceColors, String>, _ light: UInt32, _ dark: UInt32, blackInOLED: Bool = false) {
+            self.key = key
+            fallback = Color.adaptive(light: Theme.hex(light), dark: Theme.hex(dark))
+            self.blackInOLED = blackInOLED
+        }
+
+        var color: Color {
+            #if os(macOS)
+            MacAppearance.shared.color(key, fallback: fallback, blackInOLED: blackInOLED)
+            #else
+            fallback
+            #endif
+        }
+    }
+
+    private static let accentColor = PaletteColor(\.accent, 0x6A3DFF, 0x8B5CF6)
+    private static let secondaryColor = PaletteColor(\.secondary, 0xC026D3, 0xE879F9)
+    private static let backgroundColor = PaletteColor(\.background, 0xFBFBFD, 0x08070D, blackInOLED: true)
+    private static let sidebarColor = PaletteColor(\.sidebar, 0xF3F2F8, 0x12101D, blackInOLED: true)
+    private static let panelColor = PaletteColor(\.panel, 0xFFFFFF, 0x100E1A, blackInOLED: true)
+    private static let tabStripColor = PaletteColor(\.sidebar, 0xF3F2F8, 0x08070D, blackInOLED: true)
+    private static let borderColor = PaletteColor(\.border, 0xE7E7EE, 0x211D33)
+    private static let selectionColor = PaletteColor(\.selection, 0xF0ECFF, 0x1B1430)
+    private static let nestedSelectionColor = PaletteColor(\.selection, 0xE8E7F0, 0x26213D)
+
+    static var accent: Color { accentColor.color }
+    static var secondary: Color { secondaryColor.color }
+    static var background: Color { backgroundColor.color }
+    static var sidebar: Color { sidebarColor.color }
+    static var panel: Color { panelColor.color }
+
     /// Behind a tab strip.
     ///
     /// A step darker than the pane under it, so the strip reads as chrome
@@ -36,7 +66,7 @@ enum Theme {
     /// this was a solid grey, which put a third tone between the toolbar above
     /// and the content below and made the strip look like a band stuck across
     /// the window. Dark mode can take the contrast, light mode cannot.
-    static let tabStrip = Color.adaptive(light: hex(0xF3F2F8), dark: hex(0x08070D))
+    static var tabStrip: Color { tabStripColor.color }
     /// The floor under the new chat page on iPhone and iPad.
     ///
     /// That page is presented full screen over nothing, so a material there
@@ -46,12 +76,12 @@ enum Theme {
     /// card floats off it, and the page reads as this app's. The Mac keeps
     /// its window glass, which has a desktop behind it.
     static let chatStartGround = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
-    static let border = Color.adaptive(light: hex(0xE7E7EE), dark: hex(0x211D33))
+    static var border: Color { borderColor.color }
     /// The edge of the content sheet against the glass chrome. A touch of
     /// light on dark and a touch of shade on light, so the sheet reads as a
     /// layer rather than a hole cut in the chrome.
     static let contentRim = Color.adaptive(light: Color.black.opacity(0.09), dark: Color.white.opacity(0.085))
-    static let rowHighlight = Color.adaptive(light: hex(0xF0ECFF), dark: hex(0x1B1430))
+    static var rowHighlight: Color { accentSoft }
     /// The quiet circular seat behind a small chrome glyph, such as a close
     /// button.
     ///
@@ -77,7 +107,7 @@ enum Theme {
     /// Tinted with the accent rather than being a lighter grey. With a hover
     /// highlight and a selection highlight both in grey, the two were the same
     /// thing at a glance and you could not tell which workspace you were in.
-    static let rowSelected = accent.opacity(0.18)
+    static var rowSelected: Color { accent.opacity(0.18) }
     /// A selected row nested inside a selected one, such as the session showing
     /// inside the open workspace.
     ///
@@ -86,11 +116,11 @@ enum Theme {
     /// competing selections rather than as "this folder, and this terminal
     /// within it". The folder carries the colour, this one just lifts off the
     /// background.
-    static let rowSelectedNested = Color.adaptive(light: hex(0xE8E7F0), dark: hex(0x26213D))
+    static var rowSelectedNested: Color { nestedSelectionColor.color }
 
     /// The accent at card strength, for a fill that has to read as tinted
     /// rather than as coloured.
-    static let accentSoft = Color.adaptive(light: hex(0xF0ECFF), dark: hex(0x1B1430))
+    static var accentSoft: Color { selectionColor.color }
 
     // Semantic colours. Before these existed, a live session was `.green` and
     // an unsaved file was `.orange`, written at the call site, so the app had
@@ -101,7 +131,7 @@ enum Theme {
     // so the app's own active colour is what "good" means now. Warning and
     // danger stay distinct, because amber and red carry meaning the accent
     // does not.
-    static let success = accent
+    static var success: Color { accent }
     static let warning = Color(red: 0xE0 / 255, green: 0xA9 / 255, blue: 0x3B / 255)
     static let danger = Color(red: 0xD6 / 255, green: 0x45 / 255, blue: 0x3F / 255)
 
@@ -111,7 +141,7 @@ enum Theme {
     /// than a traffic light. Named separately from `success` because a run
     /// that is working has not succeeded at anything yet, and the two will
     /// want to diverge the first time a state screen shows both.
-    static let stateWorking = accent
+    static var stateWorking: Color { accent }
     /// A session that is alive and quiet. Grey, and quiet in the layout too:
     /// most rows are idle most of the time, so this must not draw the eye.
     static let stateIdle = Color.adaptive(light: hex(0x9A97A6), dark: hex(0x6E6A80))
@@ -130,7 +160,16 @@ enum Theme {
     ///
     /// Exact `sites/tokenstat` ramp. Step 0 is neutral so a quiet day reads as
     /// "nothing here", while the upper levels run violet into fuchsia.
-    static let heat: [Color] = [
+    static var heat: [Color] {
+        #if os(macOS)
+        if MacAppearance.shared.paletteID != "default" {
+            return [sidebar, accent.opacity(0.32), accent.opacity(0.6), accent, secondary]
+        }
+        #endif
+        return defaultHeat
+    }
+
+    private static let defaultHeat: [Color] = [
         Color.adaptive(light: hex(0xECEAF2), dark: hex(0x191627)),
         Color.adaptive(light: hex(0xD6C9FF), dark: hex(0x3B2A6B)),
         Color.adaptive(light: hex(0xA98CFF), dark: hex(0x5F3FB8)),

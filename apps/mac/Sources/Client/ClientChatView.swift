@@ -105,7 +105,6 @@ private struct ClientChatContent: View {
     /// rows in silence reads as broken sync; the strip says what is happening
     /// until the fresh answer lands.
     @State private var refreshing = false
-    @State private var showingChatSwitcher = false
     @State private var drawerOpen = false
     private var showingChatSidebar: Bool {
         get { session.presentation.sidebarVisible }
@@ -151,7 +150,8 @@ private struct ClientChatContent: View {
                 }
                 chatContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                     .modifier(ClientChatDrawer(open: $drawerOpen,
-                        width: min(320, geometry.size.width * 0.82)) { drawer })
+                        width: min(320, geometry.size.width * 0.82),
+                        allowsEdgeSwipe: opened != nil && geometry.size.width < 600) { drawer })
             }
             .onChange(of: geometry.size.width, initial: true) { _, width in
                 workbenchWidth = width
@@ -162,18 +162,6 @@ private struct ClientChatContent: View {
         }
         .clientTabBarHidden(opened != nil)
         .navigationBarBackButtonHidden(opened != nil && workbenchWidth < 600)
-        .sheet(isPresented: $showingChatSwitcher) {
-            NavigationStack {
-                chatSwitcher
-                    .navigationTitle(L10n.text("apple.clientchatview.conversations.1d432f58"))
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(L10n.text("common.close")) { showingChatSwitcher = false }
-                        }
-                    }
-            }
-        }
         .onAppear {
             visible = true
             session.appear(viewer)
@@ -269,9 +257,7 @@ private struct ClientChatContent: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    if drawerOpen { drawerOpen = false }
-                    else if showingChatSwitcher { showingChatSwitcher = false }
-                    else { withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false } }
+                    withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false }
                 } label: {
                     Image(systemName: "sidebar.left")
                         .frame(minWidth: 44, minHeight: 44)
@@ -327,7 +313,6 @@ private struct ClientChatContent: View {
         guard visible, publicationLayout == navigation.stackGeneration,
               let scope = WorkSessionContext.shared.scope,
               model.draftReference(for: chat.id, in: workspaceID)?.scope == scope else { return }
-        showingChatSwitcher = false
         drawerOpen = false
         guard opened?.id != chat.id else { return }
         model.saveDraftNow()
@@ -352,7 +337,12 @@ private struct ClientChatContent: View {
         ClientChatDrawerPanel(place: place, chats: model.chats, currentID: opened?.id,
             isUnread: { ClientChatReadState.shared.isUnread(peer: peer, chat: $0) },
             onClose: { drawerOpen = false }, onChats: showList,
-            onNewChat: { Task { await create() } }, onSelect: select)
+            beforeNavigate: {
+                guard visible, publicationLayout == navigation.stackGeneration else { return false }
+                model.saveDraftNow()
+                return true
+            },
+            onNewChat: { drawerOpen = false; Task { await create() } }, onSelect: select)
     }
 
     private func updateCompanion(open: Bool) {
@@ -3574,6 +3564,7 @@ struct ClientChatDrawerPanel: View {
     let isUnread: (ChatConversation) -> Bool
     let onClose: () -> Void
     let onChats: () -> Void
+    let beforeNavigate: () -> Bool
     let onNewChat: () -> Void
     let onSelect: (ChatConversation) -> Void
     @Environment(ClientNavigationModel.self) private var navigation
@@ -3582,11 +3573,20 @@ struct ClientChatDrawerPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Wordmark(size: 22, fills: false)
-                .fixedSize()
-                .padding(.horizontal, Theme.Space.l)
-                .frame(height: 52)
-                .accessibilityAddTraits(.isHeader)
+            HStack {
+                Wordmark(size: 22, fills: false)
+                    .fixedSize()
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button(action: onClose) {
+                    ActionIcon.dismiss.label(L10n.text("common.close"))
+                        .labelStyle(.iconOnly)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, Theme.Space.l)
+            .frame(height: 52)
             List {
                 Section {
                     row(L10n.text("apple.clientchatview.new_chat.db18382a"), symbol: "square.and.pencil", selected: false) {
@@ -3621,6 +3621,7 @@ struct ClientChatDrawerPanel: View {
     }
 
     private func open(_ tab: ClientTab) {
+        guard beforeNavigate() else { return }
         onClose()
         navigation.chooseNavigation()
         navigation.restoredRoute = nil
@@ -3672,6 +3673,7 @@ struct ClientChatDrawerPanel: View {
 struct ClientChatDrawer<Drawer: View>: ViewModifier {
     @Binding var open: Bool
     let width: CGFloat
+    let allowsEdgeSwipe: Bool
     @ViewBuilder let drawer: () -> Drawer
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -3684,8 +3686,9 @@ struct ClientChatDrawer<Drawer: View>: ViewModifier {
                     .transition(.move(edge: .leading))
             }
             content
+                .accessibilityHidden(open)
                 .overlay(alignment: .leading) {
-                    if !open {
+                    if allowsEdgeSwipe && !open {
                         Color.clear
                             .frame(width: 20)
                             .contentShape(.rect)
@@ -3704,8 +3707,7 @@ struct ClientChatDrawer<Drawer: View>: ViewModifier {
                                 if value.translation.width < -40 { open = false }
                             })
                             .transition(.opacity)
-                            .accessibilityAddTraits(.isButton)
-                            .accessibilityLabel(L10n.text("common.close"))
+                            .accessibilityHidden(true)
                     }
                 }
                 .offset(x: open ? width : 0)
