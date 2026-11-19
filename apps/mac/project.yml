@@ -34,7 +34,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/Tokenstat-Bridging-Header.h
-    MARKETING_VERSION: "1.21.0"
+    MARKETING_VERSION: "1.22.0"
     # App Store Connect consumes a build number on every upload, even for the
     # same marketing version. Its builds list can lag a successful upload.
     CURRENT_PROJECT_VERSION: "241"
