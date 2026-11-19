@@ -32,7 +32,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
-import java.util.Locale
+import androidx.compose.ui.platform.LocalConfiguration
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
@@ -778,6 +778,8 @@ private fun RoutingLimitCard(
                     style = TsType.headline,
                     color = colors.textPrimary,
                 )
+                // Read through the composition, so a locale change redraws it.
+                val language = LocalConfiguration.current.locales[0].language
                 Text(
                     if (reset == null) L10n.text("common.chat_reset_unknown")
                     else if (reset <= System.currentTimeMillis()) L10n.text(
@@ -788,7 +790,7 @@ private fun RoutingLimitCard(
                         DateUtils.getRelativeTimeSpanString(reset, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
                             .toString()
                             // "In 58 minutes" sits mid-sentence here.
-                            .let { if (Locale.getDefault().language == "en") it.replaceFirstChar { c -> c.lowercase() } else it },
+                            .let { if (language == "en") it.replaceFirstChar { c -> c.lowercase() } else it },
                         DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(reset)),
                     ),
                     style = TsType.footnote,
