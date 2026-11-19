@@ -330,8 +330,161 @@ private actor MarkdownHighlightLimiter {
     }
 }
 
-private struct MarkdownBlock: Identifiable {
-    enum Kind {
+/// Turns parsed blocks into the text chains and standalone blocks a message
+/// draws. A value, so a streaming row can keep the state reached after its
+/// settled blocks and carry on from there.
+private struct MessageSegmentBuilder {
+    let bodyFont: Font
+    let style: MarkdownStyle
+    let maximumCharacters: Int
+    let streaming: Bool
+    private var out: [MessageSegment] = []
+    private var wordCount = 0
+    private var chain: [Text] = []
+    private var chainLength = 0
+    private var chainLineBreaks = 0
+    private var chainWordCount = 0
+    private var chainHasLinks = false
+
+    init(bodyFont: Font, style: MarkdownStyle, maximumCharacters: Int, streaming: Bool) {
+        self.bodyFont = bodyFont
+        self.style = style
+        self.maximumCharacters = maximumCharacters
+        self.streaming = streaming
+    }
+
+    func finished() -> [MessageSegment] {
+        var copy = self
+        copy.flush()
+        return copy.out
+    }
+
+    private mutating func prose(_ value: AttributedString) -> Text {
+        streaming ? StreamingWordAttribute.text(value, next: &wordCount) : MarkdownLinks.text(value)
+    }
+
+    private func gap() -> Text { Text("\n\n").font(bodyFont) }
+
+    private mutating func flush() {
+        guard !chain.isEmpty else { return }
+        out.append(.text(MarkdownLinks.joined(chain[...]), hasLinks: chainHasLinks, wordCount: chainWordCount))
+        chain.removeAll(keepingCapacity: true)
+        chainLength = 0
+        chainLineBreaks = 0
+        chainHasLinks = false
+    }
+
+    private mutating func push(_ piece: Text, length: Int, lineBreaks: Int, separator: Text? = nil, links: Bool = false) {
+        let gapLines = separator == nil ? 2 : 1
+        if !chain.isEmpty, chainLength + length > maximumCharacters ||
+            chainLineBreaks + gapLines + lineBreaks > MarkdownTextChunks.maximumLineBreaks {
+            flush()
+        }
+        if !chain.isEmpty {
+            chain.append(separator ?? gap())
+            chainLength += length + 2
+            chainLineBreaks += gapLines + lineBreaks
+        } else {
+            chainLength = length
+            chainLineBreaks = lineBreaks
+        }
+        chain.append(piece)
+        chainWordCount = wordCount
+        chainHasLinks = chainHasLinks || links
+    }
+
+    private func chunks(_ text: String) -> [AttributedString] {
+        MarkdownTextChunks.split(MarkdownInline.attributed(text), maximum: maximumCharacters)
+    }
+
+    private mutating func listRow(_ item: MarkdownListItem, text: AttributedString) -> Text {
+        var row = Text(String(repeating: "  ", count: item.depth * 2))
+            .font(bodyFont)
+        if item.checked != nil {
+            row = row + Text(item.checked == true ? "☑ " : "☐ ")
+                .font(bodyFont)
+                .foregroundStyle(Theme.accent)
+        } else if let ordinal = item.ordinal {
+            row = row + Text("\(ordinal). ")
+                .font(Theme.numeric(11, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+        } else {
+            row = row + Text("• ")
+                .font(bodyFont)
+                .foregroundStyle(Theme.accent)
+        }
+        return row + prose(text).font(bodyFont)
+    }
+
+    mutating func add(_ block: MarkdownBlock) {
+        switch block.kind {
+        case let .heading(level, text):
+            for chunk in chunks(text) {
+                push(
+                    prose(chunk).font(MessageMarkdownContent.headingFont(style: style, bodyFont: bodyFont, level: level)),
+                    length: chunk.characters.count, lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
+                    links: chunk.runs.contains { $0.link != nil }
+                )
+            }
+        case let .paragraph(text):
+            for chunk in chunks(text) {
+                push(
+                    prose(chunk).font(bodyFont),
+                    length: chunk.characters.count, lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
+                    links: chunk.runs.contains { $0.link != nil }
+                )
+            }
+        case let .list(items):
+            // Short rows can make a text surface too tall long before it
+            // reaches the character cap. Apply both limits to every list.
+            for (index, item) in items.enumerated() {
+                let parsed = chunks(item.text)
+                // Empty bullets and checkboxes still have a visible marker.
+                let parts = parsed.isEmpty ? [AttributedString()] : parsed
+                for (part, chunk) in parts.enumerated() {
+                    let piece = (part == 0)
+                        ? listRow(item, text: chunk)
+                        : prose(chunk).font(bodyFont)
+                    push(
+                        piece,
+                        length: chunk.characters.count,
+                        lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
+                        separator: index == 0 && part == 0
+                            ? nil : Text("\n").font(bodyFont),
+                        links: chunk.runs.contains { $0.link != nil }
+                    )
+                }
+            }
+        case .code, .table, .quote, .rule:
+            flush()
+            out.append(.block(block))
+        }
+    }
+}
+
+/// The builder state each streaming row reached after its settled blocks.
+/// Main thread only, like `LiveMarkdown`.
+private final class LiveSegmentPrefix {
+    static let shared = LiveSegmentPrefix()
+    struct State {
+        let blocks: [MarkdownBlock]
+        let builder: MessageSegmentBuilder
+    }
+    private var states: [String: State] = [:]
+    private var order: [String] = []
+
+    func state(for slot: String) -> State? { states[slot] }
+
+    func save(_ state: State, for slot: String) {
+        if states.updateValue(state, forKey: slot) == nil {
+            order.append(slot)
+            if order.count > 4 { states.removeValue(forKey: order.removeFirst()) }
+        }
+    }
+}
+
+private struct MarkdownBlock: Identifiable, Equatable {
+    enum Kind: Equatable {
         case heading(level: Int, text: String)
         case paragraph(String)
         case list([MarkdownListItem])
@@ -354,7 +507,7 @@ private struct MarkdownBlock: Identifiable {
     let kind: Kind
 }
 
-private struct MarkdownListItem {
+private struct MarkdownListItem: Equatable {
     let depth: Int
     let ordinal: Int?
     let checked: Bool?
@@ -636,8 +789,8 @@ private struct MessageMarkdownContent: View {
             } else {
                 var parser = MarkdownParser(markdown)
                 let parsed = parser.blocks()
-                let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style,
-                    maximumCharacters: maximumCharacters, streaming: live)
+                let segments = Self.makeLiveSegments(blocks: parsed, slot: slot, bodyFont: bodyFont,
+                    style: style, maximumCharacters: maximumCharacters)
                 cache.store(segments, text: markdown, slot: slot)
                 cachedSegments = segments
                 needsRefresh = false
@@ -667,111 +820,34 @@ private struct MessageMarkdownContent: View {
         bodyFont: Font,
         style: MarkdownStyle, maximumCharacters: Int, streaming: Bool = false
     ) -> [MessageSegment] {
-        var out: [MessageSegment] = []
-        var wordCount = 0
-        func prose(_ value: AttributedString) -> Text {
-            streaming ? StreamingWordAttribute.text(value, next: &wordCount) : MarkdownLinks.text(value)
+        var builder = MessageSegmentBuilder(bodyFont: bodyFont, style: style,
+            maximumCharacters: maximumCharacters, streaming: streaming)
+        for block in blocks { builder.add(block) }
+        return builder.finished()
+    }
+
+    /// A streaming reply only ever grows at its end, so every block but the
+    /// last is the same as on the previous revision. Resume from the builder
+    /// state saved after those blocks instead of rebuilding the whole reply.
+    private static func makeLiveSegments(
+        blocks: [MarkdownBlock], slot: String,
+        bodyFont: Font, style: MarkdownStyle, maximumCharacters: Int
+    ) -> [MessageSegment] {
+        let stable = max(0, blocks.count - 1)
+        var builder: MessageSegmentBuilder
+        var done = 0
+        if let saved = LiveSegmentPrefix.shared.state(for: slot), saved.blocks.count <= stable,
+           blocks[..<saved.blocks.count].elementsEqual(saved.blocks) {
+            builder = saved.builder
+            done = saved.blocks.count
+        } else {
+            builder = MessageSegmentBuilder(bodyFont: bodyFont, style: style,
+                maximumCharacters: maximumCharacters, streaming: true)
         }
-        var chain: [Text] = []
-        var chainLength = 0
-        var chainLineBreaks = 0
-        var chainWordCount = 0
-        var chainHasLinks = false
-        func gap() -> Text { Text("\n\n").font(bodyFont) }
-        func flush() {
-            if !chain.isEmpty {
-                out.append(.text(MarkdownLinks.joined(chain[...]), hasLinks: chainHasLinks, wordCount: chainWordCount))
-                chain.removeAll(keepingCapacity: true)
-                chainLength = 0
-                chainLineBreaks = 0
-                chainHasLinks = false
-            }
-        }
-        func push(_ piece: Text, length: Int, lineBreaks: Int, separator: Text? = nil, links: Bool = false) {
-            let gapLines = separator == nil ? 2 : 1
-            if !chain.isEmpty, chainLength + length > maximumCharacters ||
-                chainLineBreaks + gapLines + lineBreaks > MarkdownTextChunks.maximumLineBreaks {
-                flush()
-            }
-            if !chain.isEmpty {
-                chain.append(separator ?? gap())
-                chainLength += length + 2
-                chainLineBreaks += gapLines + lineBreaks
-            } else {
-                chainLength = length
-                chainLineBreaks = lineBreaks
-            }
-            chain.append(piece)
-            chainWordCount = wordCount
-            chainHasLinks = chainHasLinks || links
-        }
-        func chunks(_ text: String) -> [AttributedString] {
-            MarkdownTextChunks.split(MarkdownInline.attributed(text), maximum: maximumCharacters)
-        }
-        func listRow(_ item: MarkdownListItem, text: AttributedString) -> Text {
-            var row = Text(String(repeating: "  ", count: item.depth * 2))
-                .font(bodyFont)
-            if item.checked != nil {
-                row = row + Text(item.checked == true ? "☑ " : "☐ ")
-                    .font(bodyFont)
-                    .foregroundStyle(Theme.accent)
-            } else if let ordinal = item.ordinal {
-                row = row + Text("\(ordinal). ")
-                    .font(Theme.numeric(11, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-            } else {
-                row = row + Text("• ")
-                    .font(bodyFont)
-                    .foregroundStyle(Theme.accent)
-            }
-            return row + prose(text).font(bodyFont)
-        }
-        for block in blocks {
-            switch block.kind {
-            case let .heading(level, text):
-                for chunk in chunks(text) {
-                    push(
-                        prose(chunk).font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
-                        length: chunk.characters.count, lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
-                        links: chunk.runs.contains { $0.link != nil }
-                    )
-                }
-            case let .paragraph(text):
-                for chunk in chunks(text) {
-                    push(
-                        prose(chunk).font(bodyFont),
-                        length: chunk.characters.count, lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
-                        links: chunk.runs.contains { $0.link != nil }
-                    )
-                }
-            case let .list(items):
-                // Short rows can make a text surface too tall long before it
-                // reaches the character cap. Apply both limits to every list.
-                for (index, item) in items.enumerated() {
-                    let parsed = chunks(item.text)
-                    // Empty bullets and checkboxes still have a visible marker.
-                    let parts = parsed.isEmpty ? [AttributedString()] : parsed
-                    for (part, chunk) in parts.enumerated() {
-                        let piece = (part == 0)
-                            ? listRow(item, text: chunk)
-                            : prose(chunk).font(bodyFont)
-                        push(
-                            piece,
-                            length: chunk.characters.count,
-                            lineBreaks: chunk.characters.lazy.filter(\.isNewline).count,
-                            separator: index == 0 && part == 0
-                                ? nil : Text("\n").font(bodyFont),
-                            links: chunk.runs.contains { $0.link != nil }
-                        )
-                    }
-                }
-            case .code, .table, .quote, .rule:
-                flush()
-                out.append(.block(block))
-            }
-        }
-        flush()
-        return out
+        for block in blocks[done..<stable] { builder.add(block) }
+        LiveSegmentPrefix.shared.save(.init(blocks: Array(blocks[..<stable]), builder: builder), for: slot)
+        for block in blocks[stable...] { builder.add(block) }
+        return builder.finished()
     }
 
     /// What to draw: the live task's latest revision when it belongs to this
@@ -837,14 +913,14 @@ private struct MessageMarkdownContent: View {
             guard !Task.isCancelled else { return }
             var parser = MarkdownParser(source)
             let parsed = parser.blocks()
-            let segments = Self.makeSegments(blocks: parsed, bodyFont: bodyFont, style: style,
-                maximumCharacters: maximumCharacters, streaming: true)
+            let segments = Self.makeLiveSegments(blocks: parsed, slot: liveSlot, bodyFont: bodyFont,
+                style: style, maximumCharacters: maximumCharacters)
             MarkdownCache.live.store(segments, text: source, slot: liveSlot)
             refreshed = (source, segments)
         }
     }
 
-    private static func headingFont(style: MarkdownStyle, bodyFont: Font, level: Int) -> Font {
+    fileprivate static func headingFont(style: MarkdownStyle, bodyFont: Font, level: Int) -> Font {
         style.headingFont(bodyFont: bodyFont, level: level)
     }
 }

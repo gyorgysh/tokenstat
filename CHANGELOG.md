@@ -17,6 +17,7 @@ desktop is a review build. Newest first.
 ### Fixed
 
 - On Mac, chat text no longer flickers while it scrolls or streams.
+- A long reply no longer freezes the app as it streams in, so you can scroll back and read while it is still being written.
 - Unlocking an iPhone or iPad no longer leaves an open chat stuck on its loading placeholder. It comes back where you were reading.
 - A chat started with the new chat button shows in its repository's chat list right away.
 
