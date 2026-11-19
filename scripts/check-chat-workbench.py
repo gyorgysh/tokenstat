@@ -233,7 +233,10 @@ native = '\n'.join([
     declaration(browser, 'private func isLoopbackHost('),
     declaration(browser, 'private enum BrowserCommand'),
     declaration(browser, 'private struct WebBrowser:'),
-    'enum Theme { static let border = Color.gray; static let accent = Color.purple }',
+    'enum Theme { static let border = Color.gray; static let accent = Color.purple; static let background = Color.black }',
+    declaration((root / 'apps/mac/Sources/App/ShellChrome.swift').read_text(),
+                "extension View {\n    /// The system's column resize pointer"),
+    declaration((root / 'apps/mac/Sources/App/ShellChrome.swift').read_text(), 'extension EnvironmentValues {'),
     declaration((root / 'apps/mac/Sources/App/ShellChrome.swift').read_text(), 'struct ColumnResizeCursorArea:'),
     declaration((root / 'apps/mac/Sources/App/ShellChrome.swift').read_text(), 'final class ColumnResizeCursorView:'),
     (root / 'apps/mac/Sources/App/DesktopWorkbenchState.swift').read_text(),
@@ -259,6 +262,7 @@ private final class Measurements {
     var roots = 0
     var toolWidth = 0.0
     var reservedWidth = 0.0
+    var widthLimit = 900.0
 }
 private struct ResizeSurface: View {
     let resize: DesktopWorkbenchResizeState
@@ -268,11 +272,11 @@ private struct ResizeSurface: View {
         let _ = { measurements.roots += 1 }()
         HStack(spacing: 0) {
             Color.clear
-            DesktopWorkbenchSpace(resize: resize, preferred: preferred, cap: 900)
+            DesktopWorkbenchSpace(resize: resize, preferred: preferred, cap: { measurements.widthLimit })
                 .onGeometryChange(for: Double.self, of: { $0.size.width }) { measurements.reservedWidth = $0 }
         }
         .overlay(alignment: .trailing) {
-            DesktopWorkbenchPanel(resize: resize, preferred: $preferred, cap: 900, isVisible: true) {
+            DesktopWorkbenchPanel(resize: resize, preferred: $preferred, cap: { measurements.widthLimit }, isVisible: true) {
                 Color.clear.onGeometryChange(for: Double.self, of: { $0.size.width }) { measurements.toolWidth = $0 }
             }
         }
@@ -367,6 +371,12 @@ private struct NavigationSurface: View {
         precondition(resize.finish() == 900 && !resize.isDragging)
         await wait { measurements.toolWidth == 520 }
         precondition(measurements.roots == rootRenders)
+        measurements.widthLimit = 680
+        resize.drag(translation: -1000, preferred: 520, cap: measurements.widthLimit)
+        await wait { measurements.toolWidth == 680 && measurements.reservedWidth == 685 }
+        precondition(measurements.roots == rootRenders, "A new window cap rebuilt the shell during the divider drag")
+        resize.cancel()
+        await wait { measurements.toolWidth == 520 }
         print("PASS: actual resize leaves track both pane widths and clamps without rebuilding the chat shell")
         let navigation = NavigationProbe(), identities = PaneIdentities()
         navigation.workbench.open(.browser, in: "first")

@@ -454,6 +454,7 @@ struct TerminalPane: View {
             }
             .id(folder.id)
         }
+        .environment(\.desktopChromeJoined, false)
     }
 
     @ViewBuilder
@@ -1574,7 +1575,7 @@ private struct LaunchSurface: View {
             )
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .help(showingCatalog
               ? L10n.text("apple.terminalpane.hide_tools_that_are_not_on_the_launcher.d2554f18")
               : L10n.text("apple.terminalpane.show_tools_you_can_install_or_add_back.95b8421f"))
@@ -1720,7 +1721,7 @@ private struct LaunchSurface: View {
             )
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .accessibilityLabel(count > 0 ? "\(label), \(count)" : label)
     }
 }
@@ -1774,7 +1775,7 @@ private struct LaunchTile: View {
                 )
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(CardButtonStyle())
             .disabled(othersBusy)
             .opacity(othersBusy ? 0.5 : 1)
 
@@ -1811,7 +1812,7 @@ private struct LaunchTile: View {
                 )
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
         .help(L10n.text("apple.terminalpane.configure_0.76d41ce7", "\(profile.name)"))
         .accessibilityLabel(L10n.text("apple.terminalpane.configure_0.76d41ce7", "\(profile.name)"))
         .accessibilityValue(profile.command)
@@ -1867,7 +1868,7 @@ private struct LaunchInstallTile: View {
             )
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .disabled(isInstalling)
         .help(L10n.text("apple.terminalpane.0_is_not_installed_click_to_run_its_offici.e78df0fc", "\(profile.name)"))
     }

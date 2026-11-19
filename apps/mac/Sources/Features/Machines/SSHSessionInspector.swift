@@ -45,7 +45,7 @@ struct SSHSessionInspector: View {
             } content: {
                 if editing != nil {
                     Button(L10n.text("apple.sshsessioninspector.snippets.ff717209"), .back) { editing = nil }
-                        .buttonStyle(.plain)
+                        .buttonStyle(QuietLinkStyle())
                         .padding(.leading, Theme.Space.s)
                 } else {
                     InspectorTitle(title: L10n.text("apple.sshsessioninspector.snippets.ff717209"), symbol: "text.badge.plus")
@@ -57,7 +57,7 @@ struct SSHSessionInspector: View {
                 .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
         .sheet(item: $asking) { snippet in
             SSHSnippetRunSheet(snippet: snippet) { command in type(command) }
         }
@@ -191,7 +191,7 @@ struct SSHSessionInspector: View {
             }
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .help(snippet.command)
         .contextMenu {
             Button(L10n.text("apple.sshsessioninspector.run_it.958ca26c"), .run) { run(snippet) }

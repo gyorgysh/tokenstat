@@ -271,6 +271,14 @@ struct DayDetailPopover: View {
 }
 
 /// Moving the pointer must invalidate only the popover, not the window shell.
+extension EnvironmentValues {
+    /// Where the heatmap reports its hovered cell. Handed down rather than
+    /// collected as a preference at the window's root: a preference read at
+    /// the root is re-reduced across the whole window on every update, and
+    /// that cost landed on every chat switch while Home was not even shown.
+    @Entry var heatmapHover: HeatmapHoverState?
+}
+
 @Observable final class HeatmapHoverState {
     private(set) var anchor: HoveredCellFrame?
     func update(_ next: HoveredCellFrame?) {

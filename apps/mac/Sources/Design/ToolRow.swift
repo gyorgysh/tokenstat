@@ -234,7 +234,7 @@ struct ToolRow: View {
                     #endif
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .help(showSnippet ? hideLabel : showLabel)
             .accessibilityLabel(showSnippet ? hideLabel : showLabel)
         } else {

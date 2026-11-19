@@ -38,7 +38,7 @@ struct DesktopPinnedWorkSection: View {
                                 .padding(.vertical, Theme.Space.s)
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RowFeedbackStyle())
                             .disabled(unavailable != nil)
                             .accessibilityLabel(L10n.text("apple.desktoppinnedworksection.open_0.e71b4013", "\(pin.label)"))
                             .help(unavailable ?? L10n.text("apple.desktoppinnedworksection.open_0.e71b4013", "\(pin.label)"))

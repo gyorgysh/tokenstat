@@ -63,7 +63,7 @@ struct AccountView: View {
             // Mac detail chrome only. The phone sheet already has a navigation
             // bar with Done, and Sync now is not offered there (no archive).
             #if os(macOS)
-            DetailChromeBar {
+            DetailChromeBar(accessory: { settingsTabs }) {
                 if model.signedIn {
                     ToolbarIconButton(
                         systemImage: "arrow.triangle.2.circlepath",
@@ -78,10 +78,6 @@ struct AccountView: View {
                     }
                 }
             }
-            TabStrip(
-                tabs: AccountSettingsPane.allCases.map { ($0, $0.label, $0.symbol) },
-                selection: $pane
-            )
             #endif
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -121,12 +117,16 @@ struct AccountView: View {
                     #endif
                 }
                 .padding(Theme.Space.m)
+                #if os(macOS)
+                .frame(maxWidth: 880)
+                .frame(maxWidth: .infinity)
+                #endif
             }
             #if os(macOS)
             .id(pane)
             #endif
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .navigationTitle(L10n.text("common.account"))
         .sheet(isPresented: $showLicenses) {
             LicensesSheet()
@@ -160,6 +160,20 @@ struct AccountView: View {
             #endif
         }
     }
+
+    #if os(macOS)
+    private var settingsTabs: some View {
+        ChromeTabStrip(
+            tabs: AccountSettingsPane.allCases.map {
+                ChromeTab(id: $0.rawValue, label: $0.label, symbol: $0.symbol)
+            },
+            selected: pane.rawValue
+        ) { id in
+            if let selected = AccountSettingsPane(rawValue: id) { pane = selected }
+        }
+        .equatable()
+    }
+    #endif
 
     private var signedOut: some View {
         Card(
@@ -601,6 +615,7 @@ struct AccountView: View {
                 set: { on in Task { await model.setLimitsSourceShared(provider.source, shared: on) } }
             ))
             .toggleStyle(.switch)
+            .controlSize(.small)
             .labelsHidden()
             .accessibilityLabel(L10n.text("apple.accountview.track_0.7cd9419b", "\(harnessName(provider.source))"))
             .fixedSize()
@@ -1232,6 +1247,9 @@ struct AccountView: View {
             Spacer(minLength: Theme.Space.m)
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
+                #if os(macOS)
+                .controlSize(.small)
+                #endif
                 .labelsHidden()
                 .accessibilityLabel(title)
                 .fixedSize()

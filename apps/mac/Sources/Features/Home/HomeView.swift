@@ -13,6 +13,7 @@ import SwiftUI
 /// they start, and that is a different question from what they spent last
 /// month. This screen answers the first, Insights answers the second.
 struct HomeView: View {
+    @Environment(\.heatmapHover) private var heatmapHover
     @Bindable var model: HomeModel
     @AppStorage("activity.scope") private var savedScope: ActivityScope = .allMachines
     @Bindable var account: AccountModel
@@ -90,7 +91,7 @@ struct HomeView: View {
                 .padding(Theme.Space.s)
             }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         #if os(macOS)
         .sheet(isPresented: $editingHome) {
             DesktopHomeEditor(layout: layout, emptyReason: emptyReason)
@@ -390,7 +391,7 @@ struct HomeView: View {
                 Image(systemName: "xmark")
                     .font(Theme.caption.weight(.semibold))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(diameter: 24))
             .foregroundStyle(.secondary)
             .help(L10n.text("apple.homeview.do_not_offer_this_again.876977c3"))
             .accessibilityLabel(L10n.text("apple.homeview.dismiss.48845bff"))
@@ -590,19 +591,27 @@ struct HomeView: View {
     /// Kept in the fixed chrome so hiding Activity cannot remove the scope
     /// control for the independently arranged usage summary.
     private var scopePicker: some View {
+        #if os(macOS)
+        ChromeTabStrip(
+            tabs: ActivityScope.allCases.map { ChromeTab(id: $0.rawValue, label: $0.label, symbol: $0.symbol) },
+            selected: model.scope.rawValue
+        ) { id in
+            if let scope = ActivityScope(rawValue: id) { Task { await model.setScope(scope) } }
+        }
+        .equatable()
+        #else
         let binding = Binding<ActivityScope>(
             get: { model.scope },
-            set: { new in
-                Task { await model.setScope(new) }
+            set: { scope in
+                Task { await model.setScope(scope) }
             }
         )
         return SegmentedCapsulePicker(
             options: ActivityScope.allCases.map { (value: $0, label: $0.label, symbol: $0.symbol) },
             selection: binding
         )
-        // Comfortable for the two labels, not the whole header: 220 squeezed
-        // them, and the full width was more than a two-option switch needs.
         .frame(width: 280, alignment: .trailing)
+        #endif
     }
 
     /// What the figures under the title are counting, said plainly.
@@ -641,6 +650,11 @@ struct HomeView: View {
                         selectedDate: model.selectedDay?.date,
                         onHover: { model.hover(day: $0) }
                     )
+                    .onPreferenceChange(HoveredCellFrameKey.self) { frame in
+                        MainActor.assumeIsolated { heatmapHover?.update(frame) }
+                    }
+                    // Read here and stopped here, so it never travels further.
+                    .transformPreference(HoveredCellFrameKey.self) { $0 = nil }
                 }
                 .transition(.smoothIn(reduceMotion: reduceMotion))
             } else if model.errorMessage != nil {

@@ -32,32 +32,35 @@ import Observation
 struct DesktopWorkbenchSpace: View {
     let resize: DesktopWorkbenchResizeState
     let preferred: Double
-    let cap: Double
+    let cap: () -> Double
     var body: some View {
-        Color.clear.frame(width: resize.width(preferred: preferred, cap: cap) + DesktopWorkbenchLayout.divider)
+        Color.clear.frame(width: resize.width(preferred: preferred, cap: cap()) + DesktopWorkbenchLayout.divider)
     }
 }
 
 struct DesktopWorkbenchPanel<Content: View>: View {
     let resize: DesktopWorkbenchResizeState
     @Binding var preferred: Double
-    let cap: Double
+    let cap: () -> Double
     let isVisible: Bool
+    let dividerTopInset: CGFloat
     let content: Content
 
-    init(resize: DesktopWorkbenchResizeState, preferred: Binding<Double>, cap: Double, isVisible: Bool,
-         @ViewBuilder content: () -> Content) {
+    init(resize: DesktopWorkbenchResizeState, preferred: Binding<Double>, cap: @escaping () -> Double, isVisible: Bool,
+         dividerTopInset: CGFloat = 0, @ViewBuilder content: () -> Content) {
         self.resize = resize
         _preferred = preferred
         self.cap = cap
         self.isVisible = isVisible
+        self.dividerTopInset = dividerTopInset
         self.content = content()
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            DesktopWorkbenchDivider(resize: resize, preferred: $preferred, cap: cap, isVisible: isVisible)
-            content.frame(width: resize.width(preferred: preferred, cap: cap))
+            DesktopWorkbenchDivider(resize: resize, preferred: $preferred, cap: cap, isVisible: isVisible,
+                                    topInset: dividerTopInset)
+            content.frame(width: resize.width(preferred: preferred, cap: cap()))
         }
         .transaction { if resize.isDragging { $0.animation = nil; $0.disablesAnimations = true } }
         .onDisappear { resize.cancel() }
@@ -68,32 +71,39 @@ struct DesktopWorkbenchPanel<Content: View>: View {
 private struct DesktopWorkbenchDivider: View {
     let resize: DesktopWorkbenchResizeState
     @Binding var preferred: Double
-    let cap: Double
+    let cap: () -> Double
     let isVisible: Bool
+    let topInset: CGFloat
     @State private var hovered = false
 
     var body: some View {
+        // The gutter is opaque: the panel floats over the chat when the
+        // window is narrow, and a clear gutter let transcript text show
+        // through between the two.
         Rectangle().fill(Theme.border).frame(width: 1)
             .frame(width: DesktopWorkbenchLayout.divider)
+            .frame(maxHeight: .infinity)
+            .background(Theme.background)
+            .padding(.top, topInset)
             .overlay {
                 Color.clear.frame(width: 11)
                     .contentShape(.rect)
-                    .background { ColumnResizeCursorArea(isActive: isVisible) }
+                    .columnResizePointer(isActive: isVisible)
                     .overlay {
                         Capsule().fill(Theme.accent.opacity(hovered || resize.isDragging ? 0.8 : 0))
                             .frame(width: 3, height: 36).allowsHitTesting(false)
                     }
                     .onHover { hovered = $0 }
                     .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                        .onChanged { resize.drag(translation: $0.translation.width, preferred: preferred, cap: cap) }
+                        .onChanged { resize.drag(translation: $0.translation.width, preferred: preferred, cap: cap()) }
                         .onEnded { _ in if let width = resize.finish() { preferred = width } })
-                    .onTapGesture(count: 2) { resize.cancel(); preferred = min(520, cap) }
+                    .onTapGesture(count: 2) { resize.cancel(); preferred = min(520, cap()) }
             }
             .help(L10n.text("apple.workbench.resize"))
             .accessibilityElement()
             .accessibilityLabel(L10n.text("apple.workbench.resize"))
             .accessibilityAdjustableAction { direction in
-                preferred = min(cap, max(DesktopWorkbenchLayout.toolMinimum,
+                preferred = min(cap(), max(DesktopWorkbenchLayout.toolMinimum,
                     preferred + (direction == .increment ? 40 : -40)))
             }
     }

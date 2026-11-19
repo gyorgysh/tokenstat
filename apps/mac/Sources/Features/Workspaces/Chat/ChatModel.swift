@@ -1039,7 +1039,20 @@ final class ChatModel {
     @ObservationIgnored private var warmQueueOwner: String?
     @ObservationIgnored private var warmGeneration: UInt64 = 0
     @ObservationIgnored private var previewCacheEpoch: UInt64 = 0
-    private(set) var recentMessagePreview: [ChatDisplayItem] = []
+    private(set) var recentMessagePreview: [ChatDisplayItem] = [] {
+        didSet { previewRevision &+= 1 }
+    }
+    /// Bumped on every preview write, so the preview's fold is cached the
+    /// same way the live transcript's is.
+    @ObservationIgnored private var previewRevision: UInt64 = 0
+    private struct PreviewFoldKey: Equatable {
+        var revision: UInt64
+        var detail: ChatDetail
+        var open: Bool
+        var toggled: Set<String>
+    }
+    @ObservationIgnored private var previewFoldCache: [ChatDisplayItem] = []
+    @ObservationIgnored private var previewFoldKey: PreviewFoldKey?
 
     /// The transcript reads the preview, so an empty write to an empty
     /// preview still redrew it.
@@ -1275,7 +1288,16 @@ final class ChatModel {
         let toggled = toggledGroups
         if isShowingCachedTranscript {
             // A preview is one window of rows, briefly, while a chat opens.
-            return ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(recentMessagePreview)), detail: detail, running: false) { open != toggled.contains($0) }
+            // That brief window is exactly when a switch is judged, and the
+            // transcript reads this several times per draw, so it is folded
+            // once per preview rather than once per read.
+            let preview = recentMessagePreview
+            let key = PreviewFoldKey(revision: previewRevision, detail: detail, open: open, toggled: toggled)
+            if key != previewFoldKey {
+                previewFoldCache = ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(preview)), detail: detail, running: false) { open != toggled.contains($0) }
+                previewFoldKey = key
+            }
+            return previewFoldCache
         }
         let pending = outgoing
         let rows = coalescedItems
@@ -1362,6 +1384,20 @@ final class ChatModel {
     /// A held arrow key cycles those instead of stopping dead or walking
     /// the archive; older chats live behind See-all. The sidebar draws the
     /// same window, so every landing is already on screen.
+    /// Set by the window when its sidebar lists chats across folders. The
+    /// arrows then follow that list, which crosses folders, rather than
+    /// this model's one folder. Returns false to fall back to the folder.
+    @ObservationIgnored var sidebarStep: ((Int) -> Bool)?
+
+    /// Steps the visible chat list one row, across folders when the sidebar
+    /// shows them that way. True when something was selected.
+    func stepConversation(_ step: Int) -> Bool {
+        if sidebarStep?(step) == true { return true }
+        guard let target = adjacentConversation(step) else { return false }
+        Task { await select(target) }
+        return true
+    }
+
     func adjacentConversation(_ step: Int) -> ChatConversation? {
         // The rows the sidebar draws, in its order. Stepping over the list
         // it hides landed on an empty chat that had no row to light, so the
@@ -1645,6 +1681,8 @@ final class ChatModel {
             continuityScope = scope
         }
         let draftHost = route.peer ?? WorkSessionContext.shared.localHostIdentity
+        let loadStarted = ProcessInfo.processInfo.systemUptime
+        var primedFromCache = false
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
             clearRecentMessagePreview()
             personas = []
@@ -1697,6 +1735,7 @@ final class ChatModel {
                 loadDraft(for: selected?.id, scope: scope, hostIdentity: draftHost,
                           workspaceID: route.workspaceID)
                 openingConversation = selected != nil
+                primedFromCache = selected != nil
             } else {
                 chats = []
                 selected = nil
@@ -1716,6 +1755,26 @@ final class ChatModel {
         adoptPeer(route.peer)
         if events.isEmpty { restoreRecentMessages() }
         loadQueue(for: selected?.id)
+        // The cached list already named the conversation to show. Open its
+        // transcript now, alongside the list read, instead of after it: the
+        // list is a full round trip to the host and the transcript used to
+        // wait for it on every switch into another folder. When the list
+        // answers it waits for this and then only checks for a newer tail.
+        var earlyOpen: Task<Void, Never>?
+        if primedFromCache, let early = selected, events.isEmpty, savedCopy == nil {
+            let openGeneration = selectionGeneration
+            earlyOpen = Task { [weak self] in
+                guard let self else { return }
+                let opened = await self.openEvents(id: early.id, generation: openGeneration)
+                #if DEBUG
+                if opened, self.selectionMatches(id: early.id, generation: openGeneration) {
+                    TranscriptProbe.shared.noteOpen(milliseconds: (ProcessInfo.processInfo.systemUptime - loadStarted) * 1000,
+                        preview: true, phase: "folder-early-page")
+                }
+                #endif
+                if opened, self.selectionGeneration == openGeneration { self.openingConversation = false }
+            }
+        }
         setupLoadTask?.cancel()
         setupLoadTask = Task { [weak self] in
             await self?.loadSetup(workspaceID: route.workspaceID, peer: route.peer,
@@ -1732,8 +1791,16 @@ final class ChatModel {
                 // block, and clearing it here would clobber the newer load.
                 return
             }
-            chats = Self.uniqued(applyChatList(loaded, read: listRead, current: chats))
+            // Usually the same list the cache already showed. Writing an
+            // equal array still invalidated every sidebar row and the chat
+            // pane, which was the long turn at the end of a folder switch.
+            let fresh = Self.uniqued(applyChatList(loaded, read: listRead, current: chats))
+            if fresh != chats { chats = fresh }
             storeChatListCache(chats, folderID: workspaceID)
+            // One fetch at a time: the refresh below must see the rows the
+            // early open is bringing, or it would open them a second time.
+            await earlyOpen?.value
+            guard generation == loadGeneration else { return }
             if let owner = continuityOwner(folderID: workspaceID) {
                 let prefix = WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host, workspaceID: owner.workspace)
                 recentMessages.retain(Set(chats.map { prefix + WorkReferenceKey.encode($0.id) }), in: prefix)

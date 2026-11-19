@@ -275,15 +275,24 @@ struct ChatFastModeButton: View {
                 #endif
             }
             .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .font(Theme.callout)
             #if os(macOS)
-            .frame(width: 28, height: 28)
+            .buttonStyle(ControlFeedbackStyle(diameter: 28))
             #else
-            .frame(width: 44, height: 44)
+            .buttonStyle(ControlFeedbackStyle(diameter: 44))
             #endif
+            .font(Theme.callout)
             .foregroundStyle(chat.fastMode ? Theme.accent : .secondary)
-            .background(chat.fastMode ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 8))
+            // Turning it on fills the seat from the glyph outward and gives
+            // the bolt a small kick, so on and off read as a change of state
+            // rather than a recolour.
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Theme.accentSoft)
+                    .opacity(chat.fastMode ? 1 : 0)
+                    .scaleEffect(chat.fastMode ? 1 : 0.6)
+            }
+            .symbolEffect(.bounce, value: chat.fastMode)
+            .animation(Motion.morph, value: chat.fastMode)
             .contentShape(.rect)
             #if os(macOS)
             .disabled(speedLocked || saving || !available)
@@ -364,6 +373,9 @@ struct ChatComposerControls<Chrome: View>: View {
     }
 
     var body: some View {
+        #if DEBUG && os(macOS)
+        let _ = DebugUIHooks.printsChanges ? Self._printChanges() : ()
+        #endif
         layout
             .sheet(isPresented: $showingAccessibleSetup, onDismiss: { pickingAgent = false }) {
                 ThemedSheet(
@@ -435,9 +447,17 @@ struct ChatComposerControls<Chrome: View>: View {
                 }
                 Button { showingAccessibleSetup = true } label: {
                     Image(systemName: "slider.horizontal.3")
+                        #if os(macOS)
+                        .frame(width: 28, height: 28)
+                        #else
                         .frame(width: 44, height: 44)
+                        #endif
                 }
+                #if os(macOS)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
+                #else
                 .buttonStyle(.plain)
+                #endif
                 .accessibilityLabel(L10n.text("apple.clientchatview.chat_setup.9fa79d00"))
                 chrome
             }
@@ -757,6 +777,7 @@ struct ChatAgentField: View {
             #if !os(macOS)
             .frame(minHeight: 44)
             #endif
+            .background { ChipHoverFill() }
             .chatControlChrome()
             .overlay(alignment: .topTrailing) {
                 // An installed agent has a newer version. The picker this
@@ -770,7 +791,7 @@ struct ChatAgentField: View {
             }
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ChipButtonStyle())
         .disabled(locked)
         .fixedSize(horizontal: false, vertical: true)
         .help(updateWaiting ? L10n.text("common.agent_updates.waiting")
@@ -802,7 +823,7 @@ struct AgentUpdatePill: View {
         Button(updating ? L10n.text("common.agent_updates.updating") : L10n.text("common.agent_updates.update"), .download, action: onUpdate)
             .labelStyle(.iconOnly)
             .font(Theme.font(11, weight: .semibold))
-            .buttonStyle(.plain)
+            .buttonStyle(QuietLinkStyle())
             .foregroundStyle(Theme.accent)
             .frame(width: 24, height: 24)
             .background(Circle().fill(Theme.accent.opacity(0.16)))
@@ -1124,7 +1145,7 @@ struct ChatAgentPanel: View {
                             ? Theme.accent : Color.secondary.opacity(0.4)
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .accessibilityLabel(
                 favorites.contains(backend: backend.id, model: id)
                     ? L10n.text("apple.chatsetupheader.unpin_0.450ccf9f", "\(id)") : L10n.text("apple.chatsetupheader.pin_0.67fd141b", "\(id)")
@@ -1194,7 +1215,7 @@ struct ChatCompactPills: View {
                         )
                         .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
             }
         }
         .padding(3)
@@ -1285,7 +1306,7 @@ struct ChatSetupSection<Content: View, Primary: View>: View {
                 .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
             .accessibilityValue(expanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
             primary
             if expanded {

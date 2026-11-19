@@ -182,7 +182,7 @@ struct SavedWorkSettings: View {
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .disabled(clearing || bytes == nil || bytes == 0)
         .accessibilityHint(L10n.text("apple.savedworksettings.removes_saved_copies_from_this_device_draf.85fe0c9a"))
         #endif

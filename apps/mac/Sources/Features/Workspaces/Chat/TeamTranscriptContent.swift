@@ -67,7 +67,7 @@ struct TeamTranscriptContent: View {
                                 if fetching == file.id { ProgressView().controlSize(.mini).accessibilityHidden(true) }
                             }.font(Theme.callout)
                         }
-                        .buttonStyle(.plain).foregroundStyle(loadAttachment == nil ? Color.secondary : TeamColors.action)
+                        .buttonStyle(QuietLinkStyle()).foregroundStyle(loadAttachment == nil ? Color.secondary : TeamColors.action)
                         .disabled(loadAttachment == nil || fetching != nil)
                         .accessibilityHint(L10n.text("common.teams.open_file"))
                         if let fileError, fetching == nil { Text(fileError).font(Theme.caption).foregroundStyle(TeamColors.warning) }

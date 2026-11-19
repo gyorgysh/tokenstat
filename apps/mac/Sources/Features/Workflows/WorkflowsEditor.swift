@@ -226,7 +226,7 @@ struct WorkflowPalette: View {
                             leading: { HarnessMark(id: backend.id, size: 20) }
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                 }
                 paletteButton(title: L10n.text("apple.workflowseditor.http.56d6f321"), subtitle: L10n.text("apple.workflowseditor.host_owned_request.f7355983"), kind: .http, mark: "mark_sync")
                 paletteButton(title: L10n.text("apple.workflowseditor.command.71316697"), subtitle: L10n.text("apple.workflowseditor.shell_in_the_folder.b6875024"), kind: .command, mark: "mark_terminal")
@@ -248,7 +248,7 @@ struct WorkflowPalette: View {
                                 leading: { FeatureMark(name: "mark_automation", tint: Theme.accent, size: 20) }
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(QuietLinkStyle())
                     }
                 }
                 Text(L10n.text("apple.workflowseditor.a_timer_cannot_commit_use_an_agent_an_auto.09e8f357"))
@@ -272,7 +272,7 @@ struct WorkflowPalette: View {
                 leading: { FeatureMark(name: mark, tint: Theme.accent, size: 20) }
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
     }
 
     private func paletteLabel<Leading: View>(

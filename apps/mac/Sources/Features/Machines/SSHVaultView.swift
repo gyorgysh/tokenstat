@@ -224,7 +224,7 @@ struct SSHVaultRow: View {
             .contentShape(.rect)
             .animation(.smooth(duration: 0.22), value: vault.status)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
     }
 
     private var symbol: String {

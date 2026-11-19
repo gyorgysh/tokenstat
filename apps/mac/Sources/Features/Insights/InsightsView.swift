@@ -87,7 +87,7 @@ struct InsightsView: View {
                 content
             }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.actionMessage, severity: .success)
                 .padding(Theme.Space.l)
@@ -110,7 +110,7 @@ struct InsightsView: View {
                             .font(Theme.callout)
                         Spacer()
                         Button(L10n.text("apple.insightsview.clear.83b12c22"), .dismiss) { model.clearFocusedDay() }
-                            .buttonStyle(.plain)
+                            .buttonStyle(QuietLinkStyle())
                             .font(Theme.callout.weight(.medium))
                             .foregroundStyle(Theme.accent)
                     }
@@ -227,7 +227,7 @@ struct InsightsView: View {
     private func rankingCard(title: String, rows: [Bucket], tab: InsightsModel.Tab) -> some View {
         Card(title: title, subtitle: L10n.text("apple.insightsview.ranked_by_tokens_share_of_this_breakdown.929721dd"), mark: tab == .harnesses ? "mark_automation" : "mark_insights",
              accessory: AnyView(Button(L10n.text("apple.insightsview.view_all_0.41a41832", "\(rows.count)"), .more) { model.tab = tab }
-                .buttonStyle(.plain).font(Theme.caption).foregroundStyle(Theme.accent)), fillsHeight: true) {
+                .buttonStyle(QuietLinkStyle()).font(Theme.caption).foregroundStyle(Theme.accent)), fillsHeight: true) {
             InsightRanking(rows: rows, isHarness: tab == .harnesses, showsValue: tab == .models) { row in
                 model.tab = tab
                 model.selected = row
@@ -334,7 +334,7 @@ private struct BreakdownTable: View {
             Button(L10n.text("apple.insightsview.show_0_more.b91c3640", "\(min(Self.pageStep, hidden))"), .more) {
                 visible += Self.pageStep
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietLinkStyle())
             .font(Theme.callout.weight(.medium))
             .foregroundStyle(Theme.accent)
 
@@ -345,7 +345,7 @@ private struct BreakdownTable: View {
             Spacer()
 
             Button(L10n.text("apple.insightsview.show_all.2150d8df"), .more) { visible = rows.count }
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .help(L10n.text("apple.insightsview.draws_every_remaining_row_a_long_list_take.db76817f"))
@@ -494,7 +494,7 @@ private struct InsightRanking: View {
                             }.font(Theme.caption2).foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
                     .help(L10n.text("apple.insightsview.inspect_0.0ae7a9ec", "\(row.key)"))
                 }
             }

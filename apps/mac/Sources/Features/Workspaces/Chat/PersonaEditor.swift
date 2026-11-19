@@ -247,7 +247,7 @@ struct PersonaEditor: View {
             FlowLayout(spacing: 6, rowSpacing: 6) {
                 ForEach(Self.startingPoints, id: \.0) { point in
                     Button(point.0) { draft.systemPrompt = point.1 }
-                        .buttonStyle(.plain)
+                        .buttonStyle(QuietLinkStyle())
                         .font(Theme.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)
                         .padding(.horizontal, 9)

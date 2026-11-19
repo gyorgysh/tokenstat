@@ -40,7 +40,7 @@ struct SidebarRowActions: View {
         Group {
             if showsDelete {
                 Button(action: delete) { glyph(ActionIcon.delete.symbol) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                     .help(deleteTitle)
                     .accessibilityLabel(deleteTitle)
             } else {

@@ -105,7 +105,7 @@ struct ChatImageGallery: View {
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
                 .contentShape(RoundedRectangle(cornerRadius: 9))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         .help(L10n.text("common.chat.images.view", resource.attachment.name))
         .accessibilityLabel(L10n.text("common.chat.images.view", resource.attachment.name))
         .accessibilityValue(L10n.text("common.chat.images.position", "\(index + 1)", "\(resources.count)"))

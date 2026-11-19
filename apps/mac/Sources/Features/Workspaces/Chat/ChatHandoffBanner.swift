@@ -50,7 +50,7 @@ struct ChatHandoffBanner: View {
                             .foregroundStyle(Theme.accent)
                             .contentShape(.rect)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(QuietLinkStyle())
                     }
                 }
                 Spacer(minLength: 0)

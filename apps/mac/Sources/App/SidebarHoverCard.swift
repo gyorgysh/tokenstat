@@ -131,6 +131,10 @@ private struct SidebarGitDetail: View {
 struct SidebarDetailButton<Card: View>: View {
     let title: String
     @Binding var isPresented: Bool
+    /// Whether the glyph is drawn. A list where every row carries a lit
+    /// glyph reads as noise, so rows show it on hover and when selected.
+    /// The seat is kept either way, so nothing in the row moves.
+    var isRevealed: Bool = true
     @ViewBuilder var card: Card
     @State private var hovering = false
 
@@ -149,6 +153,7 @@ struct SidebarDetailButton<Card: View>: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .opacity(isRevealed || isPresented || hovering ? 1 : 0)
         .help(label)
         .accessibilityLabel(label)
         .onHover { hovering = $0 }
@@ -162,11 +167,12 @@ struct SidebarChatDetailButton: View {
     let conversation: ChatConversation
     let folder: WorkspaceFolder
     @Binding var isPresented: Bool
+    var isRevealed: Bool = true
 
     var body: some View {
         SidebarDetailButton(title: conversation.title.isEmpty
             ? L10n.text("apple.sidebarhovercard.untitled_conversation.31d248c4") : conversation.title,
-                            isPresented: $isPresented) {
+                            isPresented: $isPresented, isRevealed: isRevealed) {
             SidebarChatDetailCard(conversation: conversation, folder: folder)
         }
     }

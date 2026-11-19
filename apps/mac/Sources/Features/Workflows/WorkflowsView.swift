@@ -43,7 +43,7 @@ struct WorkflowsView: View {
             #endif
         }
         .navigationTitle(L10n.text("common.workflows"))
-        .background(Theme.background)
+        .desktopPaneBackground()
         .sheet(item: $running) { graph in
             RunWorkflowSheet(model: model, graph: graph, folders: folders)
         }
@@ -217,7 +217,7 @@ struct WorkflowsView: View {
             }
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
         .accessibilityLabel(examplesExpanded ? L10n.text("apple.workflowsview.hide_the_examples.80398b38") : L10n.text("apple.workflowsview.show_the_examples.4a2afda5"))
         if examplesExpanded {
             WorkflowRecipeChips(recipes: designRecipes) { designPrompt = $0.prompt }
@@ -511,7 +511,7 @@ private struct WorkflowRow: View {
                 }
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
             if let last, last.isLive {
                 if last.isWaiting {
                     Button(L10n.text("apple.workflowsview.continue.31fbef16"), .next) { onViewRun(last) }
@@ -601,7 +601,7 @@ struct WorkflowOutline: View {
                     )
                     .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CardButtonStyle())
                 .accessibilityLabel("\(node.kind.label). \(node.displayTitle). \(node.subtitle)")
                 if node.id != ordered.last?.id {
                     incomingHint(for: node)

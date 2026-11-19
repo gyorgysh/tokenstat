@@ -156,7 +156,7 @@ struct ChatFileEditRow: View {
                     #endif
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .help(outputLabel)
             .accessibilityLabel(outputLabel)
         } else {

@@ -52,7 +52,7 @@ struct ChatTerminalPane: View {
                 Button { request = nil; showingLauncher.toggle() } label: {
                     Image(systemName: "square.grid.2x2").frame(width: 28, height: 28)
                 }
-                .buttonStyle(.plain).foregroundStyle(showingLauncher ? Theme.accent : Theme.controlGlyph)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9)).foregroundStyle(showingLauncher ? Theme.accent : Theme.controlGlyph)
                 .help(L10n.text("apple.serverlauncher.terminal_launcher"))
                 .accessibilityLabel(L10n.text("apple.serverlauncher.terminal_launcher"))
                 Menu {
@@ -218,7 +218,7 @@ struct ChatTerminalPane: View {
                         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
                     }
-                    .buttonStyle(.plain).disabled(!folder.exists)
+                    .buttonStyle(CardButtonStyle()).disabled(!folder.exists)
                 }
                 if profiles.isEmpty {
                     Text(resolved ? L10n.text("apple.chatterminalpane.no_terminal_launchers_are_available_on_thi.6e800543") : L10n.text("apple.chatterminalpane.checking_installed_tools.5a7a24c9"))

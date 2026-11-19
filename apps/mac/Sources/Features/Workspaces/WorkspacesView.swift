@@ -94,7 +94,7 @@ struct WorkspacesView: View {
                 #endif
             }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         #if os(macOS)
         .task(id: isActive ? model.selectedID : nil) {
             guard isActive, let id = model.selectedID else { return }
@@ -731,7 +731,7 @@ private struct CommitBox: View {
             Button { showingCommitHelp = true } label: {
                 Image(systemName: ActionIcon.help.symbol)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .foregroundStyle(Theme.accent)
             .accessibilityLabel(L10n.text("apple.workspacesview.about_commit_actions.5c3bba32"))
             .help(L10n.text("apple.workspacesview.about_commit_actions.5c3bba32"))
@@ -815,7 +815,7 @@ private struct ChangeRow: View {
                     .foregroundStyle(isStaged ? Theme.accent : Color.secondary)
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .help(isStaged ? L10n.text("apple.workspacesview.will_be_committed.e9764743") : L10n.text("apple.workspacesview.include_in_the_next_commit.5d7f428d"))
             #endif
 
@@ -829,7 +829,7 @@ private struct ChangeRow: View {
                     .truncationMode(.middle)
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietLinkStyle())
             .help(L10n.text("apple.workspacesview.open_the_diff.55d1e169"))
             Spacer(minLength: Theme.Space.xs)
             if let added = file.added, added > 0 {

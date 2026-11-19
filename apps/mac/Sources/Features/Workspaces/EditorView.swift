@@ -136,7 +136,7 @@ struct EditorView: View {
 
             Button(L10n.text("apple.editorview.find_in_file.214c422e"), systemImage: "magnifyingglass") { find.showing.toggle() }
                 .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
                 .foregroundStyle(Theme.controlGlyph)
                 .help(L10n.text("apple.editorview.find_in_file.214c422e"))
                 .keyboardShortcut("f", modifiers: .command)

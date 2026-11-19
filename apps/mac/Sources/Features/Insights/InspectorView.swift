@@ -30,7 +30,7 @@ struct InspectorView: View {
             .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
     }
 
     private var period: some View {

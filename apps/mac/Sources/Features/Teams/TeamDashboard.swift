@@ -165,7 +165,7 @@ struct TeamOrganizationOverview: View {
     }
     private func viewAll(_ section: TeamSection) -> some View {
         Button(L10n.text("common.teams.view_all"), .next) { store.show(section) }
-            .buttonStyle(.plain).font(Theme.callout).foregroundStyle(TeamColors.action)
+            .buttonStyle(QuietLinkStyle()).font(Theme.callout).foregroundStyle(TeamColors.action)
     }
     private func count(_ value: Int, more: Bool) -> String { value.formatted() + (more ? "+" : "") }
     private var cardColumns: [GridItem] {

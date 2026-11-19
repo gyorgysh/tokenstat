@@ -1553,12 +1553,23 @@ struct RowCopyButton: View {
             Image(systemName: copied ? "checkmark" : ActionIcon.copy.symbol)
                 .font(Theme.font(11, weight: .medium))
                 .foregroundStyle(copied ? Theme.accent : hovering ? .primary : .secondary)
+                // The copy mark turns into the tick instead of swapping.
+                .contentTransition(.symbolEffect(.replace))
                 .frame(width: 22, height: 22, alignment: .center)
+                .background {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(copied ? Theme.accentSoft : Theme.controlSeat)
+                        .opacity(hovering || copied ? 1 : 0)
+                        .scaleEffect(hovering || copied ? 1 : 0.7)
+                }
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .opacity(opacity)
-        .animation(.easeOut(duration: 0.15), value: opacity)
+        .scaleEffect(visible || copied ? 1 : 0.85)
+        .animation(Motion.morph, value: opacity)
+        .animation(Motion.morph, value: hovering)
+        .animation(Motion.morph, value: copied)
         .allowsHitTesting(visible || copied)
         .accessibilityHidden(!(visible || copied))
         .help(copied ? L10n.text("apple.markdowntext.copied.8d525e5f") : help)

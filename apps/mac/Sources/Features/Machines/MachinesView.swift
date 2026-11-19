@@ -95,7 +95,7 @@ struct MachinesView: View {
             }
         }
         .navigationTitle(L10n.text("common.devices"))
-        .background(Theme.background)
+        .desktopPaneBackground()
         .confirmationDialog(
             L10n.text("apple.machinesview.remove_from_account.a3010e43"),
             isPresented: Binding(
@@ -155,13 +155,13 @@ struct MachinesView: View {
     /// card is here because Devices is where people looked for it first.
     private var sshAccess: some View {
         #if os(macOS)
-        Button { onNavigate?(.ssh) } label: { sshAccessLabel }
-            .buttonStyle(.plain)
+        Button { onNavigate?(.ssh) } label: { sshAccessLabel.padding(.vertical, Theme.Space.xs) }
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.97))
         #else
         NavigationLink {
             SSHLibraryView(vaultTier: model.vaultTier)
         } label: { sshAccessLabel }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         #endif
     }
 
@@ -1052,7 +1052,7 @@ struct MachinesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
             .accessibilityHint(encryptionExpanded
                 ? L10n.text("apple.machinesview.hides_the_encryption_keys.d8fa35b1")
                 : L10n.text("apple.machinesview.shows_the_encryption_keys.081948ff"))
@@ -1490,7 +1490,7 @@ private struct MachineNameField: View {
                 #if os(macOS)
                 .buttonStyle(.link)
                 #else
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
                 .foregroundStyle(Theme.accent)
                 #endif
                 .font(Theme.caption)

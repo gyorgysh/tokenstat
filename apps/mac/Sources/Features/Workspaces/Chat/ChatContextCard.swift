@@ -238,11 +238,11 @@ struct ChatContextCard: View {
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Theme.accentSoft, in: Capsule())
                     }
-                    Image(systemName: expanded.wrappedValue ? "chevron.up" : "chevron.down").font(Theme.caption).foregroundStyle(.secondary)
+                    DisclosureChevron(expanded: expanded.wrappedValue)
                 }
                 .frame(maxWidth: .infinity, minHeight: chatDisclosureHeight, alignment: .leading).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6))
             .accessibilityValue(expanded.wrappedValue ? L10n.text("common.collapse") : L10n.text("common.expand"))
             content()
         }
@@ -288,11 +288,11 @@ struct ChatDisclosureRow: View {
             HStack {
                 Text(title).font(Theme.callout.weight(.medium))
                 Spacer(minLength: 8)
-                Image(systemName: expanded ? "chevron.up" : "chevron.down").font(Theme.caption)
+                DisclosureChevron(expanded: expanded)
             }
             .frame(maxWidth: .infinity, minHeight: chatDisclosureHeight, alignment: .leading).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6))
         .accessibilityValue(expanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
     }
 }
@@ -323,7 +323,7 @@ private struct ChatToolBrowser: View {
                             Text(tools.filter { group($0) == name }.count.formatted()).monospacedDigit()
                             if selectedGroup == name { Image(systemName: "checkmark") }
                         }.font(Theme.caption).padding(8).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(RowFeedbackStyle(bleed: 0, radius: 8))
                 }
                 TextField(L10n.text("common.chat.stats.search_tools"), text: $query).textFieldStyle(.themedSmall)
                 if selectedGroup != nil || !query.isEmpty {

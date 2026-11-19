@@ -441,7 +441,7 @@ struct SSHColorPicker: View {
                             )
                         )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
                 .accessibilityLabel(name)
             }
         }

@@ -165,7 +165,7 @@ struct PullsView: View {
             // view's selection is observed by the active presentation.
             .onAppear { restorePullHandoff() }
             #endif
-            .background(Theme.background)
+            .desktopPaneBackground()
             // What every other section gets from `ClientCardList`, which this
             // screen does not use because it is shared with the Mac. Without
             // it the bar keeps the default large-title mode with no title in
@@ -357,7 +357,7 @@ struct PullsView: View {
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                     .accessibilityLabel(L10n.text("apple.pullcreate.new"))
                     #endif
                 }
@@ -585,7 +585,7 @@ struct PullsView: View {
                         Button { select(pull) } label: {
                             PullRow(pull: pull)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(QuietLinkStyle())
                         .accessibilityHint(L10n.text("apple.pullsview.opens_pull_request_details.02632c19"))
                     }
                 }

@@ -103,14 +103,16 @@ enum SidebarProjectsLayout {
         }
         switch sort {
         case .manual, .recent:
-            return entries.sorted {
-                if $0.conversation.running != $1.conversation.running {
-                    return $0.conversation.running && !$1.conversation.running
-                }
-                if $0.activityMs != $1.activityMs { return $0.activityMs > $1.activityMs }
-                return $0.conversation.title.localizedStandardCompare($1.conversation.title)
+            // The keys are read once per entry rather than once per
+            // comparison. This list is rebuilt on every sidebar update, and
+            // the comparator ran each conversation's accessors log n times.
+            let keyed = entries.map { (entry: $0, running: $0.conversation.running, activity: $0.activityMs) }
+            return keyed.sorted {
+                if $0.running != $1.running { return $0.running && !$1.running }
+                if $0.activity != $1.activity { return $0.activity > $1.activity }
+                return $0.entry.conversation.title.localizedStandardCompare($1.entry.conversation.title)
                     == .orderedAscending
-            }
+            }.map(\.entry)
         case .name:
             return entries.sorted {
                 let title = $0.conversation.title.localizedStandardCompare($1.conversation.title)

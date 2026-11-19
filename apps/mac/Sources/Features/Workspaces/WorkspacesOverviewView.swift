@@ -137,7 +137,7 @@ struct WorkspacesOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .onChange(of: folders.map(\.id)) { _, _ in
             // The machine a filter named can leave while the filter stays.
             // Fall back to all rather than an empty grid.
@@ -193,7 +193,7 @@ struct WorkspacesOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
         .help(folder.path)
     }
 
@@ -325,7 +325,9 @@ struct WorkspacesOverviewPlaceholder: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        // The joined shell draws the canvas, so the title row sits on the
+        // same glass as the toolbar beside it instead of a white block.
+        .desktopPaneBackground()
     }
 }
 

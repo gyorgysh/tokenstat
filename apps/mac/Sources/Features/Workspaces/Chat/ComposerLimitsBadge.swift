@@ -90,7 +90,7 @@ struct ComposerLimitsBadge: View {
                             .contentShape(.rect)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                     .help(L10n.text("apple.composerlimitsbadge.how_much_of_the_0_subscription_is_left.9b6329e3", "\(harnessName(provider.source))"))
                     .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_limits_1.5d5c8479", "\(harnessName(provider.source))", "\(summaryText(for: compact ? compactRow.map { [$0] } ?? [] : headline))"))
                     .accessibilityValue(provider.isStale ? L10n.text("common.chat.usage.stale") : "")

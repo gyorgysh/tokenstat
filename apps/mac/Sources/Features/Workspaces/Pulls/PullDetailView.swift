@@ -80,7 +80,7 @@ struct PullDetailView: View {
                 .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
             }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .task(id: summary.number) {
             await model.open(workspaceID: workspaceID, peer: peer, number: summary.number)
         }
@@ -126,7 +126,7 @@ struct PullDetailView: View {
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                     .accessibilityLabel(L10n.text("apple.pulldetailview.open_on_github.03f69885"))
                 }
                 refreshButton
@@ -367,7 +367,7 @@ struct PullDetailView: View {
                                 .padding(.horizontal, 10).frame(height: Theme.Control.heightComfortable)
                                 .background(model.selectedPath == diff.path ? Theme.accentSoft : Theme.panel, in: Capsule())
                                 .overlay(Capsule().strokeBorder(model.selectedPath == diff.path ? Theme.accent.opacity(0.3) : Theme.border))
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(QuietLinkStyle())
                         }
                     }
                 }
@@ -562,7 +562,7 @@ private struct DetailTabs: View {
                         .frame(height: 44)
                         .background { if selection == tab { RoundedRectangle(cornerRadius: 9).fill(Theme.accentSoft).matchedGeometryEffect(id: "tab", in: slide) } }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                     .accessibilityRemoveTraits(selection == tab ? [] : .isSelected)
                     .accessibilityAddTraits(selection == tab ? .isSelected : [])
                 }
@@ -894,7 +894,7 @@ private struct CheckRow: View {
                         .contentShape(Rectangle())
                         .accessibilityLabel(L10n.text("apple.pulldetailview.open_check.130779b8"))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .foregroundStyle(Theme.accent)
             }
         }

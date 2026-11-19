@@ -118,7 +118,7 @@ struct RemoteWorkspaceSheet: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(.rect)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
                         }
                     }
                 } else {
@@ -187,7 +187,7 @@ struct RemoteWorkspaceSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
     }
 
     private func emptyState(symbol: String, title: String, body: String) -> some View {
@@ -443,7 +443,7 @@ private struct RemoteFolderBrowser: View {
                 HStack(spacing: Theme.Space.s) {
                     if listing.parent != nil {
                         Button(L10n.text("apple.remoteworkspacesheet.up.55490a4b"), .back) { path = listing.parent }
-                            .buttonStyle(.plain)
+                            .buttonStyle(QuietLinkStyle())
                             .foregroundStyle(Theme.accent)
                     }
                     Text(listing.path)
@@ -453,7 +453,7 @@ private struct RemoteFolderBrowser: View {
                     Spacer(minLength: 0)
                     if allowNewFolder {
                         Button(L10n.text("apple.remoteworkspacesheet.new_folder.cf28f49e"), .create) { naming = true }
-                            .buttonStyle(.plain)
+                            .buttonStyle(QuietLinkStyle())
                             .foregroundStyle(Theme.accent)
                             .disabled(listing.path.isEmpty)
                     }
@@ -488,7 +488,7 @@ private struct RemoteFolderBrowser: View {
                             .padding(.vertical, 5)
                             .contentShape(.rect)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
                     }
                 }
             }

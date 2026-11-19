@@ -66,6 +66,16 @@ struct ChatEventRow: View {
         #endif
     }
 
+    /// The answer card's edge firms up under the pointer, with the copy
+    /// button, so the card reads as the thing the button copies.
+    private var answerEdgeOpacity: Double {
+        #if os(macOS)
+        hovering && !isLive ? 1 : 0.72
+        #else
+        0.72
+        #endif
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             content
@@ -142,11 +152,12 @@ struct ChatEventRow: View {
             .background(Theme.panel.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
+                    .strokeBorder(Theme.border.opacity(answerEdgeOpacity), lineWidth: 1)
             }
             #if os(macOS)
             .contentShape(.rect)
             .onHover { hovering = $0 }
+            .animation(Motion.hover, value: hovering)
             #endif
             .contextMenu {
                 Button(L10n.text("apple.chateventrow.copy_response.f0f755af")) { ChatClipboard.copy(text) }

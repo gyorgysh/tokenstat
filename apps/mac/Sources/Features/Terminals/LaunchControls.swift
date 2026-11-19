@@ -230,7 +230,7 @@ struct BypassPermissionsControl: View {
             }
             .foregroundStyle(isOn ? AnyShapeStyle(Theme.warning) : AnyShapeStyle(.secondary))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         .fixedSize(horizontal: true, vertical: false)
         .help(
             isOn

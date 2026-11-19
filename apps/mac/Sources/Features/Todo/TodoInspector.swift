@@ -57,7 +57,7 @@ struct TodoInspector: View {
                 InspectorEmptyState(mark: "mark_todo", title: L10n.text("apple.todoinspector.pick_a_task.dab569d2"), subtitle: L10n.text("apple.todoinspector.edit_its_prompt_settings_and_run_here.459576ae"))
             }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .sheet(item: $runCard) { card in
             DelegateSheet(model: model, card: card, folders: folders, onViewRun: onViewRun, onRunInFront: onRunInFront)
         }

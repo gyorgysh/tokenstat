@@ -44,7 +44,7 @@ struct ChatStepGroupRow: View {
                 .strokeBorder(hovering ? Theme.border.opacity(0.9) : .clear, lineWidth: 1)
         )
         .onHover { hovering = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+        .animation(Motion.unless(reduceMotion, Motion.hover), value: hovering)
         #endif
         .animation(smoothStreaming && !reduceMotion ? .easeOut(duration: 0.18) : nil, value: group.running)
     }
@@ -156,7 +156,7 @@ struct ChatStepGroupRow: View {
             #endif
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
         .accessibilityLabel(accessibility)
         .accessibilityHint(group.open ? L10n.text("apple.chatdetail.hide_steps") : L10n.text("apple.chatdetail.show_steps"))
         .accessibilityAddTraits(.isButton)

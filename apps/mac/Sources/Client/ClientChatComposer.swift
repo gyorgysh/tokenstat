@@ -443,14 +443,12 @@ private struct ChatSendStyle: ViewModifier {
 private struct ComposerChromeButton: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(diameter: 44))
             .environment(\.compactActions, true)
             // These glyphs occupy fixed touch targets; inherited accessibility
             // text sizes must not paint over the neighboring control.
             .font(Theme.fixed(18, weight: .medium))
             .foregroundStyle(Theme.accent)
-            .frame(width: 44, height: 44)
-            .contentShape(.rect)
             .layoutPriority(1)
     }
 }

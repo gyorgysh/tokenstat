@@ -38,7 +38,7 @@ struct AutomationsInspector: View {
             .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
         .sheet(isPresented: $editing) {
             if let job = model.selectedJob {
                 NewAutomationSheet(model: model, folders: folders, existing: job)

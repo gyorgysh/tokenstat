@@ -62,6 +62,10 @@ ALLOWED = [
     ("Features/Terminals/TerminalPane.swift", "Button(action: onBegin)"),
     ("Features/Terminals/TerminalPane.swift", "Button(action: onInstall)"),
     ("Features/Workspaces/WorkspaceInspector.swift", "Button(action: action) {"),
+    # The inspector tabs. Text segments with a sliding seat, like a picker.
+    ("Features/Workspaces/WorkspaceInspector.swift", "Button(action: animated) {"),
+    # A disclosure row: its title and turning chevron are the whole target.
+    ("Features/Workspaces/Chat/ChatContextCard.swift", "Button { expanded.toggle() } label: {"),
     ("Features/Workspaces/WorkspacesView.swift", 'Button(all ? "Clear all"'),
     ("Features/Workspaces/WorkspacesView.swift", "Button(action: onOpen)"),
     # A file a turn changed. The row is the file: its type glyph, name and

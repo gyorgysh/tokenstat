@@ -42,18 +42,23 @@ struct DesktopWorkbenchBar: View {
                                     Label(tool.title, systemImage: tool.symbol)
                                         .font(Theme.font(12, weight: state.selected == tool ? .semibold : .regular))
                                         .lineLimit(1)
-                                        .padding(.leading, 9).padding(.trailing, 4)
-                                        .frame(minHeight: 44)
+                                        .padding(.leading, 7).padding(.trailing, 2)
+                                        .frame(minHeight: ToolbarIconButton.diameter)
                                         .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(ControlFeedbackStyle())
                                 .accessibilityAddTraits(state.selected == tool ? [.isSelected] : [])
                                 ToolbarIconButton(systemImage: ActionIcon.dismiss.symbol,
                                     help: L10n.text("apple.workbench.close_tool", tool.title)) { close(tool) }
                             }
                             .foregroundStyle(state.selected == tool ? Theme.accent : Theme.controlGlyph)
-                            .background(state.selected == tool ? Theme.accentSoft : .clear,
-                                        in: RoundedRectangle(cornerRadius: 8))
+                            .background {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Theme.accentSoft)
+                                    .opacity(state.selected == tool ? 1 : 0)
+                                    .scaleEffect(state.selected == tool ? 1 : 0.8)
+                            }
+                            .animation(Motion.morph, value: state.selected == tool)
                             .id(tool)
                         }
                     }
@@ -62,22 +67,17 @@ struct DesktopWorkbenchBar: View {
                     if let tool { scroll.scrollTo(tool, anchor: .trailing) }
                 }
             }
-            Menu {
+            ToolbarMenuButton(systemImage: ActionIcon.create.symbol, help: L10n.text("apple.workbench.add_tool")) {
                 ForEach(DesktopWorkbenchState.Tool.allCases) { tool in
                     Button { open(tool) } label: { Label(tool.title, systemImage: tool.symbol) }
                 }
-            } label: {
-                Image(systemName: ActionIcon.create.symbol).frame(width: 44, height: 44)
             }
-            .menuStyle(.borderlessButton).fixedSize()
-            .help(L10n.text("apple.workbench.add_tool"))
-            .accessibilityLabel(L10n.text("apple.workbench.add_tool"))
             ToolbarIconButton(systemImage: "sidebar.trailing",
                               help: L10n.text("apple.workbench.hide"), action: hide)
         }
-        .padding(6)
-        .background(Theme.sidebar)
-        .overlay(alignment: .bottom) { ThemeRule() }
+        .padding(.horizontal, 6)
+        .chromeBarMetrics()
+        .modifier(DesktopTitlebarPlate(fallback: Theme.sidebar))
     }
 }
 #endif

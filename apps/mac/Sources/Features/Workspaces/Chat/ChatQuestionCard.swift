@@ -79,7 +79,7 @@ struct ChatQuestionCard: View {
                             #endif
                             .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                     .accessibilityAddTraits(picked.contains(option) ? .isSelected : [])
                 }
             }

@@ -116,12 +116,12 @@ struct GitCommitComposer: View {
                                     .padding(.horizontal, Theme.Space.s)
                                     .background((selectedPath ?? review.includedPaths.first) == path ? Theme.rowSelected : Theme.panel,
                                                 in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(CardButtonStyle())
                         } else {
                             NavigationLink {
                                 GitReviewedFileView(service: session.service, review: review, path: path)
                             } label: { fileRow(path, selected: false) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(CardButtonStyle())
                         }
                     }
                 }

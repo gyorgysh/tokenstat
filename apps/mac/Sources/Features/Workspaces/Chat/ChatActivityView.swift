@@ -201,7 +201,7 @@ struct ChatActivityStrip: View {
                 .font(Theme.caption).padding(.horizontal, 12).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
             .accessibilityHint(L10n.text("common.chat.activity.details"))
@@ -226,7 +226,7 @@ struct ChatActivityCard: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: activityRowHeight, alignment: .leading).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
             .accessibilityValue(expanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
             if expanded {
                 ChatActivityDetails(inspection: model.currentActivityRead?.inspection, live: model.activityIsLive)

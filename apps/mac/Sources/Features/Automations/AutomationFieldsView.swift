@@ -260,7 +260,7 @@ struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
                                                 .strokeBorder(on ? Theme.accent.opacity(0.5) : Theme.border)
                                         )
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(CardButtonStyle())
                                 .accessibilityLabel(JobScheduleCopy.weekdayNames[bit])
                                 .accessibilityAddTraits(on ? .isSelected : [])
                             }

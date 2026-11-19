@@ -92,7 +92,7 @@ struct NotesView: View {
             list
             #endif
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .navigationTitle(L10n.text("common.notes"))
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
@@ -243,7 +243,7 @@ struct NotesView: View {
             TextField(L10n.text("apple.notesview.search_notes.6e7a2179"), text: $search).textFieldStyle(.plain)
             if !search.isEmpty {
                 Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).help(L10n.text("apple.notesview.clear_note_search.77682b50"))
+                    .buttonStyle(ControlFeedbackStyle(pressScale: 0.9)).foregroundStyle(.secondary).help(L10n.text("apple.notesview.clear_note_search.77682b50"))
             }
         }
         .font(Theme.callout).padding(8)
@@ -339,7 +339,7 @@ struct NotesView: View {
                     .foregroundStyle(.secondary)
                 if !search.isEmpty {
                     Button(L10n.text("apple.notesview.clear_search.3b7ea517"), .dismiss) { search = "" }
-                        .buttonStyle(.plain).foregroundStyle(Theme.accent)
+                        .buttonStyle(QuietLinkStyle()).foregroundStyle(Theme.accent)
                 } else if !showingArchive {
                     Text(L10n.text("apple.notesview.choose_new_note_to_capture_an_idea_you_can.36202a14"))
                         .font(Theme.caption)
@@ -394,7 +394,7 @@ struct NotesView: View {
             .overlay(alignment: .bottom) { ThemeRule() }
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .contextMenu {
             if showingArchive {
                 Button(L10n.text("common.restore"), .restore) { Task { await model.archiveNote(note, archived: false) } }

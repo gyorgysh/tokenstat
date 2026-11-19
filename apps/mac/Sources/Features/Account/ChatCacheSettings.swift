@@ -168,7 +168,7 @@ struct ChatCacheSettings: View {
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .disabled(clearing)
         .accessibilityHint(L10n.text("apple.chatcachesettings.removes_downloaded_chat_files_from_this_de.aa34a0e4"))
         #endif

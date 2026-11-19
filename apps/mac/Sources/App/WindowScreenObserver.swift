@@ -9,7 +9,7 @@ import SwiftUI
 ///
 /// Two jobs, kept in one observer because both need the same `NSWindow`:
 ///
-/// 1. **Geometry.** Content width and the titlebar band height, published
+/// 1. **Geometry.** Content width and full-screen state, published
 ///    outside any layout pass so a hosted `NavigationSplitView` child cannot
 ///    change its min/max while AppKit is already updating constraints.
 /// 2. **Full screen.** The traffic-light zoom button starts an AppKit display
@@ -30,7 +30,6 @@ struct WindowScreenObserver: NSViewRepresentable {
     @Binding var contentWidth: CGFloat
     @Binding var isFullScreen: Bool
     @Binding var isLiveResizing: Bool
-    @Binding var titlebarInset: CGFloat
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -42,8 +41,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                     to: window,
                     contentWidth: $contentWidth,
                     isFullScreen: $isFullScreen,
-                    isLiveResizing: $isLiveResizing,
-                    titlebarInset: $titlebarInset
+                    isLiveResizing: $isLiveResizing
                 )
             }
         }
@@ -55,7 +53,6 @@ struct WindowScreenObserver: NSViewRepresentable {
             context.coordinator.contentWidth = $contentWidth
             context.coordinator.isFullScreen = $isFullScreen
             context.coordinator.isLiveResizing = $isLiveResizing
-            context.coordinator.titlebarInset = $titlebarInset
         }
     }
 
@@ -74,19 +71,16 @@ struct WindowScreenObserver: NSViewRepresentable {
         var contentWidth: Binding<CGFloat>?
         var isFullScreen: Binding<Bool>?
         var isLiveResizing: Binding<Bool>?
-        var titlebarInset: Binding<CGFloat>?
 
         func attach(
             to window: NSWindow?,
             contentWidth: Binding<CGFloat>,
             isFullScreen: Binding<Bool>,
-            isLiveResizing: Binding<Bool>,
-            titlebarInset: Binding<CGFloat>
+            isLiveResizing: Binding<Bool>
         ) {
             self.contentWidth = contentWidth
             self.isFullScreen = isFullScreen
             self.isLiveResizing = isLiveResizing
-            self.titlebarInset = titlebarInset
             guard self.window !== window else {
                 schedulePublish()
                 return
@@ -122,7 +116,7 @@ struct WindowScreenObserver: NSViewRepresentable {
 
             // Geometry. Skipped entirely during a full-screen transition: a
             // resize notification in that window is AppKit's animation, and
-            // publishing titlebarInset from it is what re-entered layout.
+            // publishing SwiftUI geometry from it is what re-entered layout.
             for name: Notification.Name in [
                 NSWindow.didResizeNotification,
                 NSWindow.didEndLiveResizeNotification,
@@ -336,21 +330,6 @@ struct WindowScreenObserver: NSViewRepresentable {
 
             let fullScreen = window.styleMask.contains(.fullScreen)
             if isFullScreen?.wrappedValue != fullScreen { isFullScreen?.wrappedValue = fullScreen }
-
-            let inset: CGFloat
-            if fullScreen {
-                // Full screen content sits below a real titlebar. A measured
-                // band here would pull DetailChromeBar up into AppKit's bar,
-                // which is the same overlap that crashed on the way in.
-                inset = 0
-            } else if let contentView = window.contentView {
-                let layout = contentView.convert(window.contentLayoutRect, from: nil)
-                inset = max(0, contentView.bounds.maxY - layout.maxY)
-            } else {
-                inset = 0
-            }
-            let stableInset = (inset * 2).rounded() / 2
-            if titlebarInset?.wrappedValue != stableInset { titlebarInset?.wrappedValue = stableInset }
         }
 
         private func updateDisplayAndClamp(_ window: NSWindow) {

@@ -101,7 +101,9 @@ final class TranscriptProbe {
 
     /// A turn slower than this is worth a line. Well above a dropped frame,
     /// well below anything a person would sit through.
-    private static let slowTurn: CFAbsoluteTime = 0.25
+    /// `TOKENSTAT_SLOW_TURN_MS` lowers it for a measurement session.
+    private static let slowTurn: CFAbsoluteTime = ProcessInfo.processInfo
+        .environment["TOKENSTAT_SLOW_TURN_MS"].flatMap(Double.init).map { $0 / 1000 } ?? 0.25
 
     func install() {
         guard observer == nil else { return }
@@ -141,7 +143,7 @@ final class TranscriptProbe {
             recordedTurns.append(max(0, ended - max(turnStart, recordingStarted)) * 1000)
         }
         turnStart = 0
-        guard spent >= Self.slowTurn else { return }
+        guard spent >= Self.slowTurn, recording || Self.slowTurn >= 0.25 else { return }
         let sinceScroll = lastScrollAt > 0
             ? Int((ProcessInfo.processInfo.systemUptime - lastScrollAt) * 1000)
             : -1

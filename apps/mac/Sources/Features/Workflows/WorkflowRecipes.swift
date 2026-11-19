@@ -297,7 +297,7 @@ struct WorkflowRecipeChips: View {
                     )
                     .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CardButtonStyle())
                 .help(recipe.label)
                 .accessibilityLabel("\(recipe.name). \(recipe.label)")
             }

@@ -47,7 +47,7 @@ struct TaskResultWorkspaceLinks: View {
                             count: surface == .changes ? route.changeCount : nil
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                     .accessibilityHint(surface == .changes
                         ? L10n.text("apple.taskresultworkspacelinks.opens_uncommitted_files_for_this_folder.9ca505db")
                         : L10n.text("apple.taskresultworkspacelinks.opens_commits_for_this_folder.a55a945b"))

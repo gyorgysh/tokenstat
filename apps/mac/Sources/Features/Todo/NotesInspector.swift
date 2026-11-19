@@ -88,7 +88,7 @@ struct NotesInspector: View {
             .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
         .onChange(of: model.selectedCardID) { old, _ in
             if let old {
                 retainDraft(for: old)

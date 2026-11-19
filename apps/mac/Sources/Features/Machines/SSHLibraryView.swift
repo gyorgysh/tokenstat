@@ -671,7 +671,7 @@ struct SearchField: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .accessibilityLabel(L10n.text("apple.sshlibraryview.clear_search.3b7ea517"))
             }
         }
@@ -700,7 +700,7 @@ struct InlineBanner: View {
                 } label: {
                     Image(systemName: "xmark").font(Theme.font(10))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .accessibilityLabel(L10n.text("apple.sshlibraryview.dismiss.48845bff"))
             }
         }

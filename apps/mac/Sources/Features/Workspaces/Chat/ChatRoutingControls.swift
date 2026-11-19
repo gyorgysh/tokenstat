@@ -567,7 +567,7 @@ private struct ChatRoutingDisclosureStyle: DisclosureGroupStyle {
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(CardButtonStyle())
             .accessibilityHint(configuration.isExpanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
             if configuration.isExpanded { configuration.content }
         }

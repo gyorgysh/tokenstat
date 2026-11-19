@@ -70,7 +70,7 @@ struct AutomationsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .navigationTitle(L10n.text("common.automations"))
-        .background(Theme.background)
+        .desktopPaneBackground()
         .sheet(isPresented: $creating) {
             NewAutomationSheet(model: model, folders: folders, onNavigate: onNavigate)
         }
@@ -385,7 +385,7 @@ struct AutomationsView: View {
             )
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         .help(job.enabled ? L10n.text("apple.automationsview.running_on_its_schedule_click_to_pause.02cdad86") : L10n.text("apple.automationsview.paused_it_will_not_fire_click_to_enable.49b58042"))
     }
 
@@ -708,7 +708,7 @@ struct AutomationsView: View {
                     )
                     .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CardButtonStyle())
             }
         }
     }
@@ -1208,7 +1208,7 @@ struct NewAutomationSheet: View {
                     .font(Theme.caption)
                 #else
                 Button(action, action: perform)
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                     .foregroundStyle(Theme.accent)
                     .font(Theme.caption)
                 #endif
@@ -1345,7 +1345,7 @@ struct NewAutomationSheet: View {
                                                 .strokeBorder(on ? Theme.accent.opacity(0.5) : Theme.border)
                                         )
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(QuietLinkStyle())
                                 .accessibilityLabel(weekdays[bit].1)
                                 .accessibilityAddTraits(on ? .isSelected : [])
                             }

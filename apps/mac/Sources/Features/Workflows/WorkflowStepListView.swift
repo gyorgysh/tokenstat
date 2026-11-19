@@ -142,7 +142,7 @@ struct WorkflowStepListView: View {
             )
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .accessibilityLabel(accessibility(node: node, outgoing: outgoing, incoming: incoming, issue: issue))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(node.id)
@@ -243,7 +243,7 @@ struct WorkflowStepListView: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .accessibilityLabel("\(choice.title). \(choice.subtitle)")
     }
 

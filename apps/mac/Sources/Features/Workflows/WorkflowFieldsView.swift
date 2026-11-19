@@ -301,7 +301,7 @@ struct WorkflowStarterPicker: View {
             )
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .accessibilityLabel(name)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(id)

@@ -44,7 +44,7 @@ struct MachinesInspector: View {
             .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
         .confirmationDialog(
             L10n.text("apple.machinesinspector.forget_this_device.6bddebb5"),
             isPresented: Binding(

@@ -79,7 +79,11 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
     func beginChatListRead(workspaceID: String, peer: String?, scope: WorkReference.Scope?) -> Int? { 1 }
     func applyChatList(_ rows: [ChatConversation], read: Int?, current: [ChatConversation]) -> [ChatConversation] { rows }
     func continuityOwner(folderID: String) -> (scope: WorkReference.Scope, host: String, workspace: String)? { nil }
-    func refreshOpen(id: String) async {}; func select(_ chat: ChatConversation?) async { selected = chat }
+    var refreshes: [String] = []
+    func refreshOpen(id: String) async { refreshes.append(id) }; func select(_ chat: ChatConversation?) async { selected = chat }
+    var savedCopy: String?, selectionGeneration: UInt64 = 0, opened: [String] = []
+    func openEvents(id: String, generation: UInt64, quiet: Bool = false) async -> Bool { opened.append(id); events = ["row"]; return true }
+    func selectionMatches(id: String, generation: UInt64) -> Bool { selectionGeneration == generation && selected?.id == id }
     func warmRecentChats() {}
     func adoptPeer(_ next: String?) { peer = next }
 ''' + methods + r'''
@@ -112,7 +116,18 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
         Bridge.backend.finish(2, [.init(id: "new")]); Bridge.voices.finish(2, .init(personas: ["new"], defaultId: "new"))
         await until { m.defaultPersonaID == "new" && m.backends.first?.id == "new" }
         precondition(m.chats.first?.id == "b" && m.personas == ["new"] && !m.isLoading)
-        print("ChatModel loading: history survives held/failed auxiliary reads; superseded catalog/default voice rejected")
+        // Back to a folder whose list is cached: its remembered conversation
+        // starts opening at once, alongside the list read, and the answered
+        // list only refreshes that same conversation after the open lands.
+        m.pendingRevealID = "a"; m.pendingRevealFolderID = "a"
+        let primed = Task { await m.load(workspaceID: "a", peer: "mac", selectFirst: true) }
+        await until { Bridge.list.replies.count == 4 }
+        await until { m.opened == ["a"] }
+        precondition(m.refreshes.isEmpty && m.openingConversation == false,
+                     "The cached conversation waited for the folder list before opening")
+        Bridge.list.finish(3, [.init(id: "a")]); await primed.value
+        precondition(m.opened == ["a"] && m.refreshes == ["a"], "The answered list opened the conversation a second time")
+        print("ChatModel loading: history survives held/failed auxiliary reads; superseded catalog/default voice rejected; cached folders open before the list answers")
     }
 }
 '''

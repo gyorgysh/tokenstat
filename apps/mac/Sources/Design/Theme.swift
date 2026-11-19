@@ -47,6 +47,10 @@ enum Theme {
     /// its window glass, which has a desktop behind it.
     static let chatStartGround = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
     static let border = Color.adaptive(light: hex(0xE7E7EE), dark: hex(0x211D33))
+    /// The edge of the content sheet against the glass chrome. A touch of
+    /// light on dark and a touch of shade on light, so the sheet reads as a
+    /// layer rather than a hole cut in the chrome.
+    static let contentRim = Color.adaptive(light: Color.black.opacity(0.09), dark: Color.white.opacity(0.085))
     static let rowHighlight = Color.adaptive(light: hex(0xF0ECFF), dark: hex(0x1B1430))
     /// The quiet circular seat behind a small chrome glyph, such as a close
     /// button.
@@ -702,6 +706,7 @@ struct DetailChromeToggles {
     /// put in the bar. Without it the bar over Tasks or Notes was a row of
     /// empty chrome.
     var title: String? = nil
+    var usesTitlebar = false
 }
 
 private struct DetailChromeTogglesKey: EnvironmentKey {
@@ -766,8 +771,8 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
         // Nested HStacks: a multi-child `@ViewBuilder` is a TupleView that
         // stacks vertically if dropped in raw. Leading/trailing must stay one
         // horizontal group each.
-        HStack(spacing: Theme.Space.s) {
-            HStack(spacing: Theme.Space.s) {
+        HStack(spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.xs) {
                 // Back first. A back control is the one thing on a screen that
                 // leaves it, and the top left corner is where a hand goes for
                 // that without reading anything. The sidebar toggle is chrome
@@ -789,8 +794,17 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
                     accessory()
                 }
             }
+            .layoutPriority(1)
             Spacer(minLength: 0)
-            HStack(spacing: Theme.Space.s) {
+                #if os(macOS)
+                .frame(height: ToolbarIconButton.diameter)
+                .overlay {
+                    if toggles?.usesTitlebar == true {
+                        TitlebarDragArea().accessibilityHidden(true)
+                    }
+                }
+                #endif
+            HStack(spacing: Theme.Space.xs) {
                 trailing()
                 toggles?.search
                 // Last, so it is the control nearest the edge it opens, and so
@@ -800,13 +814,16 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
                     right
                 }
             }
+            .layoutPriority(1)
         }
-        .padding(.horizontal, Theme.Space.m)
+        .padding(.horizontal, Theme.Space.s)
         .chromeBarMetrics()
+        #if os(macOS)
+        .modifier(DesktopTitlebarPlate(fallback: Theme.tabStrip))
+        #else
         .background(Theme.tabStrip)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.border).frame(height: 1)
-        }
+        .overlay(alignment: .bottom) { ThemeRule() }
+        #endif
     }
 
     /// Tall enough for a 30pt circular mark with a little breathing room, and
@@ -814,15 +831,15 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
     static var height: CGFloat { DetailChromeBarHeight }
 }
 
+#if os(macOS)
+let DetailChromeBarHeight: CGFloat = 40
+let DetailChromeBottomSpacing: CGFloat = 2
+#else
 let DetailChromeBarHeight: CGFloat = 52
 let DetailChromeBottomSpacing: CGFloat = 3
+#endif
 
-/// The inside geometry every destination chrome row shares.
-///
-/// The bottom breathing room is intentionally part of the metric rather than
-/// a local adjustment. A 40pt bar with 3pt of bottom inset centres its visible
-/// content 1.5pt higher, which is what lets adjacent headers meet on the same
-/// optical baseline.
+/// Shared height and optical baseline for adjacent headers.
 private struct ChromeBarMetrics: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -836,6 +853,17 @@ extension View {
     /// Apply the fixed height and baseline correction shared by app chrome.
     func chromeBarMetrics() -> some View {
         modifier(ChromeBarMetrics())
+    }
+}
+
+extension View {
+    /// Gives standalone panes a canvas. The joined desktop shell supplies its own.
+    @ViewBuilder func desktopPaneBackground(_ color: Color = Theme.background) -> some View {
+        #if os(macOS)
+        modifier(DesktopPaneBackground(color: color))
+        #else
+        background(color)
+        #endif
     }
 }
 
@@ -934,7 +962,7 @@ struct TabStrip<Tab: Hashable>: View {
                     }
                     .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CardButtonStyle())
                 .accessibilityAddTraits(active ? [.isSelected] : [])
             }
         }
@@ -1011,7 +1039,7 @@ struct NoticeDismissButton: View {
     var body: some View {
         Button(L10n.text("apple.theme.dismiss_notification.b7bb3f34"), .dismiss, action: action)
             .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
+            .buttonStyle(QuietLinkStyle())
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .frame(width: 28, height: 28)
@@ -1234,7 +1262,7 @@ struct TransientToast: View {
                         action()
                         self.message = nil
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                 }
@@ -1313,6 +1341,47 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
+/// Hover and press feedback with a stationary hit area.
+struct ControlFeedbackStyle: ButtonStyle {
+    var highlights = true
+    var diameter: CGFloat?
+    var pressScale: CGFloat = 0.92
+
+    func makeBody(configuration: Configuration) -> some View {
+        Feedback(configuration: configuration, highlights: highlights, diameter: diameter, pressScale: pressScale)
+    }
+
+    private struct Feedback: View {
+        let configuration: Configuration
+        let highlights: Bool
+        let diameter: CGFloat?
+        let pressScale: CGFloat
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .frame(width: diameter, height: diameter)
+                .scaleEffect(isEnabled && configuration.isPressed && !reduceMotion ? pressScale : 1)
+                .animation(Motion.unless(reduceMotion, Motion.press), value: configuration.isPressed)
+                .background {
+                    if highlights {
+                        let seated = isEnabled && (hovering || configuration.isPressed)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.controlSeat)
+                            .opacity(seated ? 1 : 0)
+                            .scaleEffect(seated ? 1 : 0.82)
+                            .padding(2)
+                            .animation(Motion.unless(reduceMotion, Motion.morph), value: seated)
+                    }
+                }
+                .contentShape(.rect)
+                .onHover { if highlights { hovering = $0 } }
+        }
+    }
+}
+
 /// Icon mark for the content bar.
 ///
 /// Sidebar toggle, refresh, scan and fetch all share this seat so neighbouring
@@ -1323,8 +1392,11 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
 /// Every mark used to sit in its own bordered circle, and a bar of eight of
 /// them read as a row of buttons asking to be pressed rather than as chrome.
 struct ToolbarIconButton: View {
-    /// Keep the glyph seat compact while its full hit area fits a finger.
+    #if os(macOS)
+    static let diameter: CGFloat = 32
+    #else
     static let diameter: CGFloat = 44
+    #endif
 
     let systemImage: String
     var help: String = ""
@@ -1337,6 +1409,7 @@ struct ToolbarIconButton: View {
     let action: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -1351,11 +1424,21 @@ struct ToolbarIconButton: View {
                             .foregroundStyle(glyphColor)
                     }
                 }
-                .frame(width: 30, height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(seatColor)
-                )
+                .frame(width: min(Self.diameter - 4, 30), height: min(Self.diameter - 4, 30))
+                .background {
+                    // The hover seat grows out of the glyph rather than
+                    // fading in as a flat square.
+                    ZStack {
+                        if isAccent {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Theme.accentSoft.opacity(0.8))
+                        }
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.rowHighlight)
+                            .opacity(isHovering && isEnabled ? 1 : 0)
+                            .scaleEffect(isHovering && isEnabled ? 1 : 0.8)
+                    }
+                }
                 if showsBadge {
                     Circle()
                         .fill(Theme.accent)
@@ -1369,20 +1452,13 @@ struct ToolbarIconButton: View {
             .frame(width: Self.diameter, height: Self.diameter)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ControlFeedbackStyle(highlights: false))
         .disabled(!isEnabled || isBusy)
         .opacity(isEnabled || isBusy ? 1 : 0.4)
         .onHover { isHovering = $0 }
+        .animation(Motion.unless(reduceMotion, Motion.morph), value: isHovering)
         .help(help)
         .accessibilityLabel(help)
-    }
-
-    /// Nothing at rest. The accent's soft wash when the mark is on, so an open
-    /// panel or a pinned item still reads as on without a border to say so.
-    private var seatColor: Color {
-        if isHovering { return Theme.rowHighlight }
-        if isAccent { return Theme.accentSoft.opacity(0.8) }
-        return .clear
     }
 
     private var glyphColor: Color {
@@ -1405,6 +1481,7 @@ struct ToolbarMenuButton<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Menu {
@@ -1420,10 +1497,13 @@ struct ToolbarMenuButton<Content: View>: View {
         .frame(width: diameter, height: diameter)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isHovering ? Theme.rowHighlight : .clear)
+                .fill(Theme.rowHighlight)
+                .opacity(isHovering ? 1 : 0)
+                .scaleEffect(isHovering ? 1 : 0.8)
         )
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onHover { isHovering = $0 }
+        .animation(Motion.unless(reduceMotion, Motion.morph), value: isHovering)
         .help(help)
         .accessibilityLabel(help)
     }
@@ -1488,14 +1568,13 @@ struct InspectorChromeBar<Content: View, Accessory: View>: View {
             InspectorCloseButton(action: onClose, help: closeLabel, label: closeLabel)
                 .padding(.trailing, Theme.Space.s)
         }
-        // The same optical baseline as `DetailChromeBar`, immediately to its
-        // left. The shared modifier owns the 40pt frame and its 3pt correction
-        // so a later inspector cannot drift a point or two by accident.
         .chromeBarMetrics()
+        #if os(macOS)
+        .modifier(DesktopTitlebarPlate(fallback: Theme.sidebar))
+        #else
         .background(Theme.sidebar)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.border).frame(height: 1)
-        }
+        .overlay(alignment: .bottom) { ThemeRule() }
+        #endif
     }
 }
 
@@ -1653,6 +1732,7 @@ struct AccentButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
             )
+            .modifier(CapsuleFeedback(isPressed: configuration.isPressed, radius: radius, tint: Theme.accent))
             .contentShape(.rect)
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.42)
     }
@@ -1683,6 +1763,7 @@ struct DestructiveButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(Theme.danger.opacity(0.35), lineWidth: 1)
             )
+            .modifier(CapsuleFeedback(isPressed: configuration.isPressed, radius: 8, tint: Theme.danger))
             .contentShape(.rect)
             .opacity(configuration.isPressed ? 0.85 : 1)
     }
@@ -1717,6 +1798,7 @@ struct SecondaryButtonStyle: ButtonStyle {
                         lineWidth: 1
                     )
             )
+            .modifier(CapsuleFeedback(isPressed: configuration.isPressed, radius: 8, tint: Theme.accent))
             .contentShape(.rect)
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.42)
     }
@@ -1937,7 +2019,7 @@ struct BrandCheckboxStyle: ToggleStyle {
             .frame(minWidth: iconOnly ? 44 : nil, minHeight: Self.minimumHeight(iconOnly: iconOnly))
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
         // A checkbox that does not say whether it is checked is a button.
         // The stock Toggle this replaces announced "switch, off"; without a
         // value here somebody using VoiceOver could only learn the state by
@@ -2023,7 +2105,7 @@ struct SegmentedTabs<Value: Hashable>: View {
                         }
                         .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
                 .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
@@ -2291,7 +2373,7 @@ struct AppMenuPicker<Option: Hashable>: View {
         .id(optionsIdentity)
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         .fixedSize(horizontal: false, vertical: true)
     }
 

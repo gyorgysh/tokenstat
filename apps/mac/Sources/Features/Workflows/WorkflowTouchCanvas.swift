@@ -662,7 +662,7 @@ private struct TouchAddSheet: View {
                         .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
                         .contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(CardButtonStyle())
                     .accessibilityLabel("\(choice.title). \(choice.subtitle)")
                 }
             }

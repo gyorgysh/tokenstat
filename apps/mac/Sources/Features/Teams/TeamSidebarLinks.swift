@@ -22,7 +22,7 @@ struct TeamSidebarLinks: View {
                 .background(isTeamSelected ? Theme.rowSelected : .clear, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(CardButtonStyle())
             .padding(.horizontal, Theme.Space.xs)
             .accessibilityIdentifier("team.sidebar.open")
             .accessibilityAddTraits(isTeamSelected ? .isSelected : [])

@@ -27,20 +27,22 @@ struct DesktopContinueSection: View {
                                 Image(systemName: "bubble.left.and.bubble.right")
                                     .foregroundStyle(Theme.accent)
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(destination.title).font(Theme.callout.weight(.medium))
+                                    Text(destination.title)
+                                        .font(Theme.callout.weight(.medium))
+                                        .lineLimit(2)
                                     Text(destination.unavailable ?? destination.subtitle)
                                         .font(Theme.caption)
                                         .foregroundStyle(.secondary)
+                                        .lineLimit(1)
                                 }
-                                .lineLimit(2)
+                                .layoutPriority(1)
                                 Spacer(minLength: 0)
-                                Image(systemName: ActionIcon.next.symbol)
-                                    .foregroundStyle(Theme.accent)
+                                RowChevron()
                             }
                             .padding(.vertical, Theme.Space.s)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowFeedbackStyle())
                         .disabled(destination.unavailable != nil)
                         .help(destination.unavailable ?? L10n.text("apple.desktophomework.open_0.e71b4013", "\(destination.title)"))
                         if destination.id != destinations.last?.id { ThemeRule() }
@@ -73,12 +75,12 @@ struct DesktopHomeMachines: View {
                                 Text(machine.online == true ? L10n.text("apple.desktophomework.awake.9123b5f4") : machine.online == false ? L10n.text("apple.desktophomework.asleep.60135e8f") : L10n.text("apple.desktophomework.status_unknown.e412d872"))
                                     .font(Theme.caption)
                                     .foregroundStyle(.secondary)
-                                Image(systemName: ActionIcon.next.symbol).foregroundStyle(Theme.accent)
+                                RowChevron()
                             }
                             .padding(.vertical, Theme.Space.s)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowFeedbackStyle())
                         .help(L10n.text("apple.desktophomework.open_this_device_in_devices.24ae7e3a"))
                         if machine.id != machines.last?.id { ThemeRule() }
                     }

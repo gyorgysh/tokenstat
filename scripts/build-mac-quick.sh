@@ -15,6 +15,7 @@
 # Usage:
 #   scripts/build-mac-quick.sh              # Swift/UI changes
 #   scripts/build-mac-quick.sh --rust       # refresh the FFI framework too
+#   scripts/build-mac-quick.sh --optimized  # Debug app, Swift built with -O
 #   scripts/build-mac-quick.sh --build-only # compile without installing or launching
 #
 # The --rust form is needed when tokenstat-ffi or another Rust crate exposed
@@ -46,18 +47,28 @@ FFI="$ROOT/apps/mac/Vendor/TokenstatFFI.xcframework"
 DERIVED="$ROOT/target/xcode-debug"
 refresh_rust=0
 build_only=0
+optimized=0
 for option in "$@"; do
     case "$option" in
         --rust) refresh_rust=1 ;;
         --build-only) build_only=1 ;;
+        # Same Debug app and debug hooks, with Swift optimized. For timing:
+        # an unoptimized build makes the app's own code look several times
+        # slower than it is next to the frameworks it calls.
+        --optimized) optimized=1 ;;
         *)
-            echo "usage: $0 [--rust] [--build-only]" >&2
+            echo "usage: $0 [--rust] [--build-only] [--optimized]" >&2
             exit 2
             ;;
     esac
 done
 if [ "$build_only" -eq 1 ]; then
     DERIVED="$ROOT/target/xcode-build-only"
+fi
+swift_optimization="-Onone"
+if [ "$optimized" -eq 1 ]; then
+    DERIVED="$ROOT/target/xcode-debug-optimized"
+    swift_optimization="-O"
 fi
 APP="$DERIVED/Build/Products/Debug/Tokenstat.app"
 
@@ -120,6 +131,7 @@ if ! xcodebuild -skipPackagePluginValidation \
     CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGN_IDENTITY="" \
+    SWIFT_OPTIMIZATION_LEVEL="$swift_optimization" \
     build > "$LOG" 2>&1; then
     echo "xcodebuild failed" >&2
     if grep -E 'error:|fatal error:' "$LOG" >&2; then

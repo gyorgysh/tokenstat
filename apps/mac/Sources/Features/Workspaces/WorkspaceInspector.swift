@@ -117,8 +117,15 @@ struct WorkspaceInspector: View {
     }
 
     private var folder: WorkspaceFolder? { chat == nil ? model.selected : workspace }
+    /// One selection seat shared by the tabs, so choosing a tab slides the
+    /// seat across instead of one tab losing its fill and another gaining it.
+    @Namespace private var tabSeat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        #if DEBUG && os(macOS)
+        let _ = DebugUIHooks.printsChanges ? Self._printChanges() : ()
+        #endif
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
                 HStack(spacing: 3) {
@@ -160,18 +167,26 @@ struct WorkspaceInspector: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
     }
 
     private func inspectorTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let animated = { withAnimation(Motion.unless(reduceMotion, Motion.morph)) { action() } }
+        return Button(action: animated) {
             Text(title)
                 .font(Theme.font(12, weight: selected ? .semibold : .medium))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
                 .foregroundStyle(selected ? Theme.accent : Theme.controlGlyph)
-                .background(selected ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .background {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Theme.accentSoft)
+                            .matchedGeometryEffect(id: "seat", in: tabSeat)
+                    }
+                }
+                .hoverSeat(radius: 6)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)

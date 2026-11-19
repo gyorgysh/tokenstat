@@ -5690,6 +5690,7 @@
   "apple.agentsetup.pending_other_agent": "This message is waiting for {0} sign-in. Switch back to {0} to continue, or remove it from pending messages.",
   "apple.sidebarappearance.explanation": "Higher opacity lets less of the blurred background show through. Full screen and Reduce Transparency always use an opaque sidebar.",
   "apple.sidebarappearance.glass": "Glass sidebar",
+  "apple.sidebarappearance.highlights": "Glass highlights",
   "apple.sidebarappearance.opacity": "Sidebar opacity",
   "apple.sidebarappearance.subtitle": "The sidebar on this Mac.",
   "apple.sidebarappearance.title": "Appearance",

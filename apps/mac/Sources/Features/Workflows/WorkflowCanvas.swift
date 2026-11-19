@@ -551,7 +551,7 @@ struct WorkflowAddMenu: View {
                         HarnessMark(id: backend.id, size: 18)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
             }
             tile(title: L10n.text("apple.workflowcanvas.http.56d6f321"), subtitle: L10n.text("apple.workflowcanvas.host_owned_request.f7355983"), mark: "mark_sync") {
                 model.addNode(kind: .http)
@@ -577,7 +577,7 @@ struct WorkflowAddMenu: View {
                         FeatureMark(name: "mark_automation", tint: Theme.accent, size: 18)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
             }
         }
         .padding(10)
@@ -593,7 +593,7 @@ struct WorkflowAddMenu: View {
                 FeatureMark(name: mark, tint: Theme.accent, size: 18)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
     }
 
     private func row<Leading: View>(

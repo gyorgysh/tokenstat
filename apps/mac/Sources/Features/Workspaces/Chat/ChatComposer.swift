@@ -96,6 +96,28 @@ private struct ComposerUtilityLayout: Layout {
 /// The first row is an uninterrupted writing surface. Attach, agent options
 /// and send share one aligned utility row underneath, like a normal chat
 /// composer rather than a settings form sitting above a text field.
+/// Compared by what it shows, not by its closures. The chat pane passes new
+/// closures on every one of its updates, and a chat switch runs about nine
+/// of them, so the composer was rebuilt and measured nine times for one
+/// click. The closures only capture the chat, the model and state setters,
+/// which are either compared here or stable. Model reads inside the body
+/// are still observed, so typing and turn changes update it as before.
+extension ChatComposer: Equatable {
+    nonisolated static func == (lhs: ChatComposer, rhs: ChatComposer) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.model === rhs.model
+                && lhs.chat == rhs.chat
+                && lhs.attachments == rhs.attachments
+                && lhs.previews.count == rhs.previews.count
+                && lhs.previews.keys.sorted() == rhs.previews.keys.sorted()
+                && lhs.running == rhs.running
+                && lhs.sendsAsNote == rhs.sendsAsNote
+                && lhs.placeholder == rhs.placeholder
+                && lhs.acceptsDrops == rhs.acceptsDrops
+        }
+    }
+}
+
 struct ChatComposer: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -126,6 +148,9 @@ struct ChatComposer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        #if DEBUG && os(macOS)
+        let _ = DebugUIHooks.printsChanges ? Self._printChanges() : ()
+        #endif
         Group {
             if model.landingDraft != nil { well }
             else {
@@ -133,7 +158,7 @@ struct ChatComposer: View {
                     .frame(maxWidth: ReadingRoom.laneWidth)
                     .padding(.horizontal, Theme.Space.l)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, Theme.Space.m)
+                    .padding(.vertical, Theme.Space.s)
                     .background(Theme.background)
                     .overlay(alignment: .top) {
                         Rectangle().fill(Theme.border).frame(height: 1)
@@ -153,7 +178,7 @@ struct ChatComposer: View {
     }
 
     private var well: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+        VStack(alignment: .leading, spacing: model.landingDraft == nil ? Theme.Space.xs : Theme.Space.m) {
             ChatFileProgressNotice(model: model)
             if model.savedCopy != nil && !model.isSharedSource {
                 Button(L10n.text("apple.chatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }
@@ -176,8 +201,10 @@ struct ChatComposer: View {
             if !model.isSharedSource { ChatSlashMenu(model: model) }
             field
             if dictation.isActive {
+                // The bar opens out of the mic at the trailing end and folds
+                // back into it, instead of the row cross-fading in place.
                 ChatDictationBar(dictation: dictation, control: 28)
-                    .transition(.opacity)
+                    .transition(.scale(scale: 0.92, anchor: .trailing).combined(with: .opacity))
             } else {
                 ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
                     HStack(spacing: Theme.Space.s) {
@@ -200,13 +227,13 @@ struct ChatComposer: View {
             }
         }
         .modifier(ChatDictationLifetime(dictation: dictation, blocked: dictationBlocked))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dictation.isActive)
+        .animation(Motion.unless(reduceMotion, Motion.morph), value: dictation.isActive)
         #if os(macOS)
         .onExitCommand {
             if running { onStop() }
         }
         #endif
-        .padding(model.landingDraft == nil ? 12 : 0)
+        .padding(model.landingDraft == nil ? 8 : 0)
         .background(model.landingDraft == nil ? Theme.panel : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -269,6 +296,7 @@ struct ChatComposer: View {
         #if os(macOS)
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .hoverSeat()
         #endif
         .disabled(model.landingDraft != nil && model.currentReference == nil)
         .help(L10n.text("apple.chatcomposer.attach_files_or_images.b548dd44"))
@@ -355,6 +383,7 @@ struct ChatComposer: View {
                         .buttonStyle(DestructiveButtonStyle(small: true))
                         .environment(\.compactActions, true)
                         .keyboardShortcut(.cancelAction)
+                        .transition(.controlMorph)
                 }
                 if showsSend {
                     Button(sendTitle, .send) { dictation.stop(); onSend() }
@@ -362,6 +391,7 @@ struct ChatComposer: View {
                         .environment(\.compactActions, true)
                         .disabled(cannotSend)
                         .help(sendHelp)
+                        .transition(.controlMorph)
                         .contextMenu {
                             if running {
                                 Button(L10n.text("apple.chatcomposer.stop_and_send_now.8ad0a50d"), .send) { dictation.stop(); onSendNow() }
@@ -369,6 +399,11 @@ struct ChatComposer: View {
                         }
                 }
             }
+            // Stop and Send grow in and shrink out where they stand. The
+            // hidden copy above already holds the row still, so only the
+            // buttons themselves move.
+            .animation(Motion.unless(reduceMotion, Motion.morph), value: running)
+            .animation(Motion.unless(reduceMotion, Motion.morph), value: showsSend)
         }
         .frame(minWidth: 44, alignment: .trailing)
     }
@@ -395,7 +430,7 @@ struct ChatComposer: View {
             onAttachmentDrop: onDropProviders,
             onAttachmentDropTargeted: { nativeDropTargeted = $0 }
         )
-        .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 160, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: model.landingDraft == nil ? 28 : 42, maxHeight: 160, alignment: .topLeading)
         .layoutPriority(1)
         .fixedSize(horizontal: false, vertical: true)
         #else
@@ -500,7 +535,7 @@ struct ChatAttachmentTile: View {
                     .contentShape(Rectangle())
                     #endif
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietLinkStyle())
             .environment(\.compactActions, true)
             .accessibilityLabel(L10n.text("apple.chatcomposer.remove_0.dfbfd0da", "\(attachment.name)"))
             #if os(macOS)

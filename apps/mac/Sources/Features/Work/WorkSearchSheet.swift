@@ -126,7 +126,7 @@ struct WorkSearchSheet: View {
             Text(L10n.text("apple.worksearchsheet.in_the_app.dac837e8")).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
             ForEach(hits) { place in
                 Button { openPlace(place) } label: { WorkSearchPlaceRow(place: place) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
             }
             if !model.results.isEmpty {
                 Text(L10n.text("apple.worksearchsheet.your_work.ef14cf0d")).font(Theme.callout).foregroundStyle(Theme.controlGlyph)

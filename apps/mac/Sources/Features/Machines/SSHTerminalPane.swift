@@ -64,7 +64,6 @@ struct SSHTerminalPane: View {
     var body: some View {
         VStack(spacing: 0) {
             strip
-            ThemeRule()
             if mine.isEmpty {
                 empty
             } else {
@@ -83,7 +82,7 @@ struct SSHTerminalPane: View {
                 .modifier(PaletteSnippetSheet(session: active))
             }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .task(id: host.id) { sessions.restoreSelection(for: host.id) }
         .confirmationDialog(
             L10n.text("apple.sshterminalpane.close_this_session.2b66ce2d"),
@@ -195,7 +194,7 @@ struct SSHTerminalPane: View {
         .padding(.horizontal, Theme.Space.m)
         // The same optical baseline as every other destination's chrome row.
         .chromeBarMetrics()
-        .background(Theme.tabStrip)
+        .modifier(DesktopTitlebarPlate(fallback: Theme.tabStrip))
     }
 
     private var empty: some View {

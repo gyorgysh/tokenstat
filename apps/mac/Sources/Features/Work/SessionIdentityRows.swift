@@ -67,7 +67,7 @@ struct SessionIdentityRows: View {
             #endif
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
         .help(L10n.text("common.session_identity.copy", title(entry)) + ": " + entry.value)
         .accessibilityLabel(L10n.text("common.session_identity.copy", title(entry)))
         .accessibilityValue(copiedID == entry.id ? L10n.text("common.session_identity.copied") : entry.value)

@@ -148,7 +148,7 @@ struct RelayUsageCard: View {
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .disabled(isRefreshing)
         #endif
     }

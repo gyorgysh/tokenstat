@@ -93,7 +93,7 @@ struct TodoView: View {
                 }
             }
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         .navigationTitle(L10n.text("common.tasks"))
         .sheet(item: creationColumn) { column in
             TaskCreationDestination(target: TaskEditorTarget(peer: nil), workspaceID: model.defaultWorkspaceID ?? "",
@@ -219,7 +219,7 @@ struct TodoView: View {
             .help(L10n.text("apple.todoview.filter_by_agent_or_show_high_priority_task.4683acb4"))
             if hasFilters {
                 Button(L10n.text("apple.todoview.clear.83b12c22"), .dismiss) { search = ""; agentFilter = ""; attentionOnly = false }
-                    .buttonStyle(.plain).foregroundStyle(Theme.accent).font(Theme.caption)
+                    .buttonStyle(QuietLinkStyle()).foregroundStyle(Theme.accent).font(Theme.caption)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -483,7 +483,7 @@ private struct CardView: View {
                             Image(systemName: "xmark")
                                 .font(Theme.font(10, weight: .bold))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                         .foregroundStyle(.secondary)
                         .help(L10n.text("apple.todoview.discard_title.52f03907"))
                         Button {
@@ -492,7 +492,7 @@ private struct CardView: View {
                             Image(systemName: "checkmark")
                                 .font(Theme.font(10, weight: .bold))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                         .foregroundStyle(Theme.accent)
                         .help(L10n.text("apple.todoview.save_title.c4ecfe02"))
                     } else if titleSaveState == .saving {
@@ -757,7 +757,7 @@ private struct AddCardTrigger: View {
             )
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
     }
 }
 

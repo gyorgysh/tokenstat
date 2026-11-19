@@ -153,7 +153,7 @@ struct DesktopHomeEditor: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
             .focusable()
             .focusEffectDisabled()
             .focused($focused, equals: section)
@@ -191,7 +191,7 @@ struct DesktopHomeEditor: View {
                     .disabled(visible.last == section)
                 }
                 .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .foregroundStyle(Theme.accent)
                 .help(L10n.text("apple.desktophomeeditor.move_0_keyboard_command_up_or_command_down.672847bc", "\(section.label)"))
             }

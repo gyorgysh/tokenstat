@@ -584,7 +584,7 @@ struct ChatDictationButton: View {
                 .frame(width: size, height: size)
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ControlFeedbackStyle())
         .disabled(disabled)
         .help(L10n.text("apple.chatdictation.help", ChatDictation.name(of: dictation.locale.identifier)))
         .accessibilityLabel(L10n.text("apple.chatdictation.dictate"))
@@ -633,11 +633,9 @@ struct ChatDictationBar: View {
             }
             Button(L10n.text("apple.chatdictation.cancel"), .dismiss) { dictation.cancel() }
                 .environment(\.compactActions, true)
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(diameter: control))
                 .font(Theme.font(15, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: control, height: control)
-                .contentShape(.rect)
                 .help(L10n.text("apple.chatdictation.cancel"))
             Button(L10n.text("apple.chatdictation.done"), .done) { dictation.finish() }
                 .environment(\.compactActions, true)

@@ -46,7 +46,7 @@ struct EditorFindBar: View {
                     Image(systemName: "chevron.up")
                         .frame(minWidth: 44, minHeight: 32)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .foregroundStyle(Theme.controlGlyph)
                 .accessibilityLabel(L10n.text("apple.editorfindbar.previous_match.daa2f8c3"))
                 .keyboardShortcut("g", modifiers: [.command, .shift])
@@ -57,7 +57,7 @@ struct EditorFindBar: View {
                     Image(systemName: "chevron.down")
                         .frame(minWidth: 44, minHeight: 32)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .foregroundStyle(Theme.controlGlyph)
                 .accessibilityLabel(L10n.text("apple.editorfindbar.next_match.825e5abd"))
                 .keyboardShortcut("g", modifiers: .command)
@@ -72,7 +72,7 @@ struct EditorFindBar: View {
                     Image(systemName: "xmark")
                         .frame(minWidth: 44, minHeight: 32)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .foregroundStyle(Theme.controlGlyph)
                 .accessibilityLabel(L10n.text("apple.editorfindbar.close_find.eb903c9f"))
             }

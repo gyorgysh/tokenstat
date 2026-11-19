@@ -85,7 +85,11 @@ struct RootView: View {
     @State private var isInspectorPresented = true
     @AppStorage(ChatBrowserPreferences.opensLinksKey) private var opensChatLinksInBrowser = true
     @State private var pendingChatLink: PendingChatLink?
-    @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
+    // The three column widths are plain state, read once and written back on
+    // change. As `@AppStorage` Doubles, every unrelated defaults write (a
+    // draft, the last open chat) re-checked them and rebuilt the whole shell
+    // three times per chat switch. Only this view ever sets them.
+    @State private var browserPaneWidth = StoredWidth.read(StoredWidth.browserPane, default: 520)
     @State private var workbenchResize = DesktopWorkbenchResizeState()
     @State private var simulatorRequests: [String: SimulatorAttachmentIntent] = [:]
     @State private var desktopTerminalRequests: [String: DesktopTerminalIntent] = [:]
@@ -101,11 +105,10 @@ struct RootView: View {
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
     /// The sidebar's width, dragged by the person and remembered. The live
     /// value only exists while a drag is in flight; see `ColumnResizeHandle`.
-    @AppStorage("shell.sidebarWidth") private var sidebarWidth = ShellMetrics.sidebarDefault
-    @State private var sidebarLiveWidth: Double?
+    @State private var sidebarWidth = StoredWidth.read(StoredWidth.sidebar, default: ShellMetrics.sidebarDefault)
+    @State private var columnDrag = ShellColumnDrag()
     /// The inspector's width, same treatment.
-    @AppStorage("shell.inspectorWidth") private var inspectorWidth = ShellMetrics.inspectorDefault
-    @State private var inspectorLiveWidth: Double?
+    @State private var inspectorWidth = StoredWidth.read(StoredWidth.inspector, default: ShellMetrics.inspectorDefault)
     /// Whether the window is wide enough to carry the inspector at all.
     ///
     /// Separate from `isInspectorPresented`, which is what the user asked for.
@@ -148,9 +151,11 @@ struct RootView: View {
         var isKnown: Bool
         var sidebarFits: Bool
         var inspectorFits: Bool
-        // The embedded browser has an explicit width clamp, so it needs every
-        // width update while open rather than just column transitions.
-        var browserWidth: CGFloat?
+        var workbenchDocks: Bool
+        var showsConversationActions: Bool
+        // Updates within the same fit mode only matter when the preferred
+        // tool width would squeeze the conversation.
+        var clampedWorkbenchWidth: CGFloat?
     }
     @State private var windowWidthStorage = WindowWidthStorage()
     @State private var windowWidthSignature: WindowWidthSignature?
@@ -158,13 +163,16 @@ struct RootView: View {
     private var windowContentWidthBinding: Binding<CGFloat> {
         Binding(get: { windowContentWidth }, set: { width in
             windowWidthStorage.value = width
+            let workbenchCap = showsWorkspaceCompanion ? maximumWorkbenchWidth : nil
             let next = WindowWidthSignature(
                 isKnown: width > 0,
                 sidebarFits: sidebarColumnFits(
                     width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth
                 ),
                 inspectorFits: inspectorFits(at: width),
-                browserWidth: showsWorkspaceCompanion ? width : nil
+                workbenchDocks: hasDockedWorkbench,
+                showsConversationActions: showsConversationToolbarActions,
+                clampedWorkbenchWidth: workbenchCap.flatMap { $0 < browserPaneWidth ? $0 : nil }
             )
             if windowWidthSignature != next { windowWidthSignature = next }
         })
@@ -174,8 +182,6 @@ struct RootView: View {
     /// SwiftUI apply the system safe area in both windowed and full-screen mode.
     @State private var isFullScreen = false
     @State private var isLiveResizing = false
-    /// Retained for the window observer's geometry reporting.
-    @State private var titlebarInset: CGFloat = 0
     #endif
     /// A run a delegated task asked to show: set when navigating from Tasks,
     /// consumed by the Automations screen once its runs have loaded.
@@ -517,7 +523,6 @@ struct RootView: View {
         // traffic lights while the splash is visible.
         ZStack {
             if launch.hostReady, placeSettled {
-                // Both modes use the system content safe area for every column.
                 mainChrome
             } else {
                 LaunchSplashView(isFullScreen: isFullScreen)
@@ -576,7 +581,7 @@ struct RootView: View {
         // (coordinateSpace stays on the outer ZStack so Home's heatmap and
         // popover share one space once the splash is gone.)
         .coordinateSpace(name: HeatmapView.coordinateSpace)
-        .onPreferenceChange(HoveredCellFrameKey.self) { heatmapHover.update($0) }
+        .environment(\.heatmapHover, heatmapHover)
         // The inspector decision follows the window's width, published by the
         // observer from resize notifications. That source is outside any layout
         // pass; a GeometryReader inside the split view is not, and a width
@@ -586,14 +591,26 @@ struct RootView: View {
         }
         // The inspector's fit edge is made of the column widths, so a resize
         // that ends or a sidebar that hides can bring the column back.
-        .onChange(of: sidebarWidth) { _, _ in applyWidth(for: windowContentWidth) }
-        .onChange(of: inspectorWidth) { _, _ in applyWidth(for: windowContentWidth) }
+        .onChange(of: sidebarWidth) { _, width in
+            StoredWidth.write(width, StoredWidth.sidebar)
+            applyWidth(for: windowContentWidth)
+        }
+        .onChange(of: inspectorWidth) { _, width in
+            StoredWidth.write(width, StoredWidth.inspector)
+            applyWidth(for: windowContentWidth)
+        }
         .onChange(of: columnVisibilityChoice) { _, _ in applyWidth(for: windowContentWidth) }
         .onChange(of: showsWorkspaceBrowser) { _, _ in applyWidth(for: windowContentWidth) }
-        .onChange(of: browserPaneWidth) { _, _ in applyWidth(for: windowContentWidth) }
+        .onChange(of: browserPaneWidth) { _, width in
+            StoredWidth.write(width, StoredWidth.browserPane)
+            applyWidth(for: windowContentWidth)
+        }
         // Where the pointer is decides both peeks, and it is asked rather
         // than waited for. See `watchPointer`.
-        .task { await watchPointer() }
+        .onAppear { chat.sidebarStep = { stepChatList($0) } }
+        .task(id: needsEdgeWatcher) {
+            if needsEdgeWatcher { await watchPointer() }
+        }
     }
 
     private var sizedWindow: some View {
@@ -626,8 +643,7 @@ struct RootView: View {
             WindowScreenObserver(
                 contentWidth: windowContentWidthBinding,
                 isFullScreen: $isFullScreen,
-                isLiveResizing: $isLiveResizing,
-                titlebarInset: $titlebarInset
+                isLiveResizing: $isLiveResizing
             )
         }
         .overlay {
@@ -998,14 +1014,43 @@ struct RootView: View {
             // ensureHosted here: that would race the splash and reinstall thrash.
     }
 
-    /// Fixed columns share the window's content safe area. Keeping the shell
-    /// in one SwiftUI layout avoids native split-divider constraint updates
-    /// during resize, and gives both header bars the same vertical origin.
+    private var detailUsesTitlebar: Bool {
+        !isFullScreen && (ShellMetrics.usesGlass || showsSidebar)
+    }
+
+    private var usesUnifiedChrome: Bool {
+        ShellMetrics.usesGlass
+    }
+
+    private var chromeHeaderInset: CGFloat {
+        usesUnifiedChrome ? ShellMetrics.headerHeight : 0
+    }
+
+    private var hasDockedWorkbench: Bool {
+        showsWorkspaceCompanion && browserFitsBesideWorkspace
+    }
+
+    private var showsConversationToolbarActions: Bool {
+        windowContentWidth <= 0 || windowContentWidth - leftChromeWidth >= 600
+    }
+
+    /// Keep both columns in one layout so a resize updates the split together.
     private var mainChrome: some View {
         HStack(spacing: 0) {
-            leftChrome
-            detailColumn
+            // Above the detail, so the half of the edge handle that reaches
+            // over the content still takes the pointer.
+            leftChrome.zIndex(1)
+            LiveSteppedDetail(drag: columnDrag) { detailColumn }
                 .environment(\.detailChromeToggles, detailChromeToggles)
+                .environment(\.desktopChromeJoined, usesUnifiedChrome)
+                .ignoresSafeArea(.container, edges: detailUsesTitlebar ? .top : [])
+        }
+        .background(alignment: .topLeading) {
+            if usesUnifiedChrome {
+                DesktopChromeSurface(sidebarWidth: leftChromeWidth, drag: showsSidebar ? columnDrag : nil,
+                                     storedSidebar: sidebarWidth, isFullScreen: isFullScreen)
+                    .ignoresSafeArea(.container, edges: detailUsesTitlebar ? .top : [])
+            }
         }
         .environment(\.isWindowLiveResizing, isLiveResizing)
         .transaction { if isLiveResizing { $0.animation = nil; $0.disablesAnimations = true } }
@@ -1140,15 +1185,14 @@ struct RootView: View {
             rail
             if showsSidebar {
                 sidebar
-                    .frame(width: currentSidebarWidth)
+                    .modifier(LiveColumnWidth(drag: columnDrag, column: .sidebar, stored: sidebarWidth))
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
         .frame(maxHeight: .infinity)
-        .leftChromeSurface(isFullScreen: isFullScreen)
-        .padding(.trailing, ShellMetrics.panelInset)
-        .background(alignment: .trailing) {
-            Theme.background.frame(width: ShellMetrics.panelInset)
+        .padding(ShellMetrics.panelInset)
+        .background {
+            if !usesUnifiedChrome { Theme.sidebar }
         }
         .overlay(alignment: .trailing) {
             if showsSidebar {
@@ -1157,14 +1201,16 @@ struct RootView: View {
                 ColumnResizeHandle(
                     side: .leading,
                     width: $sidebarWidth,
-                    liveWidth: $sidebarLiveWidth,
-                    range: ShellMetrics.sidebarRange,
-                    showsLine: !ShellMetrics.usesGlass,
+                    liveWidth: columnDrag.sidebarBinding(),
+                    range: sidebarDragRange,
+                    // The joined shell draws its own rim along this edge.
+                    showsLine: !usesUnifiedChrome,
                     help: L10n.text("apple.rootview.drag_to_resize_the_sidebar_double_click_to.8259cca6")
                 )
-                .offset(x: ShellMetrics.usesGlass ? 0 : 3)
-            } else if !ShellMetrics.usesGlass {
-                Rectangle().fill(Theme.border).frame(width: 1)
+                .padding(.top, chromeHeaderInset)
+                .offset(x: 3)
+            } else {
+                ThemeRule.vertical.padding(.top, chromeHeaderInset)
             }
         }
         .ignoresSafeArea(.container, edges: .top)
@@ -1174,8 +1220,10 @@ struct RootView: View {
         "sidebar-chat-\(conversationID)"
     }
 
+    /// The stored width. A drag in progress lives in `columnDrag`, read only
+    /// by the leaves that draw it, so the root view does not rebuild per event.
     private var currentSidebarWidth: CGFloat {
-        CGFloat(sidebarLiveWidth ?? sidebarWidth)
+        CGFloat(sidebarWidth)
     }
 
     private var leftChromeWidth: CGFloat {
@@ -1184,7 +1232,7 @@ struct RootView: View {
     }
 
     private var currentInspectorWidth: CGFloat {
-        CGFloat(inspectorLiveWidth ?? inspectorWidth)
+        CGFloat(inspectorWidth)
     }
 
     /// The machine-wide places, and the account at the foot.
@@ -1193,7 +1241,7 @@ struct RootView: View {
     /// than one click away and hiding the sidebar costs nothing but the list
     /// of projects.
     private var rail: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             ForEach(RailPlace.allCases) { place in
                 RailButton(
                     place: place,
@@ -1204,9 +1252,8 @@ struct RootView: View {
             Spacer(minLength: Theme.Space.s)
             railAccount
         }
-        // The first mark sits level with the first row of the sidebar and the
-        // content bar, below the traffic lights.
-        .padding(.top, ShellMetrics.titleBand - ShellMetrics.panelInset + 2)
+        // Keep the first destination clear of the window controls.
+        .padding(.top, isFullScreen ? 0 : ShellMetrics.titleBand - ShellMetrics.panelInset + 4)
         .padding(.bottom, Theme.Space.m)
         .frame(width: ShellMetrics.railWidth + (ShellMetrics.usesGlass ? 0 : 6))
     }
@@ -1336,7 +1383,8 @@ struct RootView: View {
                 : nil,
             search: nil,
             sectionTabs: sectionTabs,
-            title: pageTitle
+            title: pageTitle,
+            usesTitlebar: detailUsesTitlebar
         )
     }
 
@@ -1344,7 +1392,8 @@ struct RootView: View {
     /// carries its own device picker, so it goes without.
     private var pageTitle: String? {
         switch route {
-        case .global(.home), .global(.insights), .global(.automations), .global(.workflows): return nil
+        case .global(.home), .global(.insights), .global(.automations), .global(.workflows), .global(.account):
+            return nil
         case let .global(section): return section.label
         case .workspacesOverview: return L10n.text("apple.rootview.all_projects.4b87271b")
         default: return nil
@@ -1441,39 +1490,55 @@ struct RootView: View {
     }
 
     private var rightInspectorToolbarButton: some View {
-        HStack(spacing: Theme.Space.xs) {
-        if supportsWorkspaceBrowser {
-            ToolbarIconButton(systemImage: ActionIcon.compare.symbol,
-                              help: L10n.text("apple.workbench.review_beside_chat"),
-                              isAccent: workbenchState.isPresented && workbenchState.selected == .changes) {
-                if let id = route.workspaceID {
-                    desktopTurnReviews[id] = nil
-                    desktopCommitReviews[id] = nil
+        HStack(spacing: 2) {
+            if supportsWorkspaceBrowser {
+                if showsConversationToolbarActions {
+                    ToolbarIconButton(systemImage: ActionIcon.compare.symbol,
+                                      help: L10n.text("apple.workbench.review_beside_chat"),
+                                      isAccent: workbenchState.isPresented && workbenchState.selected == .changes,
+                                      action: openWorkingTreeBesideChat)
+                    ToolbarIconButton(systemImage: "globe",
+                                      help: L10n.text("apple.rootview.browser_open_a_web_preview_beside_this_pro.fc5d34f3"),
+                                      isAccent: showsWorkspaceBrowser) { openWorkbench(.browser) }
+                        .accessibilityLabel(L10n.text("common.browser"))
+                    ToolbarIconButton(systemImage: "terminal",
+                                      help: L10n.text("apple.rootview.shell_or_agent_beside_this_chat.2a4ad70d"),
+                                      isAccent: showsWorkspaceTerminal) { openWorkbench(.terminal) }
+                        .accessibilityLabel(L10n.text("apple.rootview.terminal_beside_chat.40991a3f"))
+                } else {
+                    ToolbarMenuButton(systemImage: "rectangle.split.2x1",
+                                      help: L10n.text("apple.workbench.add_tool")) {
+                        ForEach(DesktopWorkbenchState.Tool.allCases) { tool in
+                            Button {
+                                if tool == .changes { openWorkingTreeBesideChat() }
+                                else { openWorkbench(tool) }
+                            } label: {
+                                Label(tool.title, systemImage: tool.symbol)
+                            }
+                        }
+                    }
                 }
-                openWorkbench(.changes)
             }
-            ToolbarIconButton(systemImage: "globe", help: L10n.text("apple.rootview.browser_open_a_web_preview_beside_this_pro.fc5d34f3"), isAccent: showsWorkspaceBrowser) {
-                openWorkbench(.browser)
-            }
-            .accessibilityLabel(L10n.text("common.browser"))
-            ToolbarIconButton(systemImage: "terminal", help: L10n.text("apple.rootview.shell_or_agent_beside_this_chat.2a4ad70d"), isAccent: showsWorkspaceTerminal) {
-                openWorkbench(.terminal)
-            }
-            .accessibilityLabel(L10n.text("apple.rootview.terminal_beside_chat.40991a3f"))
+            SidebarToggleButton(
+                edge: .trailing,
+                isOpen: supportsWorkspaceBrowser ? showsWorkspaceCompanion : isRightSidebarOpen,
+                action: toggleRightSidebar,
+                help: supportsWorkspaceBrowser
+                    ? (showsWorkspaceCompanion ? L10n.text("apple.workbench.hide") : L10n.text("apple.rootview.show_inspector.aa711c1a"))
+                    : isRightSidebarOpen
+                    ? L10n.text("apple.rootview.hide_inspector_b.ff55655a")
+                    : (inspectorFits
+                        ? L10n.text("apple.rootview.show_inspector_b.6cabbee7")
+                        : L10n.text("apple.rootview.peek_inspector_b.f0aab686"))
+            )
         }
-        SidebarToggleButton(
-            edge: .trailing,
-            isOpen: supportsWorkspaceBrowser ? showsWorkspaceCompanion : isRightSidebarOpen,
-            action: toggleRightSidebar,
-            help: supportsWorkspaceBrowser
-                ? (showsWorkspaceCompanion ? L10n.text("apple.workbench.hide") : L10n.text("apple.rootview.show_inspector.aa711c1a"))
-                : isRightSidebarOpen
-                ? L10n.text("apple.rootview.hide_inspector_b.ff55655a")
-                : (inspectorFits
-                    ? L10n.text("apple.rootview.show_inspector_b.6cabbee7")
-                    : L10n.text("apple.rootview.peek_inspector_b.f0aab686"))
-        )
-        }
+    }
+
+    private func openWorkingTreeBesideChat() {
+        guard let id = route.workspaceID else { return }
+        desktopTurnReviews[id] = nil
+        desktopCommitReviews[id] = nil
+        openWorkbench(.changes, in: id)
     }
 
     /// Whether the leading sidebar column is on screen.
@@ -1636,6 +1701,28 @@ struct RootView: View {
 
     /// The detail column's comfortable width beside a docked inspector.
     private static let comfortDetail: CGFloat = 720
+
+    /// How far the docked inspector may be dragged. Past the fit edge it
+    /// would stop docking the moment the drag ended and vanish into a peek,
+    /// so the edge stops where the column still fits.
+    private var inspectorDragRange: ClosedRange<Double> {
+        let range = ShellMetrics.inspectorRange
+        guard windowContentWidth > 0 else { return range }
+        let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
+        let sidebar = showsSidebarColumn(at: windowContentWidth) ? CGFloat(sidebarWidth) : 0
+        let room = Double(windowContentWidth - rail - sidebar - DisplayFit.box(Self.comfortDetail))
+        return range.lowerBound...max(range.lowerBound, min(range.upperBound, room))
+    }
+
+    /// The same rule for the sidebar while an inspector is docked beside it:
+    /// widening one column must not push the other out of the window.
+    private var sidebarDragRange: ClosedRange<Double> {
+        let range = ShellMetrics.sidebarRange
+        guard windowContentWidth > 0, showsInspector, !supportsWorkspaceBrowser else { return range }
+        let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
+        let room = Double(windowContentWidth - rail - DisplayFit.box(Self.comfortDetail) - CGFloat(inspectorWidth))
+        return range.lowerBound...max(range.lowerBound, min(range.upperBound, max(room, sidebarWidth)))
+    }
 
     private func showsSidebarColumn(at width: CGFloat) -> Bool {
         columnVisibilityChoice != .detailOnly
@@ -1907,24 +1994,25 @@ struct RootView: View {
     }
 
     private var detailColumn: some View {
-        HStack(spacing: 0) {
+        LiveDetailColumn(drag: columnDrag, minimumDetail: Self.detailMinimumWidth,
+                         storedInspector: showsInspector && !supportsWorkspaceBrowser ? inspectorWidth : nil) {
             detail
-                .background(route.isGlobal(.newChat) ? Color.clear : Theme.background)
                 .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
-            if showsWorkspaceCompanion && browserFitsBesideWorkspace {
-                DesktopWorkbenchSpace(resize: workbenchResize, preferred: browserPaneWidth, cap: maximumWorkbenchWidth)
+                .background { DesktopContentSheet(topInset: chromeHeaderInset) }
+            if hasDockedWorkbench {
+                DesktopWorkbenchSpace(resize: workbenchResize, preferred: browserPaneWidth, cap: { maximumWorkbenchWidth })
             } else if showsInspector && !supportsWorkspaceBrowser {
                 boundedInspector { inspectorContent }
-                    .frame(width: currentInspectorWidth)
-                    .background(Theme.sidebar)
+                    .background { Theme.background.padding(.top, chromeHeaderInset) }
                     .overlay(alignment: .leading) {
                         ColumnResizeHandle(
                             side: .trailing,
                             width: $inspectorWidth,
-                            liveWidth: $inspectorLiveWidth,
-                            range: ShellMetrics.inspectorRange,
+                            liveWidth: columnDrag.inspectorBinding(),
+                            range: inspectorDragRange,
                             help: L10n.text("apple.rootview.drag_to_resize_the_inspector_double_click.9aa43689")
                         )
+                        .padding(.top, chromeHeaderInset)
                         .offset(x: -3)
                     }
             }
@@ -1939,16 +2027,25 @@ struct RootView: View {
             // size clear scrim under the panel (ZStack) still won taps from
             // workspace file rows and the account menu. Side-by-side means
             // the panel's frame is exclusively the panel's.
-            .overlay(alignment: .leading) { sidebarFloatLayer }
-            .overlay(alignment: .trailing) { inspectorFloatLayer }
+            .overlay(alignment: .leading) { sidebarFloatLayer.padding(.top, chromeHeaderInset) }
+            .overlay(alignment: .trailing) {
+                inspectorFloatLayer
+                    .environment(\.desktopChromeJoined, false)
+                    .padding(.top, chromeHeaderInset)
+            }
             .overlay(alignment: .trailing) {
                 if let id = chatFolder, !desktopWorkbench.state(in: id).tabs.isEmpty {
-                    DesktopWorkbenchPanel(resize: workbenchResize, preferred: $browserPaneWidth, cap: maximumWorkbenchWidth, isVisible: showsWorkspaceCompanion) {
+                    DesktopWorkbenchPanel(resize: workbenchResize, preferred: $browserPaneWidth,
+                                          cap: { maximumWorkbenchWidth }, isVisible: showsWorkspaceCompanion,
+                                          dividerTopInset: hasDockedWorkbench ? chromeHeaderInset : 0) {
                         workspaceCompanionPane
-                            .background(Theme.sidebar.ignoresSafeArea(.container, edges: .top))
+                            .background {
+                                Theme.sidebar.padding(.top, hasDockedWorkbench ? chromeHeaderInset : 0)
+                            }
+                            .environment(\.desktopChromeJoined, hasDockedWorkbench && usesUnifiedChrome)
                     }
                     .frame(maxHeight: .infinity)
-                    .background(Theme.background)
+                    .padding(.top, hasDockedWorkbench ? 0 : chromeHeaderInset)
                     .shadow(color: Theme.shadow(showsWorkspaceCompanion && !browserFitsBesideWorkspace ? 0.2 : 0), radius: 12, x: -5)
                     .opacity(showsWorkspaceCompanion ? 1 : 0)
                     .allowsHitTesting(showsWorkspaceCompanion)
@@ -2018,6 +2115,7 @@ struct RootView: View {
                     ForEach(state.tabs) { tool in
                         let active = showsWorkspaceCompanion && state.selected == tool
                         workbenchContent(tool, folder: folder, active: active)
+                            .environment(\.desktopChromeJoined, false)
                             // The inspector already scopes its settings to the
                             // selected chat. Keep its shell across repositories.
                             .id(tool == .inspector ? nil : id)
@@ -2131,6 +2229,14 @@ struct RootView: View {
         }
     }
 
+    private var needsEdgeWatcher: Bool {
+        scenePhase == .active && (usesOverlayInspector || isTransientSidebarVisible)
+    }
+
+    private var isTransientSidebarVisible: Bool {
+        usesOverlaySidebar && isSidebarOverlayVisible && !isSidebarPinned && !isSidebarModalVisible
+    }
+
     /// Open and close both edge peeks from where the pointer actually is.
     ///
     /// **`onHover` was the wrong source.** It reports crossings, and it misses
@@ -2198,26 +2304,15 @@ struct RootView: View {
                 trailingLeftAt = nil
             }
 
-            if usesOverlaySidebar {
-                let width = showsSidebarOverlay
-                    ? ShellMetrics.railWidth + currentSidebarWidth + ShellMetrics.panelInset * 2
-                    : ShellMetrics.railWidth + Self.edgeStrip
-                let inside = Self.pointerIsNear(.leading, within: width)
-                if inside {
-                    // No dwell-to-open on this edge. The rail lives there and
-                    // is always on screen, so resting on it means reaching for
-                    // a place, not asking for the list of projects. ⌘B and the
-                    // toggle float the sidebar when the window is too narrow.
+            if isTransientSidebarVisible {
+                let width = leftChromeWidth + currentSidebarWidth
+                if Self.pointerIsNear(.leading, within: width) {
                     leadingLeftAt = nil
                 } else {
-                    if isSidebarOverlayVisible, !isSidebarPinned, !isSidebarModalVisible {
-                        let left = leadingLeftAt ?? now()
-                        leadingLeftAt = left
-                        if now().timeIntervalSince(left) >= Self.edgeGrace {
-                            isSidebarOverlayVisible = false
-                            leadingLeftAt = nil
-                        }
-                    } else {
+                    let left = leadingLeftAt ?? now()
+                    leadingLeftAt = left
+                    if now().timeIntervalSince(left) >= Self.edgeGrace {
+                        isSidebarOverlayVisible = false
                         leadingLeftAt = nil
                     }
                 }
@@ -2328,7 +2423,7 @@ struct RootView: View {
                     .frame(width: 18, height: 24)
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .help(isExpanded ? L10n.text("apple.rootview.collapse_sessions.1976b67d") : L10n.text("apple.rootview.expand_sessions.3675e61a"))
 
             SidebarRow(
@@ -2468,14 +2563,19 @@ struct RootView: View {
     private var sidebarHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Theme.Space.s) {
-                Wordmark()
-                Spacer(minLength: 0)
+                Wordmark(size: 15)
             }
-            .padding(.horizontal, Theme.Space.m)
+            .padding(.leading, showsSidebar && !isFullScreen ? 26 : Theme.Space.m)
+            .padding(.trailing, Theme.Space.m)
             .chromeBarMetrics()
+            .background {
+                if showsSidebar && !isFullScreen {
+                    TitlebarDragArea().accessibilityHidden(true)
+                }
+            }
             SidebarRow(
                 label: L10n.text("apple.rootview.new_chat.db18382a"),
-                symbol: "square.and.pencil", trailing: "",
+                symbol: "square.and.pencil", trailing: nil,
                 isSelected: route.isGlobal(.newChat)
             ) { startNewChat() }
             SidebarRow(
@@ -2485,7 +2585,6 @@ struct RootView: View {
                 isSelected: false
             ) { showWorkSearch = true }
         }
-        .padding(.top, ShellMetrics.titleBand - ShellMetrics.panelInset)
         .padding(.bottom, Theme.Space.xs)
     }
 
@@ -2509,7 +2608,6 @@ struct RootView: View {
     private var newChatPage: some View {
         ChatStartPage(draft: chatStart, repositories: workspaces.folders,
                       isFullScreen: isFullScreen,
-                      titlebarDragHeight: isFullScreen ? 0 : max(titlebarInset, ShellMetrics.titleBand),
                       repositoriesLoading: workspaces.isLoading || workspaces.directoryPresentation == .loading,
                       onAdd: {
                           if let owner = chatStart.owner {
@@ -2530,9 +2628,6 @@ struct RootView: View {
                               chatStart.repositoryID = added
                           }
                       })
-            // The native backdrop and optical layers cover the titlebar band
-            // together; extending only a background is clipped by the page.
-            .ignoresSafeArea(.container, edges: .top)
             .onAppear {
                 chatStart.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
             }
@@ -2740,7 +2835,7 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
             .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
             .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false,
                                        enabled: projectsDisplay == .byRepository
@@ -2805,7 +2900,7 @@ struct RootView: View {
                 .padding(.vertical, 6)
         } else {
             let shown = Array(entries.prefix(chatListLimit))
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(SidebarProjectsLayout.dayGroups(shown)) { group in
                     let collapsed = collapsedChatDays.contains(group.id)
                     SidebarChatDayHeader(
@@ -2838,6 +2933,42 @@ struct RootView: View {
         }
     }
 
+    private func openChatEntry(_ entry: SidebarChatEntry) {
+        let folder = entry.folder
+        let conversation = entry.conversation
+        if chat.folderID == folder.id {
+            openSection(.chat, in: folder.id) {
+                Task { await chat.select(conversation) }
+            }
+        } else {
+            chat.reveal(id: conversation.id, in: folder.id)
+            openSection(.chat, in: folder.id)
+        }
+    }
+
+    /// The arrows in the cross-folder chat list walk the rows as drawn:
+    /// newest first across every folder, skipping folded days and the rows
+    /// behind Show more. In the folder view they stay inside the folder,
+    /// which is what that view lists.
+    private func stepChatList(_ step: Int) -> Bool {
+        guard projectsDisplay == .byChat, step == -1 || step == 1 else { return false }
+        let shown = Array(visibleChatEntries.prefix(chatListLimit))
+        let rows = SidebarProjectsLayout.dayGroups(shown).flatMap { group in
+            collapsedChatDays.contains(group.id) ? [] : group.entries
+        }
+        guard !rows.isEmpty else { return false }
+        let next: Int
+        if let current = rows.firstIndex(where: {
+            $0.conversation.id == chat.selected?.id && $0.folder.id == chat.folderID
+        }) {
+            next = (current + step + rows.count) % rows.count
+        } else {
+            next = step > 0 ? 0 : rows.count - 1
+        }
+        openChatEntry(rows[next])
+        return true
+    }
+
     /// A chat in the cross-folder list. The same row as under a folder, with
     /// the folder named where the age would be.
     private func chatListRow(_ entry: SidebarChatEntry) -> some View {
@@ -2860,24 +2991,17 @@ struct RootView: View {
             isSelected: chat.selected?.id == conversation.id
                 && !showingChatOverview
                 && route == .workspace(id: folder.id, section: .chat),
-            select: {
-                if chat.folderID == folder.id {
-                    openSection(.chat, in: folder.id) {
-                        Task { await chat.select(conversation) }
-                    }
-                } else {
-                    chat.reveal(id: conversation.id, in: folder.id)
-                    openSection(.chat, in: folder.id)
-                }
-            },
+            select: { openChatEntry(entry) },
             remove: {
                 Task { await chat.remove(conversation, in: folder.id) }
             },
             warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) },
             caption: folder.isRemote
                 ? "\(folder.machineLabel ?? L10n.text("apple.rootview.remote.ffa98e02")) / \(folder.name)"
-                : folder.name
+                : folder.name,
+            folderIsOpen: chat.folderID == folder.id
         )
+        .equatable()
         .id(Self.sidebarChatRowID(conversation.id))
     }
 
@@ -2945,7 +3069,7 @@ struct RootView: View {
                     .frame(width: 18, height: 24)
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .help(isExpanded ? L10n.text("apple.rootview.collapse_project.96385e6d") : L10n.text("apple.rootview.expand_project.1e7feb92"))
 
             WorkspaceRow(
@@ -3085,7 +3209,7 @@ struct RootView: View {
                     case .failed:
                         Button(L10n.text("common.retry"), .refresh) {
                             Task { await chat.warmWorkspacePreviews(folder.id, includeMessages: false) }
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(QuietLinkStyle())
                     case .empty:
                         Text(L10n.text("apple.rootview.no_chats_yet.269208e4"))
                             .foregroundStyle(.tertiary)
@@ -3413,7 +3537,8 @@ struct RootView: View {
                     },
                     onNewChat: { startNewChat(in: folder) },
                     showingOverview: $showingChatOverview,
-                    isActive: showsChat
+                    isActive: showsChat,
+                    showsConversationToolbarActions: showsConversationToolbarActions
                 )
                 .retainedPane(isActive: showsChat)
                 .opacity(showsChat ? 1 : 0)
@@ -3508,7 +3633,10 @@ struct RootView: View {
             )
             #endif
         case .global(.newChat):
-            newChatPage
+            VStack(spacing: 0) {
+                DetailChromeBar { EmptyView() }
+                newChatPage
+            }
         case .global(.home):
             HomeView(
                 model: home,
@@ -3996,8 +4124,10 @@ struct RootView: View {
                     remove: {
                         Task { await chat.remove(conversation, in: folder.id) }
                     },
-                    warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) }
+                    warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) },
+                    folderIsOpen: isCurrent
                 )
+                .equatable()
                 .id(Self.sidebarChatRowID(conversation.id))
             }
             // One quiet footer row instead of stacked loud ones: the
@@ -4013,7 +4143,7 @@ struct RootView: View {
                             setHistoryExpanded(folder.id, true)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                     .font(Theme.fit(12, weight: .medium))
                     .frame(maxHeight: .infinity)
                     .contentShape(.rect)
@@ -4027,7 +4157,7 @@ struct RootView: View {
                                 showingChatOverview = true
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(QuietLinkStyle())
                         .font(Theme.fit(12, weight: .medium))
                     .frame(maxHeight: .infinity)
                     .contentShape(.rect)
@@ -4197,6 +4327,7 @@ struct RootView: View {
 
     private var recentHomeWork: [DesktopHomeDestination] {
         guard let scope = WorkSessionContext.shared.scope else { return [] }
+        let folderIDs = workspaces.folders.map(\.id)
         return WorkContinuityStore.shared.recentConversations(scope: scope).compactMap { reference in
             // Work that can never open again is not something to continue.
             // A machine that is reconnecting or waiting for access stays:
@@ -4206,7 +4337,7 @@ struct RootView: View {
             default: break
             }
             let folderID = WorkPlaceRestoration.folderID(
-                for: reference, among: workspaces.folders.map(\.id),
+                for: reference, among: folderIDs,
                 localHostIdentity: WorkSessionContext.shared.localHostIdentity
             )
             let folder = workspaces.folders.first { $0.id == folderID }
@@ -4867,7 +4998,7 @@ private struct SidebarRowLabel: View {
                 .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
                 .frame(width: 18)
             Text(label)
-                .font(Theme.fit(14, weight: isSelected ? .medium : .regular))
+                .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -4879,7 +5010,7 @@ private struct SidebarRowLabel: View {
             }
         }
         .padding(.horizontal, folderMetrics ? Theme.Space.s : Theme.Space.m)
-        .padding(.vertical, folderMetrics ? 0 : 7)
+        .padding(.vertical, folderMetrics ? 0 : 5)
         .frame(height: folderMetrics ? DisplayFit.dp(Theme.Control.sidebarRow) : nil)
         .background(background)
         .contentShape(.rect)
@@ -4889,16 +5020,7 @@ private struct SidebarRowLabel: View {
     /// plain grey wash. They have to look like different things: with both as
     /// shades of grey, which workspace you were actually in was a guess.
     private var background: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear))
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 3)
-            }
-        }
+        SidebarRowSeat(isSelected: isSelected, isHovering: isHovering, radius: 6, barInset: 3)
         .padding(.horizontal, Theme.Space.xs)
     }
 }
@@ -5290,20 +5412,7 @@ private struct WorkspaceRow: View {
     }
 
     private var background: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Theme.rowSelected
-                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
-                )
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 5)
-            }
-        }
+        SidebarRowSeat(isSelected: isSelected, isHovering: isHovering)
         .padding(.horizontal, Theme.Space.xs)
         // A hairline between adjacent rows. Without it two selected cards, or
         // a card and the session under it, share an edge and read as one tall
@@ -5347,7 +5456,7 @@ private struct SidebarGroupHeader<Trailing: View>: View {
             }
         }
         .padding(.horizontal, Theme.Space.m)
-        .padding(.top, Theme.Space.l)
+        .padding(.top, Theme.Space.m)
         .padding(.bottom, Theme.Space.xs)
     }
 
@@ -5484,7 +5593,7 @@ private struct SidebarFilterField: View {
                     .frame(width: Theme.Control.sidebarIcon, height: Theme.Control.sidebarIcon)
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .help(L10n.text("apple.sshlibraryview.clear_search.3b7ea517"))
             .accessibilityLabel(L10n.text("apple.sshlibraryview.clear_search.3b7ea517"))
         }
@@ -5520,8 +5629,7 @@ private struct SidebarShowMoreRow: View {
         }
         .buttonStyle(.plain)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
+            SidebarRowSeat(isSelected: false, isHovering: isHovering, hoverOpacity: 0.45, barInset: nil)
                 .padding(.horizontal, Theme.Space.xs)
         )
         .onHover { isHovering = $0 }
@@ -5554,13 +5662,15 @@ private struct SidebarChatDayHeader: View {
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(isCollapsed ? -90 : 0))
                     .opacity(isHovering || isCollapsed ? 1 : 0)
+                    .animation(Motion.morph, value: isCollapsed)
+                    .animation(Motion.hover, value: isHovering)
                 Spacer(minLength: 0)
             }
             .padding(.leading, ChatSidebarConversationRow.markInset)
             .padding(.trailing, Theme.Space.m)
             // The whole heading row folds the day, so it gets a full target.
-            .frame(minHeight: DisplayFit.dp(Theme.Control.sidebarIcon + 4), alignment: .bottom)
-            .padding(.top, Theme.Space.s)
+            .frame(minHeight: DisplayFit.dp(24), alignment: .bottom)
+            .padding(.top, Theme.Space.xs)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -5570,6 +5680,22 @@ private struct SidebarChatDayHeader: View {
               : L10n.text("apple.rootview.collapse_0.61eb8723", title))
         .accessibilityLabel(title)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Rows compare by what they draw. Every sidebar update handed each row new
+/// closures, so all of them re-evaluated on a chat switch even though only
+/// the two whose selection changed draw anything different. The closures
+/// capture the conversation, the folder and the open-folder flag, all
+/// compared here, and the shell's state, which they read live.
+extension ChatSidebarConversationRow: Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.conversation == rhs.conversation && lhs.folder == rhs.folder
+                && lhs.draft == rhs.draft && lhs.runningSince == rhs.runningSince
+                && lhs.isSelected == rhs.isSelected && lhs.caption == rhs.caption
+                && lhs.folderIsOpen == rhs.folderIsOpen
+        }
     }
 }
 
@@ -5593,7 +5719,11 @@ private struct ChatSidebarConversationRow: View {
     /// The folder's name, for the chat list where rows from every folder
     /// share one list. Takes the age's seat: the day heading already says when.
     var caption: String? = nil
+    /// Whether this row's folder is the one the chat model has open. The
+    /// select closure branches on it, so it takes part in equality.
+    var folderIsOpen = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
     @State private var confirmsRemoval = false
     @State private var showingDetails = false
@@ -5603,46 +5733,46 @@ private struct ChatSidebarConversationRow: View {
 
 
     var body: some View {
+        #if DEBUG && os(macOS)
+        let _ = DebugUIHooks.printsChanges ? Self._printChanges() : ()
+        #endif
         ZStack(alignment: .trailing) {
             Button {
                 showingDetails = false
                 select()
             } label: {
-                HStack(spacing: Theme.Space.xs) {
-                    HStack(spacing: Theme.Space.s) {
-                        HarnessMark(id: conversation.backend, size: DisplayFit.dp(16))
-                        Text(conversation.title.isEmpty ? L10n.text("apple.rootview.untitled_conversation.31d248c4") : conversation.title)
-                            .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
-                            .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
-                            .lineLimit(1)
-                        // The pull request this chat's branch belongs to, in
-                        // its state's colour. Read from the host's cache.
-                        if let pull = conversation.pull {
-                            Image(systemName: pull.symbol)
-                                .font(Theme.fit(11, weight: .medium))
-                                .foregroundStyle(pull.tint)
-                                .help(L10n.text("apple.branchpull.help", pull.stateLabel, "\(pull.number)", pull.title))
-                                .accessibilityLabel(L10n.text("apple.branchpull.chip", "\(pull.number)", pull.stateLabel))
-                        }
-                        Spacer(minLength: 0)
-                        ChatDraftMark(reference: draft)
+                HStack(spacing: Theme.Space.s) {
+                    HarnessMark(id: conversation.backend, size: DisplayFit.dp(16))
+                    Text(conversation.title.isEmpty ? L10n.text("apple.rootview.untitled_conversation.31d248c4") : conversation.title)
+                        .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    if let pull = conversation.pull {
+                        Image(systemName: pull.symbol)
+                            .font(Theme.fit(11, weight: .medium))
+                            .foregroundStyle(pull.tint)
+                            .help(L10n.text("apple.branchpull.help", pull.stateLabel, "\(pull.number)", pull.title))
+                            .accessibilityLabel(L10n.text("apple.branchpull.chip", "\(pull.number)", pull.stateLabel))
                     }
+                    ChatDraftMark(reference: draft)
+                    Spacer(minLength: 0)
 
-                    // The status and actions share one seat, so the title
-                    // keeps its width when the pointer arrives.
+                    // Hover actions occupy this slot without changing the title width.
                     trailingState
                         .opacity(isHovering ? 0 : 1)
-                        .frame(minWidth: 26, alignment: .trailing)
+                        .frame(minWidth: Theme.Control.sidebarIcon, alignment: .trailing)
+                        .padding(.leading, Theme.Space.s)
                 }
                 // Padding belongs to the label: every part of the highlighted
                 // row opens the chat, including its age and right-hand edge.
                 .padding(.leading, Self.markInset)
                 .padding(.trailing, Theme.Space.s + 2 + Theme.Control.sidebarIcon + 4)
                 .frame(maxWidth: .infinity)
-                .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
+                .frame(height: DisplayFit.dp(32))
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(highlights: false, pressScale: 0.98))
             .accessibilityLabel(accessibilityTitle)
             // Reserve the info button's seat even before hover, so neither
             // the title nor its status moves when the actions appear.
@@ -5651,18 +5781,15 @@ private struct ChatSidebarConversationRow: View {
                                   canDelete: conversation.teamShare == nil && !conversation.running && !copying,
                                   deleteTitle: L10n.text("apple.rootview.delete_chat.93291d9c"), delete: { confirmsRemoval = true },
                                   hover: { _ in }, actions: { menu })
-                SidebarChatDetailButton(conversation: conversation, folder: folder, isPresented: $showingDetails)
+                SidebarChatDetailButton(conversation: conversation, folder: folder, isPresented: $showingDetails,
+                                        isRevealed: isHovering || isSelected)
                     .disabled(renaming || confirmsRemoval || copying || actionError != nil)
             }
             .padding(.trailing, Theme.Space.s + 2)
         }
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Theme.rowSelectedNested
-                        : (isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
-                )
+            SidebarRowSeat(isSelected: isSelected, isHovering: isHovering,
+                           selectedFill: Theme.rowSelectedNested, hoverOpacity: 0.45, barInset: nil)
                 .padding(.horizontal, Theme.Space.xs)
         )
         .contentShape(.rect)
@@ -5747,7 +5874,8 @@ extension ChatSidebarConversationRow {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: DisplayFit.dp(96), alignment: .trailing)
+                .frame(maxWidth: DisplayFit.dp(72), alignment: .trailing)
+                .fixedSize(horizontal: true, vertical: false)
         } else {
             Text(CompactAge.text(ms: conversation.lastMessageAtMs ?? conversation.updatedAtMs))
                 .font(Theme.numeric(11))
@@ -5796,20 +5924,7 @@ private struct ActiveWorkflowRow: View {
     }
 
     private var background: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Theme.rowSelected
-                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
-                )
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 5)
-            }
-        }
+        SidebarRowSeat(isSelected: isSelected, isHovering: isHovering)
         .padding(.leading, Theme.Space.l)
         .padding(.trailing, Theme.Space.xs)
         .padding(.vertical, 1)
@@ -5861,20 +5976,7 @@ private struct ActiveAutomationRow: View {
     }
 
     private var background: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Theme.rowSelected
-                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
-                )
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 5)
-            }
-        }
+        SidebarRowSeat(isSelected: isSelected, isHovering: isHovering)
         .padding(.leading, Theme.Space.l)
         .padding(.trailing, Theme.Space.xs)
         .padding(.vertical, 1)
@@ -6046,7 +6148,7 @@ private struct ActiveSessionRow: View {
                 SidebarRowActions(name: title, visible: isHovering,
                                   deleteTitle: session.alive ? L10n.text("apple.rootview.stop_and_close.52b40c33") : L10n.text("apple.rootview.close_terminal.7d02fb04"),
                                   delete: close, hover: { _ in }, actions: { menu })
-                SidebarDetailButton(title: title, isPresented: $showingDetails) {
+                SidebarDetailButton(title: title, isPresented: $showingDetails, isRevealed: isHovering || isSelected) {
                     SidebarTerminalDetailCard(session: session, folder: folder)
                 }
                 .disabled(renaming)
@@ -6107,12 +6209,8 @@ private struct ActiveSessionRow: View {
     /// The same nested treatment as a chat row: these are the two things
     /// that live inside a project, and they should look like siblings.
     private var background: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(
-                isSelected
-                    ? Theme.rowSelectedNested
-                    : (isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
-            )
+        SidebarRowSeat(isSelected: isSelected, isHovering: isHovering,
+                       selectedFill: Theme.rowSelectedNested, hoverOpacity: 0.45, barInset: nil)
             .padding(.horizontal, Theme.Space.xs)
     }
 }

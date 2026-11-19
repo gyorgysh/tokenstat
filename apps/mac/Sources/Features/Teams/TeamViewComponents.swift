@@ -519,7 +519,7 @@ struct TeamSectionChips: View {
                                 .background(selected ? Theme.accentSoft : Theme.panel, in: Capsule())
                                 .overlay(Capsule().strokeBorder(selected ? Theme.accent.opacity(0.35) : Theme.border, lineWidth: 1))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(QuietLinkStyle())
                         .id(section)
                         .accessibilityAddTraits(selected ? [.isSelected] : [])
                     }

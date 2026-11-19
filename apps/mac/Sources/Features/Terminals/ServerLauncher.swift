@@ -50,7 +50,7 @@ struct ServerLauncher: View {
                             .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
                     }
                     if library.launcherHosts.count > 2 {
                         ThemeRule()
@@ -68,7 +68,7 @@ struct ServerLauncher: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
                     }
                 }
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))

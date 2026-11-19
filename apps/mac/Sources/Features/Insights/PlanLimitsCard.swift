@@ -127,7 +127,7 @@ struct PlanLimitPanel: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
             .disabled(isLoading)
             .help(L10n.text("apple.planlimitscard.ask_each_vendor_again.0c1778b3"))
         }

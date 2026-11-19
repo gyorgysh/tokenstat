@@ -116,7 +116,7 @@ private struct ChatConversationOverview: View {
                                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
                                 .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(CardButtonStyle())
                             #if os(macOS)
                             .modifier(ConversationPreviewHover {
                                 await model.warmConversationPreview(conversation, in: workspaceID)
@@ -186,6 +186,7 @@ struct ChatView: View {
     /// a folder that has since been left: it reloads when it comes forward.
     var isActive = true
     var loadsWorkspace = true
+    var showsConversationToolbarActions = true
     /// The composer's words live on the model, keyed to the conversation
     /// rather than to this pane, so leaving and coming back finds them and
     /// switching conversations does not carry them across.
@@ -284,10 +285,8 @@ struct ChatView: View {
                         }
                     }
                 }
-                // Pin and Continue sat inside the menu above, and people did
-                // not find them there. They are the two things somebody does
-                // to keep a conversation going later, so they get a seat.
-                if !showingOverview, model.selected != nil, let reference = model.currentReference {
+                // Narrow windows retain both actions in the conversation menu.
+                if showsConversationToolbarActions, !showingOverview, model.selected != nil, let reference = model.currentReference {
                     let pinned = pins.isPinned(reference)
                     let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
                     ToolbarIconButton(
@@ -311,7 +310,7 @@ struct ChatView: View {
                         }
                     }
                 }
-                if !showingOverview, model.currentReference != nil, model.savedCopy == nil {
+                if showsConversationToolbarActions, !showingOverview, model.currentReference != nil, model.savedCopy == nil {
                     ToolbarIconButton(
                         systemImage: ActionIcon.device.symbol,
                         help: L10n.text("apple.chatview.continue_on_another_device.b5836f9a")
@@ -444,6 +443,7 @@ struct ChatView: View {
                     },
                     onDropTargeted: { composerDropTargeted = $0 }
                 )
+                .equatable()
             } else if model.isReady(for: workspaceID), model.chats.isEmpty {
                 empty
             } else {
@@ -482,7 +482,7 @@ struct ChatView: View {
     private var presentedChat: some View {
         paneContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.background)
+        .desktopPaneBackground()
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $paneDropTargeted, receive: receive)
         .overlay {
             if dropExperienceVisible {
@@ -500,9 +500,7 @@ struct ChatView: View {
         }
         .background {
             ChatNavigationKeys(isActive: isActive && !showingOverview) { step in
-                guard let target = model.adjacentConversation(step) else { return false }
-                Task { await model.select(target) }
-                return true
+                model.stepConversation(step)
             }
             .frame(width: 0, height: 0)
         }
@@ -582,9 +580,8 @@ struct ChatView: View {
         // ⌥⌘↑ and ⌥⌘↓ from the View menu. Every chat pane that was ever
         // opened stays mounted, so only the one in front answers.
         .onReceive(NotificationCenter.default.publisher(for: .chatStepRequested)) { note in
-            guard isActive, !showingOverview, let step = note.object as? Int,
-                  let target = model.adjacentConversation(step) else { return }
-            Task { await model.select(target) }
+            guard isActive, !showingOverview, let step = note.object as? Int else { return }
+            _ = model.stepConversation(step)
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatStepGroupsToggleRequested)) { _ in
             guard isActive, !showingOverview else { return }
@@ -611,6 +608,9 @@ struct ChatView: View {
     }
 
     var body: some View {
+        #if DEBUG && os(macOS)
+        let _ = DebugUIHooks.printsChanges ? Self._printChanges() : ()
+        #endif
         observedChat
         // And the same fact to the host, which is the one deciding whether a
         // phone hears about this turn.
@@ -718,7 +718,11 @@ struct ChatView: View {
                 // never loses taps.
                 .allowsHitTesting(!follow.scrolling && !model.isShowingCachedTranscript)
                 .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
+                #if os(macOS)
+                .padding(.vertical, Theme.Space.m)
+                #else
                 .padding(.vertical, Theme.Space.xl)
+                #endif
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
                 .chatScrollContent()

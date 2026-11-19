@@ -155,7 +155,7 @@ struct PickerSearchField: View {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .accessibilityLabel(L10n.text("apple.searchablepicker.clear_filter.ba59e2d4"))
             }
         }
@@ -463,7 +463,7 @@ struct PickerOptionList<Value: Hashable>: View {
                 .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
         .keyboardShortcut("[", modifiers: .command)
         .help(L10n.text("common.back"))
         .accessibilityLabel(L10n.text("common.back"))
@@ -542,7 +542,7 @@ struct PickerOptionList<Value: Hashable>: View {
                 await refresh()
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         .foregroundStyle(Theme.accent)
         .environment(\.compactActions, true)
         .frame(minWidth: Theme.Control.heightComfortable, minHeight: Theme.Control.heightComfortable)

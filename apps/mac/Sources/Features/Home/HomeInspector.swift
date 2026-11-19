@@ -39,7 +39,7 @@ struct HomeInspector: View {
             .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
     }
 
     private func dayBody(_ day: HeatCell) -> some View {

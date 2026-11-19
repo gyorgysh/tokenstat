@@ -70,7 +70,7 @@ struct SSHSectionView: View {
             }
             content
         }
-        .background(Theme.background)
+        .desktopPaneBackground()
         // The connect sheet is presented by the window, not by this screen.
         // Connecting starts from the tab strip and the sidebar as well, and
         // neither of those is on screen at the same time as this list.
@@ -389,7 +389,7 @@ struct SSHSectionView: View {
                 .strokeBorder(model.selection == .snippet(snippet.id) ? Theme.accent.opacity(0.5) : Theme.border))
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CardButtonStyle())
         .accessibilityHint(L10n.text("apple.sshsectionview.open_this_saved_command_for_editing_does_n.e50141e1"))
         .contextMenu {
             Button(L10n.text("apple.sshsectionview.copy_command.9a01feec"), .copy) {

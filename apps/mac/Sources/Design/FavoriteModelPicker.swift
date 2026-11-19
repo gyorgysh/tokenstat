@@ -139,7 +139,7 @@ struct FavoriteModelPicker: View {
                 )
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
         .disabled(selection.isEmpty)
         .help(isFavorite ? L10n.text("apple.favoritemodelpicker.remove_from_favorites.18720329") : L10n.text("apple.favoritemodelpicker.pin_this_model_to_the_top.7d0b6322"))
         .accessibilityLabel(isFavorite ? L10n.text("apple.favoritemodelpicker.remove_favorite.5bc0aa08") : L10n.text("apple.favoritemodelpicker.add_favorite.65b52e8c"))

@@ -35,7 +35,7 @@ struct SSHInspector: View {
                 .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
     }
 
     /// The server the inspector is showing, when it is showing one. A new

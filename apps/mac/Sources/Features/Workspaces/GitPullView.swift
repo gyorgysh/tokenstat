@@ -363,7 +363,7 @@ struct BranchPullChip: View {
             .background(pull.tint.opacity(0.12), in: Capsule())
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         .help(L10n.text("apple.branchpull.help", pull.stateLabel, "\(pull.number)", pull.title))
         .accessibilityLabel(L10n.text("apple.branchpull.help", pull.stateLabel, "\(pull.number)", pull.title))
     }
@@ -403,7 +403,7 @@ struct ChatChangesPill: View {
             .overlay(Capsule().strokeBorder(Theme.border))
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietLinkStyle())
         .help(L10n.text("apple.chatchanges.bar_help"))
     }
 }

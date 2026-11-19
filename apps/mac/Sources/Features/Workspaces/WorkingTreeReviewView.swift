@@ -346,7 +346,7 @@ struct ReviewFileBrowser<Detail: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
         .accessibilityAddTraits(selection == nil ? [.isSelected] : [])
         .background(selection == nil ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 6))
     }

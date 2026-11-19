@@ -7,6 +7,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import Observation
 
 /// Sizes the desktop shell is built from.
 ///
@@ -20,9 +21,14 @@ enum ShellMetrics {
     /// the panel is flat and runs edge to edge.
     static var panelInset: CGFloat { usesGlass ? 6 : 0 }
     static let panelRadius: CGFloat = 16
+    /// How far a dragged column edge moves between re-layouts of the panes
+    /// beside it. Small enough that a truncated title catches up at once,
+    /// large enough that a drag is mostly moves rather than measurements.
+    static let dragLayoutStep: CGFloat = 12
     /// The band the traffic lights sit in. The shell's titlebar is hidden and
     /// empty, so this is the only thing above the first row of chrome.
     static let titleBand: CGFloat = 28
+    static var headerHeight: CGFloat { DetailChromeBarHeight + panelInset }
 
     static let sidebarRange: ClosedRange<Double> = 220...440
     static let sidebarDefault: Double = 272
@@ -52,49 +58,10 @@ extension View {
             // measured about ten tab strips that nobody could see. A hidden
             // pane has no bar to show and now holds nothing that changes.
             .transformEnvironment(\.detailChromeToggles) { if !isActive { $0 = nil } }
+            .transformEnvironment(\.desktopChromeJoined) { if !isActive { $0 = false } }
     }
 
-    /// The left chrome's surface: native glass over a frosted backdrop on macOS 26
-    /// and later, the flat sidebar colour before that.
-    ///
-    /// Chrome only. `Theme` keeps the rule that content sits on flat colour,
-    /// because vibrancy pulls whatever is behind the window into columns of
-    /// digits. A list of project names and a rail of glyphs is chrome.
-    ///
-    /// Blur behind the window, rather than tinting an opaque colour plate.
-    /// A translucent black (or white) wash keeps the frost close to the
-    /// content surface while allowing a restrained amount of the blurred
-    /// backdrop through.
-    /// Reduce Transparency uses an opaque theme surface.
-    @ViewBuilder
-    func leftChromeSurface(isFullScreen: Bool = false) -> some View {
-        if #available(macOS 26, *) {
-            self
-                .background {
-                    SidebarGlassSurface(isFullScreen: isFullScreen)
-                }
-                .overlay {
-                    SidebarPanelRim()
-                }
-                .padding([.leading, .top, .bottom], ShellMetrics.panelInset)
-                .background {
-                    GeometryReader { proxy in
-                        Path { path in
-                            path.addRect(CGRect(origin: .zero, size: proxy.size))
-                            path.addRoundedRect(in: CGRect(x: ShellMetrics.panelInset,
-                                y: ShellMetrics.panelInset,
-                                width: max(0, proxy.size.width - ShellMetrics.panelInset),
-                                height: max(0, proxy.size.height - ShellMetrics.panelInset * 2)),
-                                cornerSize: CGSize(width: ShellMetrics.panelRadius,
-                                    height: ShellMetrics.panelRadius),
-                                style: .continuous)
-                        }.fill(Theme.background, style: FillStyle(eoFill: true))
-                    }.allowsHitTesting(false)
-                }
-        } else {
-            self.background(Theme.sidebar)
-        }
-    }
+
 }
 
 /// A transparent titlebar region that delegates the original mouse-down to
@@ -182,7 +149,12 @@ private final class FrostedGlassView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     /// Honour the app's theme even when it differs from the system's.
+    private var isDark: Bool?
+
     func setTheme(dark: Bool) {
+        // Called on every SwiftUI update. Re-tinting live glass is not free.
+        guard isDark != dark else { return }
+        isDark = dark
         appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         glass.tintColor = (dark ? NSColor.black : NSColor.white).withAlphaComponent(0.15)
     }
@@ -210,12 +182,214 @@ private final class FrostedGlassView: NSView {
 
 @available(macOS 26, *)
 private struct SidebarPanelRim: View {
+    var cornerRadius: CGFloat = ShellMetrics.panelRadius
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.10), lineWidth: 1)
             .allowsHitTesting(false)
+    }
+}
+
+/// The toolbar uses the same material and contrast setting as the sidebar.
+struct DesktopTitlebarPlate: ViewModifier {
+    @Environment(\.desktopChromeJoined) private var isJoined
+    let fallback: Color
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.top, isJoined ? ShellMetrics.panelInset : 0)
+            .background {
+                if !isJoined { fallback }
+            }
+            .overlay(alignment: .bottom) {
+                if !isJoined { ThemeRule() }
+            }
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var desktopChromeJoined = false
+}
+
+struct DesktopPaneBackground: ViewModifier {
+    @Environment(\.desktopChromeJoined) private var isJoined
+    let color: Color
+
+    func body(content: Content) -> some View {
+        content.background {
+            if !isJoined { color }
+        }
+    }
+}
+
+/// The window owns the outer corner curves. This path only marks where chrome
+/// gives way to the content, and needs one material pass even with both panes.
+struct DesktopChromeSurface: View {
+    let sidebarWidth: CGFloat
+    /// A sidebar edge drag in progress, read here so the surface follows the
+    /// pointer without the root view rebuilding.
+    var drag: ShellColumnDrag?
+    var storedSidebar: Double = 0
+    let isFullScreen: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @AppStorage(SidebarAppearancePreferences.enabledKey) private var enabled = true
+    @AppStorage(SidebarAppearancePreferences.washKey) private var wash = SidebarAppearancePreferences.defaultWash
+
+    var body: some View {
+        let live = drag?.sidebar.map { CGFloat($0 - storedSidebar) } ?? 0
+        let width = sidebarWidth + live
+        let outline = DesktopChromeShape(sidebarWidth: width)
+        let tint = SidebarAppearancePreferences.normalized(wash)
+        Group {
+            if enabled && !isFullScreen && !reduceTransparency && tint < 1 {
+                glass(outline: outline, width: width, tint: tint)
+            } else {
+                outline.fill(Theme.sidebar)
+                    .overlay { DesktopContentRim(sidebarWidth: width).stroke(Theme.contentRim, lineWidth: 1) }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func glass(outline: DesktopChromeShape, width: CGFloat, tint: Double) -> some View {
+        if #available(macOS 26, *) {
+            // Real Liquid Glass over the desktop behind the window, under the
+            // whole window: the content sheet covers everything that is not
+            // chrome, so the glass never needs the chrome's shape and a
+            // sidebar drag never reshapes it. A SwiftUI material here only
+            // blurred the window's own (clear) backing, which read as flat
+            // grey whatever the slider said.
+            SidebarBackdrop(cornerRadius: 0)
+                .overlay { Theme.sidebar.opacity(tint) }
+                .overlay { ChromeLighting(sidebarWidth: width) }
+        } else {
+            outline.fill(.regularMaterial)
+                .overlay { outline.fill(Theme.sidebar.opacity(tint)) }
+                .overlay { ChromeLighting(sidebarWidth: width) }
+        }
+    }
+}
+
+/// Optional light on the glass: a sheen along the top, one soft glare
+/// streak, a breath of the accent and a lit bevel along the seam.
+///
+/// Plain alpha blending on purpose. Additive light (`plusLighter`) pushed
+/// whites past full brightness, which an XDR display shows as HDR glare and
+/// which made the content beside it look washed out. The seam's dark line
+/// is drawn whether or not this is on, because it is structure, not light.
+private struct ChromeLighting: View {
+    let sidebarWidth: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(SidebarAppearancePreferences.highlightsKey) private var highlights = false
+
+    var body: some View {
+        let dark = colorScheme == .dark
+        let outline = DesktopChromeShape(sidebarWidth: sidebarWidth)
+        ZStack {
+            if highlights {
+                outline.fill(LinearGradient(
+                    stops: [.init(color: .white.opacity(dark ? 0.05 : 0.18), location: 0),
+                            .init(color: .clear, location: 0.22)],
+                    startPoint: .top, endPoint: .bottom))
+                outline.fill(LinearGradient(
+                    stops: [.init(color: .clear, location: 0.08),
+                            .init(color: .white.opacity(dark ? 0.025 : 0.08), location: 0.14),
+                            .init(color: .clear, location: 0.20)],
+                    startPoint: .topLeading, endPoint: UnitPoint(x: 0.75, y: 1)))
+                outline.fill(RadialGradient(colors: [Theme.accent.opacity(dark ? 0.06 : 0.04), .clear],
+                                            center: .topLeading, startRadius: 0, endRadius: 480))
+                DesktopContentRim(sidebarWidth: sidebarWidth, inset: -1.5)
+                    .stroke(.white.opacity(dark ? 0.09 : 0.35), lineWidth: 1)
+            }
+            DesktopContentRim(sidebarWidth: sidebarWidth, inset: -0.5)
+                .stroke(Theme.contentRim, lineWidth: 1)
+        }
+    }
+}
+
+private struct DesktopChromeShape: Shape {
+    let sidebarWidth: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let shoulder = rect.minX + min(max(sidebarWidth, 0), rect.width)
+        let headerBottom = min(rect.minY + ShellMetrics.headerHeight, rect.maxY)
+        return Path { path in
+            path.move(to: rect.origin)
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: headerBottom))
+            path.addLine(to: CGPoint(x: shoulder, y: headerBottom))
+            path.addLine(to: CGPoint(x: shoulder, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            path.closeSubpath()
+        }
+    }
+}
+
+/// The edge where the content sheet meets the chrome: one soft line down the
+/// sidebar side and across under the toolbar, square at the shoulder.
+private struct DesktopContentRim: Shape {
+    let sidebarWidth: CGFloat
+    /// Where the line sits relative to the seam. Negative is the chrome's
+    /// side, which is the only side the content sheet does not cover.
+    var inset: CGFloat = 0.5
+
+    func path(in rect: CGRect) -> Path {
+        let shoulder = rect.minX + min(max(sidebarWidth, 0), rect.width) + inset
+        let headerBottom = min(rect.minY + ShellMetrics.headerHeight, rect.maxY) + inset
+        return Path { path in
+            path.move(to: CGPoint(x: shoulder, y: rect.maxY))
+            path.addLine(to: CGPoint(x: shoulder, y: headerBottom))
+            path.addLine(to: CGPoint(x: rect.maxX, y: headerBottom))
+        }
+    }
+}
+
+/// The content canvas below the toolbar. Its corner stays square: a rounded
+/// corner against the sidebar read as a gap rather than a sheet.
+struct DesktopContentSheet: View {
+    let topInset: CGFloat
+    var color: Color = Theme.background
+
+    var body: some View {
+        Rectangle()
+            .fill(color)
+            .padding(.top, topInset)
+            .allowsHitTesting(false)
+    }
+}
+
+/// AppKit proposes the new width before it publishes the new docking state.
+/// A stale inspector reservation must never move the sidebar off the window.
+struct DesktopDetailLayout: Layout {
+    let minimumDetail: CGFloat
+    var inspectorWidth: CGFloat?
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let preferredWidth = minimumDetail + (inspectorWidth ?? 0)
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? preferredWidth
+        let height = proposal.height.flatMap { $0.isFinite ? $0 : nil } ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let main = subviews.first else { return }
+        let trailing = subviews.dropFirst().first
+        let remaining = max(0, bounds.width - minimumDetail)
+        let sideWidth: CGFloat
+        if let inspectorWidth {
+            sideWidth = inspectorWidth <= remaining ? inspectorWidth : 0
+        } else {
+            sideWidth = min(remaining, trailing?.sizeThatFits(.unspecified).width ?? 0)
+        }
+        let mainWidth = bounds.width - sideWidth
+        main.place(at: bounds.origin, anchor: .topLeading,
+                   proposal: ProposedViewSize(width: mainWidth, height: bounds.height))
+        trailing?.place(at: CGPoint(x: bounds.minX + mainWidth, y: bounds.minY), anchor: .topLeading,
+                        proposal: ProposedViewSize(width: sideWidth, height: bounds.height))
     }
 }
 
@@ -242,6 +416,25 @@ struct FloatingSidebarSurface: ViewModifier {
                     Rectangle().fill(Theme.border).frame(width: 1)
                 }
         }
+    }
+}
+
+/// Remembered column widths, read once when a window opens and written
+/// when a drag settles. Same keys the app has always used.
+enum StoredWidth {
+    static let sidebar = "shell.sidebarWidth"
+    static let inspector = "shell.inspectorWidth"
+    static let browserPane = "chat.browserPaneWidth"
+
+    static func read(_ key: String, default fallback: Double) -> Double {
+        guard let number = UserDefaults.standard.object(forKey: key) as? NSNumber else { return fallback }
+        let value = number.doubleValue
+        return value.isFinite && value > 0 ? value : fallback
+    }
+
+    static func write(_ value: Double, _ key: String) {
+        guard value.isFinite, value > 0 else { return }
+        UserDefaults.standard.set(value, forKey: key)
     }
 }
 
@@ -321,6 +514,7 @@ struct RailButton: View {
     let action: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -328,7 +522,7 @@ struct RailButton: View {
                 .font(Theme.fixed(16, weight: isSelected ? .semibold : .regular))
                 .symbolVariant(isSelected ? .fill : .none)
                 .foregroundStyle(isSelected ? Theme.accent : (isHovering ? Theme.controlGlyphHover : Theme.controlGlyph))
-                .frame(width: 40, height: 36)
+                .frame(width: 36, height: 33)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(isSelected ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.7) : .clear))
@@ -343,8 +537,9 @@ struct RailButton: View {
                 }
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ControlFeedbackStyle(highlights: false))
         .onHover { isHovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isHovering)
         .help(place.label)
         .accessibilityLabel(place.label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -380,10 +575,10 @@ struct ColumnResizeHandle: View {
                 .frame(width: 3, height: 36)
                 .allowsHitTesting(false)
         }
-        .frame(width: 7)
+        .frame(width: 9)
         .frame(maxHeight: .infinity)
         .contentShape(.rect)
-        .background { ColumnResizeCursorArea() }
+        .columnResizePointer()
         .onHover { hovered = $0 }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
@@ -414,6 +609,125 @@ struct ColumnResizeHandle: View {
         .accessibilityAdjustableAction { direction in
             let step: Double = direction == .increment ? 20 : -20
             width = min(range.upperBound, max(range.lowerBound, width + step))
+        }
+    }
+}
+
+/// The widths a column edge is being dragged to, outside the root view.
+///
+/// A width held in the root view's state rebuilt every screen the window
+/// shows on each pointer event, which is what made the edges feel heavy. Here
+/// only the small leaves that read a width (the column frame, the chrome
+/// surface, the handle itself) update while the pointer moves, and the stored
+/// preference is written once, when the drag ends.
+@Observable final class ShellColumnDrag {
+    var sidebar: Double?
+    var inspector: Double?
+
+    func sidebarBinding() -> Binding<Double?> {
+        Binding(get: { self.sidebar }, set: { self.sidebar = $0 })
+    }
+
+    func inspectorBinding() -> Binding<Double?> {
+        Binding(get: { self.inspector }, set: { self.inspector = $0 })
+    }
+}
+
+/// Frames a column at its live width while dragging, its stored width
+/// otherwise. Reading the live width here keeps the update in this leaf.
+struct LiveColumnWidth: ViewModifier {
+    enum Column { case sidebar, inspector }
+    let drag: ShellColumnDrag
+    let column: Column
+    let stored: Double
+
+    func body(content: Content) -> some View {
+        let live = column == .sidebar ? drag.sidebar : drag.inspector
+        // The column's edge follows the pointer exactly. Its rows are laid
+        // out in steps (see `SteppedWidthLayout`) and clipped to the edge.
+        SteppedWidthLayout(step: live == nil ? 1 : ShellMetrics.dragLayoutStep) { content }
+            .frame(width: CGFloat(live ?? stored))
+            .clipShape(DragClip(active: live != nil))
+            .transaction { if live != nil { $0.animation = nil; $0.disablesAnimations = true } }
+    }
+}
+
+/// Clips to the column only while it is dragged. A clip added and removed
+/// would change the column's identity and reset its scroll position, so
+/// at rest this is a rectangle far larger than anything it holds, which
+/// leaves hover cards and focus rings that reach past the edge alone.
+private struct DragClip: Shape {
+    var active: Bool
+    func path(in rect: CGRect) -> Path {
+        Path(active ? rect : rect.insetBy(dx: -4000, dy: -4000))
+    }
+}
+
+/// The detail beside a sidebar being dragged, laid out in steps.
+///
+/// Re-measuring a chat transcript or Home's cards for every pointer event is
+/// what made the sidebar edge trail the pointer. While a drag runs, this
+/// only re-measures each `dragLayoutStep` points and moves the laid out
+/// content in between, which costs a placement and nothing else. The extra
+/// width hangs off the window's trailing edge, so nothing ever shows a gap.
+struct LiveSteppedDetail<Content: View>: View {
+    let drag: ShellColumnDrag
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        SteppedWidthLayout(step: drag.sidebar == nil ? 1 : ShellMetrics.dragLayoutStep) { content }
+    }
+}
+
+/// Proposes its child a width rounded up to a whole step, places it at the
+/// leading edge, and reports the width it was offered. A child asked the
+/// same size again reuses its last layout, so between steps a resize is a
+/// move. Rounding up, never down, means the child always covers the space.
+struct SteppedWidthLayout: Layout {
+    var step: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let size = child.sizeThatFits(childProposal(proposal))
+        return CGSize(width: proposal.width ?? size.width, height: proposal.height ?? size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let offered = ProposedViewSize(width: bounds.width, height: bounds.height)
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: childProposal(offered))
+    }
+
+    private func childProposal(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        guard step > 1, let width = proposal.width, width.isFinite else { return proposal }
+        return ProposedViewSize(width: (width / step).rounded(.up) * step, height: proposal.height)
+    }
+}
+
+/// The detail and docked inspector split, reading the inspector's live width
+/// in this leaf rather than in the root view.
+struct LiveDetailColumn<Content: View>: View {
+    let drag: ShellColumnDrag
+    let minimumDetail: CGFloat
+    let storedInspector: Double?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let width = storedInspector.map { CGFloat(drag.inspector ?? $0) }
+        DesktopDetailLayout(minimumDetail: minimumDetail, inspectorWidth: width) { content }
+            .transaction { if drag.inspector != nil { $0.animation = nil; $0.disablesAnimations = true } }
+    }
+}
+
+extension View {
+    /// The system's column resize pointer over a divider. SwiftUI's own
+    /// pointer style wins over the hosting view's arrow, where a cursor rect
+    /// alone was overridden and never showed.
+    @ViewBuilder
+    func columnResizePointer(isActive: Bool = true) -> some View {
+        if #available(macOS 15, *) {
+            self.pointerStyle(isActive ? .columnResize : nil)
+        } else {
+            self.background { ColumnResizeCursorArea(isActive: isActive) }
         }
     }
 }
@@ -460,8 +774,8 @@ struct ProjectHeader: View {
     private static let primary = 5
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
-            title
+        HStack(spacing: 6) {
+            title.layoutPriority(1)
             if let branch {
                 branch
             }
@@ -474,10 +788,20 @@ struct ProjectHeader: View {
                 if let section = WorkspaceSection(rawValue: id) { select(section) }
             }
             .equatable()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var title: some View {
+        ViewThatFits(in: .horizontal) {
+            titleLabel.frame(maxWidth: 216).fixedSize(horizontal: true, vertical: false)
+            titleLabel.frame(maxWidth: 116).fixedSize(horizontal: true, vertical: false)
+            titleLabel
+        }
+        .help(folder.isRemote ? "\(folder.machineLabel ?? L10n.text("apple.shellchrome.remote_machine.d9dd1af3")) · \(folder.path)" : folder.path)
+    }
+
+    private var titleLabel: some View {
         HStack(spacing: 6) {
             Image(systemName: folder.isRemote ? "network" : "folder.fill")
                 .font(Theme.fixed(11, weight: .semibold))
@@ -487,9 +811,6 @@ struct ProjectHeader: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .frame(maxWidth: 160, alignment: .leading)
-        .fixedSize(horizontal: true, vertical: false)
-        .help(folder.isRemote ? "\(folder.machineLabel ?? L10n.text("apple.shellchrome.remote_machine.d9dd1af3")) · \(folder.path)" : folder.path)
     }
 
     private var tabs: [ChromeTab] {
@@ -537,8 +858,8 @@ struct ChromeTabStrip: View, Equatable {
             ViewThatFits(in: .horizontal) {
                 strip(counts: true) { _, _ in true }
                 strip(counts: false) { _, _ in true }
-                strip(counts: false) { index, isSelected in isSelected || index < primary }
-                compactStrip
+                primaryStrip(limit: primary)
+                primaryStrip(limit: 2)
                 sectionMenu(tabs)
             }
         }
@@ -558,13 +879,13 @@ struct ChromeTabStrip: View, Equatable {
     /// Keep the two main destinations named before falling back to one
     /// native menu. A row of every icon still has a minimum width and can
     /// otherwise force the entire document beyond the window's trailing edge.
-    private var compactStrip: some View {
+    private func primaryStrip(limit: Int) -> some View {
         HStack(spacing: 2) {
-            ForEach(Array(tabs.prefix(2))) { tab in
+            ForEach(Array(tabs.prefix(limit))) { tab in
                 ChromeTabButton(tab: tab, isSelected: tab.id == selected,
                                 showsLabel: true, showsCount: false) { select(tab.id) }
             }
-            if tabs.count > 2 { sectionMenu(Array(tabs.dropFirst(2))) }
+            if tabs.count > limit { sectionMenu(Array(tabs.dropFirst(limit))) }
         }
         .fixedSize()
     }
@@ -589,7 +910,7 @@ struct ChromeTabStrip: View, Equatable {
         .padding(.horizontal, 7)
         .frame(height: 26)
         .background(Capsule().fill(current == nil ? Color.clear : Theme.rowSelected))
-        .frame(minHeight: 44)
+        .frame(minHeight: ToolbarIconButton.diameter)
         .contentShape(Rectangle())
         .help(L10n.text("apple.shellchrome.switch_section.936d958d"))
         .accessibilityLabel(current.map { L10n.text("apple.shellchrome.0_switch_section.dac85de8", "\($0.label)") } ?? L10n.text("apple.shellchrome.more_sections.a8e35e36"))
@@ -620,6 +941,7 @@ struct ChromeTabButton: View {
     let action: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -640,14 +962,25 @@ struct ChromeTabButton: View {
             .foregroundStyle(isSelected ? Theme.accent : (isHovering ? Theme.controlGlyphHover : Theme.controlGlyph))
             .padding(.horizontal, showsLabel ? 9 : 7)
             .frame(height: 26)
-            .background(
-                Capsule().fill(isSelected ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.7) : .clear))
-            )
-            .frame(minHeight: 44)
+            .background {
+                // Hover grows in under the pointer. The selected seat grows
+                // out of the tab it lands on while the old one shrinks away.
+                ZStack {
+                    Capsule().fill(Theme.rowHighlight.opacity(0.7))
+                        .opacity(isHovering && !isSelected ? 1 : 0)
+                        .scaleEffect(isHovering && !isSelected ? 1 : 0.85)
+                    Capsule().fill(Theme.rowSelected)
+                        .opacity(isSelected ? 1 : 0)
+                        .scaleEffect(isSelected ? 1 : 0.7)
+                }
+            }
+            .frame(minHeight: ToolbarIconButton.diameter)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ControlFeedbackStyle(highlights: false, pressScale: 0.95))
         .onHover { isHovering = $0 }
+        .animation(Motion.unless(reduceMotion, Motion.morph), value: isHovering)
+        .animation(Motion.unless(reduceMotion, Motion.morph), value: isSelected)
         .help(tab.count.map { "\(tab.label), \($0)" } ?? tab.label)
         .accessibilityLabel(tab.count.map { "\(tab.label), \($0)" } ?? tab.label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

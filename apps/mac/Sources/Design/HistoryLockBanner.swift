@@ -70,7 +70,7 @@ struct HistoryLockBanner: View {
             }
             .font(Theme.font(12, weight: .semibold))
             .foregroundStyle(Theme.accent)
-            .buttonStyle(.plain)
+            .buttonStyle(QuietLinkStyle())
             #endif
         }
         .padding(.horizontal, 12)

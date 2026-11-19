@@ -1267,7 +1267,7 @@ struct SSHLiveTerminalScreen: View {
                         )
                         .foregroundStyle(other.id == session.id ? Color.primary : Color.secondary)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietLinkStyle())
                 }
                 if let onNewSession {
                     Button(L10n.text("apple.sshliveterminal.new_terminal.fe544556"), .create, action: onNewSession)

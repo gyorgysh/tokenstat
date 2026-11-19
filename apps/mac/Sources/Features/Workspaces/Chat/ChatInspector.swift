@@ -77,7 +77,7 @@ struct ChatInspector: View {
             .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
         .sheet(isPresented: $showingPersonas) {
             PersonaEditor(model: model, onClose: { showingPersonas = false })
         }
@@ -234,7 +234,7 @@ struct ChatInspector: View {
                 .foregroundStyle(Theme.accent)
             Button(L10n.text("common.remove"), .dismiss) { remove() }
                 .disabled(model.savedCopy != nil || writingAllowlist)
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.88))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .labelStyle(.iconOnly)

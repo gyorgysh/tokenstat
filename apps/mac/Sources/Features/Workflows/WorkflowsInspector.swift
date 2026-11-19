@@ -45,7 +45,7 @@ struct WorkflowsInspector: View {
             .background(Theme.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background)
+        .desktopPaneBackground()
         .sheet(item: $running) { graph in
             RunWorkflowSheet(model: model, graph: graph, folders: folders)
         }

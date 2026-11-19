@@ -47,9 +47,10 @@ struct ChatInstructionsCard: View {
                 }
                 .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
+                .padding(.vertical, 3)
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 6))
             .accessibilityLabel(showingAdded ? L10n.text("apple.chatinstructionscard.hide_what_tokenstat_adds.fa10e5bb") : L10n.text("apple.chatinstructionscard.show_what_tokenstat_adds.8288a2b7"))
 
             if showingAdded {

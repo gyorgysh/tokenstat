@@ -233,7 +233,7 @@ private struct BranchPickerContent: View {
                         onWorktrees()
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(QuietLinkStyle())
                 .foregroundStyle(Theme.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Space.m)
@@ -275,7 +275,7 @@ private struct BranchPickerContent: View {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlFeedbackStyle(pressScale: 0.9))
                 .accessibilityLabel(L10n.text("apple.branchpicker.clear_branch_filter.91702c83"))
             }
         }
@@ -331,7 +331,7 @@ private struct BranchPickerContent: View {
                 outcome = nil
                 isCreating = true
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietLinkStyle())
             .foregroundStyle(Theme.accent)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Space.m)

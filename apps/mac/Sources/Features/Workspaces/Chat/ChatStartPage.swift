@@ -11,7 +11,6 @@ struct ChatStartPage: View {
     @Bindable var draft: ChatStartDraft
     let repositories: [WorkspaceFolder]
     var isFullScreen = false
-    var titlebarDragHeight: CGFloat = 0
     var hostPicker: AnyView? = nil
     var allowsSend = true
     /// A mobile New Chat with known computers keeps the composer visible while
@@ -142,13 +141,6 @@ struct ChatStartPage: View {
         #if os(macOS)
         .onReceive(NotificationCenter.default.publisher(for: ChatDragSession.ended)) { _ in
             dropTargeted = false; composerDropTargeted = false
-        }
-        .overlay(alignment: .top) {
-            if !isFullScreen && titlebarDragHeight > 0 {
-                TitlebarDragArea()
-                    .frame(height: titlebarDragHeight)
-                    .accessibilityHidden(true)
-            }
         }
         #endif
         .environment(\.chatAgentPickerFocus, { focused in

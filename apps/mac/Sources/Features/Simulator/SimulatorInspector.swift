@@ -105,8 +105,7 @@ private struct SimulatorInspectorContent: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 2) {
             Menu {
                 ForEach(session.orderedDevices) { device in
                     Button {
@@ -119,21 +118,31 @@ private struct SimulatorInspectorContent: View {
                     }
                 }
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: session.selected?.isTablet == true ? "ipad" : "iphone").foregroundStyle(Theme.accent)
-                    Text(session.selected?.name ?? L10n.text("apple.simulator.choose_device")).font(Theme.font(13, weight: .semibold)).lineLimit(1)
-                    Image(systemName: "chevron.down").font(Theme.font(10)).foregroundStyle(Theme.controlGlyph)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }.menuStyle(.borderlessButton).disabled(session.busy || session.devices.isEmpty)
-            Text(session.selected?.runtime ?? L10n.text("apple.simulator.ios_subtitle"))
-                .font(Theme.font(11)).foregroundStyle(Theme.controlGlyph).padding(.leading, 24)
-            }.frame(maxWidth: .infinity, alignment: .leading)
+                Label(session.selected?.name ?? L10n.text("apple.simulator.choose_device"),
+                      systemImage: session.selected?.isTablet == true ? "ipad" : "iphone")
+                    .font(Theme.font(13, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .menuStyle(.borderlessButton)
+            .disabled(session.busy || session.devices.isEmpty)
+            .layoutPriority(1)
+            if let runtime = session.selected?.runtime {
+                Text(runtime)
+                    .font(Theme.font(11))
+                    .foregroundStyle(Theme.controlGlyph)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
             ToolbarIconButton(systemImage: ActionIcon.refresh.symbol, help: L10n.text("apple.simulator.refresh")) { Task { await session.refresh(force: true) } }
             ToolbarIconButton(systemImage: ActionIcon.settings.symbol, help: L10n.text("apple.simulator.preferences")) { settings.toggle() }
                 .popover(isPresented: $settings) {
                     ScrollView { preferences.padding(18) }.frame(width: 350).frame(maxHeight: 640)
                 }
-        }.padding(12).background(Theme.sidebar).overlay(alignment: .bottom) { ThemeRule() }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 36)
+        .background(Theme.sidebar)
+        .overlay(alignment: .bottom) { ThemeRule() }
     }
 
     private var preferences: some View {
@@ -206,11 +215,13 @@ private struct SimulatorDeviceStage: View {
         GeometryReader { geometry in
             let pixels = session.hasFrame ? session.pixels : session.previewPixels
             let aspect = pixels.width / max(1, pixels.height)
-            let available = CGSize(width: max(100, geometry.size.width - 52), height: max(100, geometry.size.height - 48))
+            let inset: CGFloat = 14
+            let available = CGSize(width: max(1, geometry.size.width - inset * 2),
+                                   height: max(1, geometry.size.height - inset * 2))
             let height = min(available.height, available.width / aspect) * session.zoom
             let width = height * aspect
             ZStack {
-                RadialGradient(colors: [Theme.accentSoft.opacity(0.65), Theme.background], center: .center, startRadius: 20, endRadius: max(200, geometry.size.height * 0.65))
+                Theme.background
                 if session.perspective {
                     SimulatorDeviceModel(session: session, visible: isActive)
                     VStack {
@@ -221,11 +232,12 @@ private struct SimulatorDeviceStage: View {
                             .padding(16)
                     }.allowsHitTesting(false)
                 } else {
-                ScrollView([.horizontal, .vertical]) {
-                    VStack(spacing: 14) {
-                        device(width: width, height: height).padding(18)
-                    }.frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
-                }.scrollIndicators(.hidden)
+                    ScrollView([.horizontal, .vertical]) {
+                        device(width: width, height: height)
+                            .padding(inset)
+                            .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
+                    }
+                    .scrollIndicators(.hidden)
                 }
             }
         }
@@ -238,7 +250,7 @@ private struct SimulatorDeviceStage: View {
             RoundedRectangle(cornerRadius: radius + 8)
                 .fill(LinearGradient(colors: [Theme.controlGlyph.opacity(0.6), Theme.border, Theme.controlGlyph.opacity(0.35)], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .padding(-7)
-                .shadow(color: Theme.controlGlyph.opacity(0.22), radius: 16, y: 12)
+                .shadow(color: Theme.shadow(0.24), radius: 8, y: 4)
             RoundedRectangle(cornerRadius: radius + 4).fill(.black).padding(-4)
             if session.attachedID != nil {
                 SimulatorScreen(session: session, interactive: isActive,
@@ -280,51 +292,72 @@ private struct SimulatorControls: View {
             if let message = session.message {
                 Text(message).font(Theme.font(11)).foregroundStyle(Theme.controlGlyph).lineLimit(2)
             }
-            HStack(spacing: 4) {
-                ToolbarIconButton(systemImage: ActionIcon.home.symbol, help: L10n.text("apple.simulator.home")) { session.button(0) }
-                ToolbarIconButton(systemImage: "lock", help: L10n.text("apple.simulator.lock")) { session.button(1) }
-                Menu {
-                    Button(L10n.text("apple.simulator.portrait"), .layout) { session.rotate(1) }
-                    Button(L10n.text("apple.simulator.landscape_left"), .layout) { session.rotate(3) }
-                    Button(L10n.text("apple.simulator.landscape_right"), .layout) { session.rotate(4) }
-                    Button(L10n.text("apple.simulator.upside_down"), .layout) { session.rotate(2) }
-                } label: { Image(systemName: "rotate.right").frame(width: 28, height: 28) }
-                    .menuStyle(.borderlessButton).fixedSize().help(L10n.text("apple.simulator.rotate"))
-                    .accessibilityLabel(L10n.text("apple.simulator.rotate"))
-                ToolbarIconButton(systemImage: "camera", help: L10n.text("apple.simulator.screenshot")) { session.screenshot() }
-                Menu {
-                    if session.attached?.platform == .ios, session.attached?.isFoldable == true {
-                        Button(L10n.text("apple.simulator.fold_open"), .layout) { session.fold(180) }
-                        Button(L10n.text("apple.simulator.fold_half"), .layout) { session.fold(90) }
-                        Button(L10n.text("apple.simulator.fold_closed"), .layout) { session.fold(0) }
-                    }
-                    Button(L10n.text("apple.simulator.light"), .theme) { session.command(["ui", "{device}", "appearance", "light"]) }
-                    Button(L10n.text("apple.simulator.dark"), .theme) { session.command(["ui", "{device}", "appearance", "dark"]) }
-                    Button(L10n.text("apple.simulator.paste"), .copy) {
-                        if let text = NSPasteboard.general.string(forType: .string) { session.command(["pbcopy", "{device}"], input: Data(text.utf8)) }
-                    }
-                    Button(L10n.text("apple.simulator.settings_app"), .settings) { session.command(["launch", "{device}", "com.apple.Preferences"]) }
-                    Button(session.attached?.platform == .android ? L10n.text("apple.simulator.open_android_studio") : L10n.text("apple.simulator.open_xcode"), .external) { session.openExternally() }
-                    Button(L10n.text("apple.simulator.detach"), .disconnect) { session.detach() }
-                    Button(L10n.text("apple.simulator.shutdown"), .stop) { confirmsShutdown = true }
-                } label: { Image(systemName: ActionIcon.more.symbol).frame(width: 28, height: 28) }
-                    .menuStyle(.borderlessButton).fixedSize().help(L10n.text("apple.simulator.more"))
-                    .accessibilityLabel(L10n.text("apple.simulator.more"))
-            }.disabled(session.attachedID == nil || session.busy || !session.hasFrame)
-            HStack(spacing: 4) {
-                ToolbarIconButton(systemImage: "minus.magnifyingglass", help: L10n.text("apple.simulator.zoom_out")) { session.zoom = max(0.5, session.zoom - 0.25) }
-                Button(L10n.text("apple.simulator.fit"), .preview) { session.zoom = 1; session.perspective = false }
-                    .buttonStyle(.plain).font(Theme.font(11))
-                ToolbarIconButton(systemImage: "plus.magnifyingglass", help: L10n.text("apple.simulator.zoom_in")) { session.zoom = min(3, session.zoom + 0.25) }
-                Spacer(minLength: 0)
-                ToolbarIconButton(systemImage: "cube", help: L10n.text("apple.simulator.perspective"), isAccent: session.perspective) {
-                    session.perspective.toggle()
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 0) {
+                    deviceActions.fixedSize()
+                    Spacer(minLength: 4)
+                    viewActions.fixedSize()
                 }
-                ToolbarIconButton(systemImage: isExpanded ? ActionIcon.dismiss.symbol : ActionIcon.enterFullScreen.symbol, help: isExpanded ? L10n.text("common.close") : L10n.text("apple.simulator.expand")) { onExpand() }
+                VStack(spacing: 0) {
+                    deviceActions
+                    viewActions
+                }
             }
-        }.padding(10).background(Theme.sidebar).overlay(alignment: .top) { ThemeRule() }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Theme.sidebar)
+        .overlay(alignment: .top) { ThemeRule() }
         .confirmationDialog(L10n.text("apple.simulator.shutdown_confirm"), isPresented: $confirmsShutdown) {
             Button(L10n.text("apple.simulator.shutdown"), role: .destructive) { session.shutdown() }
+        }
+    }
+
+    private var deviceActions: some View {
+        HStack(spacing: 0) {
+            ToolbarIconButton(systemImage: ActionIcon.home.symbol, help: L10n.text("apple.simulator.home")) { session.button(0) }
+            ToolbarIconButton(systemImage: "lock", help: L10n.text("apple.simulator.lock")) { session.button(1) }
+            ToolbarMenuButton(systemImage: "rotate.right", help: L10n.text("apple.simulator.rotate")) {
+                Button(L10n.text("apple.simulator.portrait"), .layout) { session.rotate(1) }
+                Button(L10n.text("apple.simulator.landscape_left"), .layout) { session.rotate(3) }
+                Button(L10n.text("apple.simulator.landscape_right"), .layout) { session.rotate(4) }
+                Button(L10n.text("apple.simulator.upside_down"), .layout) { session.rotate(2) }
+            }
+            ToolbarIconButton(systemImage: "camera", help: L10n.text("apple.simulator.screenshot")) { session.screenshot() }
+            ToolbarMenuButton(help: L10n.text("apple.simulator.more")) {
+                if session.attached?.platform == .ios, session.attached?.isFoldable == true {
+                    Button(L10n.text("apple.simulator.fold_open"), .layout) { session.fold(180) }
+                    Button(L10n.text("apple.simulator.fold_half"), .layout) { session.fold(90) }
+                    Button(L10n.text("apple.simulator.fold_closed"), .layout) { session.fold(0) }
+                }
+                Button(L10n.text("apple.simulator.light"), .theme) { session.command(["ui", "{device}", "appearance", "light"]) }
+                Button(L10n.text("apple.simulator.dark"), .theme) { session.command(["ui", "{device}", "appearance", "dark"]) }
+                Button(L10n.text("apple.simulator.paste"), .copy) {
+                    if let text = NSPasteboard.general.string(forType: .string) { session.command(["pbcopy", "{device}"], input: Data(text.utf8)) }
+                }
+                Button(L10n.text("apple.simulator.settings_app"), .settings) { session.command(["launch", "{device}", "com.apple.Preferences"]) }
+                Button(session.attached?.platform == .android ? L10n.text("apple.simulator.open_android_studio") : L10n.text("apple.simulator.open_xcode"), .external) { session.openExternally() }
+                Button(L10n.text("apple.simulator.detach"), .disconnect) { session.detach() }
+                Button(L10n.text("apple.simulator.shutdown"), .stop) { confirmsShutdown = true }
+            }
+        }
+        .disabled(session.attachedID == nil || session.busy || !session.hasFrame)
+    }
+
+    private var viewActions: some View {
+        HStack(spacing: 0) {
+            ToolbarIconButton(systemImage: "minus.magnifyingglass", help: L10n.text("apple.simulator.zoom_out")) { session.zoom = max(0.5, session.zoom - 0.25) }
+            // Between the two zoom glyphs, so a glyph rather than a word.
+            ToolbarIconButton(systemImage: "1.magnifyingglass", help: L10n.text("apple.simulator.fit")) {
+                session.zoom = 1
+                session.perspective = false
+            }
+            ToolbarIconButton(systemImage: "plus.magnifyingglass", help: L10n.text("apple.simulator.zoom_in")) { session.zoom = min(3, session.zoom + 0.25) }
+            ToolbarIconButton(systemImage: "cube", help: L10n.text("apple.simulator.perspective"), isAccent: session.perspective) {
+                session.perspective.toggle()
+            }
+            ToolbarIconButton(systemImage: isExpanded ? ActionIcon.dismiss.symbol : ActionIcon.enterFullScreen.symbol, help: isExpanded ? L10n.text("common.close") : L10n.text("apple.simulator.expand")) { onExpand() }
         }
     }
 }
