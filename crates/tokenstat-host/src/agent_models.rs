@@ -88,12 +88,12 @@ pub(crate) fn fallback_for(id: &str) -> &'static [&'static str] {
             "gpt-5-mini",
             "glm-5.2-high",
         ],
+        // agy reports the account-specific catalog. Offer the common Flash
+        // tier while its probe is pending and let the live list replace it.
         "agy" => &[
-            "gemini-3.6-flash-high",
-            "gemini-3.5-flash-high",
-            "gemini-3.1-pro-high",
-            "claude-sonnet-4-6",
-            "gpt-oss-120b-medium",
+            "gemini-3.8-flash-medium",
+            "gemini-3.8-flash-low",
+            "gemini-3.8-flash-high",
         ],
         _ => &[],
     }
@@ -623,9 +623,8 @@ pub(crate) fn parse_cursor_models(out: &str) -> Vec<String> {
         .collect()
 }
 
-/// Current `agy models` mashes the id into the label (`gemini-3.6-flash-highGemini 3.6 Flash (High)`).
-/// Some builds print `id<TAB>label`. Older builds printed the label alone,
-/// and that label is what `--model` accepted.
+/// Current `agy models` prints `id<TAB>label`. Older builds mashed the ID
+/// into the label or printed the accepted model name on its own.
 pub(crate) fn parse_agy_models(out: &str) -> Vec<String> {
     let mut models = Vec::new();
     for line in out.lines() {
@@ -995,11 +994,23 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
     }
 
     #[test]
-    fn agy_list_splits_a_tab_separated_id() {
-        let out = "gemini-3.6-flash-high\tGemini 3.6 Flash (High)\n";
+    fn agy_list_preserves_account_models_and_effort_variants() {
+        let out = "\
+gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)
+gemini-4-neon-xhigh\tGemini 4 Neon (Extra)
+gemini-4-argon-high\tGemini 4 Argon (High)
+gemini-4-carbon-high\tGemini 4 Carbon (High)
+gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)
+";
         assert_eq!(
             parse_agy_models(out),
-            vec!["gemini-3.6-flash-high".to_string()]
+            [
+                "gemini-3.8-flash-medium",
+                "gemini-4-neon-xhigh",
+                "gemini-4-argon-high",
+                "gemini-4-carbon-high",
+                "gemini-4-hydrogen-high",
+            ]
         );
         assert_eq!(
             sanitize_agy_model("gemini-3.6-flash-high\tGemini 3.6 Flash (High)").as_deref(),

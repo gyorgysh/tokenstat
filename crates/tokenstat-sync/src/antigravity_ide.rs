@@ -78,64 +78,19 @@ pub fn limits() -> ProviderLimits {
         );
     }
 
-    let mut grouped: HashMap<(String, String), (f64, Option<i64>)> = HashMap::new();
+    let observed_at_ms = now_ms();
+    let mut grouped = QuotaGroups::new();
     let mut plan = None;
     for connection in connections {
         let Ok(response) = rpc_request(&connection, "GetUserStatus", &serde_json::json!({})) else {
             continue;
         };
         let status = response.get("userStatus").unwrap_or(&response);
-        plan = plan.or_else(|| {
-            status
-                .pointer("/planStatus/planInfo/planName")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
-        let Some(models) = status
-            .pointer("/cascadeModelConfigData/clientModelConfigs")
-            .and_then(Value::as_array)
-        else {
-            continue;
-        };
-        for model in models {
-            let label = model
-                .get("label")
-                .and_then(Value::as_str)
-                .or_else(|| model.pointer("/modelOrAlias/model").and_then(Value::as_str))
-                .unwrap_or("model");
-            let Some(quota) = model.get("quotaInfo") else {
-                continue;
-            };
-            let Some(remaining) = quota.get("remainingFraction").and_then(Value::as_f64) else {
-                continue;
-            };
-            if !remaining.is_finite() || !(0.0..=1.0).contains(&remaining) {
-                continue;
-            }
-            let percent = (1.0 - remaining) * 100.0;
-            let group = if label.to_ascii_lowercase().contains("gemini") {
-                "Gemini models"
-            } else {
-                "Claude and GPT models"
-            };
-            let resets_at_ms = quota
-                .get("resetTime")
-                .and_then(Value::as_str)
-                .and_then(|raw| raw.parse::<jiff::Timestamp>().ok())
-                .map(|timestamp| timestamp.as_millisecond());
-            let window = if resets_at_ms.is_some_and(|reset| reset - now_ms() > 10 * 60 * 60 * 1000)
-            {
-                "weekly"
-            } else {
-                "5-hour"
-            };
-            let entry = grouped
-                .entry((group.to_string(), window.to_string()))
-                .or_insert((0.0, resets_at_ms));
-            if percent > entry.0 {
-                *entry = (percent, resets_at_ms);
-            }
-        }
+        let plan_name = status
+            .pointer("/planStatus/planInfo/planName")
+            .and_then(Value::as_str);
+        plan = plan.or_else(|| plan_name.map(str::to_string));
+        collect_quota_windows(status, plan_name, observed_at_ms, &mut grouped);
     }
     let mut windows: Vec<UsageWindow> = grouped
         .into_iter()
@@ -149,7 +104,8 @@ pub fn limits() -> ProviderLimits {
         .collect();
     windows.sort_by_key(|window| {
         (
-            !window.label.starts_with("Gemini"),
+            !window.label.starts_with("Gemini models"),
+            !window.label.starts_with("Claude and GPT models"),
             !window.label.ends_with("weekly"),
         )
     });
@@ -163,9 +119,82 @@ pub fn limits() -> ProviderLimits {
         source: "antigravity".to_string(),
         plan,
         windows,
-        observed_at_ms: now_ms(),
+        observed_at_ms,
         note: None,
         stale: false,
+    }
+}
+
+type QuotaGroups = HashMap<(&'static str, &'static str), (f64, Option<i64>)>;
+
+fn collect_quota_windows(
+    status: &Value,
+    plan: Option<&str>,
+    observed_at_ms: i64,
+    grouped: &mut QuotaGroups,
+) {
+    let Some(models) = status
+        .pointer("/cascadeModelConfigData/clientModelConfigs")
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    let separate_argon = plan.is_some_and(|name| {
+        matches!(
+            name.trim().to_ascii_lowercase().as_str(),
+            "pro" | "google ai pro" | "antigravity pro"
+        )
+    });
+    for model in models {
+        if model.get("disabled").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let Some(quota) = model.get("quotaInfo") else {
+            continue;
+        };
+        let Some(remaining) = quota
+            .get("remainingFraction")
+            .and_then(Value::as_f64)
+            .filter(|value| (0.0..=1.0).contains(value))
+        else {
+            continue;
+        };
+        let label = model
+            .get("label")
+            .and_then(Value::as_str)
+            .or_else(|| model.pointer("/modelOrAlias/model").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let argon = separate_argon
+            && (label.starts_with("gemini 4 argon") || label.starts_with("gemini-4-argon"));
+        let group = if argon {
+            "Gemini 4 Argon"
+        } else if label.contains("gemini") || label.starts_with("orchestrator") {
+            "Gemini models"
+        } else {
+            "Claude and GPT models"
+        };
+        let resets_at_ms = quota
+            .get("resetTime")
+            .and_then(Value::as_str)
+            .and_then(|raw| raw.parse::<jiff::Timestamp>().ok())
+            .map(|timestamp| timestamp.as_millisecond());
+        // The Pro Argon bucket is weekly even in its final hours. The
+        // legacy IDE reading omits period metadata for the shared buckets.
+        let window = if argon
+            || resets_at_ms.is_some_and(|reset| reset - observed_at_ms > 10 * 60 * 60 * 1000)
+        {
+            "weekly"
+        } else {
+            "5-hour"
+        };
+        let percent = (1.0 - remaining) * 100.0;
+        let entry = grouped
+            .entry((group, window))
+            .or_insert((percent, resets_at_ms));
+        if percent > entry.0 {
+            *entry = (percent, resets_at_ms);
+        }
     }
 }
 
@@ -1054,6 +1083,38 @@ fn is_not_found(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_shared_groups_and_separate_pro_argon_when_present() {
+        let now = "2026-11-19T12:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
+        let status = serde_json::json!({
+            "cascadeModelConfigData": { "clientModelConfigs": [
+                {"label": "Gemini 4 Neon", "quotaInfo": {"remainingFraction": 0.75, "resetTime": "2026-11-22T12:00:00Z"}},
+                {"label": "Orchestrator (Neon)", "quotaInfo": {"remainingFraction": 0.5, "resetTime": "2026-11-19T16:00:00Z"}},
+                {"label": "Gemini 4 Hydrogen", "quotaInfo": {"remainingFraction": 0.75, "resetTime": "2026-11-19T16:00:00Z"}},
+                {"label": "Claude Opus 5.5", "quotaInfo": {"remainingFraction": 1.0, "resetTime": "2026-11-22T12:00:00Z"}},
+                {"label": "GPT-OSS 120B", "quotaInfo": {"remainingFraction": 0.75, "resetTime": "2026-11-19T16:00:00Z"}},
+                {"label": "Gemini 4 Argon", "quotaInfo": {"remainingFraction": 0.25, "resetTime": "2026-11-19T16:00:00Z"}},
+                {"label": "Gemini 4 Carbon", "disabled": true, "quotaInfo": {"remainingFraction": 0.0}}
+            ]}
+        });
+        let mut pro = QuotaGroups::new();
+        collect_quota_windows(&status, Some("Google AI Pro"), now, &mut pro);
+        assert_eq!(pro.len(), 5);
+        assert_eq!(pro[&("Gemini models", "weekly")].0, 25.0);
+        assert_eq!(pro[&("Gemini models", "5-hour")].0, 50.0);
+        assert_eq!(pro[&("Claude and GPT models", "weekly")].0, 0.0);
+        assert_eq!(pro[&("Claude and GPT models", "5-hour")].0, 25.0);
+        assert_eq!(pro[&("Gemini 4 Argon", "weekly")].0, 75.0);
+
+        let mut ultra = QuotaGroups::new();
+        collect_quota_windows(&status, Some("Google AI Ultra"), now, &mut ultra);
+        assert_eq!(ultra.len(), 4);
+        assert_eq!(ultra[&("Gemini models", "5-hour")].0, 75.0);
+    }
 
     #[test]
     fn is_antigravity_process_matches_language_server() {
