@@ -1100,7 +1100,7 @@ final class ChatModel {
                   continuityScope == owner.scope, previewCacheEpoch == epoch,
                   !recentMessages.contains(key),
                   !(folderID == folder && selected?.id == conversation.id) else { return }
-            recentMessages.store(rows, for: key, speculative: true) { String(reflecting: $0).utf8.count }
+            recentMessages.store(rows, for: key, speculative: true) { $0.estimatedBytes }
             DiagnosticsLog.note("chat preview prepared source=hover rows=\(rows.count) held=\(recentMessages.contains(key))")
             Self.warmMarkdown(recentMessages.peek(key))
         } catch { /* Opening still performs its normal fresh read. */ }
@@ -1165,9 +1165,7 @@ final class ChatModel {
                     guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
                           previewCacheEpoch == epoch else { return true }
                     if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
-                    recentMessages.store(rows, for: key, speculative: true) {
-                        String(reflecting: $0).utf8.count
-                    }
+                    recentMessages.store(rows, for: key, speculative: true) { $0.estimatedBytes }
                     DiagnosticsLog.note("chat preview prepared source=workspace rows=\(rows.count) held=\(recentMessages.contains(key))")
                     Self.warmMarkdown(recentMessages.peek(key))
                 } catch {
@@ -1265,7 +1263,7 @@ final class ChatModel {
                     guard self.selected?.id != chat.id,
                           !self.recentMessages.contains(key),
                           self.previewCacheEpoch == epoch else { continue }
-                    self.recentMessages.store(rows, for: key, speculative: true) { String(reflecting: $0).utf8.count }
+                    self.recentMessages.store(rows, for: key, speculative: true) { $0.estimatedBytes }
                     DiagnosticsLog.note("chat preview prepared source=recent rows=\(rows.count) held=\(self.recentMessages.contains(key))")
                     Self.warmMarkdown(self.recentMessages.peek(key))
                 } catch {
@@ -1362,10 +1360,8 @@ final class ChatModel {
         // Preserve every row kind and its identity, including reasoning,
         // failures, tools and edits. No downloaded attachment bytes are held.
         let rows = Array(displayItems.suffix(TranscriptSlice.length))
-        recentMessages.store(rows, for: key) { row in
-            // Include nested tool output and patch strings in the budget.
-            String(reflecting: row).utf8.count
-        }
+        // Nested tool output and patch strings count toward the budget.
+        recentMessages.store(rows, for: key) { $0.estimatedBytes }
     }
 
     private func restoreRecentMessages() {

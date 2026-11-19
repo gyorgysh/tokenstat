@@ -732,31 +732,8 @@ struct ChatView: View {
             // lazy stack skipped measuring the last prompt: those rows were
             // not visible, so they stayed at estimated height until a click
             // forced a real layout.
-            .overlay {
-                if showsSkeleton {
-                    TranscriptSkeleton()
-                        .frame(maxWidth: ReadingRoom.laneWidth)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Theme.background)
-                }
-            }
+            .overlay { OpeningSkeleton(model: model, follow: follow) }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: transcriptReady)
-            .modifier(OpeningCover(
-                isOpening: model.openingConversation,
-                ready: transcriptReady,
-                conversationID: model.selected?.id,
-                opening: $opening
-            ))
-            // Arm the cover late (see `coverArmed`). This restarts on every
-            // toggle of `opening`, so when it flips back the restart takes
-            // the `guard` exit and disarms before the next frame.
-            .task(id: opening) {
-                coverArmed = false
-                guard opening else { return }
-                try? await Task.sleep(for: .milliseconds(150))
-                guard !Task.isCancelled, opening else { return }
-                coverArmed = true
-            }
             .chatScrollMetrics { metrics in
                 guard isActive else { return }
                 #if DEBUG
@@ -1054,28 +1031,6 @@ struct ChatView: View {
     /// the end is under the viewport and steady.
     private var transcriptReady: Bool {
         follow.arrived && !model.openingConversation
-    }
-
-    /// Whether an opening is in progress for the conversation on screen.
-    ///
-    /// The wireframe covers an opening: the fetch, and the frames a lazy stack
-    /// then spends measuring what the fetch delivered. Nothing else. A send, a
-    /// jump and a streaming turn all reset `arrived` too, and an empty
-    /// transcript never reaches it at all (`atEnd` needs a content height),
-    /// so keying the cover on `arrived` alone put scaffolding over the first
-    /// message of a new chat for the length of the settle budget.
-    @State private var opening = false
-
-    /// Whether the wireframe may appear. Armed 150ms into an opening, so
-    /// a fast open settles before the grace runs out and never flashes
-    /// scaffolding at all. Reset on every toggle, so a re-pick starts over.
-    @State private var coverArmed = false
-
-    /// Whether the wireframe is up: an opening is under way, it has
-    /// outlasted the grace period, it has not settled, and no cached
-    /// preview is standing in for it.
-    private var showsSkeleton: Bool {
-        opening && coverArmed && !transcriptReady && model.recentMessagePreview.isEmpty
     }
 
     /// The longest the opening pin holds, in fifty-millisecond frames. It
@@ -1715,3 +1670,69 @@ private struct ConversationPreviewHover: ViewModifier {
     }
 }
 #endif
+
+/// The wireframe over an opening, with the two pieces of state that decide it.
+///
+/// They used to live on the chat pane, so turning each of them on and off
+/// re-ran the whole pane, transcript and toolbar included: four of the eight
+/// pane updates in a chat switch, for a cover that usually never shows
+/// because a cached preview stands in. Here they re-run this view alone.
+private struct OpeningSkeleton: View {
+    let model: ChatModel
+    let follow: TranscriptFollowState
+    /// Whether an opening is in progress for the conversation on screen.
+    ///
+    /// The wireframe covers an opening: the fetch, and the frames a lazy stack
+    /// then spends measuring what the fetch delivered. Nothing else. A send, a
+    /// jump and a streaming turn all reset `arrived` too, and an empty
+    /// transcript never reaches it at all (`atEnd` needs a content height),
+    /// so keying the cover on `arrived` alone put scaffolding over the first
+    /// message of a new chat for the length of the settle budget.
+    @State private var opening = false
+
+    /// Whether the wireframe may appear. Armed 150ms into an opening, so
+    /// a fast open settles before the grace runs out and never flashes
+    /// scaffolding at all. Reset on every toggle, so a re-pick starts over.
+    @State private var coverArmed = false
+
+    /// Whether the wireframe is up: an opening is under way, it has
+    /// outlasted the grace period, it has not settled, and no cached
+    /// preview is standing in for it.
+    private var showsSkeleton: Bool {
+        opening && coverArmed && !transcriptReady && model.recentMessagePreview.isEmpty
+    }
+
+    private var transcriptReady: Bool {
+        follow.arrived && !model.openingConversation
+    }
+
+    var body: some View {
+        ZStack {
+            if showsSkeleton {
+                TranscriptSkeleton()
+                    .frame(maxWidth: ReadingRoom.laneWidth)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.background)
+            }
+        }
+        .allowsHitTesting(showsSkeleton)
+        .modifier(OpeningCover(
+            isOpening: model.openingConversation,
+            ready: transcriptReady,
+            conversationID: model.selected?.id,
+            opening: $opening
+        ))
+        // Arm the cover late (see `coverArmed`). This restarts on every
+        // toggle of `opening`, so when it flips back the restart takes
+        // the `guard` exit and disarms before the next frame. Nothing is
+        // armed while a cached preview is standing in, since the cover
+        // could not show over it anyway.
+        .task(id: opening) {
+            if coverArmed { coverArmed = false }
+            guard opening, model.recentMessagePreview.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, opening, model.recentMessagePreview.isEmpty else { return }
+            coverArmed = true
+        }
+    }
+}

@@ -334,3 +334,51 @@ struct ChatTurnChanges: Equatable, Sendable {
     var added: UInt64 { files.reduce(0) { $0 + $1.added } }
     var removed: UInt64 { files.reduce(0) { $0 + $1.removed } }
 }
+
+extension ChatDisplayItem {
+    /// What the recent-message cache budgets a row at: the strings it holds,
+    /// nested tool output and patches included, plus a fixed cost per row.
+    ///
+    /// `String(reflecting:)` arrived at a similar number by printing the
+    /// whole row, nested types and all. That ran on the main thread for up to
+    /// 150 rows every time a chat was left, and again for every preview a
+    /// folder warmed, and was most of what leaving a long chat cost.
+    var estimatedBytes: Int {
+        let base = 96 + id.utf8.count
+        switch kind {
+        case let .user(text), let .turnSeparator(text), let .thinking(text), let .failed(text):
+            return base + text.utf8.count
+        case let .assistant(text, backend):
+            return base + text.utf8.count + (backend?.utf8.count ?? 0)
+        case let .handoff(to, brief):
+            return base + to.utf8.count + brief.utf8.count
+        case let .tool(tool):
+            // The snippet is the detail split into lines, so the detail
+            // already counts it.
+            return base + tool.callId.utf8.count + tool.verb.utf8.count + tool.target.utf8.count
+                + (tool.detail?.utf8.count ?? 0) + tool.snippet.count * 16
+        case let .edit(edit):
+            return base + edit.path.utf8.count + edit.patch.utf8.count
+        case .attachment:
+            // Metadata only. Downloaded bytes are never held here.
+            return base + 256
+        case let .approval(approval):
+            return base + approval.verb.utf8.count + approval.preview.utf8.count
+                + (approval.shellPrefix?.utf8.count ?? 0)
+        case .usage:
+            return base
+        case let .group(group):
+            return base + group.memberIDs.reduce(0) { $0 + $1.utf8.count + 16 }
+                + group.recentActivity.reduce(0) { $0 + $1.verb.utf8.count + $1.target.utf8.count + 32 }
+        case let .question(question):
+            return base + question.question.utf8.count + question.options.reduce(0) { $0 + $1.utf8.count }
+                + (question.answer?.utf8.count ?? 0)
+        case let .changes(changes):
+            return base + changes.files.reduce(0) { total, file in
+                total + file.path.utf8.count + file.patches.reduce(0) { $0 + $1.utf8.count }
+            }
+        case let .plan(steps):
+            return base + steps.reduce(0) { $0 + $1.text.utf8.count + $1.status.utf8.count }
+        }
+    }
+}
