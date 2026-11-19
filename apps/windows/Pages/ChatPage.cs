@@ -1433,7 +1433,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             Width = new GridLength(1, GridUnitType.Star),
         });
-        var face = new PersonaMark(FaceSeed(), 26, PersonaMood.Failed);
+        var face = new PersonaMark(FaceSeed(), 26, PersonaMood.Failed, settlesAfter: 4);
         face.VerticalAlignment = VerticalAlignment.Top;
         grid.Children.Add(face);
         var text = new TextBlock

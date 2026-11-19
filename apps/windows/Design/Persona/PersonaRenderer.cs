@@ -65,29 +65,22 @@ internal static class PersonaRenderer
         // squash pushes them around inside the creature rather than letting an
         // eye escape it.
         DrawHighlight(canvas, bounds, width, height, outline);
-        double facing = Math.Cos(engine.Yaw);
-        if (facing > 0)
+        // Turning is drawn inside the face now: each feature is placed on the
+        // body as if it were a ball, so a turn or a glance slides it round
+        // and narrows it. Only the roll is left to apply to the whole face.
+        int firstFaceElement = canvas.Count;
+        DrawFace(engine, canvas, width, height, unit, ink, outline);
+        if (Math.Abs(engine.Roll) > 1e-4)
         {
-            int firstFaceElement = canvas.Count;
-            DrawFace(engine, canvas, width, height, unit, ink, outline);
             var origin = body.Centroid;
-            var transform = new TransformGroup();
-            transform.Children.Add(new ScaleTransform
-            {
-                CenterX = origin.X * width, CenterY = origin.Y * height,
-                ScaleX = Math.Max(0.08, facing), ScaleY = 1,
-            });
-            transform.Children.Add(new TranslateTransform { X = Math.Sin(engine.Yaw) * bounds.Width * width * 0.24 });
-            transform.Children.Add(new RotateTransform
+            var transform = new RotateTransform
             {
                 CenterX = origin.X * width, CenterY = origin.Y * height,
                 Angle = engine.Roll * 180 / Math.PI,
-            });
+            };
             for (int i = firstFaceElement; i < canvas.Count; i++)
             {
-                var path = canvas[i];
                 canvas.TransformFace(i, transform);
-                path.Opacity *= Math.Min(1, facing * 4);
             }
         }
         foreach (var mote in engine.Motes)
@@ -206,70 +199,63 @@ internal static class PersonaRenderer
         // thin means round eyes closer together.
         double aspect = Math.Clamp(bounds.Height / Math.Max(bounds.Width, 1e-4), 0.45, 1.7);
 
-        double tilt = Math.Clamp(Math.Atan2(crown.X - centroid.X, Math.Max(centroid.Y - crown.Y, 1e-4)) * 0.25, -0.12, 0.12);
+        // Lean from where the crown sits, plus the head following the eyes.
+        double lean = Math.Clamp(Math.Atan2(crown.X - centroid.X, Math.Max(centroid.Y - crown.Y, 1e-4)) * 0.25, -0.12, 0.12);
+        double tilt = lean + engine.HeadTilt;
 
         double heightPoints = bounds.Height * height;
-        double anchorHeight = heightPoints * (0.10 + face.Lift);
+        // Eyes just above the middle. Low, wide-set features are most of what
+        // reads as young and friendly; high ones read as a forehead.
+        double anchorHeight = heightPoints * (0.05 + face.Lift);
         double originX = centroid.X * width;
         double originY = centroid.Y * height;
-        PPoint Place(double dx, double dy) => new(
-            originX + dx * Math.Cos(tilt) - dy * Math.Sin(tilt),
-            originY + dx * Math.Sin(tilt) + dy * Math.Cos(tilt));
+
+        // The features sit on the body as if it were a ball. Looking to one
+        // side turns that ball a little, so the eyes slide toward the edge,
+        // the far one narrows and the whole face comes round. A turn past the
+        // edge hides a feature behind the body.
+        double sphereX = Math.Max(1, bounds.Width * width * 0.5);
+        double sphereY = Math.Max(1, heightPoints * 0.5);
+        double gazeX = Math.Clamp(face.Gaze.X + engine.Look.X, -1.3, 1.3);
+        double gazeY = Math.Clamp(face.Gaze.Y + engine.Look.Y, -1.3, 1.3);
+        double turn = engine.Yaw + gazeX * 0.30;
+        double nod = gazeY * 0.20;
+        (PPoint Point, double Width, double Height, double Facing) Project(double dx, double dy)
+        {
+            double theta = Math.Asin(Math.Clamp(dx / sphereX, -0.98, 0.98)) + turn;
+            double phi = Math.Asin(Math.Clamp(dy / sphereY, -0.98, 0.98)) + nod;
+            return (new PPoint(sphereX * Math.Sin(theta), sphereY * Math.Sin(phi)),
+                Math.Max(0, Math.Cos(theta)), Math.Max(0.2, Math.Cos(phi)), Math.Cos(theta));
+        }
+        PPoint Place(PPoint offset) => new(
+            originX + offset.X * Math.Cos(tilt) - offset.Y * Math.Sin(tilt),
+            originY + offset.X * Math.Sin(tilt) + offset.Y * Math.Cos(tilt));
+        PPoint OnFace(double dx, double dy) => Place(Project(dx, dy).Point);
 
         int count = traits.EyeCount;
         // Small marks need proportionally bigger features or the face turns
         // into two specks. Three fixed steps, not a curve.
-        double lod = unit < 24 ? 1.35 : unit < 34 ? 1.15 : 1.0;
-        double radius = unit * 0.047 * lod * Math.Clamp(face.EyeScale, 0.8, 1.25);
-        double spread = unit * 0.235 * Math.Clamp(face.Spread, 0.85, 1.15) / Math.Max(Math.Sqrt(aspect), 0.6);
-        double openness = Math.Max(0.02, face.Openness * (1 - engine.Blink * 0.96) * aspect);
+        double lod = unit < 24 ? 1.28 : unit < 34 ? 1.12 : 1.0;
+        double radius = unit * 0.060 * lod * Math.Clamp(face.EyeScale, 0.8, 1.25);
+        double spread = unit * 0.25 * Math.Clamp(face.Spread, 0.85, 1.15) / Math.Max(Math.Sqrt(aspect), 0.6);
+        double tall = Math.Clamp(Math.Sqrt(aspect), 0.75, 1.3);
 
         for (int i = 0; i < count; i++)
         {
             double offset = i - (count - 1) / 2.0;
-            var centre = Place(
-                offset * spread + face.Gaze.X * radius * 0.34,
-                -anchorHeight + face.Gaze.Y * radius * 0.30);
-            // The lower lid takes a bite out of the bottom of the eye.
-            // Concentration reads as a lid: shrinking the whole eye instead
-            // just makes the creature look further away.
-            double lid = radius * 2 * openness * Math.Clamp(face.Squint, 0, 0.8);
-            double ex = centre.X - radius;
-            double ey = centre.Y - radius * openness;
-            double ew = radius * 2;
-            double eh = Math.Max(radius * 0.10, radius * 2 * openness - lid);
-            switch (face.EyeStyle)
+            double side = offset < 0 ? -1 : 1;
+            var spot = Project(offset * spread, -anchorHeight);
+            if (spot.Facing <= 0.02)
             {
-                case PersonaFacePose.Eyes.HappyArc:
-                    DrawArcEye(canvas, ex, ey, ew, eh, unit, ink, false, clip);
-                    break;
-                case PersonaFacePose.Eyes.ContentArc:
-                    DrawArcEye(canvas, ex, ey, ew, eh, unit, ink, true, clip);
-                    break;
-                default:
-                    var eye = new PathGeometry();
-                    switch (traits.Eye)
-                    {
-                        case PersonaTraits.EyeShape.Pixel:
-                            PersonaDraw.RoundedRect(eye, ex, ey, ew, eh, radius * 0.32);
-                            break;
-                        case PersonaTraits.EyeShape.Oval:
-                            PersonaDraw.Ellipse(eye, ex + ew / 2, ey + eh / 2, ew / 2 - radius * 0.16, eh / 2);
-                            break;
-                        default:
-                            PersonaDraw.Ellipse(eye, ex + ew / 2, ey + eh / 2, ew / 2, eh / 2);
-                            break;
-                    }
-                    canvas.Paint(eye, PersonaDraw.Solid(ink), clip: clip);
-                    if (unit >= 28 && openness > 0.35)
-                    {
-                        var glint = new PathGeometry();
-                        PersonaDraw.Ellipse(glint, centre.X - radius * 0.20, centre.Y - radius * 0.26,
-                            radius * 0.22, radius * 0.22);
-                        canvas.Paint(glint, PersonaDraw.Solid(PersonaDraw.White, 0.88), clip: clip, mask: eye);
-                    }
-                    break;
+                continue;
             }
+            var centre = Place(spot.Point);
+            double winked = engine.WinkSide == side ? engine.Wink : 0;
+            DrawEye(
+                canvas, centre, radius, spot.Width, spot.Height * tall, side, face,
+                winked > 0 ? Math.Max(winked, engine.Blink) : engine.Blink,
+                Math.Max(face.Cheer, winked), tilt, unit, ink, traits.Eye,
+                Math.Min(1, spot.Facing * 4), clip);
 
             if (unit >= 40 && Math.Abs(face.Brow) > 0.45)
             {
@@ -277,40 +263,120 @@ internal static class PersonaRenderer
             }
         }
 
-        if (unit >= 26)
-        {
-            DrawBlush(canvas, Place, anchorHeight, radius, spread, unit, Math.Max(0.24, face.Blush), clip);
-        }
-
-        if (unit < 21)
+        double facing = Math.Min(1, Math.Max(0, Math.Cos(turn)) * 4);
+        if (facing <= 0.01)
         {
             return;
         }
-        DrawMouth(canvas, Place, anchorHeight, radius, unit, ink, face, traits, clip);
+        int first = canvas.Count;
+        if (unit >= 22)
+        {
+            DrawBlush(canvas, OnFace, anchorHeight, radius, spread, unit, Math.Max(0.32, face.Blush), clip);
+        }
+        if (unit >= 21)
+        {
+            DrawMouth(canvas, OnFace, anchorHeight, radius, unit, ink, face, traits, clip);
+        }
+        for (int k = first; k < canvas.Count; k++)
+        {
+            canvas[k].Opacity *= facing;
+        }
     }
 
-    private static void DrawArcEye(
-        PersonaScene canvas, double x, double y, double w, double h,
-        double unit, Color ink, bool flipped, Geometry clip)
+    /// <summary>
+    /// One eye: a solid shape seen through the gap its lids leave. Every
+    /// expression is lid positions, not a different drawing. The upper lid
+    /// comes down to shut it, tips inward for focus and outward for a sorry
+    /// droop. The lower lid rises for a squint and curves for a smile, and
+    /// pushed all the way it leaves a crescent. Because they are all numbers
+    /// the eye can travel from any of them to any other.
+    /// </summary>
+    private static void DrawEye(
+        PersonaScene canvas, PPoint centre, double radius, double widthScale, double heightScale,
+        double side, PersonaFacePose face, double blink, double cheer, double tilt, double unit,
+        Color ink, PersonaTraits.EyeShape shape, double opacity, Geometry clip)
     {
-        double midY = y + h / 2;
-        double lift = w * 0.55;
-        var geometry = new PathGeometry();
-        var arc = PersonaDraw.Figure(new PPoint(0, 0), false);
-        if (flipped)
+        double wide = Math.Clamp(face.Openness, 0, 1.3);
+        double closing = Math.Clamp(blink, 0, 1);
+        // A blink squeezes the eye a little wider as it shuts, and its small
+        // overshoot on the way out (a negative blink) opens it a little taller.
+        double w = radius * 2 * (shape == PersonaTraits.EyeShape.Oval ? 0.86 : 1) * widthScale * (1 + closing * 0.10);
+        double h = radius * 2 * (shape == PersonaTraits.EyeShape.Oval ? 1.14 : 1)
+            * Math.Min(1.4, heightScale * Math.Max(1, wide)) * (1 - Math.Min(0, blink) * 0.9);
+        double open = Math.Clamp(Math.Min(wide, 1) * (1 - closing), 0, 1);
+        // A squint is a small smile of the lower lid, not a flat cut: a flat
+        // one squared the eye off and every busy mood looked cross.
+        double squint = Math.Clamp(face.Squint, 0, 0.8);
+        double smile = Math.Clamp(Math.Max(cheer, squint * 0.45), 0, 1);
+        double droop = Math.Clamp(face.Droop, 0, 1);
+        double focus = Math.Clamp((face.Brow - 0.15) / 0.85, 0, 1) * (1 - droop) * 0.55;
+
+        // Points are laid out in the eye's own frame and turned by the tilt.
+        PPoint Local(double x, double y) => PersonaDraw.Rot(centre.X + x, centre.Y + y, centre.X, centre.Y, tilt);
+        double minX = -w / 2, maxX = w / 2, minY = -h / 2, maxY = h / 2;
+        // Where the lids meet when shut: below the middle, as on a face.
+        double meet = minY + h * 0.68;
+        double shut = 1 - open;
+        double upper = minY + (meet - minY) * shut;
+        double innerX = side < 0 ? maxX : minX;
+        double outerX = side < 0 ? minX : maxX;
+        double innerY = upper + h * 0.30 * focus;
+        double outerY = upper + h * 0.40 * droop;
+        double LidY(double x) => innerY + (outerY - innerY) * (x - innerX) / (outerX - innerX);
+        double left = minX - w;
+        double right = maxX + w;
+        // The lid's edge arches, most of all half way down, so a heavy lid
+        // leaves a rounded eye. Fully open or fully shut it is straight.
+        double arch = LidY(0) - h * (1.6 * shut * (1 - shut) + 0.26 * Math.Min(1, focus + droop));
+        double lowerBase = maxY - (maxY - meet) * shut - h * 0.30 * squint;
+        double lowerEdge = Math.Max(lowerBase - h * 0.10 * smile, Math.Max(LidY(left), LidY(right)));
+        double lowerPeak = Math.Max(lowerBase - h * 1.35 * smile, arch);
+
+        // The gap between the lids, which the eye and its lights show through.
+        var gap = new PathGeometry();
+        var figure = PersonaDraw.Figure(Local(left, LidY(left)));
+        PersonaDraw.Quad(figure, Local(right, LidY(right)), Local(0, arch));
+        PersonaDraw.Line(figure, Local(right, lowerEdge));
+        PersonaDraw.Quad(figure, Local(left, lowerEdge), Local(0, lowerPeak));
+        gap.Figures.Add(figure);
+
+        if (open > 0.04)
         {
-            arc.StartPoint = PersonaDraw.Pt(x, midY - lift * 0.3);
-            PersonaDraw.Quad(arc, new PPoint(x + w, midY - lift * 0.3), new PPoint(x + w / 2, midY + lift * 0.9));
+            var eye = new PathGeometry();
+            PersonaDraw.EllipseRotated(eye, centre.X, centre.Y, w / 2, h / 2, tilt);
+            canvas.Paint(eye, PersonaDraw.Solid(ink), clip: clip, mask: gap).Opacity = opacity;
+
+            // Two catchlights, a big one high and a small one low on the far
+            // side. The lids cut them like the eye.
+            if (unit >= 22 && open > 0.3)
+            {
+                double size = Math.Min(w, h);
+                var big = Local(-w * 0.22, minY + h * 0.30);
+                var glint = new PathGeometry();
+                PersonaDraw.Ellipse(glint, big.X, big.Y, size * 0.15, size * 0.15);
+                canvas.Paint(glint, PersonaDraw.Solid(PersonaDraw.White, 0.92), clip: clip, mask: gap).Opacity = opacity;
+                var small = Local(w * 0.16, minY + h * 0.64);
+                var spark = new PathGeometry();
+                PersonaDraw.Ellipse(spark, small.X, small.Y, size * 0.065, size * 0.065);
+                canvas.Paint(spark, PersonaDraw.Solid(PersonaDraw.White, 0.62), clip: clip, mask: gap).Opacity = opacity;
+            }
         }
-        else
+
+        // A shut eye is still an expression: a curve up when pleased, down
+        // when content or asleep. It fades in as the lids close, so a blink
+        // and a smile both pass through it without a cut.
+        double line = Math.Clamp((0.24 - open) / 0.18, 0, 1);
+        if (line > 0)
         {
-            arc.StartPoint = PersonaDraw.Pt(x, midY + lift * 0.3);
-            PersonaDraw.Quad(arc, new PPoint(x + w, midY + lift * 0.3), new PPoint(x + w / 2, midY - lift * 1.5));
+            double sag = h * 0.22 * (smile > 0.5 ? -1 : 1) - h * 0.10 * droop;
+            var arc = new PathGeometry();
+            var curve = PersonaDraw.Figure(Local(minX, meet - sag * 0.25), false);
+            PersonaDraw.Quad(curve, Local(maxX, meet - sag * 0.25), Local(0, meet + sag));
+            arc.Figures.Add(curve);
+            canvas.Paint(
+                arc, null, PersonaDraw.Solid(ink, line), Math.Max(1, unit * 0.024),
+                PenLineCap.Round, PenLineJoin.Round, clip).Opacity = opacity;
         }
-        geometry.Figures.Add(arc);
-        canvas.Paint(
-            geometry, null, PersonaDraw.Solid(ink), Math.Max(1, unit * 0.023),
-            PenLineCap.Round, PenLineJoin.Round, clip);
     }
 
     private static void DrawBlush(
@@ -373,7 +439,7 @@ internal static class PersonaRenderer
         double curve = Math.Clamp(face.MouthCurve + resting, -1.1, 1.1);
         // An open mouth widens as it opens. Without it a loud syllable is a
         // tall narrow wedge rather than a vowel.
-        double half = unit * 0.060 * Math.Min(face.MouthWidth, 1.2) * traits.MouthWidth
+        double half = unit * 0.052 * Math.Min(face.MouthWidth, 1.2) * traits.MouthWidth
             * (1 + Math.Clamp(face.MouthOpen, 0, 1.2) * 0.22);
         double open = Math.Clamp(face.MouthOpen, 0, 0.8) * unit * 0.065;
         double baseY = -anchorHeight + unit * 0.12;

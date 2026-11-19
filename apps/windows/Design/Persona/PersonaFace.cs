@@ -72,6 +72,53 @@ internal sealed class PersonaFacePose
     public double Tongue { get; set; }
 
     /// <summary>
+    /// How far the lower lids have pushed up into a smile, zero to one. At one
+    /// the eyes are two crescents, the shape HappyArc names. Being a number
+    /// rather than a shape is what lets an eye smile slowly.
+    /// </summary>
+    public double Cheer { get; set; }
+
+    /// <summary>
+    /// How far the outer ends of the upper lids have dropped. Sorry, tired,
+    /// or let down, depending on the mouth.
+    /// </summary>
+    public double Droop { get; set; }
+
+    /// <summary>
+    /// The same expression with its named eye shapes turned into lid
+    /// positions. A pleased crescent is a lower lid pushed all the way up and
+    /// a contented arc is a shut eye, so both ease in and out like any other
+    /// number instead of swapping under a blink.
+    /// </summary>
+    public PersonaFacePose Expressed()
+    {
+        var output = Copy();
+        switch (EyeStyle)
+        {
+            case Eyes.HappyArc:
+                output.Cheer = 1;
+                output.Squint = 0;
+                output.Openness = 1;
+                break;
+            case Eyes.ContentArc:
+                output.Openness = 0;
+                output.Cheer = 0;
+                output.Blinks = false;
+                break;
+        }
+        output.EyeStyle = Eyes.Normal;
+        return output;
+    }
+
+    private PersonaFacePose Copy() => new()
+    {
+        EyeStyle = EyeStyle, Openness = Openness, Squint = Squint, Gaze = Gaze, Lift = Lift,
+        Spread = Spread, Brow = Brow, MouthCurve = MouthCurve, MouthOpen = MouthOpen,
+        MouthWidth = MouthWidth, Blinks = Blinks, EyeScale = EyeScale, Blush = Blush,
+        Tongue = Tongue, Cheer = Cheer, Droop = Droop,
+    };
+
+    /// <summary>
     /// One expression part way into another. Used while a mood is changing, so
     /// the face is crossfading at the same time as the body rather than
     /// chasing a target that has already jumped.
@@ -95,6 +142,8 @@ internal sealed class PersonaFacePose
             EyeScale = Mix(from.EyeScale, to.EyeScale),
             Blush = Mix(from.Blush, to.Blush),
             Tongue = Mix(from.Tongue, to.Tongue),
+            Cheer = Mix(from.Cheer, to.Cheer),
+            Droop = Mix(from.Droop, to.Droop),
             Blinks = to.Blinks,
             // Eye shape is a decision, not a quantity. Half a star is not an
             // expression, so it changes at the midpoint, under the blink.
@@ -121,6 +170,8 @@ internal sealed class PersonaFacePose
         EyeScale += (target.EyeScale - EyeScale) * k;
         Blush += (target.Blush - Blush) * k;
         Tongue += (target.Tongue - Tongue) * k;
+        Cheer += (target.Cheer - Cheer) * k;
+        Droop += (target.Droop - Droop) * k;
         Blinks = target.Blinks;
         EyeStyle = target.EyeStyle;
     }

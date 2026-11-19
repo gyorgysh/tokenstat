@@ -35,9 +35,12 @@ internal sealed class PersonaMark : Canvas
     private bool _needsRedraw = true;
     private bool _wasMoving;
     private bool _inViewport = true;
+    private double _startedAt;
 
-    public PersonaMark(ulong seed = 0, double size = 28, PersonaMood state = PersonaMood.Idle, bool pokeable = false)
+    public PersonaMark(ulong seed = 0, double size = 28, PersonaMood state = PersonaMood.Idle, bool pokeable = false,
+        double? settlesAfter = null)
     {
+        SettlesAfter = settlesAfter;
         _seed = seed;
         _size = size;
         _state = state;
@@ -51,7 +54,12 @@ internal sealed class PersonaMark : Canvas
         PointerPressed += OnPointerPressed;
         Loaded += (_, _) => Start();
         Unloaded += (_, _) => Stop();
-        ActualThemeChanged += (_, _) => _needsRedraw = true;
+        ActualThemeChanged += (_, _) =>
+        {
+            _needsRedraw = true;
+            // A settled face has stopped its timer, so redraw it here.
+            if (!_timer.IsEnabled && IsLoaded && _inViewport) Tick();
+        };
         EffectiveViewportChanged += (_, args) =>
         {
             var viewport = args.EffectiveViewport;
@@ -113,6 +121,13 @@ internal sealed class PersonaMark : Canvas
     /// <summary>Whether a click shoves it. Off by default: a face beside a message is not a control.</summary>
     public bool Pokeable { get; set; }
 
+    /// <summary>
+    /// Seconds of motion before the character comes to rest, holding its last
+    /// frame. Null moves for as long as it is on screen. A face beside an old
+    /// message has nothing new to say, and every moving one costs a frame.
+    /// </summary>
+    public double? SettlesAfter { get; set; }
+
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (!Pokeable || _size <= 0)
@@ -128,6 +143,7 @@ internal sealed class PersonaMark : Canvas
         if (!_inViewport) return;
         _timer.Interval = FrameInterval;
         _engine.SuspendClock();
+        _startedAt = _clock.Elapsed.TotalSeconds;
         _timer.Start();
         Tick();
     }
@@ -146,6 +162,12 @@ internal sealed class PersonaMark : Canvas
         {
             _engine.SuspendClock();
             _timer.Interval = TimeSpan.FromMilliseconds(250);
+            return;
+        }
+        if (SettlesAfter is { } settle && _clock.Elapsed.TotalSeconds - _startedAt > settle && !_needsRedraw)
+        {
+            _timer.Stop();
+            _engine.SuspendClock();
             return;
         }
         bool moving = Moving();

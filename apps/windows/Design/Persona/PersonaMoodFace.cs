@@ -147,6 +147,7 @@ internal static class PersonaMoodFace
                 face.MouthCurve = 0.34 - sigh * 0.70;
                 face.MouthOpen = 0.10 + sigh * 0.30;
                 face.MouthWidth = 0.58;
+                face.Droop = sigh * 0.45;
                 if (sigh > 0.55)
                 {
                     face.EyeStyle = PersonaFacePose.Eyes.ContentArc;
@@ -170,6 +171,7 @@ internal static class PersonaMoodFace
                 double retry = PersonaMoodTiming.FailedRetry(clock);
                 face.Openness = 1 - melt * 0.66;
                 face.Brow = 0.35 + melt * 0.35;
+                face.Droop = 0.35 + melt * 0.55;
                 face.Gaze = new PPoint(0, 0.30 + melt * 0.25);
                 face.Lift = -melt * 0.05;
                 face.MouthCurve = -0.8;

@@ -86,7 +86,41 @@ internal sealed class PersonaEngine
     private double? _lastTime;
     private double _pending;
     private double _blinkCountdown = 2.5;
-    private double _blinkHold;
+
+    /// <summary>Seconds into the current blink, or negative between blinks.</summary>
+    private double _blinkAge = -1;
+    private double _blinkLength = 0.30;
+
+    /// <summary>
+    /// One blink in five or so comes as a pair, which is most of what makes
+    /// blinking look like a habit rather than a timer.
+    /// </summary>
+    private bool _blinkAgain;
+
+    /// <summary>
+    /// A wink: one eye, held a little, in the moods that are enjoying
+    /// themselves. Minus one is the left eye, plus one the right, zero none.
+    /// </summary>
+    public double WinkSide { get; private set; }
+    private double _winkAge = -1;
+    private double _winkCountdown = 7;
+
+    /// <summary>
+    /// Where the eyes are looking on top of the mood's own gaze, in eye radii.
+    /// It jumps between fixations rather than drifting: a saccade is fast,
+    /// then the eyes hold, which is how attention looks from outside.
+    /// </summary>
+    public PPoint Look { get; private set; }
+    private PVector _lookVelocity;
+    private PPoint _lookTarget;
+    private double _fixation = 0.8;
+
+    /// <summary>
+    /// The head leaning into where it looks, in radians. Underdamped on
+    /// purpose: a glance that tips the head and settles back is curiosity.
+    /// </summary>
+    public double HeadTilt { get; private set; }
+    private double _headTiltVelocity;
     private int _beatIndex;
     private int _launches;
     private ulong _random;
@@ -99,7 +133,7 @@ internal sealed class PersonaEngine
         Traits = new PersonaTraits(seed);
         Body = new PersonaSoftBody(lumps: Traits.Lumps);
         _random = seed == 0 ? 0x9E3779B97F4A7C15ul : seed;
-        Face = mood.Face(0, Traits);
+        Face = mood.Face(0, Traits).Expressed();
         _blinkCountdown = 1.4 + NextUnit() * 3.0;
         for (int i = 0; i < _dust.Length; i++)
         {
@@ -218,14 +252,14 @@ internal sealed class PersonaEngine
         // one frame, so it never has a moment where it visibly changes its
         // mind.
         var arriving = Mood.Drive(now, Traits);
-        var arrivingFace = Mood.Face(now, Traits);
+        var arrivingFace = Mood.Face(now, Traits).Expressed();
         PersonaDrive drive;
         PersonaFacePose target;
         if (_leaving is { } gone && _shift > 0)
         {
             double done = 1 - _shift;
             drive = PersonaDrive.Blend(gone.Mood.Drive(gone.Clock, Traits), arriving, done);
-            target = PersonaFacePose.Blend(gone.Mood.Face(gone.Clock, Traits), arrivingFace, done);
+            target = PersonaFacePose.Blend(gone.Mood.Face(gone.Clock, Traits).Expressed(), arrivingFace, done);
         }
         else
         {
@@ -271,7 +305,63 @@ internal sealed class PersonaEngine
         // The face eases toward the mood's pose rather than being set to it,
         // which is what makes a change of mood read as an expression moving.
         Face.EaseTowards(target, FixedStep * 11);
+        AdvanceGaze(FixedStep);
         AdvanceBlink(FixedStep);
+    }
+
+    /// <summary>
+    /// How far this mood's eyes wander between fixations, in eye radii. Asleep
+    /// and let down they do not. Busy they stay near the work, idle they look
+    /// around the room.
+    /// </summary>
+    private double Wander => Mood switch
+    {
+        PersonaMood.Sleeping or PersonaMood.Failed => 0,
+        PersonaMood.Idle or PersonaMood.Waiting or PersonaMood.Stargazing or PersonaMood.Gardening => 0.55,
+        PersonaMood.Thinking or PersonaMood.Pacing => 0.45,
+        PersonaMood.Working or PersonaMood.Typing or PersonaMood.Reading or PersonaMood.Sketching or PersonaMood.Gaming => 0.18,
+        _ => 0.32,
+    };
+
+    private void AdvanceGaze(double dt)
+    {
+        double reach = Face.Openness > 0.3 ? Wander : 0;
+        _fixation -= dt;
+        if (_fixation <= 0)
+        {
+            // Mostly small hops near the last place, now and then a proper
+            // look somewhere else. A uniform pick reads as a scanner.
+            bool far = NextUnit() < 0.3;
+            double angle = NextUnit() * 2 * Math.PI;
+            double distance = reach * (far ? 0.7 + NextUnit() * 0.3 : NextUnit() * 0.45);
+            var next = new PPoint(Math.Cos(angle) * distance, Math.Sin(angle) * distance * 0.6);
+            double jump = Math.Sqrt(Math.Pow(next.X - _lookTarget.X, 2) + Math.Pow(next.Y - _lookTarget.Y, 2));
+            _lookTarget = next;
+            _fixation = 0.45 + NextUnit() * (far ? 2.4 : 1.4);
+            // A big look often brings a blink along with it.
+            if (jump > 0.45 && _blinkAge < 0 && Face.Blinks && NextUnit() < 0.35)
+            {
+                StartBlink(0.26);
+            }
+        }
+        if (reach == 0)
+        {
+            _lookTarget = new PPoint(0, 0);
+        }
+        // Critically damped and quick: there and still in about a tenth of a
+        // second, with no wobble, because eyes do not wobble.
+        const double omega = 34;
+        double vx = _lookVelocity.X + ((_lookTarget.X - Look.X) * omega * omega - 2 * omega * _lookVelocity.X) * dt;
+        double vy = _lookVelocity.Y + ((_lookTarget.Y - Look.Y) * omega * omega - 2 * omega * _lookVelocity.Y) * dt;
+        _lookVelocity = new PVector(vx, vy);
+        Look = new PPoint(Look.X + vx * dt, Look.Y + vy * dt);
+
+        // The head follows the eyes, late and softly, and overshoots a touch.
+        double tiltTarget = Math.Clamp(-(Look.X + Face.Gaze.X * 0.5) * 0.10, -0.16, 0.16);
+        const double stiffness = 70;
+        double damping = 2 * 0.55 * Math.Sqrt(stiffness);
+        _headTiltVelocity += ((tiltTarget - HeadTilt) * stiffness - _headTiltVelocity * damping) * dt;
+        HeadTilt += _headTiltVelocity * dt;
     }
 
     /// <summary>
@@ -378,7 +468,7 @@ internal sealed class PersonaEngine
         // happens behind one.
         _leaving = (Mood, Clock);
         _shift = 1;
-        _blinkHold = 0.13;
+        StartBlink(0.30);
         Body.Pulse(-0.13);
 
         Mood = next;
@@ -711,7 +801,7 @@ internal sealed class PersonaEngine
                 {
                     Body.Poke(Body.Anchors.Mouth, -0.95, 0.34);
                     Body.Impulse(new PVector(-0.30, -0.18));
-                    _blinkHold = 0.12;
+                    StartBlink(0.26);
                 }
                 break;
 
@@ -746,42 +836,118 @@ internal sealed class PersonaEngine
         _blinkCountdown = Math.Min(_blinkCountdown, 0.12);
     }
 
+    private void StartBlink(double length)
+    {
+        _blinkAge = 0;
+        _blinkLength = length;
+        _blinkAgain = NextUnit() < 0.2;
+    }
+
     private void AdvanceBlink(double dt)
     {
-        if (_blinkHold > 0)
+        if (_blinkAge >= 0)
         {
-            _blinkHold -= dt;
-            if (_blinkHold <= 0)
+            _blinkAge += dt;
+            if (_blinkAge >= _blinkLength)
             {
-                _blinkCountdown = 2.2 + NextUnit() * 3.4;
+                if (_blinkAgain)
+                {
+                    _blinkAgain = false;
+                    _blinkAge = 0;
+                    _blinkLength = 0.26;
+                }
+                else
+                {
+                    _blinkAge = -1;
+                    _blinkCountdown = 1.6 + NextUnit() * 4.4;
+                }
+            }
+        }
+        else if (Face.Blinks)
+        {
+            _blinkCountdown -= dt;
+            if (_blinkCountdown <= 0)
+            {
+                StartBlink(0.30);
+            }
+        }
+        AdvanceWink(dt);
+    }
+
+    private bool Winks => Mood is PersonaMood.Idle or PersonaMood.Ok or PersonaMood.Dancing
+        or PersonaMood.Juggling or PersonaMood.Bouncing or PersonaMood.Waiting;
+
+    private void AdvanceWink(double dt)
+    {
+        if (_winkAge >= 0)
+        {
+            _winkAge += dt;
+            if (_winkAge >= 0.62)
+            {
+                _winkAge = -1;
+                WinkSide = 0;
             }
             return;
         }
-        if (!Face.Blinks)
+        if (!Winks || !Face.Blinks || _blinkAge >= 0)
         {
             return;
         }
-        _blinkCountdown -= dt;
-        if (_blinkCountdown <= 0)
+        _winkCountdown -= dt;
+        if (_winkCountdown <= 0)
         {
-            _blinkHold = 0.10;
+            _winkCountdown = 6 + NextUnit() * 9;
+            _winkAge = 0;
+            WinkSide = NextUnit() < 0.5 ? -1 : 1;
         }
     }
 
-    /// <summary>How shut the eyes are from blinking alone, zero to one.</summary>
+    /// <summary>
+    /// How shut one eye is from a wink, zero to one. Quick in, held long
+    /// enough to be read as meant, and out.
+    /// </summary>
+    public double Wink
+    {
+        get
+        {
+            if (_winkAge < 0) return 0;
+            double t = _winkAge;
+            if (t < 0.08) return t / 0.08;
+            if (t < 0.42) return 1;
+            double x = Math.Min(1, (t - 0.42) / 0.20);
+            return 1 - x * x * (3 - 2 * x);
+        }
+    }
+
+    /// <summary>
+    /// How shut the eyes are from blinking alone, zero to one. Fast down, a
+    /// beat shut, then open a touch past where it started and back. A straight
+    /// down-and-up reads as a flicker, and the small overshoot on the way out
+    /// is what makes the eye look awake rather than reset. Negative means wider
+    /// than at rest.
+    /// </summary>
     public double Blink
     {
         get
         {
-            if (_blinkHold <= 0)
+            if (_blinkAge < 0) return 0;
+            const double close = 0.06;
+            const double hold = close + 0.035;
+            double t = _blinkAge;
+            if (t < close)
             {
-                return 0;
+                double x = t / close;
+                return x * x;
             }
-            // Fast down, slower up: a real blink is not symmetric. The hold
-            // may be longer than the down phase, so the progress clamps to the
-            // start of the cycle.
-            double progress = Math.Clamp(1 - _blinkHold / 0.10, 0, 1);
-            return progress < 0.35 ? progress / 0.35 : Math.Max(0, 1 - (progress - 0.35) / 0.65);
+            if (t < hold) return 1;
+            double open = hold + Math.Max(0.05, (_blinkLength - hold) * 0.45);
+            if (t < open)
+            {
+                double x = (t - hold) / (open - hold);
+                return 1 - 1.08 * x * x * (3 - 2 * x);
+            }
+            double y = Math.Min(1, (t - open) / Math.Max(0.01, _blinkLength - open));
+            return -0.08 * (1 - y * y * (3 - 2 * y));
         }
     }
 
@@ -794,8 +960,15 @@ internal sealed class PersonaEngine
             drive.AnchorX,
             PersonaStage.Floor - drive.Radius * drive.Stretch.Height * Body.RestBottom);
         Body.Reset(centre, drive.Stretch, drive.Radius);
-        Face = Mood.Face(0, Traits);
-        _blinkHold = 0;
+        Face = Mood.Face(0, Traits).Expressed();
+        _blinkAge = -1;
+        _winkAge = -1;
+        WinkSide = 0;
+        Look = new PPoint(0, 0);
+        _lookTarget = new PPoint(0, 0);
+        _lookVelocity = new PVector(0, 0);
+        HeadTilt = 0;
+        _headTiltVelocity = 0;
         _pending = 0;
         _softening = 0;
         _jiggle = 0;
