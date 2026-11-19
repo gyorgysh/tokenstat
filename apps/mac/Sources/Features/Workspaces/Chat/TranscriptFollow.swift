@@ -160,11 +160,27 @@ enum TranscriptSlice {
     /// tall put it in the middle of that reply, or past every row the stack
     /// built, which is a blank transcript. The newest rows are measured
     /// exactly instead: they are what a following reader is looking at.
+    ///
+    /// Only as many as cover the end, though. Every measured row is laid out
+    /// and painted in full whether or not it is on screen, and six long
+    /// replies are thousands of points of text drawn on every switch to a
+    /// chat. The tail stops once its rows' height floor reaches
+    /// `measuredCover`, which is taller than any window, and never holds
+    /// fewer than `measuredMinimum`.
     static let measuredTail = 6
+    static let measuredMinimum = 2
+    static let measuredCover = 2400.0
 
     /// The built rows, split into the lazy head and the measured tail.
     static func split(_ rows: [ChatDisplayItem]) -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
-        let cut = max(0, rows.count - measuredTail)
+        var count = 0
+        var covered = 0.0
+        for row in rows.reversed() {
+            count += 1
+            covered += row.tailHeightFloor
+            if count >= measuredTail || (count >= measuredMinimum && covered >= measuredCover) { break }
+        }
+        let cut = rows.count - count
         return (rows[..<cut], rows[cut...])
     }
 

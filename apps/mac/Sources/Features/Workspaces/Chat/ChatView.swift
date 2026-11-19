@@ -733,7 +733,6 @@ struct ChatView: View {
             // not visible, so they stayed at estimated height until a click
             // forced a real layout.
             .overlay { OpeningSkeleton(model: model, follow: follow) }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: transcriptReady)
             .chatScrollMetrics { metrics in
                 guard isActive else { return }
                 #if DEBUG
@@ -1022,17 +1021,6 @@ struct ChatView: View {
 
     /// A read-only preview covers the live transcript's initial layout/fetch.
     /// It never enters the event stream or the reading-position bookkeeping.
-    /// Whether the transcript may be looked at.
-    ///
-    /// Both halves, because they cover different frames. `openingConversation`
-    /// is true from the instant a conversation is picked, before the settle
-    /// task has run, which is the second of half-built rows that used to show
-    /// before the wireframe replaced them. `arrived` covers the rest, until
-    /// the end is under the viewport and steady.
-    private var transcriptReady: Bool {
-        follow.arrived && !model.openingConversation
-    }
-
     /// The longest the opening pin holds, in fifty-millisecond frames. It
     /// stops once the conversation has arrived and the end has been steady
     /// for a moment, so this is the ceiling on a slow host and not what an
@@ -1706,6 +1694,8 @@ private struct OpeningSkeleton: View {
         follow.arrived && !model.openingConversation
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         ZStack {
             if showsSkeleton {
@@ -1716,6 +1706,11 @@ private struct OpeningSkeleton: View {
             }
         }
         .allowsHitTesting(showsSkeleton)
+        // The fade lives here, on the cover, rather than on the transcript.
+        // Animating the whole scroll view on `transcriptReady` made the
+        // opening flag a dependency of the entire pane, which re-ran it once
+        // more on every switch, and animated the rows' layout along with it.
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: transcriptReady)
         .modifier(OpeningCover(
             isOpening: model.openingConversation,
             ready: transcriptReady,

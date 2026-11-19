@@ -266,6 +266,11 @@ assert(replaced.atEnd, "the replacement's own geometry can confirm arrival")
 replaced.settle(false)
 
 assert(TranscriptSlice.range(count: 10, olderOffset: 0) == 0..<10, "short lists are the whole list")
+assert(TranscriptSlice.split((0..<10).map { ChatDisplayItem(id: "\($0)") }).measured.count == 6, "short rows keep the full measured tail")
+assert(TranscriptSlice.split((0..<10).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 1200) }).measured.count == 2, "tall rows that cover the end need no more")
+assert(TranscriptSlice.split((0..<10).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 5000) }).measured.count == 2, "the tail never drops below its minimum")
+assert(TranscriptSlice.split([ChatDisplayItem(id: "only")]).measured.count == 1, "a one-row list is all tail")
+assert(TranscriptSlice.split([]).measured.isEmpty, "an empty list has no tail")
 assert(TranscriptSlice.range(count: 200, olderOffset: 0) == 50..<200, "glued to the end is a suffix")
 assert(TranscriptSlice.range(count: 200, olderOffset: 50) == 0..<150, "full slide reaches the start")
 assert(TranscriptSlice.hiddenAbove(count: 200, olderOffset: 0) == 50, "suffix hides the prefix")
@@ -286,7 +291,7 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
     path.write_text(
         "import Foundation\nimport Observation\nimport CoreGraphics\n"
         "enum TranscriptFollow { static let threshold: CGFloat = 56 }\n"
-        "struct ChatDisplayItem: Identifiable { let id: String }\n"
+        "struct ChatDisplayItem: Identifiable { let id: String; var tailHeightFloor: Double = 20 }\n"
         + slice + metrics + delivery + follow + row_mounts + tests
     )
     subprocess.run(["swift", str(path)], check=True)

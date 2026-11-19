@@ -336,6 +336,31 @@ struct ChatTurnChanges: Equatable, Sendable {
 }
 
 extension ChatDisplayItem {
+    /// A height this row is very unlikely to be under, in points.
+    ///
+    /// It decides how many of the newest rows the transcript lays out exactly
+    /// (`TranscriptSlice.split`). It errs low on purpose: generous characters
+    /// per line, a short line height, and a ceiling per row. Erring low only
+    /// measures a row more than needed. Erring high would leave part of the
+    /// end on estimated heights, which is what the measured tail prevents.
+    var tailHeightFloor: Double {
+        func prose(_ text: String) -> Double {
+            var lines = 0
+            var run = 0
+            for unit in text.utf8 {
+                if unit == 10 { lines += 1 + run / 140; run = 0 } else { run += 1 }
+            }
+            lines += 1 + run / 140
+            return min(1200, Double(lines) * 16 + 24)
+        }
+        switch kind {
+        case let .user(text), let .thinking(text), let .failed(text): return prose(text)
+        case let .assistant(text, _): return prose(text)
+        case let .handoff(_, brief): return min(prose(brief), 60)
+        default: return 20
+        }
+    }
+
     /// What the recent-message cache budgets a row at: the strings it holds,
     /// nested tool output and patches included, plus a fixed cost per row.
     ///

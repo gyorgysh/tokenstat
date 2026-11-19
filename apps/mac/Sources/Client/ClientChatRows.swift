@@ -215,7 +215,7 @@ struct ClientChatEventRow: View {
                     .font(Theme.caption).foregroundStyle(.secondary)
             } else {
                 HStack(alignment: .top, spacing: Theme.Space.s) {
-                    PersonaMark(seed: faceSeed, size: 26, state: .failed)
+                    PersonaMark(seed: faceSeed, size: 26, state: .failed, settlesAfter: 4)
                     Text(text)
                         .font(ClientType.label)
                         .foregroundStyle(Theme.danger)

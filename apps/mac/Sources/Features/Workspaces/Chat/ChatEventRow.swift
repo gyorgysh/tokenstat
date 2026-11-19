@@ -271,7 +271,7 @@ struct ChatEventRow: View {
                     .font(Theme.caption).foregroundStyle(.secondary)
             } else {
                 HStack(alignment: .top, spacing: Theme.Space.s) {
-                    PersonaMark(seed: faceSeed, size: 26, state: .failed)
+                    PersonaMark(seed: faceSeed, size: 26, state: .failed, settlesAfter: 4)
                     Text(text)
                         .font(Theme.callout)
                         .foregroundStyle(Theme.danger)
@@ -899,24 +899,33 @@ extension ChatEventRow: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.item == rhs.item
             && lhs.defaultAgentName == rhs.defaultAgentName
-            && lhs.isPending == rhs.isPending
-            && lhs.faceSeed == rhs.faceSeed
             && lhs.isLive == rhs.isLive
             && lhs.animatesRunning == rhs.animatesRunning
             && lhs.expandsOutput == rhs.expandsOutput
             && lhs.compactTools == rhs.compactTools
-            && lhs.answeringQuestion == rhs.answeringQuestion
-            && lhs.canAnswerQuestions == rhs.canAnswerQuestions
             && (lhs.reviewChanges == nil) == (rhs.reviewChanges == nil)
             && (lhs.reviewTurnChanges == nil) == (rhs.reviewTurnChanges == nil)
             && lhs.imageResources == rhs.imageResources
         else { return false }
-        if case .attachment = lhs.item.kind {
+        // Inputs only one kind of row reads are compared for that kind. The
+        // question flag flips when the cached preview gives way to the live
+        // page, and the face seed arrives with the chat, so comparing them
+        // everywhere rebuilt every visible row a second time on each switch.
+        switch lhs.item.kind {
+        case .attachment:
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading
                 && lhs.attachmentError == rhs.attachmentError
                 && (lhs.attachmentData == nil) == (rhs.attachmentData == nil)
                 && lhs.attachmentFile == rhs.attachmentFile
+        case .question:
+            return lhs.answeringQuestion == rhs.answeringQuestion
+                && lhs.canAnswerQuestions == rhs.canAnswerQuestions
+        case .approval:
+            return lhs.isPending == rhs.isPending
+        case .failed:
+            return lhs.faceSeed == rhs.faceSeed
+        default:
+            return true
         }
-        return true
     }
 }

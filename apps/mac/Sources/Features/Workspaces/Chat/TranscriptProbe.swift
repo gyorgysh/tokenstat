@@ -43,11 +43,21 @@ final class TranscriptProbe {
 
     /// Opt-in, bounded diagnostics. No conversation identifiers or text leave
     /// the model. Run-loop work is responsiveness evidence, not rendered FPS.
+    private var cpuStarted = 0.0
+
+    /// The calling thread's CPU time. Recording starts and stops on main.
+    private static func threadCPUMilliseconds() -> Double {
+        var time = timespec()
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)
+        return Double(time.tv_sec) * 1000 + Double(time.tv_nsec) / 1_000_000
+    }
+
     func startRecording() {
         install()
         recordedTurns.removeAll(keepingCapacity: true)
         recordedOpens.removeAll(keepingCapacity: true)
         recordingStarted = ProcessInfo.processInfo.systemUptime
+        cpuStarted = Self.threadCPUMilliseconds()
         resizeCount = 0
         recording = true
     }
@@ -76,6 +86,9 @@ final class TranscriptProbe {
             "turns": sorted.count, "p50_ms": percentile(0.5),
             "elapsed_ms": (stopped - recordingStarted) * 1000,
             "total_work_ms": sorted.reduce(0, +), "resize_requests": resizeCount,
+            // CPU time the main thread actually ran. Wall-clock turn times
+            // grow when other processes load the machine; this does not.
+            "main_cpu_ms": Self.threadCPUMilliseconds() - cpuStarted,
             "p95_ms": percentile(0.95), "p99_ms": percentile(0.99),
             "max_ms": sorted.last ?? 0,
             "over_16_7_ms": sorted.filter { $0 > 16.7 }.count,

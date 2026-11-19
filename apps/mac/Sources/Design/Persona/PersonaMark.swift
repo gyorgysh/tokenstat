@@ -61,6 +61,10 @@ struct PersonaMark: View {
     /// message is not a control, and a hit area there would steal the click
     /// that selects the row.
     var pokeable = false
+    /// Seconds of motion before the character comes to rest. Nil moves for
+    /// as long as it is on screen. A face beside an old message has nothing
+    /// new to say, and every moving one costs the window a frame.
+    var settlesAfter: Double?
 
     @Environment(\.personaMotionAllowed) private var paneAllowsMotion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -70,13 +74,16 @@ struct PersonaMark: View {
     @Environment(\.controlActiveState) private var controlActiveState
     #endif
     @State private var isVisible = false
+    @State private var settled = false
     @State private var engine: PersonaEngine
 
-    init(seed: UInt64, size: CGFloat = 28, state: PersonaMood = .idle, pokeable: Bool = false) {
+    init(seed: UInt64, size: CGFloat = 28, state: PersonaMood = .idle, pokeable: Bool = false,
+         settlesAfter: Double? = nil) {
         self.seed = seed
         self.size = size
         self.state = state
         self.pokeable = pokeable
+        self.settlesAfter = settlesAfter
         _engine = State(initialValue: PersonaEngine(seed: seed, mood: state))
     }
 
@@ -110,6 +117,12 @@ struct PersonaMark: View {
         .accessibilityHidden(true)
         .onAppear { isVisible = true; engine.suspendClock() }
         .onDisappear { isVisible = false; engine.suspendClock() }
+        .task(id: state) {
+            settled = false
+            guard let settlesAfter else { return }
+            try? await Task.sleep(for: .seconds(settlesAfter))
+            if !Task.isCancelled { settled = true }
+        }
 
         if pokeable {
             mark
@@ -132,7 +145,7 @@ struct PersonaMark: View {
     /// looking. A window that is not key does not need sixty frames a second
     /// of anything, and on a laptop that is battery.
     private var moving: Bool {
-        if reduceMotion || !isVisible || !paneAllowsMotion { return false }
+        if reduceMotion || settled || !isVisible || !paneAllowsMotion { return false }
         if scenePhase != .active { return false }
         #if os(macOS)
         if controlActiveState != .key { return false }
