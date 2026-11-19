@@ -1979,13 +1979,15 @@ struct ClientChatThread: View {
             // lazy stack skipped measuring the last prompt until a later
             // layout (leave and come back) forced the real height.
             .overlay {
-                if showsSkeleton {
-                    TranscriptSkeleton()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Theme.background)
+                Group {
+                    if showsSkeleton {
+                        TranscriptSkeleton()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Theme.background)
+                    }
                 }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showsSkeleton)
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
             .modifier(OpeningCover(
                 isOpening: model.openingConversation || hasPendingViewport,
                 ready: transcriptReady,

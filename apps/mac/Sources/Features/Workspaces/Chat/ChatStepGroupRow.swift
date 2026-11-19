@@ -38,13 +38,14 @@ struct ChatStepGroupRow: View {
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(hovering ? Theme.rowHighlight.opacity(0.55) : .clear)
+                .animation(Motion.unless(reduceMotion, Motion.hover), value: hovering)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(hovering ? Theme.border.opacity(0.9) : .clear, lineWidth: 1)
+                .animation(Motion.unless(reduceMotion, Motion.hover), value: hovering)
         )
         .onHover { hovering = $0 }
-        .animation(Motion.unless(reduceMotion, Motion.hover), value: hovering)
         #endif
         .animation(smoothStreaming && !reduceMotion ? .easeOut(duration: 0.18) : nil, value: group.running)
     }

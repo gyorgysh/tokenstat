@@ -153,11 +153,13 @@ struct ChatEventRow: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border.opacity(answerEdgeOpacity), lineWidth: 1)
+                    #if os(macOS)
+                    .animation(Motion.hover, value: hovering)
+                    #endif
             }
             #if os(macOS)
             .contentShape(.rect)
             .onHover { hovering = $0 }
-            .animation(Motion.hover, value: hovering)
             #endif
             .contextMenu {
                 Button(L10n.text("apple.chateventrow.copy_response.f0f755af")) { ChatClipboard.copy(text) }
