@@ -22,7 +22,7 @@ enum SidebarAppearancePreferences {
 struct SidebarAppearanceSettings: View {
     @AppStorage(SidebarAppearancePreferences.enabledKey) private var enabled = true
     @AppStorage(SidebarAppearancePreferences.washKey) private var wash = SidebarAppearancePreferences.defaultWash
-    @AppStorage(SidebarAppearancePreferences.highlightsKey) private var highlights = false
+    @AppStorage(SidebarAppearancePreferences.highlightsKey) private var highlights = true
 
     var body: some View {
         if #available(macOS 26, *) {

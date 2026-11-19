@@ -9,28 +9,27 @@ desktop is a review build. Newest first.
 
 ### Changed
 
-- A handoff to another agent now shows as a bright banner in the chat, with the agent's name and what it was told behind a tap, instead of a thin divider that was easy to miss. Windows shows handoffs for the first time.
-- Pin and Continue on another device are easier to find. On iPhone and iPad they are the two large buttons at the top of the chat menu, on the Mac they sit in the chat's toolbar, and on Android Pin leads the menu in the accent colour.
+- Handoffs between agents show as a banner with the new agent's name and what it was told. Windows shows handoffs for the first time.
+- Pin and Continue on another device are easier to find: at the top of the chat menu on iPhone and iPad, in the chat toolbar on Mac, and first in the menu on Android.
 
 ### Improved
 
-- On Mac, the sidebar, the toolbar and the inspector's header share one Liquid Glass surface that shows the desktop behind the window, with a soft edge where the content meets it. The opacity slider still sets it, and a new Glass highlights setting adds a sheen and a lit edge for those who want more shine. Every screen, the inspector included, uses the same content colour.
-- On Mac, rows, cards and buttons respond to the pointer. Hover highlights grow into place, rows and cards lift, buttons give a little when clicked, links and section tabs answer the pointer, and the selection bar in the sidebar moves between rows instead of jumping. Reduce Motion turns the movement off.
-- Chat controls move with what they do. Send and Stop grow in and out of the composer, the copy button turns into a tick, fast mode fills in when turned on, dictation opens out of the microphone, inspector tabs slide between choices and section chevrons turn. The model picker, chat settings and attach button respond to the pointer, and dictation and the other chat controls give clearer feedback when pressed on Mac, iPhone and iPad.
-- On Mac, more of the window is the conversation. A shorter composer leaves more room for it, chat titles use more of the toolbar, Account tabs and Home's device selector fit in the toolbar, and chat and terminal rows in the sidebar show their details button only on hover or when selected. The simulator gives the device more space and fits its controls on one row when room allows.
-- Chat characters are more expressive, on Mac, iPhone, iPad, Windows and Android. Their eyes are bigger and glossier, glance around in quick looks, blink like a habit (sometimes twice, and with a wink when they are in a good mood), and the head tips toward whatever they look at. Turning to look slides the face round the body instead of moving two dots. Moods now change by moving the eyelids, so a character can slowly smile, narrow its eyes to concentrate, or droop when a turn fails, instead of swapping one face for another.
-- On Mac, switching chats takes about a third less work. A chat in another folder starts loading at once instead of after the folder's list, the longest pauses while a chat opens are about half as long as before, and a chat with a very long reply opens without drawing the parts of it that are off screen.
+- On Mac, the sidebar, toolbar and inspector header share one Liquid Glass surface. The opacity slider still applies, and a soft sheen can be turned off in Glass highlights.
+- On Mac, rows, cards and buttons respond to hover and clicks, and chat controls animate when they change. Reduce Motion turns this off.
+- The composer is shorter and chat titles use more of the toolbar.
+- Chat characters have bigger eyes that look around, blink, wink and change expression smoothly, on every platform.
+- Switching chats on Mac is faster, and the longest pauses are about half as long.
 
 ### Fixed
 
-- Clicking a chat no longer makes it jump. It opens at its end straight away instead of showing its top for a moment, and the last rows, the token count among them, stay where they are while the rest of the conversation loads, including chats that were only read ahead in the background and chats with very long replies.
-- The strip above the composer with the folder's changes and its pull request stays put while a turn runs and when moving between chats in the same folder, instead of disappearing and coming back.
-- A long chat no longer turns into a blank screen after opening it, returning to the app, or bringing up the keyboard on iPhone and iPad, or after a resize on the Mac. It also opens at the real end of the last reply instead of partway through it. The messages come back by themselves instead of needing a scroll or leaving the chat.
-- A chat with a failed turn no longer keeps the computer busy while it sits open. The drooping face beside the error settles after a moment instead of moving forever, on Mac, iPhone, iPad and Windows.
-- On Mac, dragging the edge of the sidebar or the inspector follows the pointer smoothly, even beside a long chat, and every resizable edge shows the resize pointer. The inspector can no longer be dragged so wide that it drops out of the window when you let go, and the edge between a chat and its terminal or browser is solid instead of showing the chat through it.
-- Previous and Next Conversation follow the sidebar's chat list across folders when the sidebar lists chats rather than repositories.
-- Jump to latest appears when a chat reopens at the place you were reading, not only after you scroll.
-- On iPhone and iPad, a repository's chat list shows chats started elsewhere when you come back to it, without a pull to refresh.
+- Clicking a chat no longer makes it jump. It opens at the latest message.
+- The changes and pull request strip above the composer no longer flickers.
+- A long chat no longer goes blank after opening it, returning to the app, showing the keyboard on iPhone and iPad, or resizing on Mac.
+- A chat with a failed turn no longer keeps the computer busy while open.
+- On Mac, dragging the sidebar or inspector edge follows the pointer, and the inspector can't be dragged out of the window.
+- Previous and Next Conversation follow the sidebar order across folders.
+- Jump to latest appears when a chat reopens where you were reading.
+- On iPhone and iPad, a repository's chat list shows chats started elsewhere without a pull to refresh.
 
 ## [1.20.0] - 2026-11-14
 

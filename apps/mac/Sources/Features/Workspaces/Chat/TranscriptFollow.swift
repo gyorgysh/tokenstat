@@ -161,15 +161,7 @@ enum TranscriptSlice {
     /// built, which is a blank transcript. The newest rows are measured
     /// exactly instead: they are what a following reader is looking at.
     ///
-    /// Enough to cover the window: a chat of one-line tool rows needs dozens,
-    /// and with six the rest of the window was estimated rows correcting
-    /// their heights above the end as it opened. Only as many as cover the
-    /// end, though. Every measured row is laid out
-    /// and painted in full whether or not it is on screen, and six long
-    /// replies are thousands of points of text drawn on every switch to a
-    /// chat. The tail stops once its rows' height floor reaches
-    /// `measuredCover`, which is taller than any window, and never holds
-    /// fewer than `measuredMinimum`.
+    /// Capped at enough rows to cover the window, measured by `tailHeightFloor`.
     static let measuredTail = 40
     static let measuredMinimum = 2
     static let measuredCover = 2400.0
@@ -332,6 +324,7 @@ final class TranscriptFollowState {
     @ObservationIgnored var repin: (() -> Bool)?
     @ObservationIgnored private let repinDelivery = TranscriptScrollDelivery()
     @ObservationIgnored private var lastContentHeight: CGFloat = 0
+    @ObservationIgnored private var lastViewportHeight: CGFloat = 0
     @ObservationIgnored private var lastOffset: CGFloat = 0
     @ObservationIgnored private var lastDistanceFromBottom: CGFloat = 0
     /// Offset drift outside our own scrolls, accumulated across frames. Scroll
@@ -436,6 +429,8 @@ final class TranscriptFollowState {
     /// so spending forty of them on a transcript that is already there is
     /// most of what made opening a long chat a hang.
     @ObservationIgnored private(set) var atEnd = false
+    /// Within a couple of points of the end, not just inside the threshold.
+    var exactlyAtEnd: Bool { lastDistanceFromBottom <= 2 }
     /// Somebody scrolled away while the end was being chased. Read by the
     /// chase, which stops rather than argue.
     @ObservationIgnored private(set) var abandoned = false
@@ -516,6 +511,7 @@ final class TranscriptFollowState {
         atEnd = false
         steadyFrames = 0
         lastContentHeight = 0
+        lastViewportHeight = 0
         lastOffset = 0
         lastDistanceFromBottom = 0
         programmaticUntil = .distantPast
@@ -540,6 +536,20 @@ final class TranscriptFollowState {
         // not a gesture, and rows stay interactive while it is followed.
         let readerMoved = moved && metrics.readerIsScrolling != false
         trackScrolling(moved: moved)
+
+        // Small growth or a shorter viewport stays inside the threshold and
+        // left the last row (the token count) hidden under the composer.
+        let resized = lastViewportHeight > 0 && abs(metrics.viewportHeight - lastViewportHeight) > 0.5
+        lastViewportHeight = metrics.viewportHeight
+        if resized || (grew && !moved), pinned, !readerMoved, !sliceHidesNewest, !metrics.viewportPastContent,
+           metrics.distanceFromBottom > 2, metrics.distanceFromBottom <= TranscriptFollow.threshold {
+            repinDelivery.submit(after: max(0, 0.15 - Date().timeIntervalSince(lastRepinAt))) { [weak self] in
+                guard let self, self.active, self.pinned, !self.sliceHidesNewest, !self.suppressed else { return }
+                self.lastRepinAt = Date()
+                self.markDrivenInstant()
+                _ = self.repin?()
+            }
+        }
 
         if sliceHidesNewest {
             // The bottom of this slice is older messages. Treat it as far
@@ -1142,15 +1152,7 @@ extension View {
         }
     }
 
-    /// A transcript's scroll view starts at the end.
-    ///
-    /// Each selected chat gets a scroll view of its own, and a new one lays
-    /// out at the top. The settle task then pinned it to the newest row, so
-    /// a click on a chat drew the start of the window for a frame and jumped.
-    /// Only the first offset is anchored. A general bottom anchor also moves
-    /// the view as lazy rows estimate their heights, and it inflated a 10,000
-    /// point transcript to more than 100,000 while it opened. How the view
-    /// holds its place after that stays with the follow logic.
+    /// Each chat gets a new scroll view, which would otherwise lay out at the top for a frame.
     @ViewBuilder
     func transcriptOpensAtEnd() -> some View {
         if #available(macOS 15.0, iOS 18.0, *) {

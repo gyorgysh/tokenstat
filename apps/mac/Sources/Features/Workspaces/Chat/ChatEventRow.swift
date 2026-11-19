@@ -907,10 +907,7 @@ extension ChatEventRow: Equatable {
             && (lhs.reviewTurnChanges == nil) == (rhs.reviewTurnChanges == nil)
             && lhs.imageResources == rhs.imageResources
         else { return false }
-        // Inputs only one kind of row reads are compared for that kind. The
-        // question flag flips when the cached preview gives way to the live
-        // page, and the face seed arrives with the chat, so comparing them
-        // everywhere rebuilt every visible row a second time on each switch.
+        // Kind-specific inputs, so a preview-to-live switch does not rebuild every row.
         switch lhs.item.kind {
         case .attachment:
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

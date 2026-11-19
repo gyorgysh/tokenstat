@@ -336,13 +336,7 @@ struct ChatTurnChanges: Equatable, Sendable {
 }
 
 extension ChatDisplayItem {
-    /// A height this row is very unlikely to be under, in points.
-    ///
-    /// It decides how many of the newest rows the transcript lays out exactly
-    /// (`TranscriptSlice.split`). It errs low on purpose: generous characters
-    /// per line, a short line height, and a ceiling per row. Erring low only
-    /// measures a row more than needed. Erring high would leave part of the
-    /// end on estimated heights, which is what the measured tail prevents.
+    /// A low estimate of the row's height in points, for `TranscriptSlice.split`.
     var tailHeightFloor: Double {
         func prose(_ text: String) -> Double {
             var lines = 0
@@ -353,7 +347,6 @@ extension ChatDisplayItem {
             lines += 1 + run / 140
             return min(1200, Double(lines) * 16 + 24)
         }
-        // Rows sit at least eight points apart in a transcript.
         let gap: Double = 8
         switch kind {
         case let .user(text), let .thinking(text), let .failed(text): return prose(text) + gap
@@ -389,9 +382,8 @@ extension ChatDisplayItem {
         case .attachment:
             // Metadata only. Downloaded bytes are never held here.
             return base + 256
-        case let .approval(approval):
-            return base + approval.verb.utf8.count + approval.preview.utf8.count
-                + (approval.shellPrefix?.utf8.count ?? 0)
+        case .approval:
+            return base + 512
         case .usage:
             return base
         case let .group(group):

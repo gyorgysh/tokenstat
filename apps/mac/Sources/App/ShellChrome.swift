@@ -284,11 +284,13 @@ struct DesktopChromeSurface: View {
 private struct ChromeLighting: View {
     let sidebarWidth: CGFloat
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(SidebarAppearancePreferences.highlightsKey) private var highlights = false
+    @AppStorage(SidebarAppearancePreferences.highlightsKey) private var highlights = true
 
     var body: some View {
         let dark = colorScheme == .dark
-        let outline = DesktopChromeShape(sidebarWidth: sidebarWidth)
+        // Full-window fills: the content sheet covers the rest, and a fill that
+        // followed the sidebar width repainted the whole window on every drag frame.
+        let outline = Rectangle()
         ZStack {
             if highlights {
                 outline.fill(LinearGradient(
@@ -558,7 +560,10 @@ struct ColumnResizeHandle: View {
 
     let side: Side
     @Binding var width: Double
-    @Binding var liveWidth: Double?
+    /// Closures rather than a binding: SwiftUI reads a binding while updating
+    /// the parent, which made the root view redraw on every drag event.
+    let liveWidth: () -> Double?
+    let setLiveWidth: (Double?) -> Void
     let range: ClosedRange<Double>
     var showsLine: Bool = true
     var help: String = L10n.text("apple.shellchrome.drag_to_resize.31b2f1cd")
@@ -583,14 +588,14 @@ struct ColumnResizeHandle: View {
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
-                    let origin = start ?? (liveWidth ?? width)
+                    let origin = start ?? (liveWidth() ?? width)
                     if start == nil { start = origin }
                     let delta = side == .leading ? value.translation.width : -value.translation.width
-                    liveWidth = min(range.upperBound, max(range.lowerBound, origin + delta))
+                    setLiveWidth(min(range.upperBound, max(range.lowerBound, origin + delta)))
                 }
                 .onEnded { _ in
-                    if let liveWidth { width = liveWidth }
-                    liveWidth = nil
+                    if let live = liveWidth() { width = live }
+                    setLiveWidth(nil)
                     start = nil
                 }
         )
@@ -599,7 +604,7 @@ struct ColumnResizeHandle: View {
             width = min(range.upperBound, max(range.lowerBound, reset))
         }
         .onDisappear {
-            liveWidth = nil
+            setLiveWidth(nil)
             start = nil
             hovered = false
         }
@@ -623,14 +628,6 @@ struct ColumnResizeHandle: View {
 @Observable final class ShellColumnDrag {
     var sidebar: Double?
     var inspector: Double?
-
-    func sidebarBinding() -> Binding<Double?> {
-        Binding(get: { self.sidebar }, set: { self.sidebar = $0 })
-    }
-
-    func inspectorBinding() -> Binding<Double?> {
-        Binding(get: { self.inspector }, set: { self.inspector = $0 })
-    }
 }
 
 /// Frames a column at its live width while dragging, its stored width

@@ -1208,7 +1208,7 @@ struct RootView: View {
                 ColumnResizeHandle(
                     side: .leading,
                     width: $sidebarWidth,
-                    liveWidth: columnDrag.sidebarBinding(),
+                    liveWidth: { columnDrag.sidebar }, setLiveWidth: { columnDrag.sidebar = $0 },
                     range: sidebarDragRange,
                     // The joined shell draws its own rim along this edge.
                     showsLine: !usesUnifiedChrome,
@@ -2015,7 +2015,7 @@ struct RootView: View {
                         ColumnResizeHandle(
                             side: .trailing,
                             width: $inspectorWidth,
-                            liveWidth: columnDrag.inspectorBinding(),
+                            liveWidth: { columnDrag.inspector }, setLiveWidth: { columnDrag.inspector = $0 },
                             range: inspectorDragRange,
                             help: L10n.text("apple.rootview.drag_to_resize_the_inspector_double_click.9aa43689")
                         )

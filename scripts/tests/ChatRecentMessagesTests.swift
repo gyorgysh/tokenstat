@@ -15,9 +15,9 @@ private struct ChatRecentMessage: Equatable {
             ChatRecentMessage(id: "m\(id)", text: text, backend: "codex", isUser: false)
         }
         var cache = ChatRecentMessages<ChatRecentMessage>()
-        cache.store((0..<180).map { message($0) }, for: "account|host|folder|chat", cost: { $0.text.utf8.count + $0.id.utf8.count + ($0.backend?.utf8.count ?? 0) })
+        cache.store((0..<480).map { message($0) }, for: "account|host|folder|chat", cost: { $0.text.utf8.count + $0.id.utf8.count + ($0.backend?.utf8.count ?? 0) })
         let tail = cache.messages(for: "account|host|folder|chat")
-        precondition(tail.count == 150 && tail.first?.id == "m30" && tail.last?.id == "m179")
+        precondition(tail.count == 450 && tail.first?.id == "m30" && tail.last?.id == "m479")
         precondition(cache.messages(for: "other-account|host|folder|chat").isEmpty)
         precondition(cache.messages(for: "account|other-host|folder|chat").isEmpty)
         cache.removeAll()

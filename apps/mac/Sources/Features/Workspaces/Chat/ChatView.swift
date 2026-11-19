@@ -196,12 +196,8 @@ struct ChatView: View {
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
-    /// Every opening settle still running. A click on a chat starts two:
-    /// one in the new scroll view, and one in the outgoing view, which sees
-    /// the new identity for a pass before it is removed. The last one to
-    /// start was often the outgoing one, and when its view went it ended the
-    /// settle for both, so the end stopped being held while the chat was
-    /// still arriving. The hold now ends when the last settle does.
+    /// A click starts a settle in both the new and the outgoing scroll view.
+    /// The hold ends when the last one does.
     @State private var settles = SettleTickets()
     /// Bumped on send so the transcript scrolls to the end synchronously,
     /// instead of waiting for the first streamed token to trigger a pin.
@@ -522,9 +518,7 @@ struct ChatView: View {
         // Asked again when the branch moves and when a turn ends, since an
         // agent may have just opened the pull request.
         .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {
-            // The chip belongs to the folder and branch, not to this ask.
-            // Clearing it on every ask emptied the strip above the composer
-            // whenever a turn started or ended, and the composer jumped twice.
+            // Keep the last answer for this folder and branch while asking again.
             let owner = "\(workspaceID)|\(git?.branch ?? "")"
             if branchPullOwner != owner {
                 branchPull = nil
@@ -930,7 +924,7 @@ struct ChatView: View {
                     // A lazy-stack scroll walks every row between here and
                     // the end. Limit settling corrections; geometry-based
                     // repinning handles later height changes.
-                    if !follow.atEnd, correctionPins < 8 {
+                    if !follow.exactlyAtEnd, correctionPins < 8 {
                         correctionPins += 1
                         pinToLatest(proxy, animated: false)
                     }
@@ -1448,10 +1442,7 @@ struct ChatView: View {
         (paneDropTargeted || transcriptDropTargeted || composerDropTargeted) && showsDropTargets
     }
 
-    /// Whether the pane offers itself as a drop target. Leaves out the
-    /// folder's list read, which flips on every switch into another folder
-    /// and re-ran the whole pane to say so. A drop that lands while that
-    /// read is out is refused by `acceptsDrops` when it arrives.
+    /// Leaves out the folder list read, so it does not redraw the pane. `acceptsDrops` checks it on drop.
     private var showsDropTargets: Bool {
         isActive && !showingOverview && !model.sending
             && model.folderID == workspaceID
@@ -1681,8 +1672,6 @@ private struct ConversationPreviewHover: ViewModifier {
 }
 #endif
 
-/// The settles in flight, by ticket. A reference, so starting and ending one
-/// does not redraw the transcript.
 final class SettleTickets {
     private var live: Set<UUID> = []
 
@@ -1749,18 +1738,11 @@ private struct OpeningSkeleton: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.background)
             } else if showsBlank {
-                // Inside the grace period nothing is drawn over a fast open,
-                // but its first page lands at the top of a new scroll view
-                // and is pinned to the end a frame later. The plain pane
-                // colour hides that frame without flashing the wireframe.
+                // Hides the first page landing at the top before it is pinned.
                 Theme.background
             }
         }
         .allowsHitTesting(showsSkeleton)
-        // The fade lives here, on the cover, rather than on the transcript.
-        // Animating the whole scroll view on `transcriptReady` made the
-        // opening flag a dependency of the entire pane, which re-ran it once
-        // more on every switch, and animated the rows' layout along with it.
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: transcriptReady)
         .modifier(OpeningCover(
             isOpening: model.openingConversation,

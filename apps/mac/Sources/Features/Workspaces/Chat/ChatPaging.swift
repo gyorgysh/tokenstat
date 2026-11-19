@@ -28,12 +28,7 @@ enum ChatPaging {
     /// of insertions, each one a walk over the rows and a correction of
     /// the reader's place.
     static let pageEvents = 1200
-    /// How many records a background preview fetch asks for: the same page
-    /// a conversation opens on. A smaller page folded into a shorter window
-    /// than the one the live page then showed, or started part way through a
-    /// long reply, and either one grew the transcript above a view sitting
-    /// at its end on the frame the live page landed. The same records give
-    /// the same rows, so opening a warmed chat moves nothing.
+    /// The same page a chat opens on, so a warmed preview shows the same rows.
     static let previewPageEvents = openPageEvents
     /// The most records the host hands back in one page. Mirrors
     /// `PAGE_EVENTS_MAX`; a request above this is clamped, not refused.

@@ -61,9 +61,7 @@ struct PersonaMark: View {
     /// message is not a control, and a hit area there would steal the click
     /// that selects the row.
     var pokeable = false
-    /// Seconds of motion before the character comes to rest. Nil moves for
-    /// as long as it is on screen. A face beside an old message has nothing
-    /// new to say, and every moving one costs the window a frame.
+    /// Seconds of motion before it rests. Nil moves while shown.
     var settlesAfter: Double?
 
     @Environment(\.personaMotionAllowed) private var paneAllowsMotion
