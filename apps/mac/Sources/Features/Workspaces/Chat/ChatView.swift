@@ -196,9 +196,8 @@ struct ChatView: View {
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
-    /// A click starts a settle in both the new and the outgoing scroll view.
-    /// The hold ends when the last one does.
-    @State private var settles = SettleTickets()
+    @State private var settleTaskID = UUID()
+    @State private var settledPresentation: ChatPresentationIdentity?
     /// Bumped on send so the transcript scrolls to the end synchronously,
     /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
@@ -533,6 +532,7 @@ struct ChatView: View {
             dropPresentation &+= 1
             if !active {
                 showingHandoff = false
+                settledPresentation = nil
                 model.saveDraftNow()
                 // Tear down scroll work before the LazyVStack is discarded.
                 follow.freeze()
@@ -541,9 +541,10 @@ struct ChatView: View {
             }
         }
         .onChange(of: showingOverview) { _, _ in dropPresentation &+= 1 }
-        .onChange(of: model.readingIdentity) { _, _ in
+        .onChange(of: model.readingIdentity) { previous, current in
             // A sheet belongs to the conversation that opened it.
             showingHandoff = false
+            if previous.generation != current.generation { settleMood = nil }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         #if os(macOS)
@@ -666,6 +667,12 @@ struct ChatView: View {
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
         let split = TranscriptSlice.split(rows)
+        let presentation = ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)
+        #if os(macOS)
+        let verticalPadding = Theme.Space.m
+        #else
+        let verticalPadding = Theme.Space.xl
+        #endif
         ScrollViewReader { proxy in
             ScrollView {
                 // Keep the bottom target measured even when a tall lazy row
@@ -716,7 +723,7 @@ struct ChatView: View {
                                 startedAt: model.selected.flatMap { model.turnStartedAt(for: $0.id) }
                             )
                         }
-                        TranscriptBottomSentinel()
+                        TranscriptBottomSentinel(trailingPadding: verticalPadding)
                     }
                 }
                 // One gate for the whole stack, not one per row: hit testing
@@ -726,24 +733,21 @@ struct ChatView: View {
                 // never loses taps.
                 .allowsHitTesting(!follow.scrolling && !model.isShowingCachedTranscript)
                 .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
-                #if os(macOS)
-                .padding(.vertical, Theme.Space.m)
-                #else
-                .padding(.vertical, Theme.Space.xl)
-                #endif
+                .padding(.top, verticalPadding)
+                .padding(.bottom, sliceOffset == 0 ? 0 : verticalPadding)
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
                 .chatScrollContent()
             }
             .transcriptOpensAtEnd()
             .chatDropSurface(enabled: showsDropTargets, isTargeted: $transcriptDropTargeted, receive: receive)
-            // Cover the build-up, do not hide the stack. Opacity 0 is how a
-            // lazy stack skipped measuring the last prompt: those rows were
-            // not visible, so they stayed at estimated height until a click
-            // forced a real layout.
-            .overlay { OpeningSkeleton(model: model, follow: follow) }
+            .overlay {
+                if settledPresentation != presentation {
+                    OpeningSkeleton().transition(.identity)
+                }
+            }
             .chatScrollMetrics { metrics in
-                guard isActive else { return }
+                guard isActive, presentation.reading == model.readingIdentity else { return }
                 #if DEBUG
                 TranscriptProbe.shared.noteMetrics()
                 TranscriptProbe.shared.pinned = follow.pinned
@@ -775,22 +779,23 @@ struct ChatView: View {
             }
             .transcriptEarlierPages(model, window: window, proxy: proxy, hiddenEarlierRows: hiddenAboveCount)
             .onChange(of: structureToken) { _, _ in
-                // Tool-heavy (Codex) turns change shape per poll. An animated
-                // pin per poll is what yanked scrollback, so structural pins
-                // are silent while busy and skipped entirely when at the end
-                // (growth frames repin on their own).
-                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
+                // Opening owns placement while the cached rows and the live
+                // page trade places. Later structural changes can follow normally.
+                guard settledPresentation == presentation,
+                      presentation.reading == model.readingIdentity,
+                      !follow.settling, !follow.atEnd else { return }
+                pinToLatest(proxy, animated: !model.busy)
             }
             .onChange(of: followPulse) { _, _ in
                 showNewest()
                 follow.jump()
                 Task { await returnToLatest(proxy) }
             }
-            .onChange(of: chat.running) { _, _ in
-                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
-            }
             .onChange(of: model.busy) { was, now in
-                settleAfterTurn(was: was, now: now)
+                guard presentation.reading == model.readingIdentity else { return }
+                if settledPresentation == presentation {
+                    settleAfterTurn(was: was, now: now)
+                }
                 if was, !now {
                     Task { await model.drainQueue() }
                 }
@@ -853,6 +858,7 @@ struct ChatView: View {
             }
             #endif
             .onAppear {
+                guard presentation.reading == model.readingIdentity else { return }
                 #if os(macOS)
                 // A new scroll view cannot use the previous window's paging
                 // anchor, in-flight claim or first-pin throttle.
@@ -870,75 +876,62 @@ struct ChatView: View {
                 follow.suppressed = !model.approvals.isEmpty
                 if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
                 window.nearTopChanged = { measuringRows = $0 }
-                installRepin(proxy)
-                pinToLatest(proxy, animated: false)
             }
-            .task(id: ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)) {
-                // A lazy stack does not know its own height until it has drawn
-                // the rows, so the first scroll to the end lands on estimates.
-                // Hold the end across the frames it takes the real heights to
-                // arrive: the intermediate ones all say the end is far below,
-                // and believing one of them is how a long conversation used to
-                // open in its middle.
-                //
-                // Only while in front. This pane stays mounted behind other
-                // destinations, and scrolling a zero-size proxy to estimated
-                // heights is how it came back painted off-origin.
-                guard isActive else { return }
-                let ticket = settles.begin()
+            .task(id: presentation) {
+                guard !Task.isCancelled, isActive, presentation.reading == model.readingIdentity else { return }
+                let ticket = UUID()
+                settleTaskID = ticket
+                settledPresentation = nil
+                installRepin(proxy, for: presentation)
                 follow.settle(true)
                 window.followingEnd = true
                 showNewest()
-                pinToLatest(proxy, animated: false)
                 defer {
-                    if settles.end(ticket) {
+                    if settleTaskID == ticket, presentation.reading == model.readingIdentity {
                         #if os(macOS)
-                        // These are geometry and counts only. They let a
-                        // diagnostic log distinguish an empty model from a
-                        // viewport that never reached its content.
-                        DiagnosticsLog.note("chat viewport settle end=\(follow.atEnd) rows=\(model.transcriptItems.count) cancelled=\(Task.isCancelled)")
+                        DiagnosticsLog.note("chat viewport settle end=\(follow.exactlyAtEnd) rows=\(model.transcriptItems.count) cancelled=\(Task.isCancelled)")
                         #endif
                         follow.settle(false)
+                        if !Task.isCancelled { settledPresentation = presentation }
                     }
                 }
-                // Fetch time does not spend the layout-settling budget. Slow
-                // hosts used to exhaust every correction before rows arrived.
+                // The cached tail can be measured while the live page loads.
+                // Reveal after the live page has stayed at its actual bottom.
                 while model.openingConversation {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, settleTaskID == ticket,
+                          presentation.reading == model.readingIdentity else { return }
                 }
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, presentation.reading == model.readingIdentity else { return }
                 if await restoreReadingPlace(proxy) != .unavailable { return }
-                guard !Task.isCancelled else { return }
-                showNewest()
-                // Hold the end until the conversation has stopped arriving,
-                // and then for a few frames while the last rows measure
-                // themselves. A fixed count was a guess at how long the
-                // opening backfill takes, and the pages that landed after it
-                // ran out are what left the view in the middle.
-                var quiet = 0
+                guard !Task.isCancelled, settleTaskID == ticket,
+                      presentation.reading == model.readingIdentity else { return }
+                var previousBottomLayout: UInt64?
                 var correctionPins = 0
                 for _ in 0..<Self.settleFrames {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled, isActive, model.approvals.isEmpty else { return }
-                    // A lazy-stack scroll walks every row between here and
-                    // the end. Limit settling corrections; geometry-based
-                    // repinning handles later height changes.
-                    if !follow.exactlyAtEnd, correctionPins < 8 {
-                        correctionPins += 1
-                        pinToLatest(proxy, animated: false)
+                    guard !Task.isCancelled, settleTaskID == ticket,
+                          presentation.reading == model.readingIdentity,
+                          !follow.abandoned, model.approvals.isEmpty else { return }
+                    if follow.exactlyAtEnd {
+                        let revision = follow.layoutRevision
+                        if previousBottomLayout == revision { return }
+                        previousBottomLayout = revision
+                    } else {
+                        previousBottomLayout = nil
+                        if correctionPins < 8, pinToLatest(proxy, animated: false) {
+                            correctionPins += 1
+                        }
                     }
-                    quiet = model.openingConversation ? 0 : quiet + 1
-                    if follow.arrived, quiet >= 3 { return }
                 }
             }
             .task(id: settleMood) {
                 guard settleMood == .ok else { return }
-                try? await Task.sleep(for: .milliseconds(480))
+                do { try await Task.sleep(for: .milliseconds(480)) } catch { return }
                 settleMood = nil
             }
-            .task(id: ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)) {
-                await watchMountedRows(proxy)
+            .task(id: presentation) {
+                await watchMountedRows(proxy, for: presentation)
             }
         }
         #if os(macOS)
@@ -947,8 +940,8 @@ struct ChatView: View {
         // sometimes leaving a loaded conversation entirely offscreen after
         // arrow navigation. Keep the composer/pane, but give each selected
         // window its own scroll view. Paging and streaming retain this one.
-        .id(ChatReadingIdentity(reference: model.currentReference,
-                                generation: model.selectionGeneration))
+        .id(ChatReadingIdentity(reference: presentation.reading.reference,
+                                generation: presentation.reading.generation))
         #endif
         }
     }
@@ -1027,18 +1020,7 @@ struct ChatView: View {
         )
     }
 
-    /// A read-only preview covers the live transcript's initial layout/fetch.
-    /// It never enters the event stream or the reading-position bookkeeping.
-    /// The longest the opening pin holds, in fifty-millisecond frames. It
-    /// stops once the conversation has arrived and the end has been steady
-    /// for a moment, so this is the ceiling on a slow host and not what an
-    /// open costs.
-    ///
-    /// A long transcript of tool rows rarely holds still for three frames
-    /// while its lazy rows measure, so in practice it rode the ceiling: two
-    /// seconds of wireframe over a page that had arrived in a tenth of that.
-    /// Following the end carries on after the reveal, so a shorter hold hides
-    /// the first build-up and not the whole of it.
+    /// Bound the number of layout samples after the live page arrives.
     private static let settleFrames = 24
 
     /// Rows the transcript builds this pass. A fixed-width slice, never a
@@ -1130,11 +1112,12 @@ struct ChatView: View {
     /// Weak, because the state owns the closure and the closure would
     /// otherwise own the state. The proxy and the model are both fine to hold:
     /// neither is owned by what is holding this.
-    private func installRepin(_ proxy: ScrollViewProxy) {
+    private func installRepin(_ proxy: ScrollViewProxy, for presentation: ChatPresentationIdentity) {
         let state = follow
         let model = model
         state.repin = { [weak state] in
-            guard let state, state.active, state.pinned, !state.sliceHidesNewest, model.approvals.isEmpty else { return false }
+            guard let state, presentation.reading == model.readingIdentity,
+                  state.active, state.pinned, !state.sliceHidesNewest, model.approvals.isEmpty else { return false }
             state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
             return true
@@ -1207,15 +1190,15 @@ struct ChatView: View {
     /// end is moved. Anyone else is scrolling themselves, which rebuilds the
     /// rows anyway. Bounded, so a chat that really has nothing to build
     /// cannot keep moving the view.
-    private func watchMountedRows(_ proxy: ScrollViewProxy) async {
+    private func watchMountedRows(_ proxy: ScrollViewProxy, for presentation: ChatPresentationIdentity) async {
         guard isActive else { return }
         var repairs = 0
         var emptySamples = 0
         while !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            // The opening cover only hides the stack, so repair under it:
-            // the rows are back by the time it lifts.
-            if rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
+            guard presentation.reading == model.readingIdentity else { return }
+            // The repair must not compete with opening placement.
+            if settledPresentation != presentation || rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
                 || model.openingConversation || follow.scrolling || !follow.pinned || !canScrollToEnd {
                 emptySamples = 0
                 if rowMounts.showsRows(viewportHeight: window.viewportHeight) { repairs = 0 }
@@ -1230,7 +1213,7 @@ struct ChatView: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) { proxy.scrollTo(last, anchor: .top) }
             try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, presentation.reading == model.readingIdentity else { return }
             guard isActive, follow.pinned, !follow.scrolling, canScrollToEnd else { continue }
             follow.markDrivenInstant()
             lastSilentPinAt = .distantPast
@@ -1238,23 +1221,25 @@ struct ChatView: View {
         }
     }
 
-    private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
+    @discardableResult
+    private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) -> Bool {
         // A pending request owns the view. Streaming text must not scroll it
         // back out from under somebody who is reading it to decide.
         // And a hidden pane owns no viewport: this view stays mounted behind
         // other destinations, and scrolling its zero-size proxy is what left
         // it painted off-origin until a resize.
-        guard isActive, follow.pinned, model.approvals.isEmpty else { return }
+        guard isActive, follow.pinned, model.approvals.isEmpty else { return false }
         guard canScrollToEnd else {
             follow.stopFollowing()
-            return
+            return false
         }
         if !animated {
             let now = Date()
-            guard now.timeIntervalSince(lastSilentPinAt) > 0.15 else { return }
+            guard now.timeIntervalSince(lastSilentPinAt) > 0.15 else { return false }
             lastSilentPinAt = now
         }
         scrollTo(TranscriptFollow.bottomID, proxy, animated: animated)
+        return true
     }
 
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
@@ -1278,7 +1263,9 @@ struct ChatView: View {
         #endif
         follow.markDriven(duration: animate ? 0.4 : 0.08)
         if !animate {
-            proxy.scrollTo(id, anchor: .bottom)
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo(id, anchor: .bottom) }
         } else {
             withAnimation(.easeOut(duration: TranscriptFollow.structureDuration)) {
                 proxy.scrollTo(id, anchor: .bottom)
@@ -1672,95 +1659,24 @@ private struct ConversationPreviewHover: ViewModifier {
 }
 #endif
 
-final class SettleTickets {
-    private var live: Set<UUID> = []
-
-    func begin() -> UUID {
-        let ticket = UUID()
-        live.insert(ticket)
-        return ticket
-    }
-
-    /// Whether this was the last settle still running.
-    func end(_ ticket: UUID) -> Bool {
-        live.remove(ticket)
-        return live.isEmpty
-    }
-}
-
-/// The wireframe over an opening, with the two pieces of state that decide it.
-///
-/// They used to live on the chat pane, so turning each of them on and off
-/// re-ran the whole pane, transcript and toolbar included: four of the eight
-/// pane updates in a chat switch, for a cover that usually never shows
-/// because a cached preview stands in. Here they re-run this view alone.
+/// Keep the transcript laid out behind the cover. Delay the wireframe so a
+/// fast selection can appear directly at the latest message.
 private struct OpeningSkeleton: View {
-    let model: ChatModel
-    let follow: TranscriptFollowState
-    /// Whether an opening is in progress for the conversation on screen.
-    ///
-    /// The wireframe covers an opening: the fetch, and the frames a lazy stack
-    /// then spends measuring what the fetch delivered. Nothing else. A send, a
-    /// jump and a streaming turn all reset `arrived` too, and an empty
-    /// transcript never reaches it at all (`atEnd` needs a content height),
-    /// so keying the cover on `arrived` alone put scaffolding over the first
-    /// message of a new chat for the length of the settle budget.
-    @State private var opening = false
-
-    /// Whether the wireframe may appear. Armed 150ms into an opening, so
-    /// a fast open settles before the grace runs out and never flashes
-    /// scaffolding at all. Reset on every toggle, so a re-pick starts over.
-    @State private var coverArmed = false
-
-    /// Whether the wireframe is up: an opening is under way, it has
-    /// outlasted the grace period, it has not settled, and no cached
-    /// preview is standing in for it.
-    private var showsSkeleton: Bool {
-        opening && coverArmed && !transcriptReady && model.recentMessagePreview.isEmpty
-    }
-
-    /// Before the wireframe is armed, with nothing cached to stand in.
-    private var showsBlank: Bool {
-        opening && !coverArmed && !transcriptReady && model.recentMessagePreview.isEmpty
-    }
-
-    private var transcriptReady: Bool {
-        follow.arrived && !model.openingConversation
-    }
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showsSkeleton = false
 
     var body: some View {
-        ZStack {
-            if showsSkeleton {
-                TranscriptSkeleton()
-                    .frame(maxWidth: ReadingRoom.laneWidth)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.background)
-            } else if showsBlank {
-                // Hides the first page landing at the top before it is pinned.
-                Theme.background
+        Theme.background
+            .overlay {
+                if showsSkeleton {
+                    TranscriptSkeleton()
+                        .frame(maxWidth: ReadingRoom.laneWidth)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-        }
-        .allowsHitTesting(showsSkeleton)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: transcriptReady)
-        .modifier(OpeningCover(
-            isOpening: model.openingConversation,
-            ready: transcriptReady,
-            conversationID: model.selected?.id,
-            opening: $opening
-        ))
-        // Arm the cover late (see `coverArmed`). This restarts on every
-        // toggle of `opening`, so when it flips back the restart takes
-        // the `guard` exit and disarms before the next frame. Nothing is
-        // armed while a cached preview is standing in, since the cover
-        // could not show over it anyway.
-        .task(id: opening) {
-            if coverArmed { coverArmed = false }
-            guard opening, model.recentMessagePreview.isEmpty else { return }
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled, opening, model.recentMessagePreview.isEmpty else { return }
-            coverArmed = true
-        }
+            .task {
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                showsSkeleton = true
+            }
     }
 }

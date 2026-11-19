@@ -327,6 +327,9 @@ final class TranscriptFollowState {
     @ObservationIgnored private var lastViewportHeight: CGFloat = 0
     @ObservationIgnored private var lastOffset: CGFloat = 0
     @ObservationIgnored private var lastDistanceFromBottom: CGFloat = 0
+    @ObservationIgnored private var readerIsScrolling = false
+    /// Opening samples this on its timer because unchanged geometry emits no callback.
+    @ObservationIgnored private(set) var layoutRevision: UInt64 = 0
     /// Offset drift outside our own scrolls, accumulated across frames. Scroll
     /// callbacks run per frame, so a slow reading scroll moves less than the
     /// per-frame `moved` epsilon every frame and would otherwise read as
@@ -430,7 +433,7 @@ final class TranscriptFollowState {
     /// most of what made opening a long chat a hang.
     @ObservationIgnored private(set) var atEnd = false
     /// Within a couple of points of the end, not just inside the threshold.
-    var exactlyAtEnd: Bool { lastDistanceFromBottom <= 2 }
+    var exactlyAtEnd: Bool { atEnd && lastViewportHeight > 0 && lastDistanceFromBottom <= 2 }
     /// Somebody scrolled away while the end was being chased. Read by the
     /// chase, which stops rather than argue.
     @ObservationIgnored private(set) var abandoned = false
@@ -514,6 +517,8 @@ final class TranscriptFollowState {
         lastViewportHeight = 0
         lastOffset = 0
         lastDistanceFromBottom = 0
+        readerIsScrolling = false
+        layoutRevision &+= 1
         programmaticUntil = .distantPast
         undrivenDrift = 0
         farMovedFrames = 0
@@ -532,6 +537,9 @@ final class TranscriptFollowState {
         let grew = metrics.contentHeight > lastContentHeight + 0.5
         let shrank = metrics.contentHeight < lastContentHeight - 0.5
         let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
+        let resized = abs(metrics.viewportHeight - lastViewportHeight) > 0.5
+        if grew || shrank || moved || resized { layoutRevision &+= 1 }
+        readerIsScrolling = metrics.readerIsScrolling == true
         // Motion only: growth under a still viewport is a stream arriving,
         // not a gesture, and rows stay interactive while it is followed.
         let readerMoved = moved && metrics.readerIsScrolling != false
@@ -539,12 +547,14 @@ final class TranscriptFollowState {
 
         // Small growth or a shorter viewport stays inside the threshold and
         // left the last row (the token count) hidden under the composer.
-        let resized = lastViewportHeight > 0 && abs(metrics.viewportHeight - lastViewportHeight) > 0.5
+        let hadViewport = lastViewportHeight > 0
         lastViewportHeight = metrics.viewportHeight
-        if resized || (grew && !moved), pinned, !readerMoved, !sliceHidesNewest, !metrics.viewportPastContent,
+        if (hadViewport && resized) || (grew && !moved), pinned, !settling, !readerIsScrolling,
+           !readerMoved, !sliceHidesNewest, !metrics.viewportPastContent,
            metrics.distanceFromBottom > 2, metrics.distanceFromBottom <= TranscriptFollow.threshold {
             repinDelivery.submit(after: max(0, 0.15 - Date().timeIntervalSince(lastRepinAt))) { [weak self] in
-                guard let self, self.active, self.pinned, !self.sliceHidesNewest, !self.suppressed else { return }
+                guard let self, self.active, self.pinned, !self.sliceHidesNewest, !self.suppressed,
+                      !self.settling, !self.readerIsScrolling, !self.exactlyAtEnd else { return }
                 self.lastRepinAt = Date()
                 self.markDrivenInstant()
                 _ = self.repin?()
@@ -872,9 +882,13 @@ private struct TranscriptRowMount: ViewModifier {
 }
 
 struct TranscriptBottomSentinel: View {
+    var trailingPadding: CGFloat = 0
+
     var body: some View {
         Color.clear
-            .frame(height: 1)
+            // Include the padding in the target's frame so a bottom pin
+            // agrees with the scroll view's end on the same layout.
+            .frame(height: 1 + trailingPadding)
             .id(TranscriptFollow.bottomID)
     }
 }

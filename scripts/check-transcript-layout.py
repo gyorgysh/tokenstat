@@ -124,6 +124,32 @@ resize.note(native(6751, 7270, 119, scrolling: false, viewport: 400))
 drain()
 assert(resize.pinned && resizePins == 1, "viewport shrink must preserve follow")
 
+let openingLayout = TranscriptFollowState()
+openingLayout.resetViewport()
+openingLayout.settle(true)
+assert(!openingLayout.exactlyAtEnd, "an unmeasured viewport must not reveal the transcript")
+var openingPins = 0
+openingLayout.repin = { openingPins += 1; return true }
+openingLayout.note(native(6751, 7270, 0, scrolling: false))
+let firstBottomLayout = openingLayout.layoutRevision
+assert(openingLayout.exactlyAtEnd)
+openingLayout.note(native(6751, 7270, 0, scrolling: false))
+assert(openingLayout.layoutRevision == firstBottomLayout, "unchanged geometry is one stable layout")
+openingLayout.note(native(6751, 7270, 12, scrolling: false, viewport: 507))
+assert(!openingLayout.exactlyAtEnd && openingLayout.layoutRevision != firstBottomLayout,
+       "a composer resize invalidates the measured bottom even within the follow threshold")
+drain()
+assert(openingPins == 0, "the opening task alone must correct the viewport")
+
+let reachedAfterResize = TranscriptFollowState()
+reachedAfterResize.note(native(6751, 7270, 0, scrolling: false))
+var unnecessaryPins = 0
+reachedAfterResize.repin = { unnecessaryPins += 1; return true }
+reachedAfterResize.note(native(6751, 7270, 12, scrolling: false, viewport: 507))
+reachedAfterResize.note(native(6763, 7270, 0, scrolling: false, viewport: 507))
+drain()
+assert(unnecessaryPins == 0, "a delayed small correction is obsolete once layout reaches the bottom")
+
 // A completed row can shrink while its old offset lies beyond the whole
 // document. The clamped bottom distance is zero, but nothing intersects the
 // viewport. Correct once, without interpreting a real gesture as layout.
@@ -133,6 +159,7 @@ var recoveryPins = 0
 belowContent.repin = { recoveryPins += 1; return true }
 belowContent.note(native(600, 500, 0, scrolling: false, viewport: 400))
 assert(!belowContent.atEnd, "a viewport below all content is not at the end")
+assert(!belowContent.exactlyAtEnd, "a clamped gap cannot make a blank viewport ready")
 drain()
 assert(recoveryPins == 1, "a following reader must recover from a blank viewport")
 belowContent.note(native(100, 500, 0, scrolling: false, viewport: 400))
