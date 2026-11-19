@@ -317,7 +317,7 @@ identity = root_source[start:end].replace('private struct', 'struct')
 sidebar_fixture = r'''
 import Foundation
 struct ChatConversation: Equatable { let id: String; var backend = "codex"; var running = false }
-typealias ChatDisplayItem = String
+struct ChatDisplayItem { let estimatedBytes: Int }
 @MainActor final class WorkSessionContext {
     static let shared = WorkSessionContext()
     var scope: String? = "account", localHostIdentity: String? = "host"
@@ -345,10 +345,10 @@ enum ChatHistoryWindow {
 struct ChatRecentMessages<T> { static var perFolderLimit: Int { 10 } }
 struct Cache {
     func contains(_ key: String) -> Bool { false }
-    func store(_ rows: [String], for key: String, speculative: Bool, cost: (String) -> Int) {}
-    func peek(_ key: String) -> [String] { [] }
+    func store(_ rows: [ChatDisplayItem], for key: String, speculative: Bool, cost: (ChatDisplayItem) -> Int) {}
+    func peek(_ key: String) -> [ChatDisplayItem] { [] }
 }
-struct Projector { func project(_ rows: [String], backend: String, running: Bool) async throws -> [String] { [] } }
+struct Projector { func project(_ rows: [String], backend: String, running: Bool) async throws -> [ChatDisplayItem] { [] } }
 @MainActor final class Model {
     var continuityScope: String?
     var previewCacheEpoch: UInt64 = 0
@@ -364,7 +364,7 @@ struct Projector { func project(_ rows: [String], backend: String, running: Bool
     func storeChatListCache(_ list: [ChatConversation], folderID: String) { chatListCache[folderID] = list; sidebarListErrors[folderID] = nil }
     static func uniqued(_ list: [ChatConversation]) -> [ChatConversation] { list }
     func isUnused(_ row: ChatConversation, in folder: String) -> Bool { false }
-    static func warmMarkdown(_ rows: [String]) {}
+    static func warmMarkdown(_ rows: [ChatDisplayItem]) {}
 WARM
 }
 IDENTITY
@@ -381,18 +381,20 @@ IDENTITY
         // transcript previews while other sidebar folders are still loading.
         model.continuityScope = "account"; model.previewCacheEpoch += 1
         Bridge.replies[0]?.resume(returning: [ChatConversation(id: "existing")]); Bridge.replies[0] = nil
-        await read.value
+        let answered = await read.value
+        assert(answered)
         assert(model.chatListCache["other-repo"]?.first?.id == "existing",
                "preview invalidation must not leave another repository loading")
         let failed = Task { await model.warmWorkspacePreviews("failed-repo", includeMessages: false) }
         await until(2); model.previewCacheEpoch += 1
         Bridge.replies[1]?.resume(throwing: CocoaError(.fileReadUnknown)); Bridge.replies[1] = nil
-        await failed.value
+        let succeeded = await failed.value
+        assert(!succeeded)
         assert(model.sidebarListErrors["failed-repo"] != nil, "failed directory reads settle to Retry")
         let oldAccount = Task { await model.warmWorkspacePreviews("private-repo", includeMessages: false) }
         await until(3); WorkSessionContext.shared.scope = "other-account"
         Bridge.replies[2]?.resume(returning: [ChatConversation(id: "private")]); Bridge.replies[2] = nil
-        await oldAccount.value
+        _ = await oldAccount.value
         assert(model.chatListCache["private-repo"] == nil, "retired account replies cannot populate the sidebar")
         let original = SidebarChatReadIdentity(folderID: "repo", model: ObjectIdentifier(model), session: 1)
         let replacement = Model()
