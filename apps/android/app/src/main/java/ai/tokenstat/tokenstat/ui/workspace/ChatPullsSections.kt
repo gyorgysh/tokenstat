@@ -3477,7 +3477,8 @@ private fun ChatWorkingIndicator(
                         .background(colors.accent.copy(alpha = 0.18f), CircleShape),
                 )
             }
-            PersonaMark(seed = seed, size = 26.dp, mood = mood)
+            PersonaMark(seed = seed, size = 26.dp, mood = mood,
+                settlesAfter = if (mood == PersonaMood.Failed) 4.0 else null)
         }
         androidx.compose.animation.AnimatedContent(
             targetState = base,
