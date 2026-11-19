@@ -171,14 +171,13 @@ object RelativeClock {
         else -> error("Unknown relative time unit: $unit")
     }
 
-    /// "3 days ago", in full words the way Foundation's numeric relative
-    /// style phrases it: seconds, minutes, hours, days, then weeks to months
-    /// to years, each rounded to the nearest rather than floored, so a reset
+    /// "3 days ago", in full words like Foundation's numeric relative style.
+    /// "now" for the first minute, so the label never ticks by the second.
+    /// Each unit is rounded to the nearest rather than floored, so a reset
     /// 2.8 days out reads "in 3 days" here and on the Apple client alike.
     fun label(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = ((nowMillis - epochMillis) / 1000).coerceAtLeast(0)
-        if (delta < 5) return L10n.text("android.hostcontracts.now.ed5eb9a3")
-        if (delta < 60) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit(delta, "second")}")
+        if (delta < 60) return L10n.text("android.hostcontracts.now.ed5eb9a3")
         val minutes = (delta + 30) / 60
         if (minutes < 60) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit(minutes, "minute")}")
         val hours = (delta + 1800) / 3600

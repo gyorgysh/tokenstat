@@ -103,6 +103,7 @@ import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
+import ai.tokenstat.tokenstat.ui.components.SkeletonPage
 import ai.tokenstat.tokenstat.ui.components.SkeletonRows
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
@@ -477,7 +478,7 @@ private fun SessionsSection(
                 TextButton(onClick = onLoad) { Text(L10n.text("common.refresh")) }
             }
         }
-        if (loading && sessions.isEmpty()) item { SkeletonRows(count = 3) }
+        if (loading && sessions.isEmpty()) item { SkeletonPage() }
         if (!loading && sessions.isEmpty()) {
             item {
                 EmptyState(
@@ -868,7 +869,7 @@ private fun TodoSection(
                 }
             }
         }
-        if (loading && cards.isEmpty()) item { SkeletonRows(count = 3) }
+        if (loading && cards.isEmpty()) item { SkeletonPage() }
         if (!loading && cards.isEmpty()) {
             item {
                 EmptyState(
@@ -1048,7 +1049,7 @@ private fun WorkflowsSection(
         item {
             TsSecondaryButton(label = L10n.text("android.workspacesections.open_workflows.6fa79b22"), icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
         }
-        if (loading && workflows.isEmpty()) item { SkeletonRows(count = 3) }
+        if (loading && workflows.isEmpty()) item { SkeletonPage() }
         if (!loading && workflows.isEmpty()) {
             item {
                 EmptyState(
@@ -1235,7 +1236,7 @@ private fun AutomationsSection(
         item {
             TsSecondaryButton(label = L10n.text("android.workspacesections.open_automations.8c752bc8"), icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
         }
-        if (loading && automations.isEmpty()) item { SkeletonRows(count = 3) }
+        if (loading && automations.isEmpty()) item { SkeletonPage() }
         if (!loading && automations.isEmpty()) {
             item {
                 EmptyState(

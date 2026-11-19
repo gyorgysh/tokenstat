@@ -41,14 +41,12 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,6 +65,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
+import ai.tokenstat.tokenstat.ui.theme.cardPadding
+import ai.tokenstat.tokenstat.ui.theme.cardRadius
 import ai.tokenstat.tokenstat.ui.components.BrandCheckDisc
 import ai.tokenstat.tokenstat.ui.components.EmptyKind
 import ai.tokenstat.tokenstat.ui.components.EmptyState
@@ -370,18 +370,19 @@ fun ContinueSection(
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         SectionLabel(L10n.text("android.homesections.pick_up_where_you_left_off.47173482"))
         val pin: (RecentPlaces.Place) -> Unit = { refused = !onTogglePin(it) }
-        TsCard(modifier = if (showResume) Modifier.drawWithContent {
-            drawContent()
-            val width = 3.dp.toPx()
-            val inset = Space.m.toPx()
-            drawRoundRect(
-                color = colors.accent,
-                topLeft = Offset(if (layoutDirection == LayoutDirection.Ltr) 0f else size.width - width, inset),
-                size = Size(width, (size.height - 2 * inset).coerceAtLeast(0f)),
-                cornerRadius = CornerRadius(width / 2),
-            )
-        } else Modifier) {
-            ContinuePlaceRow(featured, machineName, machineOnline, offline, onOpen, isPinned, refused, pin, isFeatured = showResume)
+        if (showResume) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(cardRadius))
+                    .background(colors.accentSoft)
+                    .border(1.dp, colors.accent.copy(alpha = 0.45f), RoundedCornerShape(cardRadius))
+                    .padding(horizontal = cardPadding),
+            ) {
+                ContinuePlaceRow(featured, machineName, machineOnline, offline, onOpen, isPinned, refused, pin, isFeatured = true)
+            }
+        } else TsCard {
+            ContinuePlaceRow(featured, machineName, machineOnline, offline, onOpen, isPinned, refused, pin)
         }
         if (rest.isNotEmpty()) TsCard {
             rest.forEachIndexed { index, place ->
@@ -416,7 +417,7 @@ private fun placeDetail(
 ): String {
     val name = machineName(place.id.peer)
     val state = machineRowState(name != null, offline, name?.let { machineOnline(place.id.peer) })
-    return "${name ?: L10n.text("android.homesections.machine.8f1cc42d")} · $state · ${RelativeClock.label(place.openedAtMs)}"
+    return "${name ?: L10n.text("android.homesections.machine.8f1cc42d")} · $state"
 }
 
 @Composable
@@ -460,20 +461,39 @@ private fun ContinuePlaceRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().clickable { onOpen(place) }.padding(vertical = 12.dp),
     ) {
-        Icon(placeIcon(place), null, tint = colors.accent, modifier = Modifier.width(24.dp))
+        Box(
+            Modifier
+                .size(if (isFeatured) 36.dp else 24.dp)
+                .then(if (isFeatured) Modifier.clip(CircleShape).background(colors.accent.copy(alpha = 0.16f)) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(placeIcon(place), null, tint = colors.accent, modifier = Modifier.size(if (isFeatured) 20.dp else 24.dp))
+        }
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (isFeatured) place.workspaceName else RecentPlaces.title(place),
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.weight(1f).widthIn(min = Space.xs))
+                Text(
+                    RelativeClock.label(place.openedAtMs),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                )
+            }
             Text(
-                if (isFeatured) L10n.text("common.home_continue_chat") else RecentPlaces.title(place),
-                fontWeight = FontWeight.SemiBold,
-                color = colors.textPrimary,
-                maxLines = 2,
-            )
-            Text(
-                if (isFeatured) "${place.workspaceName} · $detail" else detail,
+                if (isFeatured) "${L10n.text("common.home_continue_chat")} · $detail" else detail,
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.textSecondary,
-                maxLines = 2,
+                color = if (isFeatured) colors.accent else colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         PlacePinButton(place, isPinned, refused, onTogglePin)

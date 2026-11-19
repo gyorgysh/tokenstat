@@ -9,7 +9,9 @@ desktop is a review build. Newest first.
 
 ### Improved
 
-- Chats show a quieter loading placeholder that fills the screen on Mac, iPhone, iPad, Android and Windows.
+- On iPhone, a chat's top bar has a menu button, the chat name and repository in the middle, and one menu for everything else. The menu button, or a swipe from the left edge, opens a panel with the app's sections and the repository's chats.
+- The Pick up where you left off card on iPhone, iPad and Android names the repository and keeps the time in one spot. Times under a minute read "just now", so the card no longer shifts every few seconds.
+- Loading placeholders for chats and lists are quieter and fill the screen on Mac, iPhone, iPad, Android and Windows.
 - The agent picker has one Refresh button. It reloads agents, models and limits together.
 
 ### Fixed

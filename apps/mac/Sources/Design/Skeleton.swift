@@ -69,11 +69,12 @@ enum Skeleton {
                     HStack(spacing: Theme.Space.s) {
                         Bar(
                             width: Self.labelWidths[index % Self.labelWidths.count],
+                            height: 9,
                             phase: Double(index) * 0.08
                         )
                         Spacer(minLength: Theme.Space.s)
                         if showsValue {
-                            Bar(width: 52, phase: Double(index) * 0.08 + 0.04)
+                            Bar(width: 44, height: 9, phase: Double(index) * 0.08 + 0.04)
                         }
                     }
                 }
@@ -89,19 +90,33 @@ enum Skeleton {
 
         var body: some View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Bar(width: 116, height: 11, phase: 0)
-                    Bar(width: 168, height: 9, phase: 0.06)
+                VStack(alignment: .leading, spacing: 6) {
+                    Bar(width: 116, height: 10, phase: 0)
+                    Bar(width: 168, height: 8, phase: 0.06)
                 }
                 Rows(count: rows)
             }
+            .opacity(0.75)
             .padding(Theme.cardPadding)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
+            .background(Theme.panel.opacity(0.6), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        }
+    }
+
+    /// A page of cards still on their way, fading out towards the bottom.
+    struct CardStack: View {
+        var count: Int = 4
+        var rows: Int = 2
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                ForEach(0..<count, id: \.self) { _ in CardPlaceholder(rows: rows) }
+            }
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0.4), .init(color: .clear, location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .accessibilityHidden(true)
         }
     }
 }

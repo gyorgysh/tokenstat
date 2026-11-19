@@ -150,7 +150,7 @@ struct ClientInsightsView: View {
                 }
             }
         } else if model.isLoading {
-            ClientWireframe.Rows(count: 5)
+            ClientWireframe.Page()
         } else if let message = model.errorMessage {
             ClientEmptyState(
                 kind: model.needsSignIn ? .needsAccount : .unreachable,

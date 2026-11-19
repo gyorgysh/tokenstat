@@ -24,19 +24,18 @@ struct ClientContinueSection: View {
             let otherPlaces = places.filter { $0.id != featured.id }
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ClientSectionTitle(title: L10n.text("apple.clientcontinuesection.pick_up_where_you_left_off.47173482"), mark: "mark_activity")
-                placeRow(featured, isFeatured: featured.id.kind == .chat)
-                    .cardSurface()
-                    .overlay(alignment: .leading) {
-                        if featured.id.kind == .chat {
-                            Capsule()
-                                .fill(Theme.accent)
-                                .frame(width: 3)
-                                .padding(.vertical, Theme.Space.m)
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
+                if featured.id.kind == .chat {
+                    placeRow(featured, isFeatured: true)
+                        .background(Theme.accentSoft, in: .rect(cornerRadius: Theme.cardRadius))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                                .strokeBorder(Theme.accent.opacity(0.45), lineWidth: 1)
                         }
-                    }
-                    .accessibilityIdentifier("home.continue.latest")
+                        .accessibilityIdentifier("home.continue.latest")
+                } else {
+                    placeRow(featured).cardSurface()
+                        .accessibilityIdentifier("home.continue.latest")
+                }
                 if !otherPlaces.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(otherPlaces) { place in
@@ -107,33 +106,42 @@ struct ClientContinueSection: View {
         )
     }
 
-    private func detail(_ place: ClientRecentPlaces.Place) -> Text {
+    private func detail(_ place: ClientRecentPlaces.Place, isFeatured: Bool) -> String {
         let machine = account.account?.machines.first { $0.publicIdentity == place.id.peer }
         let state = machine == nil ? L10n.text("apple.clientcontinuesection.no_longer_linked.e409e8a7")
             : connectivity.isOffline ? L10n.text("apple.clientcontinuesection.you_are_offline.4d5c9439")
             : machine?.online == true ? L10n.text("apple.clientcontinuesection.awake.9123b5f4")
             : machine?.online == false ? L10n.text("apple.clientcontinuesection.asleep.60135e8f") : L10n.text("apple.clientcontinuesection.status_unknown.e412d872")
-        return Text("\(machine?.displayName ?? L10n.text("apple.clientcontinuesection.machine.8f1cc42d")) · \(state) · ")
-            + Text(place.openedAt, style: .relative)
+        let parts = [isFeatured ? L10n.text("common.home_continue_chat") : nil,
+                     machine?.displayName ?? L10n.text("apple.clientcontinuesection.machine.8f1cc42d"), state]
+        return parts.compactMap { $0 }.joined(separator: " · ")
     }
 
     private func row(_ place: ClientRecentPlaces.Place, isFeatured: Bool) -> some View {
-        let subtitle = isFeatured ? Text(verbatim: "\(place.workspaceName) · ") + detail(place) : detail(place)
+        let lines = dynamicTypeSize.isAccessibilitySize ? nil : 1 as Int?
         return HStack(spacing: Theme.Space.m) {
             Image(systemName: place.symbol)
-                .font(ClientType.body)
+                .font(isFeatured ? ClientType.label.weight(.semibold) : ClientType.body)
                 .foregroundStyle(Theme.accent)
-                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 24)
+                .frame(width: isFeatured ? 36 : 24, height: isFeatured ? 36 : nil)
+                .background { if isFeatured { Circle().fill(Theme.accent.opacity(0.16)) } }
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text(isFeatured ? L10n.text("common.home_continue_chat") : place.title)
-                    .font(ClientType.label.weight(.semibold))
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                subtitle
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                    Text(isFeatured ? place.workspaceName : place.title)
+                        .font(ClientType.label.weight(.semibold))
+                        .lineLimit(lines)
+                    Spacer(minLength: Theme.Space.xs)
+                    RelativeTimeText(date: place.openedAt, unitsStyle: .abbreviated)
+                        .font(ClientType.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                Text(detail(place, isFeatured: isFeatured))
                     .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(isFeatured ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                    .lineLimit(lines)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if !dynamicTypeSize.isAccessibilitySize {

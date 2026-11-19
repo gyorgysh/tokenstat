@@ -292,17 +292,17 @@ internal static class Motion
     /// </summary>
     public static Border SkeletonCard(int rows = 3)
     {
-        var body = new StackPanel { Spacing = Theme.SpaceM };
-        var heading = new StackPanel { Spacing = 4 };
-        heading.Children.Add(SkeletonBar(116, height: 11));
-        heading.Children.Add(SkeletonBar(168, height: 9, phaseSecs: 0.06));
+        var body = new StackPanel { Spacing = Theme.SpaceM, Opacity = 0.75 };
+        var heading = new StackPanel { Spacing = 6 };
+        heading.Children.Add(SkeletonBar(116, height: 10));
+        heading.Children.Add(SkeletonBar(168, height: 8, phaseSecs: 0.06));
         body.Children.Add(heading);
         body.Children.Add(SkeletonRows(rows));
+        var background = Theme.PanelBrush;
+        background.Opacity = 0.6;
         return new Border
         {
-            Background = Theme.PanelBrush,
-            BorderBrush = Theme.BorderBrush,
-            BorderThickness = new Thickness(1),
+            Background = background,
             CornerRadius = new CornerRadius(Theme.CardRadius),
             Padding = new Thickness(Theme.CardPadding),
             Child = body,

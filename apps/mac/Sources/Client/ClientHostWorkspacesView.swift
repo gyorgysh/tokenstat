@@ -72,7 +72,7 @@ struct ClientHostWorkspacesView: View {
                 }
 
                 if model.isConnecting {
-                    ClientWireframe.Rows(count: 3)
+                    ClientWireframe.Page()
                 } else if model.isAllowed == false {
                     // Not an error. Every device on an account used to reach
                     // every machine on it the moment it signed in; now each one

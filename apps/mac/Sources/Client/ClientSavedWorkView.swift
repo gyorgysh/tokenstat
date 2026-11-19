@@ -234,7 +234,7 @@ private struct ClientSavedWorkConversation: View {
                     message: L10n.text("apple.clientsavedworkview.this_copy_could_not_be_opened_any_draft_yo.9fed3d94"))
                     .padding(Theme.Space.m)
             } else {
-                ClientWireframe.Rows(count: 5).padding(Theme.Space.m)
+                ClientWireframe.Page().padding(Theme.Space.m)
             }
         }
         .background(Theme.background)

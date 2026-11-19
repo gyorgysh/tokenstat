@@ -136,7 +136,7 @@ struct ClientSavedPlaceView: View {
             )
             .padding(Theme.Space.m)
         } else {
-            ClientWireframe.Rows(count: 3).padding(Theme.Space.m)
+            ClientWireframe.Page().padding(Theme.Space.m)
         }
     }
 

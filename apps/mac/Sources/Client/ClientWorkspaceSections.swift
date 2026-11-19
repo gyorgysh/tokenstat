@@ -1165,7 +1165,7 @@ struct ClientSectionList<Content: View>: View {
                     // before the question has been asked. A wireframe says
                     // "rows are coming" and holds their shape, where a spinner
                     // said nothing and then let the list appear all at once.
-                    ClientWireframe.Rows(count: 4)
+                    ClientWireframe.Page()
                         .transition(.smoothIn(reduceMotion: reduceMotion))
                     // But a wireframe promises the answer is coming, so it
                     // must not pulse forever when the machine never replies.

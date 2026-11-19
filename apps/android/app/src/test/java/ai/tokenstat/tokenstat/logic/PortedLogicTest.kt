@@ -336,7 +336,7 @@ class PortedLogicTest {
     fun relativeClockLabels() {
         val now = 1_700_000_000_000L
         assertEquals("now", RelativeClock.label(now - 3_000, now))
-        assertEquals("30 seconds ago", RelativeClock.label(now - 30_000, now))
+        assertEquals("now", RelativeClock.label(now - 30_000, now))
         assertEquals("1 minute ago", RelativeClock.label(now - 60_000, now))
         assertEquals("3 minutes ago", RelativeClock.label(now - 3 * 60_000, now))
         assertEquals("2 hours ago", RelativeClock.label(now - 2 * 3_600_000, now))

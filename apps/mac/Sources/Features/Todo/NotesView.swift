@@ -324,8 +324,7 @@ struct NotesView: View {
         let shown = shownNotes
         if !model.hasLoaded && model.errorMessage == nil {
             VStack(spacing: Theme.Space.m) {
-                Skeleton.CardPlaceholder(rows: 3)
-                Skeleton.CardPlaceholder(rows: 3)
+                Skeleton.CardStack(rows: 3)
                 Spacer()
             }.padding(Theme.Space.m)
         } else if shown.isEmpty {

@@ -113,16 +113,36 @@ fun SkeletonCard(rows: Int = 3) {
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(cardRadius))
-            .background(colors.panel)
-            .tsCardBorder()
-            .padding(cardPadding),
+            .background(colors.panel.copy(alpha = 0.6f))
+            .padding(cardPadding)
+            .alpha(0.75f),
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            SkeletonBar(width = 116.dp, height = 11.dp, phaseMillis = 0)
-            SkeletonBar(width = 168.dp, height = 9.dp, phaseMillis = 60)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SkeletonBar(width = 116.dp, height = 10.dp, phaseMillis = 0)
+            SkeletonBar(width = 168.dp, height = 8.dp, phaseMillis = 60)
         }
         SkeletonRows(count = rows)
+    }
+}
+
+/// A page of cards still on their way, fading out towards the bottom.
+@Composable
+fun SkeletonPage(count: Int = 4, rows: Int = 2) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    Brush.verticalGradient(0.4f to Color.Black, 1f to Color.Transparent),
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        repeat(count) { SkeletonCard(rows = rows) }
     }
 }
 

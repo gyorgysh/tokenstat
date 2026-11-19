@@ -115,8 +115,7 @@ struct WorkflowsView: View {
                     }
                     if isWarming {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            Skeleton.CardPlaceholder(rows: 2)
-                            Skeleton.CardPlaceholder(rows: 2)
+                            Skeleton.CardStack()
                         }
                         .transition(.opacity)
                     } else if filtered.isEmpty && model.draft == nil {

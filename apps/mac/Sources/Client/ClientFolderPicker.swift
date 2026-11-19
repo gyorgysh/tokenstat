@@ -133,7 +133,7 @@ struct ClientFolderPicker: View {
                         .padding(Theme.Space.m)
                 }
                 if loading && listing == nil {
-                    ClientWireframe.Rows(count: 6).padding(Theme.Space.m)
+                    ClientWireframe.Page().padding(Theme.Space.m)
                 } else if let listing {
                     let rows = listing.entries.filter { showHidden || !$0.hidden }
                     if rows.isEmpty {

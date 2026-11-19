@@ -413,25 +413,53 @@ enum ClientWireframe {
     /// A list of rows: a mark, two lines of text, a figure.
     struct Rows: View {
         var count = 3
+        /// Fade towards the bottom, for a list that runs off the screen.
+        var fades = false
+        private static let titles: [CGFloat] = [0.62, 0.48, 0.7, 0.55, 0.42, 0.66]
+        private static let details: [CGFloat] = [0.36, 0.44, 0.3, 0.4, 0.34, 0.28]
 
         var body: some View {
-            VStack(spacing: Theme.Space.s) {
-                ForEach(0..<count, id: \.self) { _ in
-                    HStack(spacing: Theme.Space.s) {
-                        Skeleton.Bar(width: 26, height: 26)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Skeleton.Bar(width: 130, height: 11)
-                            Skeleton.Bar(width: 76, height: 9)
-                        }
-                        Spacer(minLength: Theme.Space.s)
-                        Skeleton.Bar(width: 48, height: 11)
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                VStack(spacing: Theme.Space.s) {
+                    ForEach(0..<count, id: \.self) { index in
+                        row(index, width: width)
                     }
-                    .padding(Theme.Space.s)
-                    .cardSurface()
+                }
+            }
+            .frame(height: CGFloat(count) * 64 + CGFloat(max(0, count - 1)) * Theme.Space.s)
+            .opacity(0.75)
+            .mask {
+                if fades {
+                    LinearGradient(stops: [.init(color: .black, location: 0.45), .init(color: .clear, location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                } else {
+                    Color.black
                 }
             }
             .accessibilityHidden(true)
         }
+
+        private func row(_ index: Int, width: CGFloat) -> some View {
+            let text = max(0, width - 120)
+            return HStack(spacing: Theme.Space.m) {
+                Circle().fill(Theme.border.opacity(0.7)).frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 8) {
+                    Skeleton.Bar(width: text * Self.titles[index % Self.titles.count], height: 10)
+                    Skeleton.Bar(width: text * Self.details[index % Self.details.count], height: 8)
+                }
+                Spacer(minLength: Theme.Space.s)
+                Skeleton.Bar(width: 36, height: 8)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .frame(height: 64)
+            .background(Theme.panel.opacity(0.6), in: .rect(cornerRadius: Theme.cardRadius))
+        }
+    }
+
+    /// A whole screen still waiting for its list.
+    struct Page: View {
+        var body: some View { Rows(count: 9, fades: true) }
     }
 }
 

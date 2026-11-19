@@ -84,7 +84,7 @@ private struct ChatConversationOverview: View {
                     }.labelsHidden().frame(width: 145)
                 }
                 if model.isLoading || model.folderID != workspaceID {
-                    Skeleton.CardPlaceholder(rows: 3)
+                    Skeleton.CardStack(rows: 3)
                 } else if conversations.isEmpty {
                     ContentUnavailableView(L10n.text("apple.chatview.no_conversations_yet.0d60084f"), systemImage: "bubble.left.and.bubble.right", description: Text(L10n.text("apple.chatview.start_a_chat_to_work_with_an_agent_in_this.1a00be4f")))
                         .frame(maxWidth: .infinity)

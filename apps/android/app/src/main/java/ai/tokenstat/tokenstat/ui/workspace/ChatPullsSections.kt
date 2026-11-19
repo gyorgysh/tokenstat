@@ -166,6 +166,7 @@ import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
+import ai.tokenstat.tokenstat.ui.components.SkeletonPage
 import ai.tokenstat.tokenstat.ui.components.TranscriptSkeleton
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsBrandSwitch
@@ -1494,7 +1495,7 @@ fun ChatSection(
             )
         }
         if (openId == null) {
-            if (loading) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
+            if (loading) { SkeletonPage(); return }
             if (chats.isEmpty()) {
                 EmptyState(
                     Icons.Default.ChatBubbleOutline,
@@ -3268,7 +3269,7 @@ fun PullsSection(
                 style = TsType.caption, color = LocalTsColors.current.textSecondary,
             )
         }
-        if (loading && pulls.isEmpty()) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
+        if (loading && pulls.isEmpty()) { SkeletonPage(); return }
         if (pulls.isEmpty() && error == null) {
             EmptyState(Icons.Default.ChatBubbleOutline,
                 if (stateName == "all") L10n.text("android.pullfilter.no_pull_requests")

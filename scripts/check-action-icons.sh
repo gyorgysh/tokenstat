@@ -52,6 +52,8 @@ ALLOWED = [
     # screen it opens, handed in as an ActionIcon by `WorkSearchPlace`.
     ("Features/Work/WorkSearchSheet.swift", "openPlace(place)"),
     ("Client/ClientWorkSearch.swift", "openPlace(place)"),
+    # A conversation row in the phone's chat drawer. It leads with the agent's mark.
+    ("Client/ClientChatView.swift", "onSelect(chat)"),
     ("App/RootView.swift", "Button(action: action) {"),
     # Terminal rows already lead with the harness/terminal mark. Their action
     # also dismisses the explicit info popover before opening the session.

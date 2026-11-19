@@ -12,6 +12,8 @@ struct ClientChatMenu: View {
     var folderName = ""
     var onFork: ((ChatConversation) -> Void)?
     var onTools: (() -> Void)?
+    var onBrowse: (() -> Void)?
+    var onHideControls: (() -> Void)?
     var onSetup: (() -> Void)?
     var onHandoff: (() -> Void)?
     var onDelete: ((ChatConversation) -> Void)?
@@ -52,6 +54,13 @@ struct ClientChatMenu: View {
             }
             if let onTools {
                 Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source, action: onTools)
+                    .keyboardShortcut("i", modifiers: [.command, .option])
+            }
+            if let onBrowse {
+                Button(L10n.text("apple.clientfoldersplit.browse_port.d3b57f13"), .browser, action: onBrowse)
+            }
+            if let onHideControls {
+                Button(L10n.text("apple.clientchatview.hide_controls"), .collapse, action: onHideControls)
             }
             Button(L10n.text("apple.clientchatmenu.rename_chat.26076241"), .edit) { rename = true }
                 .disabled(conversation.teamShare != nil || conversation.running || !ownsProject)

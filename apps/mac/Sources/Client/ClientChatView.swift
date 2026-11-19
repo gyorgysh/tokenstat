@@ -106,6 +106,7 @@ private struct ClientChatContent: View {
     /// until the fresh answer lands.
     @State private var refreshing = false
     @State private var showingChatSwitcher = false
+    @State private var drawerOpen = false
     private var showingChatSidebar: Bool {
         get { session.presentation.sidebarVisible }
         nonmutating set { session.presentation.sidebarVisible = newValue }
@@ -149,6 +150,8 @@ private struct ClientChatContent: View {
                         }
                 }
                 chatContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .modifier(ClientChatDrawer(open: $drawerOpen,
+                        width: min(320, geometry.size.width * 0.82)) { drawer })
             }
             .onChange(of: geometry.size.width, initial: true) { _, width in
                 workbenchWidth = width
@@ -158,6 +161,7 @@ private struct ClientChatContent: View {
             }
         }
         .clientTabBarHidden(opened != nil)
+        .navigationBarBackButtonHidden(opened != nil && workbenchWidth < 600)
         .sheet(isPresented: $showingChatSwitcher) {
             NavigationStack {
                 chatSwitcher
@@ -222,14 +226,7 @@ private struct ClientChatContent: View {
                     folder: folder,
                     isActive: opened != nil && ChatViewportAttachment.isCurrentPresentation(visible: visible,
                         layout: publicationLayout, currentLayout: navigation.stackGeneration),
-                    onBack: {
-                        guard visible, publicationLayout == navigation.stackGeneration else { return }
-                        session.presentation.chromeCollapsed = false
-                        navigation.leaveThread(session: session, presentationID: presentationID)
-                        publicationIntent = navigation.chatHandoff.intent
-                        publicationLayout = navigation.stackGeneration
-                        retainedThread = opened; self.opened = nil
-                    },
+                    onBack: showList,
                     onShowChats: {
                         if workbenchWidth >= 600 && workbenchHeight >= 500
                             && verticalSizeClass != .compact
@@ -237,8 +234,9 @@ private struct ClientChatContent: View {
                             && (!browserOpen || workbenchWidth >= 900) {
                             withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
                         }
-                        else { showingChatSwitcher = true }
+                        else { drawerOpen.toggle() }
                     },
+                    drawerOpen: drawerOpen,
                     availableWorkbenchWidth: workbenchWidth,
                     availableWorkbenchHeight: workbenchHeight,
                     onBrowserChange: { updateCompanion(open: $0) },
@@ -271,7 +269,8 @@ private struct ClientChatContent: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    if showingChatSwitcher { showingChatSwitcher = false }
+                    if drawerOpen { drawerOpen = false }
+                    else if showingChatSwitcher { showingChatSwitcher = false }
                     else { withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false } }
                 } label: {
                     Image(systemName: "sidebar.left")
@@ -286,19 +285,7 @@ private struct ClientChatContent: View {
             ForEach(model.chats.sorted {
                 ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
             }) { chat in
-                Button {
-                    guard visible, publicationLayout == navigation.stackGeneration,
-                          let scope = WorkSessionContext.shared.scope,
-                          model.draftReference(for: chat.id, in: workspaceID)?.scope == scope else { return }
-                    showingChatSwitcher = false
-                    guard opened?.id != chat.id else { return }
-                    model.saveDraftNow()
-                    navigation.chooseWithinChat(session: session, presentationID: presentationID)
-                    publicationIntent = navigation.chatHandoff.intent
-                    publicationLayout = navigation.stackGeneration
-                    retainedThread = nil
-                    opened = chat
-                } label: {
+                Button { select(chat) } label: {
                     HStack(alignment: .top, spacing: Theme.Space.s) {
                         HarnessMark(id: chat.backend, size: 24)
                         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -334,6 +321,38 @@ private struct ClientChatContent: View {
         }
         .listStyle(.plain)
         }
+    }
+
+    private func select(_ chat: ChatConversation) {
+        guard visible, publicationLayout == navigation.stackGeneration,
+              let scope = WorkSessionContext.shared.scope,
+              model.draftReference(for: chat.id, in: workspaceID)?.scope == scope else { return }
+        showingChatSwitcher = false
+        drawerOpen = false
+        guard opened?.id != chat.id else { return }
+        model.saveDraftNow()
+        navigation.chooseWithinChat(session: session, presentationID: presentationID)
+        publicationIntent = navigation.chatHandoff.intent
+        publicationLayout = navigation.stackGeneration
+        retainedThread = nil
+        opened = chat
+    }
+
+    private func showList() {
+        guard visible, publicationLayout == navigation.stackGeneration else { return }
+        drawerOpen = false
+        session.presentation.chromeCollapsed = false
+        navigation.leaveThread(session: session, presentationID: presentationID)
+        publicationIntent = navigation.chatHandoff.intent
+        publicationLayout = navigation.stackGeneration
+        retainedThread = opened; self.opened = nil
+    }
+
+    private var drawer: some View {
+        ClientChatDrawerPanel(place: place, chats: model.chats, currentID: opened?.id,
+            isUnread: { ClientChatReadState.shared.isUnread(peer: peer, chat: $0) },
+            onClose: { drawerOpen = false }, onChats: showList,
+            onNewChat: { Task { await create() } }, onSelect: select)
     }
 
     private func updateCompanion(open: Bool) {
@@ -732,6 +751,8 @@ struct ClientChatThread: View {
     /// A root reader presented as a cover closes through its owner.
     var onSwipeBack: (() -> Void)?
     var onShowChats: (() -> Void)? = nil
+    /// The chats drawer covers the navigation bar while it is open.
+    var drawerOpen = false
     var availableWorkbenchWidth: CGFloat? = nil
     var availableWorkbenchHeight: CGFloat? = nil
     var onBrowserChange: ((Bool) -> Void)? = nil
@@ -1300,75 +1321,59 @@ struct ClientChatThread: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         .navigationTitle(isActive ? (chat?.title ?? L10n.text("apple.clientchatview.chat.460b3a7d")) : L10n.text("apple.clientchatview.chat.460b3a7d"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(isActive && chromeCollapsed ? .hidden : .visible, for: .navigationBar)
+        .toolbar(isActive && (chromeCollapsed || drawerOpen) ? .hidden : .visible, for: .navigationBar)
         .toolbar {
-            if isActive, let onBack {
+            if isActive, let onShowChats {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: onShowChats) {
+                        Image(systemName: "line.3.horizontal")
+                    }
+                    .accessibilityLabel(L10n.text("apple.clientchatview.conversations.1d432f58"))
+                }
+            } else if isActive, let onBack {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: onBack) { ActionIcon.back.label(L10n.text("common.chats")) }
                 }
             }
-            if isActive, let onShowChats {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onShowChats) {
-                        Image(systemName: "sidebar.left")
-                    }
-                    .accessibilityLabel(L10n.text("apple.clientchatview.conversations.1d432f58"))
-                }
-            }
-            if isActive, model.savedCopy == nil, browserOwner != nil {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        suggestedBrowserTarget = nil
-                        portText = BrowserHistory.shared.portSuggestion(for: browserOwner)
-                        portError = nil
-                        showPort = true
-                    } label: {
-                        Image(systemName: "globe")
-                    }
-                    .accessibilityLabel(L10n.text("apple.clientfoldersplit.browse_port.d3b57f13"))
-                }
-            }
             if isActive, let chat {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { setControlsCollapsed(true) } label: {
-                        Label(L10n.text("apple.clientchatview.hide_controls"), systemImage: "rectangle.topthird.inset.filled")
-                            .labelStyle(.iconOnly)
-                    }
-                    .accessibilityLabel(L10n.text("apple.clientchatview.hide_controls"))
-                    .accessibilityShowsLargeContentViewer()
-                    .contextMenu {
-                        Button { setControlsCollapsed(true) } label: {
-                            Label(L10n.text("apple.clientchatview.hide_controls"), systemImage: "rectangle.topthird.inset.filled")
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text(chat.title.isEmpty ? L10n.text("apple.clientchatview.chat.460b3a7d") : chat.title)
+                            .font(ClientType.label.weight(.semibold))
+                            .lineLimit(1)
+                        if !folderName.isEmpty {
+                            Text(folderName)
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                     }
-                }
-                if toolsIdentity != nil && onShowChats == nil {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source) {
-                            if ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass) {
-                                showingToolsPane.toggle()
-                            } else {
-                                pushingTools = true
-                            }
-                        }
-                        .labelStyle(.iconOnly)
-                        .accessibilityLabel(L10n.text("apple.clientchatview.project_files_changes_and_history.4da56c40"))
-                        // The inspector chord stays on the real control.
-                        .keyboardShortcut("i", modifiers: [.command, .option])
-                    }
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.vertical, 6)
+                    .frame(minWidth: 140, maxWidth: 260, minHeight: 44)
+                    .clientGlassChip()
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
                 }
                 if model.savedCopy == nil, let tools = toolsIdentity {
                     ToolbarItem(placement: .topBarTrailing) {
                         ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
                             workspaceID: tools.workspaceID, hostName: hostName,
                             pinReference: pinReference, folderName: folderName, onFork: onFork,
-                            onTools: onShowChats == nil ? nil : {
+                            onTools: {
                                 if ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass) {
                                     showingToolsPane.toggle()
                                 } else {
                                     pushingTools = true
                                 }
                             },
+                            onBrowse: browserOwner == nil ? nil : {
+                                suggestedBrowserTarget = nil
+                                portText = BrowserHistory.shared.portSuggestion(for: browserOwner)
+                                portError = nil
+                                showPort = true
+                            },
+                            onHideControls: { setControlsCollapsed(true) },
                             onSetup: { showingSetup = true }, onHandoff: { showingHandoff = true },
                             onDelete: onDelete, onViewportChoice: beginViewportChoice)
                             .id(chat.id)
@@ -3558,6 +3563,156 @@ private struct ClientChatResizeFrame: ViewModifier {
     }
 
     func reset() { origin = nil; liveWidth = nil }
+}
+
+/// The phone's chat drawer, drawn like the iPad sidebar: the wordmark, the
+/// app's sections, then this project's conversations.
+struct ClientChatDrawerPanel: View {
+    let place: String
+    let chats: [ChatConversation]
+    let currentID: String?
+    let isUnread: (ChatConversation) -> Bool
+    let onClose: () -> Void
+    let onChats: () -> Void
+    let onNewChat: () -> Void
+    let onSelect: (ChatConversation) -> Void
+    @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(ClientTabCustomization.self) private var tabCustomization
+    private let rowHeight = SidebarMetrics.touchRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Wordmark(size: 22, fills: false)
+                .fixedSize()
+                .padding(.horizontal, Theme.Space.l)
+                .frame(height: 52)
+                .accessibilityAddTraits(.isHeader)
+            List {
+                Section {
+                    row(L10n.text("apple.clientchatview.new_chat.db18382a"), symbol: "square.and.pencil", selected: false) {
+                        onClose()
+                        onNewChat()
+                    }
+                    ForEach(tabCustomization.visibleTabs.filter { $0 != .team }) { tab in
+                        row(tab.label, symbol: tab.symbol, selected: false) { open(tab) }
+                    }
+                }
+                Section {
+                    row(L10n.text("common.chats"), symbol: "bubble.left.and.bubble.right", selected: false, action: onChats)
+                    ForEach(chats.sorted {
+                        ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
+                    }) { chat in
+                        chatRow(chat)
+                    }
+                } header: {
+                    Text(place)
+                        .font(ClientType.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .lineLimit(1)
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, rowHeight)
+            .clientCompactSections()
+        }
+        .background(Theme.background)
+    }
+
+    private func open(_ tab: ClientTab) {
+        onClose()
+        navigation.chooseNavigation()
+        navigation.restoredRoute = nil
+        navigation.workspacesPath = []
+        navigation.destination = tab
+        navigation.folderID = nil
+    }
+
+    private func row(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: symbol)
+                    .font(Theme.font(14))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 20)
+                Text(title).font(Theme.font(16)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .clientSidebarRowSurface(isSelected: selected, height: rowHeight)
+        }
+        .buttonStyle(.plain)
+        .clientSidebarRowChrome()
+    }
+
+    private func chatRow(_ chat: ChatConversation) -> some View {
+        Button { onSelect(chat) } label: {
+            HStack(spacing: Theme.Space.s) {
+                HarnessMark(id: chat.backend, size: 20)
+                Text(chat.title.isEmpty ? L10n.text("apple.clientchatview.chat.460b3a7d") : chat.title)
+                    .font(Theme.font(15, weight: chat.id == currentID ? .medium : .regular))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if chat.running || isUnread(chat) {
+                    Circle().fill(Theme.accent).frame(width: 7, height: 7)
+                        .accessibilityLabel(chat.running ? L10n.text("common.running")
+                            : L10n.text("apple.clientrecentchats.unread.1b9f384c"))
+                }
+            }
+            .clientSidebarRowSurface(isSelected: chat.id == currentID, height: rowHeight)
+        }
+        .buttonStyle(.plain)
+        .clientSidebarRowChrome()
+        .accessibilityAddTraits(chat.id == currentID ? .isSelected : [])
+    }
+}
+
+/// A phone's chat list: slides in from the leading edge and pushes the
+/// conversation aside. A tap or a swipe on the conversation closes it.
+struct ClientChatDrawer<Drawer: View>: ViewModifier {
+    @Binding var open: Bool
+    let width: CGFloat
+    @ViewBuilder let drawer: () -> Drawer
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        ZStack(alignment: .leading) {
+            if open {
+                drawer()
+                    .frame(width: width)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .transition(.move(edge: .leading))
+            }
+            content
+                .overlay(alignment: .leading) {
+                    if !open {
+                        Color.clear
+                            .frame(width: 20)
+                            .contentShape(.rect)
+                            .gesture(DragGesture(minimumDistance: 12).onEnded { value in
+                                if value.translation.width > 40 { open = true }
+                            })
+                    }
+                }
+                .overlay {
+                    if open {
+                        Color.black.opacity(0.2)
+                            .ignoresSafeArea()
+                            .contentShape(.rect)
+                            .onTapGesture { open = false }
+                            .gesture(DragGesture(minimumDistance: 12).onEnded { value in
+                                if value.translation.width < -40 { open = false }
+                            })
+                            .transition(.opacity)
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityLabel(L10n.text("common.close"))
+                    }
+                }
+                .offset(x: open ? width : 0)
+        }
+        .clipped()
+        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: open)
+    }
 }
 
 struct ClientChatSidebarFrame: ViewModifier {

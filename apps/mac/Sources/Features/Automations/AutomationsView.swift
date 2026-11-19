@@ -218,8 +218,7 @@ struct AutomationsView: View {
             // "Nothing yet" is an answer, and it must not be given before the
             // question has been asked. Grey rows say the daemon is being read.
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Skeleton.CardPlaceholder(rows: 2)
-                Skeleton.CardPlaceholder(rows: 2)
+                Skeleton.CardStack()
             }
             .padding(Theme.Space.m)
             .transition(.opacity)

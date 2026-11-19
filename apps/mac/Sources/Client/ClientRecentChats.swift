@@ -356,6 +356,7 @@ private struct ClientRecentChatContent: View {
     @State private var visible = false
     @State private var loadGeneration: UInt64 = 0
     @State private var showingChatSwitcher = false
+    @State private var drawerOpen = false
     private var showingChatSidebar: Bool {
         get { session.presentation.sidebarVisible }
         nonmutating set { session.presentation.sidebarVisible = newValue }
@@ -479,6 +480,16 @@ private struct ClientRecentChatContent: View {
                         }
                 }
                 threadContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .modifier(ClientChatDrawer(open: $drawerOpen,
+                        width: min(320, geometry.size.width * 0.82)) {
+                        ClientChatDrawerPanel(place: folderName, chats: model.chats, currentID: chatID,
+                            isUnread: { ClientChatReadState.shared.isUnread(peer: peer, chat: $0) },
+                            onClose: { drawerOpen = false }, onChats: leave,
+                            onNewChat: {
+                                model.saveDraftNow()
+                                navigation.openNewChat(repositoryID: "remote:\(peer):\(workspaceID)")
+                            }, onSelect: select)
+                    })
             }
             .onChange(of: geometry.size.width, initial: true) { _, width in
                 workbenchWidth = width
@@ -489,6 +500,7 @@ private struct ClientRecentChatContent: View {
         }
         .background(Theme.background)
         .clientTabBarHidden(!loaded || model.chats.contains(where: { $0.id == chatID }))
+        .navigationBarBackButtonHidden(model.savedCopy == nil && workbenchWidth > 0 && workbenchWidth < 600)
         .sheet(isPresented: $showingChatSwitcher) {
             NavigationStack {
                 chatSwitcher
@@ -509,6 +521,33 @@ private struct ClientRecentChatContent: View {
         .onDisappear {
             guard scenePhase == .active else { return }
             if navigation.presentedChat == nil { navigation.leaveChat(owner: viewer) }
+        }
+    }
+
+    private func select(_ chat: ChatConversation) {
+        guard visible, publicationLayout == navigation.stackGeneration,
+              let presentationScope, presentationScope == WorkSessionContext.shared.scope,
+              model.draftReference(for: chat.id, in: workspaceID)?.scope == presentationScope,
+              rootChatReference == nil || rootChatReference == navigation.presentedChat?.reference
+        else { return }
+        showingChatSwitcher = false
+        drawerOpen = false
+        guard chat.id != chatID else { return }
+        model.saveDraftNow()
+        navigation.chooseWithinChat(session: session, presentationID: presentationID,
+                                    preserveChatSpace: rootChatReference == nil)
+        onSwitch(chat.id)
+    }
+
+    private func leave() {
+        drawerOpen = false
+        if rootChatReference != nil {
+            guard visible, publicationLayout == navigation.stackGeneration,
+                  WorkDestinationResolver.sameConversation(rootChatReference, navigation.presentedChat?.reference)
+            else { return }
+            navigation.presentedChat = nil
+        } else {
+            dismiss()
         }
     }
 
@@ -541,8 +580,9 @@ private struct ClientRecentChatContent: View {
                         if canShowChatSidebar {
                             withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
                         }
-                        else { showingChatSwitcher = true }
+                        else { drawerOpen.toggle() }
                     } : nil,
+                    drawerOpen: drawerOpen,
                     availableWorkbenchWidth: workbenchWidth,
                     availableWorkbenchHeight: workbenchHeight,
                     onBrowserChange: { updateCompanion(open: $0) },
@@ -568,7 +608,7 @@ private struct ClientRecentChatContent: View {
                 )
                 .padding(Theme.Space.m)
             } else {
-                ClientWireframe.Rows(count: 5)
+                ClientWireframe.Page()
                     .padding(Theme.Space.m)
             }
         }
@@ -602,7 +642,8 @@ private struct ClientRecentChatContent: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    if showingChatSwitcher { showingChatSwitcher = false }
+                    if drawerOpen { drawerOpen = false }
+                    else if showingChatSwitcher { showingChatSwitcher = false }
                     else { withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false } }
                 } label: {
                     Image(systemName: "sidebar.left")
@@ -616,19 +657,7 @@ private struct ClientRecentChatContent: View {
             List(model.chats.sorted {
             ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
         }) { chat in
-            Button {
-                guard visible, publicationLayout == navigation.stackGeneration,
-                      let presentationScope, presentationScope == WorkSessionContext.shared.scope,
-                      model.draftReference(for: chat.id, in: workspaceID)?.scope == presentationScope,
-                      rootChatReference == nil || rootChatReference == navigation.presentedChat?.reference
-                else { return }
-                showingChatSwitcher = false
-                guard chat.id != chatID else { return }
-                model.saveDraftNow()
-                navigation.chooseWithinChat(session: session, presentationID: presentationID,
-                                            preserveChatSpace: rootChatReference == nil)
-                onSwitch(chat.id)
-            } label: {
+            Button { select(chat) } label: {
                 HStack(spacing: Theme.Space.s) {
                     HarnessMark(id: chat.backend, size: 24)
                     VStack(alignment: .leading) {
