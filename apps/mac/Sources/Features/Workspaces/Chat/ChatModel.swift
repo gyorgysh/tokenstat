@@ -1359,7 +1359,7 @@ final class ChatModel {
               let key = WorkReferenceKey.conversation(reference), !events.isEmpty else { return }
         // Preserve every row kind and its identity, including reasoning,
         // failures, tools and edits. No downloaded attachment bytes are held.
-        let rows = Array(displayItems.suffix(TranscriptSlice.length))
+        let rows = Array(displayItems.suffix(ChatRecentMessages<ChatDisplayItem>.messageLimit))
         // Nested tool output and patch strings count toward the budget.
         recentMessages.store(rows, for: key) { $0.estimatedBytes }
     }

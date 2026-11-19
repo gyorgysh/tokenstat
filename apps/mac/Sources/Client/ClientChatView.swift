@@ -1950,6 +1950,7 @@ struct ClientChatThread: View {
             // A new scroll view, for `watchMountedRows` when moving the view
             // did not make the lazy stack build again.
             .id(transcriptRebuild)
+            .transcriptOpensAtEnd()
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $transcriptDropTargeted, receive: receive)
             .scrollDismissesKeyboard(.immediately)
             // No tap-to-dismiss gesture here: `.scrollDismissesKeyboard`

@@ -22,7 +22,8 @@ import AppKit
 /// - `ai.tokenstat.debug.route`: `home`, `insights`, `machines`, `todo`,
 ///   `notes`, `workflows`, `automations`, `account`, `overview`, `ssh`, or
 ///   `workspace:<folder name or index>:<section>`, `newchat:<folder>`
-///   (the project menu's New chat), or `chat:<folder>:<n>`.
+///   (the project menu's New chat), `chat:<folder>:<n>`, or `click:<n>` (the
+///   nth row of the cross-folder chat list, opened the way a click opens it).
 /// - `ai.tokenstat.debug.window`: the content size, as `1440x900`.
 /// - `ai.tokenstat.debug.appearance`: `dark`, `light` or `system`.
 /// - `ai.tokenstat.debug.key`: a named action, such as `sidebar` or

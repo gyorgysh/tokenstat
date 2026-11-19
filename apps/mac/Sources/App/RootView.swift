@@ -494,6 +494,13 @@ struct RootView: View {
                 guard chat.folderID == folder.id, chat.chats.indices.contains(index) else { return }
                 await chat.select(chat.chats[index])
             }
+        case "click":
+            // `click:<n>`, the nth row of the cross-folder chat list, opened
+            // exactly as a click on it opens it.
+            let index = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
+            let rows = Array(visibleChatEntries.prefix(chatListLimit))
+            guard rows.indices.contains(index) else { return }
+            openChatEntry(rows[index])
         case "workspace":
             let key = parts.count > 1 ? parts[1] : "0"
             let folder = Int(key).flatMap { workspaces.folders.indices.contains($0) ? workspaces.folders[$0] : nil }

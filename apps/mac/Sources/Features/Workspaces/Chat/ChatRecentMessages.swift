@@ -15,7 +15,14 @@ struct ChatRecentMessages<Row> {
     /// Across every project, so a long session cannot grow without bound.
     /// Each conversation is capped by `byteLimit`, so this is about 30 MB.
     static var conversationLimit: Int { 60 }
-    static var messageLimit: Int { 150 }
+    /// Rows before folding. A transcript shows `TranscriptSlice.length`
+    /// rows after tool steps fold into groups, and 150 raw rows folded to
+    /// about a hundred. The live page then filled the slice with fifty
+    /// older rows above the preview, which pushed the view off the end for
+    /// a frame on every click. Three slices of raw rows fold to a full one,
+    /// so the preview and the live page show the same rows. `byteLimit`
+    /// still bounds what a conversation can hold.
+    static var messageLimit: Int { 450 }
     static var byteLimit: Int { 512 * 1024 }
 
     mutating func store(_ messages: [Row], for key: String, speculative: Bool = false, cost: (Row) -> Int) {

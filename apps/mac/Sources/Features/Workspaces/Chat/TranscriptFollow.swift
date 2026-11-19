@@ -1139,6 +1139,24 @@ extension View {
         }
     }
 
+    /// A transcript's scroll view starts at the end.
+    ///
+    /// Each selected chat gets a scroll view of its own, and a new one lays
+    /// out at the top. The settle task then pinned it to the newest row, so
+    /// a click on a chat drew the start of the window for a frame and jumped.
+    /// Only the first offset is anchored. A general bottom anchor also moves
+    /// the view as lazy rows estimate their heights, and it inflated a 10,000
+    /// point transcript to more than 100,000 while it opened. How the view
+    /// holds its place after that stays with the follow logic.
+    @ViewBuilder
+    func transcriptOpensAtEnd() -> some View {
+        if #available(macOS 15.0, iOS 18.0, *) {
+            defaultScrollAnchor(.bottom, for: .initialOffset)
+        } else {
+            self
+        }
+    }
+
     /// Follow the transcript's scroll position.
     func chatScrollMetrics(_ note: @escaping (TranscriptMetrics) -> Void) -> some View {
         modifier(TranscriptScrollMetrics(note: note))

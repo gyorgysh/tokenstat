@@ -196,7 +196,13 @@ struct ChatView: View {
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
-    @State private var settleTaskID = UUID()
+    /// Every opening settle still running. A click on a chat starts two:
+    /// one in the new scroll view, and one in the outgoing view, which sees
+    /// the new identity for a pass before it is removed. The last one to
+    /// start was often the outgoing one, and when its view went it ended the
+    /// settle for both, so the end stopped being held while the chat was
+    /// still arriving. The hold now ends when the last settle does.
+    @State private var settles = SettleTickets()
     /// Bumped on send so the transcript scrolls to the end synchronously,
     /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
@@ -727,6 +733,7 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
                 .chatScrollContent()
             }
+            .transcriptOpensAtEnd()
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $transcriptDropTargeted, receive: receive)
             // Cover the build-up, do not hide the stack. Opacity 0 is how a
             // lazy stack skipped measuring the last prompt: those rows were
@@ -876,14 +883,13 @@ struct ChatView: View {
                 // destinations, and scrolling a zero-size proxy to estimated
                 // heights is how it came back painted off-origin.
                 guard isActive else { return }
-                let ticket = UUID()
-                settleTaskID = ticket
+                let ticket = settles.begin()
                 follow.settle(true)
                 window.followingEnd = true
                 showNewest()
                 pinToLatest(proxy, animated: false)
                 defer {
-                    if settleTaskID == ticket {
+                    if settles.end(ticket) {
                         #if os(macOS)
                         // These are geometry and counts only. They let a
                         // diagnostic log distinguish an empty model from a
@@ -1658,6 +1664,24 @@ private struct ConversationPreviewHover: ViewModifier {
     }
 }
 #endif
+
+/// The settles in flight, by ticket. A reference, so starting and ending one
+/// does not redraw the transcript.
+final class SettleTickets {
+    private var live: Set<UUID> = []
+
+    func begin() -> UUID {
+        let ticket = UUID()
+        live.insert(ticket)
+        return ticket
+    }
+
+    /// Whether this was the last settle still running.
+    func end(_ ticket: UUID) -> Bool {
+        live.remove(ticket)
+        return live.isEmpty
+    }
+}
 
 /// The wireframe over an opening, with the two pieces of state that decide it.
 ///
