@@ -758,6 +758,8 @@ struct ClientChatThread: View {
     @State private var followPulse = 0
     @State private var presenceOwner = UUID()
     @State private var viewportPlaced = false
+    /// Lock and unlock keep this scroll view at the reader's row.
+    @State private var placedViewport: PlacedViewport?
     /// Last instant (non-animated) pin. A scrollTo on a lazy stack walks
     /// every row in between, so silent pins share one ~150ms gate, same as
     /// the growth repins. Animated pins always go through.
@@ -2117,6 +2119,7 @@ struct ClientChatThread: View {
                 }
                 else {
                     traceViewport("hidden")
+                    placedViewport = nil
                     retireViewport()
                     follow.freeze()
                 }
@@ -2138,12 +2141,23 @@ struct ClientChatThread: View {
                     }
                     return
                 }
+                let generation = model.selectionGeneration
+                let reference = model.currentReference
+                let returning = PlacedViewport(reading: model.readingIdentity, attachment: attachment)
+                if viewportPlaced, placedViewport == returning,
+                   model.viewportContinuity.mark(generation: generation) != nil {
+                    settleTaskID = UUID()
+                    model.viewportContinuity.beginPlacement(generation: generation, owner: presenceOwner)
+                    model.viewportContinuity.completePlacement(generation: generation, owner: presenceOwner)
+                    traceViewport("resume")
+                    holdViewport(proxy)
+                    return
+                }
                 viewportPlaced = false
+                placedViewport = nil
                 readerMoved = false
                 readingFrames.cancelCapture()
                 stopHoldingViewport()
-                let generation = model.selectionGeneration
-                let reference = model.currentReference
                 let ticket = UUID()
                 settleTaskID = ticket
                 guard model.viewportContinuity.beginPlacement(generation: generation, owner: presenceOwner,
@@ -2171,6 +2185,7 @@ struct ClientChatThread: View {
                                 model.viewportContinuity.completePlacement(generation: generation, owner: presenceOwner)
                             }
                             viewportPlaced = true
+                            placedViewport = PlacedViewport(reading: model.readingIdentity, attachment: attachment)
                             holdViewport(proxy)
                         }
                     }
@@ -3023,6 +3038,11 @@ struct ClientChatThread: View {
 
 /// A weak reference to this transcript's own scroll view. Row placement uses
 /// its measured geometry after SwiftUI has revealed the target lazy row.
+private struct PlacedViewport: Equatable {
+    let reading: ChatReadingIdentity
+    let attachment: ChatViewportAttachmentIdentity
+}
+
 private struct ClientChatViewportTaskIdentity: Hashable {
     let presentation: ChatPresentationIdentity
     let attachment: ChatViewportAttachmentIdentity?

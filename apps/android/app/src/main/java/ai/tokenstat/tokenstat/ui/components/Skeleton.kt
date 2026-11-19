@@ -12,6 +12,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import ai.tokenstat.tokenstat.ui.localization.L10n
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -112,5 +123,82 @@ fun SkeletonCard(rows: Int = 3) {
             SkeletonBar(width = 168.dp, height = 9.dp, phaseMillis = 60)
         }
         SkeletonRows(count = rows)
+    }
+}
+
+private data class SkeletonTurn(val mine: Boolean, val lines: Int)
+
+private val transcriptTurns = listOf(
+    SkeletonTurn(false, 3), SkeletonTurn(true, 1), SkeletonTurn(false, 5), SkeletonTurn(true, 2),
+    SkeletonTurn(false, 2), SkeletonTurn(false, 4), SkeletonTurn(true, 1), SkeletonTurn(false, 3),
+)
+private val transcriptWidths = listOf(0.94f, 0.86f, 0.71f, 0.9f, 0.58f, 0.8f)
+private val transcriptLine = 9.dp
+private val transcriptLineGap = 9.dp
+private val transcriptTurnGap = 22.dp
+private val transcriptBubblePadding = 12.dp
+
+/// Loading placeholder for a chat. Fills the pane, newest turn at the bottom.
+@Composable
+fun TranscriptSkeleton(modifier: Modifier = Modifier) {
+    val colors = LocalTsColors.current
+    val label = L10n.text("android.pulldetail.loading_conversation.5eb1e4a3")
+    BoxWithConstraints(
+        modifier
+            .fillMaxSize()
+            .padding(horizontal = Space.l, vertical = Space.l)
+            .semantics { contentDescription = label }
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen; alpha = 0.7f }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Transparent, 0.38f to Color.Black),
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+    ) {
+        val lane = maxWidth
+        var used = 0.dp
+        var count = 0
+        while (used < maxHeight && count < 40) {
+            val turn = transcriptTurns[count % transcriptTurns.size]
+            used += (transcriptLine + transcriptLineGap) * turn.lines - transcriptLineGap +
+                (if (turn.mine) transcriptBubblePadding * 2 else 0.dp) + transcriptTurnGap
+            count += 1
+        }
+        Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(transcriptTurnGap, Alignment.Bottom),
+        ) {
+            for (index in (0 until maxOf(count, 1)).reversed()) {
+                val turn = transcriptTurns[index % transcriptTurns.size]
+                val span = if (turn.mine) lane * 0.5f else lane
+                val lines: @Composable () -> Unit = {
+                    Column(verticalArrangement = Arrangement.spacedBy(transcriptLineGap)) {
+                        repeat(turn.lines) { line ->
+                            SkeletonBar(
+                                width = span * transcriptWidths[(index * 2 + line) % transcriptWidths.size],
+                                height = transcriptLine,
+                                phaseMillis = (index % transcriptTurns.size) * 110 + line * 50,
+                            )
+                        }
+                    }
+                }
+                if (turn.mine) {
+                    Row(Modifier.fillMaxWidth()) {
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            Modifier
+                                .width(span + transcriptBubblePadding * 2)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(colors.accentSoft.copy(alpha = 0.55f))
+                                .padding(transcriptBubblePadding),
+                        ) { lines() }
+                    }
+                } else {
+                    lines()
+                }
+            }
+        }
     }
 }

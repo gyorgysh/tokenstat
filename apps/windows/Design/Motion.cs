@@ -6,6 +6,7 @@
 
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
@@ -306,6 +307,45 @@ internal static class Motion
             Padding = new Thickness(Theme.CardPadding),
             Child = body,
         };
+    }
+
+    private static readonly (bool Mine, int Lines)[] TranscriptTurns =
+    {
+        (false, 3), (true, 1), (false, 5), (true, 2), (false, 2), (false, 4), (true, 1), (false, 3),
+    };
+    private static readonly double[] TranscriptWidths = { 0.94, 0.86, 0.71, 0.9, 0.58, 0.8 };
+
+    /// <summary>Loading placeholder for a chat, newest turn at the bottom.</summary>
+    public static StackPanel TranscriptSkeleton(int turns = 10, double lane = 640)
+    {
+        var stack = new StackPanel { Spacing = 22, Opacity = 0.7, Margin = new Thickness(0, Theme.SpaceL, 0, 0) };
+        for (var index = turns - 1; index >= 0; index--)
+        {
+            var turn = TranscriptTurns[index % TranscriptTurns.Length];
+            var span = turn.Mine ? lane * 0.5 : lane;
+            var lines = new StackPanel { Spacing = 9 };
+            for (var line = 0; line < turn.Lines; line++)
+            {
+                lines.Children.Add(SkeletonBar(span * TranscriptWidths[(index * 2 + line) % TranscriptWidths.Length],
+                    height: 9, phaseSecs: (index % TranscriptTurns.Length) * 0.11 + line * 0.05));
+            }
+            var fade = 0.2 + 0.8 * (turns - index) / turns;
+            FrameworkElement element = turn.Mine
+                ? new Border
+                {
+                    Background = Theme.AccentSoftBrush,
+                    CornerRadius = new CornerRadius(16),
+                    Padding = new Thickness(12),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Width = span + 24,
+                    Child = lines,
+                }
+                : lines;
+            element.Opacity = fade;
+            stack.Children.Add(element);
+        }
+        AutomationProperties.SetName(stack, L10n.Text("common.loading"));
+        return stack;
     }
 
     /// <summary>

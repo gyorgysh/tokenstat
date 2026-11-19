@@ -166,6 +166,7 @@ import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
+import ai.tokenstat.tokenstat.ui.components.TranscriptSkeleton
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsBrandSwitch
 import ai.tokenstat.tokenstat.ui.components.TsCard
@@ -244,6 +245,7 @@ fun ChatSection(
     var startedNewChatSend by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     var didOpenConversation by remember(workspace, openConversationOnAppear, conversationNonce) { mutableStateOf(false) }
     var events by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var transcriptOpened by remember(projectOwner, openId) { mutableStateOf(false) }
     var recordedTurn by remember(projectOwner, openId) { mutableStateOf<Pair<ChatDisplayItem.Changes, String?>?>(null) }
     val history = remember(projectOwner, openId) { ChatHistoryWindow() }
     var usage by remember(projectOwner, openId) { mutableStateOf<ChatUsageTotals?>(null) }
@@ -613,6 +615,7 @@ fun ChatSection(
             usage = history.usage
             hasEarlier = history.hasEarlier
             eventsError = null
+            transcriptOpened = true
             val answer = model.workspaceSection(peer, "chat.approvals", buildJsonObject { put("id", id) })
             if (openId != id) return false
             approvals = (answer as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
@@ -1912,6 +1915,9 @@ fun ChatSection(
                             }
                         }
                         transcriptEnd()
+                    }
+                    if (!transcriptOpened && eventsError == null) {
+                        TranscriptSkeleton(Modifier.background(LocalTsColors.current.background))
                     }
                     follow.pill(busy)?.let { pill ->
                         TranscriptFollowPill(

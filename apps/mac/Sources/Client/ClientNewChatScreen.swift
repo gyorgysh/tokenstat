@@ -6,6 +6,7 @@ struct ClientNewChatScreen: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ClientWorkspacesModel.self) private var workspaces
     @Environment(ClientChatSessions.self) private var sessions
+    @Environment(ClientProjectChats.self) private var projectChats
     @Environment(AccountModel.self) private var account
     @State private var addingRepository = false
     @State private var choosingHost = false
@@ -316,6 +317,9 @@ struct ClientNewChatScreen: View {
               draft.ownsPresentation(submission, scope: WorkSessionContext.shared.scope,
                                      session: WorkSessionContext.shared.generation) else { return }
         reader.prepareInitialPresentation()
+        let listed = reader.selected.flatMap { $0.id == created.id ? $0 : nil } ?? created
+        projectChats.entry(peer: host.peerKey, workspace: raw).replace(listed)
+        sessions.created(listed, peer: host.peerKey, workspace: raw, by: session)
         navigation.showingNewChat = false
         navigation.destination = .workspaces
         let presentation = UUID()

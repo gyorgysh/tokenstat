@@ -172,6 +172,14 @@ final class ClientChatSessions {
         recency.removeAll()
     }
 
+    /// Adds a chat made elsewhere to every open list for its project.
+    func created(_ chat: ChatConversation, peer: String, workspace: String, by creator: ClientChatSession) {
+        for (key, session) in sessions where key.peer == peer && key.workspace == workspace && session !== creator {
+            session.invalidate()
+            session.model.acceptRenamedConversation(chat)
+        }
+    }
+
     func renamed(_ chat: ChatConversation, peer: String, workspace: String) {
         for (key, session) in sessions where key.peer == peer && key.workspace == workspace {
             session.invalidate()

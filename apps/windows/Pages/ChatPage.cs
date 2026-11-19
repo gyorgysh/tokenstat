@@ -815,7 +815,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerDock.Visibility = Visibility.Collapsed;
         _root.Children.Clear();
         _root.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
-        _root.Children.Add(Motion.SkeletonCard());
+        _root.Children.Add(Motion.TranscriptSkeleton());
         _openChat = null;
         _approvals = new JsonArray();
         _openId = id;

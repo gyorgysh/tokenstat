@@ -201,6 +201,8 @@ struct ChatView: View {
     @State private var settleMood: PersonaMood?
     @State private var settleTaskID = UUID()
     @State private var settledPresentation: ChatPresentationIdentity?
+    /// Only a new conversation raises the opening cover.
+    @State private var settledSelection: ChatReadingIdentity?
     /// Bumped on send so the transcript scrolls to the end synchronously,
     /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
@@ -748,7 +750,7 @@ struct ChatView: View {
             .transcriptOpensAtEnd()
             .chatDropSurface(enabled: showsDropTargets, isTargeted: $transcriptDropTargeted, receive: receive)
             .overlay {
-                if settledPresentation != presentation {
+                if settledSelection != Self.selectionKey(presentation) {
                     OpeningSkeleton().transition(.identity)
                 }
             }
@@ -898,7 +900,10 @@ struct ChatView: View {
                         DiagnosticsLog.note("chat viewport settle end=\(follow.exactlyAtEnd) rows=\(model.transcriptItems.count) cancelled=\(Task.isCancelled)")
                         #endif
                         follow.settle(false)
-                        if !Task.isCancelled { settledPresentation = presentation }
+                        if !Task.isCancelled {
+                            settledPresentation = presentation
+                            settledSelection = Self.selectionKey(presentation)
+                        }
                     }
                 }
                 // The cached tail can be measured while the live page loads.
@@ -950,6 +955,10 @@ struct ChatView: View {
                                 generation: presentation.reading.generation))
         #endif
         }
+    }
+
+    private static func selectionKey(_ presentation: ChatPresentationIdentity) -> ChatReadingIdentity {
+        ChatReadingIdentity(reference: presentation.reading.reference, generation: presentation.reading.generation)
     }
 
     private func transcriptRow(_ item: ChatDisplayItem, chat: ChatConversation, spinning: String?) -> some View {

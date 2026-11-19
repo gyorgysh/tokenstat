@@ -930,48 +930,74 @@ struct OpeningCover: ViewModifier {
     }
 }
 
+/// Loading placeholder for a chat. Fills the pane, newest turn at the bottom.
 struct TranscriptSkeleton: View {
-    /// Roughly how tall each stand-in turn is, in bars.
     private static let turns: [(mine: Bool, lines: Int)] = [
-        (false, 3), (true, 1), (false, 4), (true, 2), (false, 2),
+        (false, 3), (true, 1), (false, 5), (true, 2), (false, 2), (false, 4), (true, 1), (false, 3),
     ]
+    private static let widths: [CGFloat] = [0.94, 0.86, 0.71, 0.9, 0.58, 0.8]
+    private static let lineHeight: CGFloat = 9
+    private static let lineGap: CGFloat = 9
+    private static let turnGap: CGFloat = 22
+    private static let bubblePadding: CGFloat = 12
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Spacer(minLength: 0)
-            ForEach(Array(Self.turns.enumerated()), id: \.offset) { index, turn in
-                HStack(spacing: 0) {
-                    if turn.mine { Spacer(minLength: 48) }
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        ForEach(0..<turn.lines, id: \.self) { line in
-                            Skeleton.Bar(
-                                width: nil,
-                                height: 10,
-                                phase: Double(index) * 0.09 + Double(line) * 0.04
-                            )
-                            .frame(maxWidth: width(index: index, line: line), alignment: .leading)
-                        }
-                    }
-                    .padding(Theme.Space.m)
-                    .background(
-                        turn.mine ? Theme.accentSoft : Theme.panel.opacity(0.72),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    )
-                    if !turn.mine { Spacer(minLength: 48) }
+        GeometryReader { geometry in
+            let lane = max(0, geometry.size.width)
+            VStack(alignment: .leading, spacing: Self.turnGap) {
+                ForEach(Self.filling(geometry.size.height), id: \.self) { index in
+                    turn(index, lane: lane)
                 }
             }
+            .frame(width: lane, height: geometry.size.height, alignment: .bottom)
+            .opacity(0.7)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.vertical, Theme.Space.xl)
+        .clipped()
+        .mask {
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.38)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+        .padding(.vertical, Theme.Space.l)
         .padding(.horizontal, Theme.Space.l)
+        .accessibilityElement()
         .accessibilityLabel(L10n.text("apple.transcriptfollow.loading_the_conversation.f32af8b0"))
         .allowsHitTesting(false)
     }
 
-    /// Ragged, so it reads as prose rather than as a progress bar.
-    private func width(index: Int, line: Int) -> CGFloat {
-        let widths: [CGFloat] = [420, 360, 290, 240, 330]
-        return widths[(index * 2 + line) % widths.count]
+    @ViewBuilder
+    private func turn(_ index: Int, lane: CGFloat) -> some View {
+        let shape = Self.turns[index % Self.turns.count]
+        let lines = VStack(alignment: .leading, spacing: Self.lineGap) {
+            ForEach(0..<shape.lines, id: \.self) { line in
+                Skeleton.Bar(width: nil, height: Self.lineHeight,
+                             phase: Double(index % Self.turns.count) * 0.11 + Double(line) * 0.05)
+                    .frame(maxWidth: (shape.mine ? lane * 0.5 : lane) * Self.widths[(index * 2 + line) % Self.widths.count],
+                           alignment: .leading)
+            }
+        }
+        if shape.mine {
+            HStack(spacing: 0) {
+                Spacer(minLength: lane * 0.3)
+                lines
+                    .frame(width: lane * 0.5, alignment: .leading)
+                    .padding(Self.bubblePadding)
+                    .background(Theme.accentSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        } else {
+            lines.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private static func filling(_ height: CGFloat) -> [Int] {
+        var used: CGFloat = 0
+        var count = 0
+        while used < height, count < 40 {
+            let shape = turns[count % turns.count]
+            used += CGFloat(shape.lines) * (lineHeight + lineGap) - lineGap
+                + (shape.mine ? bubblePadding * 2 : 0) + turnGap
+            count += 1
+        }
+        return Array((0..<max(count, 1)).reversed())
     }
 }
 

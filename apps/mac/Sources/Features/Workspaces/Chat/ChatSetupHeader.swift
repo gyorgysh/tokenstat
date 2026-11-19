@@ -859,6 +859,7 @@ struct ChatAgentPanel: View {
     @State private var signInBackend: ChatBackend?
     @State private var setupError: String?
     @State private var canRefresh = false
+    @State private var refreshingAgents = false
     @State private var updating = false
     @State private var favorites = ModelFavoritesStore.shared
     /// Installed agent versions, keyed by launcher id, and what an update or
@@ -889,7 +890,7 @@ struct ChatAgentPanel: View {
                     prompt: L10n.text("apple.chatsetupheader.filter_agents_models_and_efforts.315032da"),
                     emptyMessage: L10n.text("apple.chatsetupheader.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
                     caption: model.peer == nil ? L10n.text("apple.chatsetupheader.agents_on_this_computer.133ab3d5") : L10n.text("apple.chatsetupheader.agents_on_this_chat_s_remote_host.2c090971"),
-                    refresh: canRefresh ? { await model.reloadBackends() } : nil,
+                    refresh: nil,
                     sectionValue: choices.currentValue,
                     sectionTabs: choices.selectableSections,
                     stepped: true,
@@ -939,8 +940,16 @@ struct ChatAgentPanel: View {
                     showingSetup.toggle()
                 }
                 Spacer(minLength: 0)
-                Button(L10n.text("common.retry"), .refresh) { Task { await model.reloadBackends() } }
-                    .disabled(installing != nil || locked)
+                Button(L10n.text("common.refresh"), .refresh) {
+                    guard !refreshingAgents else { return }
+                    refreshingAgents = true
+                    Task {
+                        await model.reloadBackends(refreshModels: canRefresh)
+                        refreshingAgents = false
+                    }
+                }
+                .disabled(installing != nil || locked || refreshingAgents)
+                .opacity(refreshingAgents ? 0.5 : 1)
             }
             .font(Theme.caption)
             .padding(Theme.Space.s)

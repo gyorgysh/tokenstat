@@ -7,6 +7,16 @@ desktop is a review build. Newest first.
 
 ## [1.22.0]
 
+### Improved
+
+- Chats show a quieter loading placeholder that fills the screen on Mac, iPhone, iPad, Android and Windows.
+- The agent picker has one Refresh button. It reloads agents, models and limits together.
+
+### Fixed
+
+- Unlocking an iPhone or iPad no longer leaves an open chat stuck on its loading placeholder. It comes back where you were reading.
+- A chat started with the new chat button shows in its repository's chat list right away.
+
 ## [1.21.0] - 2026-11-19
 
 ### Changed
