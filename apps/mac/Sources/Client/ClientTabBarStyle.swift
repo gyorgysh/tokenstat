@@ -154,10 +154,15 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
             apply(animated: false)
         }
 
+        /// Every live prober that wants the bar gone. A screen leaving must not
+        /// bring the bar back while the screen replacing it still hides it.
+        private static let hiders = NSHashTable<Prober>.weakObjects()
+
         func apply(animated: Bool) {
             guard parent != nil else { return }
             guard let tabs = ClientTabBarHost.controller(from: self) ?? tabs else { return }
             self.tabs = tabs
+            if hidden { Self.hiders.add(self) } else { Self.hiders.remove(self) }
             let reportedHidden: Bool
             if #available(iOS 18, *) {
                 reportedHidden = tabs.isTabBarHidden
@@ -182,9 +187,15 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
         }
 
         func restore() {
+            Self.hiders.remove(self)
             guard hidByUs else { return }
             hidByUs = false
-            if let tabs = tabs ?? ClientTabBarHost.controller(from: self) {
+            let tabs = tabs ?? ClientTabBarHost.controller(from: self)
+            if let heir = Self.hiders.allObjects.first(where: { $0.tabs === tabs && $0.view.window != nil }) {
+                heir.hidByUs = true
+                return
+            }
+            if let tabs {
                 ClientTabBarHost.setHidden(false, on: tabs, animated: false)
             }
         }
