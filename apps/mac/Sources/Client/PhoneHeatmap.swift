@@ -185,7 +185,16 @@ struct PhoneHeatmap: View {
     ///
     /// Only step zero changes. The four active steps stay the brand's own, so
     /// a busy week on the phone is the same colour as a busy week on the site.
-    private static let heatPalette: [Color] = {
+    ///
+    /// A chosen theme or OLED has its own ramp, whose step zero is already
+    /// the border tone and reads on any ground.
+    private static var heatPalette: [Color] {
+        let appearance = AppAppearance.shared
+        guard appearance.paletteID == "default", appearance.mode != .oled else { return Theme.heat }
+        return defaultHeatPalette
+    }
+
+    private static let defaultHeatPalette: [Color] = {
         var ramp = Theme.heat
         ramp[0] = Color.adaptive(
             light: Color(red: 0xDE / 255, green: 0xDA / 255, blue: 0xEA / 255),

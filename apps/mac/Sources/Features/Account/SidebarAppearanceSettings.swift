@@ -12,13 +12,24 @@ enum SidebarAppearancePreferences {
     static let highlightsKey = "appearance.sidebarHighlights"
     static let defaultWash = 0.95
 
+    /// The least wash OLED allows. The glass keeps its edge and its light,
+    /// but the rows sit on something close enough to black that the theme
+    /// still reads as black rather than as a grey frost.
+    static let oledMinimumWash = 0.8
+
     static func normalized(_ value: Double) -> Double {
         value.isFinite ? min(1, max(0, value)) : defaultWash
+    }
+
+    /// The wash actually drawn, after the theme has had its say.
+    static func effective(_ value: Double) -> Double {
+        let wash = normalized(value)
+        return AppAppearance.shared.mode == .oled ? max(wash, oledMinimumWash) : wash
     }
 }
 
 struct SidebarAppearanceSettings: View {
-    private let appearance = MacAppearance.shared
+    private let appearance = AppAppearance.shared
     @AppStorage(SidebarAppearancePreferences.enabledKey) private var enabled = true
     @AppStorage(SidebarAppearancePreferences.washKey) private var wash = SidebarAppearancePreferences.defaultWash
     @AppStorage(SidebarAppearancePreferences.highlightsKey) private var highlights = true
@@ -33,7 +44,7 @@ struct SidebarAppearanceSettings: View {
              subtitle: L10n.text("apple.sidebarappearance.subtitle"), mark: "mark_local") {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 Picker(L10n.text("apple.sidebarappearance.mode"), selection: $appearance.mode) {
-                    ForEach(MacAppearanceMode.allCases, id: \.self) { mode in
+                    ForEach(AppAppearanceMode.allCases, id: \.self) { mode in
                         Text(mode.title).tag(mode)
                     }
                 }
@@ -42,7 +53,7 @@ struct SidebarAppearanceSettings: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     Text(L10n.text("apple.sidebarappearance.theme")).font(Theme.headline)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: Theme.Space.s)], spacing: Theme.Space.s) {
-                        ForEach(MacAppearance.builtIn, id: \.id) { preset in
+                        ForEach(AppAppearance.builtIn, id: \.id) { preset in
                             swatch(preset.theme, id: preset.id)
                         }
                         ForEach(appearance.custom) { preset in
@@ -103,9 +114,9 @@ struct SidebarAppearanceSettings: View {
     private func swatch(_ theme: AppearanceTheme, id: String) -> some View {
         let selected = appearance.paletteID == id
         let colors = scheme == .dark ? theme.dark : theme.light
-        let background = appearance.mode == .oled ? Color.black : MacAppearance.color(colors.background) ?? Theme.background
-        let accent = MacAppearance.color(colors.accent) ?? Theme.accent
-        let secondary = MacAppearance.color(colors.secondary) ?? Theme.secondary
+        let background = appearance.mode == .oled ? Color.black : AppAppearance.color(colors.background) ?? Theme.background
+        let accent = AppAppearance.color(colors.accent) ?? Theme.accent
+        let secondary = AppAppearance.color(colors.secondary) ?? Theme.secondary
         return Button {
             appearance.select(id)
             copiedPrompt = false
@@ -168,7 +179,6 @@ struct SidebarAppearanceSettings: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .disabled(appearance.mode == .oled)
     }
 
     private func copyPrompt() {
@@ -187,7 +197,7 @@ struct SidebarAppearanceSettings: View {
         do {
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
-            let data = try handle.read(upToCount: MacAppearance.maximumImportBytes + 1) ?? Data()
+            let data = try handle.read(upToCount: AppAppearance.maximumImportBytes + 1) ?? Data()
             try appearance.importTheme(data)
             copiedPrompt = false
         } catch let error as AppearanceImportError {

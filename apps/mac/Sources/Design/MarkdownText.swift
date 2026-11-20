@@ -223,7 +223,7 @@ private enum MarkdownCache {
     /// parses a second rather than one per token.
     static var appearanceKey: String {
         #if os(macOS)
-        return MacAppearance.shared.markdownCacheKey
+        return AppAppearance.shared.markdownCacheKey
         #else
         return ""
         #endif

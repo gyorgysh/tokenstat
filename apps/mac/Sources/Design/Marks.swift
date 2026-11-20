@@ -300,8 +300,10 @@ struct Wordmark: View {
             HStack(spacing: 0) {
                 Text(L10n.text("apple.marks.token.3c469e9d"))
                     .foregroundStyle(.primary)
+                // The brand violet, whatever the theme. The wordmark is the
+                // logo, and the bars beside it never change colour either.
                 Text(L10n.text("apple.marks.stat.40460da8"))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.brandAccent)
             }
             .font(Theme.fixed(size * 0.88, weight: .bold))
             // Lowercase, always. It is the command you type.

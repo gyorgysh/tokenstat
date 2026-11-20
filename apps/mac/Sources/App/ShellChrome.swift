@@ -89,7 +89,7 @@ struct SidebarGlassSurface: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        if MacAppearance.shared.mode == .oled || !enabled || isFullScreen || reduceTransparency || wash >= 1 {
+        if !enabled || isFullScreen || reduceTransparency || SidebarAppearancePreferences.effective(wash) >= 1 {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Theme.sidebar)
         } else {
             // Keep native glass's depth and edge while the backing softens
@@ -99,7 +99,7 @@ struct SidebarGlassSurface: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill((colorScheme == .dark ? Color.black : Color.white)
-                            .opacity(SidebarAppearancePreferences.normalized(wash)))
+                            .opacity(SidebarAppearancePreferences.effective(wash)))
                 }
         }
     }
@@ -241,9 +241,9 @@ struct DesktopChromeSurface: View {
         let live = drag?.sidebar.map { CGFloat($0 - storedSidebar) } ?? 0
         let width = sidebarWidth + live
         let outline = DesktopChromeShape(sidebarWidth: width)
-        let tint = SidebarAppearancePreferences.normalized(wash)
+        let tint = SidebarAppearancePreferences.effective(wash)
         Group {
-            if MacAppearance.shared.mode != .oled && enabled && !isFullScreen && !reduceTransparency && tint < 1 {
+            if enabled && !isFullScreen && !reduceTransparency && tint < 1 {
                 glass(outline: outline, width: width, tint: tint)
             } else {
                 outline.fill(Theme.sidebar)

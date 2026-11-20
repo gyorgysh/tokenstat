@@ -252,6 +252,7 @@ private struct ClientAccountContent: View {
     @ViewBuilder
     private var thisDevicePane: some View {
         notificationsCard
+        ClientAppearanceCard()
         layoutCard
         tabsCard
         LocalTrafficCard(traffic: model.remoteStatus?.traffic) {

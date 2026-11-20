@@ -256,7 +256,7 @@ struct TokenstatApp: App {
         WindowGroup {
             #if os(macOS)
             RootView()
-                .modifier(MacAppearanceScheme())
+                .modifier(AppAppearanceScheme())
                 // The minimum is the detail column alone. The sidebar overlays
                 // on a tiled half-screen, and a content minimum larger than
                 // the tile overflows: the layout is built at the minimum and
@@ -272,6 +272,7 @@ struct TokenstatApp: App {
             // A minimum size would be meaningless here: the scene is whatever
             // the device is.
             ClientRootView()
+                .modifier(AppAppearanceScheme())
             #endif
         }
         #if os(macOS)
@@ -342,7 +343,7 @@ struct TokenstatApp: App {
         #if os(macOS)
         Window(L10n.text("apple.tokenstatapp.about_tokenstat.2777c642"), id: Self.aboutWindowID) {
             AboutView()
-                .modifier(MacAppearanceScheme())
+                .modifier(AppAppearanceScheme())
         }
         .windowResizability(.contentSize)
         // Nothing outside the app opens this, and without the empty match a
@@ -356,7 +357,7 @@ struct TokenstatApp: App {
         WindowGroup(for: RemoteScreenTarget.self) { $target in
             if let target {
                 ScreenViewerView(peer: target.peer, name: target.name, tier: target.tier)
-                    .modifier(MacAppearanceScheme())
+                    .modifier(AppAppearanceScheme())
                     .frame(minWidth: 900, minHeight: 600)
             }
         }

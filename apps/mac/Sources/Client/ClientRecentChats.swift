@@ -355,7 +355,6 @@ private struct ClientRecentChatContent: View {
     @State private var loadingLive = false
     @State private var visible = false
     @State private var loadGeneration: UInt64 = 0
-    @State private var drawerOpen = false
     private var showingChatSidebar: Bool {
         get { session.presentation.sidebarVisible }
         nonmutating set { session.presentation.sidebarVisible = newValue }
@@ -479,26 +478,6 @@ private struct ClientRecentChatContent: View {
                         }
                 }
                 threadContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .modifier(ClientChatDrawer(open: $drawerOpen,
-                        width: min(320, geometry.size.width * 0.82),
-                        allowsEdgeSwipe: model.savedCopy == nil && geometry.size.width < 600
-                            && model.chats.contains { $0.id == chatID }) {
-                        ClientChatDrawerPanel(place: folderName, chats: model.chats, currentID: chatID,
-                            isUnread: { ClientChatReadState.shared.isUnread(peer: peer, chat: $0) },
-                            onClose: { drawerOpen = false }, onChats: leave,
-                            beforeNavigate: {
-                                guard ownsDrawer else { return false }
-                                model.saveDraftNow()
-                                if rootChatReference != nil { navigation.presentedChat = nil }
-                                return true
-                            },
-                            onNewChat: {
-                                guard ownsDrawer else { return }
-                                drawerOpen = false
-                                model.saveDraftNow()
-                                navigation.openNewChat(repositoryID: "remote:\(peer):\(workspaceID)")
-                            }, onSelect: select)
-                    })
             }
             .onChange(of: geometry.size.width, initial: true) { _, width in
                 workbenchWidth = width
@@ -521,7 +500,7 @@ private struct ClientRecentChatContent: View {
         }
     }
 
-    private var ownsDrawer: Bool {
+    private var ownsSwitcher: Bool {
         visible && publicationLayout == navigation.stackGeneration
             && presentationScope != nil && presentationScope == WorkSessionContext.shared.scope
             && (rootChatReference == nil || rootChatReference == navigation.presentedChat?.reference)
@@ -533,7 +512,6 @@ private struct ClientRecentChatContent: View {
               model.draftReference(for: chat.id, in: workspaceID)?.scope == presentationScope,
               rootChatReference == nil || rootChatReference == navigation.presentedChat?.reference
         else { return }
-        drawerOpen = false
         guard chat.id != chatID else { return }
         model.saveDraftNow()
         navigation.chooseWithinChat(session: session, presentationID: presentationID,
@@ -542,7 +520,6 @@ private struct ClientRecentChatContent: View {
     }
 
     private func leave() {
-        drawerOpen = false
         if rootChatReference != nil {
             guard visible, publicationLayout == navigation.stackGeneration,
                   WorkDestinationResolver.sameConversation(rootChatReference, navigation.presentedChat?.reference)
@@ -551,6 +528,17 @@ private struct ClientRecentChatContent: View {
         } else {
             dismiss()
         }
+    }
+
+    private var switcher: ClientChatSwitcher {
+        ClientChatSwitcher(chats: model.chats,
+            isUnread: { ClientChatReadState.shared.isUnread(peer: peer, chat: $0) },
+            onBack: leave, onSelect: select,
+            onNewChat: {
+                guard ownsSwitcher else { return }
+                model.saveDraftNow()
+                navigation.openNewChat(repositoryID: "remote:\(peer):\(workspaceID)")
+            })
     }
 
     private var canShowChatSidebar: Bool {
@@ -578,13 +566,10 @@ private struct ClientRecentChatContent: View {
                         else { return }
                         navigation.presentedChat = nil
                     } : nil,
-                    onShowChats: model.savedCopy == nil ? {
-                        if canShowChatSidebar {
-                            withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
-                        }
-                        else { drawerOpen.toggle() }
+                    onShowChats: model.savedCopy == nil && canShowChatSidebar ? {
+                        withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
                     } : nil,
-                    drawerOpen: drawerOpen,
+                    switcher: model.savedCopy == nil && !canShowChatSidebar ? switcher : nil,
                     availableWorkbenchWidth: workbenchWidth,
                     availableWorkbenchHeight: workbenchHeight,
                     onBrowserChange: { updateCompanion(open: $0) },

@@ -105,7 +105,6 @@ private struct ClientChatContent: View {
     /// rows in silence reads as broken sync; the strip says what is happening
     /// until the fresh answer lands.
     @State private var refreshing = false
-    @State private var drawerOpen = false
     private var showingChatSidebar: Bool {
         get { session.presentation.sidebarVisible }
         nonmutating set { session.presentation.sidebarVisible = newValue }
@@ -149,9 +148,6 @@ private struct ClientChatContent: View {
                         }
                 }
                 chatContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .modifier(ClientChatDrawer(open: $drawerOpen,
-                        width: min(320, geometry.size.width * 0.82),
-                        allowsEdgeSwipe: opened != nil && geometry.size.width < 600) { drawer })
             }
             .onChange(of: geometry.size.width, initial: true) { _, width in
                 workbenchWidth = width
@@ -215,16 +211,10 @@ private struct ClientChatContent: View {
                     isActive: opened != nil && ChatViewportAttachment.isCurrentPresentation(visible: visible,
                         layout: publicationLayout, currentLayout: navigation.stackGeneration),
                     onBack: showList,
-                    onShowChats: {
-                        if workbenchWidth >= 600 && workbenchHeight >= 500
-                            && verticalSizeClass != .compact
-                            && !dynamicTypeSize.isAccessibilitySize
-                            && (!browserOpen || workbenchWidth >= 900) {
-                            withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
-                        }
-                        else { drawerOpen.toggle() }
-                    },
-                    drawerOpen: drawerOpen,
+                    onShowChats: canShowChatSidebar ? {
+                        withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
+                    } : nil,
+                    switcher: canShowChatSidebar ? nil : switcher,
                     availableWorkbenchWidth: workbenchWidth,
                     availableWorkbenchHeight: workbenchHeight,
                     onBrowserChange: { updateCompanion(open: $0) },
@@ -313,7 +303,6 @@ private struct ClientChatContent: View {
         guard visible, publicationLayout == navigation.stackGeneration,
               let scope = WorkSessionContext.shared.scope,
               model.draftReference(for: chat.id, in: workspaceID)?.scope == scope else { return }
-        drawerOpen = false
         guard opened?.id != chat.id else { return }
         model.saveDraftNow()
         navigation.chooseWithinChat(session: session, presentationID: presentationID)
@@ -325,7 +314,6 @@ private struct ClientChatContent: View {
 
     private func showList() {
         guard visible, publicationLayout == navigation.stackGeneration else { return }
-        drawerOpen = false
         session.presentation.chromeCollapsed = false
         navigation.leaveThread(session: session, presentationID: presentationID)
         publicationIntent = navigation.chatHandoff.intent
@@ -333,16 +321,23 @@ private struct ClientChatContent: View {
         retainedThread = opened; self.opened = nil
     }
 
-    private var drawer: some View {
-        ClientChatDrawerPanel(place: place, chats: model.chats, currentID: opened?.id,
+    /// Room for the iPad's conversation sidebar. Anything narrower gets the
+    /// phone's back button and title menu instead.
+    private var canShowChatSidebar: Bool {
+        workbenchWidth >= 600 && workbenchHeight >= 500
+            && verticalSizeClass != .compact
+            && !dynamicTypeSize.isAccessibilitySize
+            && (!browserOpen || workbenchWidth >= 900)
+    }
+
+    private var switcher: ClientChatSwitcher {
+        ClientChatSwitcher(chats: model.chats,
             isUnread: { ClientChatReadState.shared.isUnread(peer: peer, chat: $0) },
-            onClose: { drawerOpen = false }, onChats: showList,
-            beforeNavigate: {
-                guard visible, publicationLayout == navigation.stackGeneration else { return false }
-                model.saveDraftNow()
-                return true
-            },
-            onNewChat: { drawerOpen = false; Task { await create() } }, onSelect: select)
+            onBack: showList, onSelect: select,
+            onNewChat: {
+                guard visible, publicationLayout == navigation.stackGeneration else { return }
+                Task { await create() }
+            })
     }
 
     private func updateCompanion(open: Bool) {
@@ -740,9 +735,11 @@ struct ClientChatThread: View {
     var onBack: (() -> Void)?
     /// A root reader presented as a cover closes through its owner.
     var onSwipeBack: (() -> Void)?
+    /// The iPad's sidebar toggle. Absent where the sidebar has no room.
     var onShowChats: (() -> Void)? = nil
-    /// The chats drawer covers the navigation bar while it is open.
-    var drawerOpen = false
+    /// Phone navigation. When present it owns the back button, the edge swipe
+    /// and the title menu.
+    var switcher: ClientChatSwitcher? = nil
     var availableWorkbenchWidth: CGFloat? = nil
     var availableWorkbenchHeight: CGFloat? = nil
     var onBrowserChange: ((Bool) -> Void)? = nil
@@ -936,6 +933,37 @@ struct ClientChatThread: View {
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.xs)
         .background(Theme.background)
+    }
+
+    /// The chat's name and its project, on a glass chip. On a phone it is
+    /// also the way to another chat, so it says so with a small chevron.
+    private func titleChip(_ chat: ChatConversation, opensMenu: Bool) -> some View {
+        HStack(spacing: Theme.Space.xs) {
+            VStack(spacing: 1) {
+                Text(chat.title.isEmpty ? L10n.text("apple.clientchatview.chat.460b3a7d") : chat.title)
+                    .font(ClientType.label.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if !folderName.isEmpty {
+                    Text(folderName)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            if opensMenu {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, 6)
+        .frame(minWidth: 140, maxWidth: 260, minHeight: 44)
+        .clientGlassChip()
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 
     private func setControlsCollapsed(_ collapsed: Bool) {
@@ -1281,8 +1309,8 @@ struct ClientChatThread: View {
         }
         .modifier(ClientChatControlsSwipe(upward: false, enabled: isActive && chromeCollapsed,
                                          maximumStartY: 56) { setControlsCollapsed(false) })
-        .modifier(ClientChatBackSwipe(enabled: isActive && chromeCollapsed,
-                                     action: onBack ?? onSwipeBack))
+        .modifier(ClientChatBackSwipe(enabled: isActive && (chromeCollapsed || switcher != nil),
+                                     action: switcher?.onBack ?? onBack ?? onSwipeBack))
         .overlay(alignment: .topLeading) {
             if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
                 Button { setControlsCollapsed(false) } label: {
@@ -1311,12 +1339,16 @@ struct ClientChatThread: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         .navigationTitle(isActive ? (chat?.title ?? L10n.text("apple.clientchatview.chat.460b3a7d")) : L10n.text("apple.clientchatview.chat.460b3a7d"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(isActive && (chromeCollapsed || drawerOpen) ? .hidden : .visible, for: .navigationBar)
+        .toolbar(isActive && chromeCollapsed ? .hidden : .visible, for: .navigationBar)
         .toolbar {
-            if isActive, let onShowChats {
+            if isActive, let switcher {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: switcher.onBack) { ActionIcon.back.label(L10n.text("common.chats")) }
+                }
+            } else if isActive, let onShowChats {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: onShowChats) {
-                        Image(systemName: "line.3.horizontal")
+                        Image(systemName: "sidebar.left")
                     }
                     .accessibilityLabel(L10n.text("apple.clientchatview.conversations.1d432f58"))
                 }
@@ -1327,23 +1359,14 @@ struct ClientChatThread: View {
             }
             if isActive, let chat {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        Text(chat.title.isEmpty ? L10n.text("apple.clientchatview.chat.460b3a7d") : chat.title)
-                            .font(ClientType.label.weight(.semibold))
-                            .lineLimit(1)
-                        if !folderName.isEmpty {
-                            Text(folderName)
-                                .font(ClientType.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                    if let switcher {
+                        ClientChatSwitcherMenu(switcher: switcher, currentID: chat.id,
+                            place: folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName) {
+                            titleChip(chat, opensMenu: true)
                         }
+                    } else {
+                        titleChip(chat, opensMenu: false)
                     }
-                    .padding(.horizontal, Theme.Space.l)
-                    .padding(.vertical, 6)
-                    .frame(minWidth: 140, maxWidth: 260, minHeight: 44)
-                    .clientGlassChip()
-                    .accessibilityElement(children: .combine)
-                    .accessibilityAddTraits(.isHeader)
                 }
                 if model.savedCopy == nil, let tools = toolsIdentity {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -3555,165 +3578,80 @@ private struct ClientChatResizeFrame: ViewModifier {
     func reset() { origin = nil; liveWidth = nil }
 }
 
-/// The phone's chat drawer, drawn like the iPad sidebar: the wordmark, the
-/// app's sections, then this project's conversations.
-struct ClientChatDrawerPanel: View {
-    let place: String
+/// How a phone moves between chats: back to the list, or across to another
+/// chat in the same project from the title.
+///
+/// Built from the platform's own pieces, a back button, the edge swipe and a
+/// title menu, so it moves the way every other iPhone app does. A drawer was
+/// tried first and read as a second app inside this one.
+struct ClientChatSwitcher {
     let chats: [ChatConversation]
-    let currentID: String?
     let isUnread: (ChatConversation) -> Bool
-    let onClose: () -> Void
-    let onChats: () -> Void
-    let beforeNavigate: () -> Bool
-    let onNewChat: () -> Void
+    let onBack: () -> Void
     let onSelect: (ChatConversation) -> Void
-    @Environment(ClientNavigationModel.self) private var navigation
-    @Environment(ClientTabCustomization.self) private var tabCustomization
-    private let rowHeight = SidebarMetrics.touchRow
+    let onNewChat: () -> Void
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Wordmark(size: 22, fills: false)
-                    .fixedSize()
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button(action: onClose) {
-                    ActionIcon.dismiss.label(L10n.text("common.close"))
-                        .labelStyle(.iconOnly)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, Theme.Space.l)
-            .frame(height: 52)
-            List {
-                Section {
-                    row(L10n.text("apple.clientchatview.new_chat.db18382a"), symbol: "square.and.pencil", selected: false) {
-                        onClose()
-                        onNewChat()
-                    }
-                    ForEach(tabCustomization.visibleTabs.filter { $0 != .team }) { tab in
-                        row(tab.label, symbol: tab.symbol, selected: false) { open(tab) }
-                    }
-                }
-                Section {
-                    row(L10n.text("common.chats"), symbol: "bubble.left.and.bubble.right", selected: false, action: onChats)
-                    ForEach(chats.sorted {
-                        ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
-                    }) { chat in
-                        chatRow(chat)
-                    }
-                } header: {
-                    Text(place)
-                        .font(ClientType.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .lineLimit(1)
-                }
-            }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, rowHeight)
-            .clientCompactSections()
-        }
-        .background(Theme.background)
-    }
-
-    private func open(_ tab: ClientTab) {
-        guard beforeNavigate() else { return }
-        onClose()
-        navigation.chooseNavigation()
-        navigation.restoredRoute = nil
-        navigation.workspacesPath = []
-        navigation.destination = tab
-        navigation.folderID = nil
-    }
-
-    private func row(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Space.s) {
-                Image(systemName: symbol)
-                    .font(Theme.font(14))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 20)
-                Text(title).font(Theme.font(16)).lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .clientSidebarRowSurface(isSelected: selected, height: rowHeight)
-        }
-        .buttonStyle(.plain)
-        .clientSidebarRowChrome()
-    }
-
-    private func chatRow(_ chat: ChatConversation) -> some View {
-        Button { onSelect(chat) } label: {
-            HStack(spacing: Theme.Space.s) {
-                HarnessMark(id: chat.backend, size: 20)
-                Text(chat.title.isEmpty ? L10n.text("apple.clientchatview.chat.460b3a7d") : chat.title)
-                    .font(Theme.font(15, weight: chat.id == currentID ? .medium : .regular))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if chat.running || isUnread(chat) {
-                    Circle().fill(Theme.accent).frame(width: 7, height: 7)
-                        .accessibilityLabel(chat.running ? L10n.text("common.running")
-                            : L10n.text("apple.clientrecentchats.unread.1b9f384c"))
-                }
-            }
-            .clientSidebarRowSurface(isSelected: chat.id == currentID, height: rowHeight)
-        }
-        .buttonStyle(.plain)
-        .clientSidebarRowChrome()
-        .accessibilityAddTraits(chat.id == currentID ? .isSelected : [])
+    /// The newest first, capped so the menu fits a phone without scrolling.
+    var recent: [ChatConversation] {
+        Array(chats.sorted {
+            ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
+        }.prefix(6))
     }
 }
 
-/// A phone's chat list: slides in from the leading edge and pushes the
-/// conversation aside. A tap or a swipe on the conversation closes it.
-struct ClientChatDrawer<Drawer: View>: ViewModifier {
-    @Binding var open: Bool
-    let width: CGFloat
-    let allowsEdgeSwipe: Bool
-    @ViewBuilder let drawer: () -> Drawer
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+/// The title of an open chat on a phone, and the menu behind it.
+struct ClientChatSwitcherMenu<Title: View>: View {
+    let switcher: ClientChatSwitcher
+    let currentID: String
+    let place: String
+    @ViewBuilder let title: () -> Title
 
-    func body(content: Content) -> some View {
-        ZStack(alignment: .leading) {
-            if open {
-                drawer()
-                    .frame(width: width)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .transition(.move(edge: .leading))
+    var body: some View {
+        Menu {
+            Button(action: switcher.onNewChat) {
+                Label(L10n.text("apple.clientchatview.new_chat.db18382a"), systemImage: "square.and.pencil")
             }
-            content
-                .accessibilityHidden(open)
-                .overlay(alignment: .leading) {
-                    if allowsEdgeSwipe && !open {
-                        Color.clear
-                            .frame(width: 20)
-                            .contentShape(.rect)
-                            .gesture(DragGesture(minimumDistance: 12).onEnded { value in
-                                if value.translation.width > 40 { open = true }
-                            })
+            Section(place) {
+                ForEach(switcher.recent) { chat in
+                    // Every row carries a glyph so the names line up, and the
+                    // glyph is the row's state: here, working, unread, or quiet.
+                    Button { switcher.onSelect(chat) } label: {
+                        Label(name(chat), systemImage: symbol(chat))
                     }
+                    .accessibilityValue(state(chat))
                 }
-                .overlay {
-                    if open {
-                        Color.black.opacity(0.2)
-                            .ignoresSafeArea()
-                            .contentShape(.rect)
-                            .onTapGesture { open = false }
-                            .gesture(DragGesture(minimumDistance: 12).onEnded { value in
-                                if value.translation.width < -40 { open = false }
-                            })
-                            .transition(.opacity)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .offset(x: open ? width : 0)
+            }
+            Button(action: switcher.onBack) {
+                Label(L10n.text("apple.clientchatview.all_chats"), systemImage: "bubble.left.and.bubble.right")
+            }
+        } label: {
+            title()
         }
-        .clipped()
-        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: open)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .accessibilityHint(L10n.text("apple.clientchatview.switch_chats_hint"))
+    }
+
+    /// One line. A menu wraps a long first prompt over three rows otherwise,
+    /// and a list of chats turns into a list of paragraphs.
+    private func name(_ chat: ChatConversation) -> String {
+        let title = chat.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        guard !title.isEmpty else { return L10n.text("apple.clientchatview.chat.460b3a7d") }
+        return title.count > 34 ? String(title.prefix(32)).trimmingCharacters(in: .whitespaces) + "…" : title
+    }
+
+    private func symbol(_ chat: ChatConversation) -> String {
+        if chat.id == currentID { return "checkmark" }
+        if chat.running { return "waveform" }
+        if switcher.isUnread(chat) { return "circle.fill" }
+        return "bubble.left"
+    }
+
+    private func state(_ chat: ChatConversation) -> String {
+        if chat.running { return L10n.text("common.running") }
+        if switcher.isUnread(chat) { return L10n.text("apple.clientrecentchats.unread.1b9f384c") }
+        return ""
     }
 }
 

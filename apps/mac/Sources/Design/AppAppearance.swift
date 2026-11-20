@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
-#if os(macOS)
-enum MacAppearanceMode: String, CaseIterable {
+enum AppAppearanceMode: String, CaseIterable {
     case auto, light, dark, oled
 
     var title: String {
@@ -24,8 +26,6 @@ enum MacAppearanceMode: String, CaseIterable {
     }
 }
 
-#endif
-
 struct AppearanceColors: Codable, Equatable {
     let background: String
     let sidebar: String
@@ -35,7 +35,6 @@ struct AppearanceColors: Codable, Equatable {
     let secondary: String
     let selection: String
 
-    #if os(macOS)
     init(_ background: String, _ sidebar: String, _ panel: String, _ border: String,
          _ accent: String, _ secondary: String, _ selection: String) {
         self.background = "#" + background
@@ -82,10 +81,8 @@ struct AppearanceColors: Codable, Equatable {
             }
         }) else { throw AppearanceImportError.contrast }
     }
-    #endif
 }
 
-#if os(macOS)
 struct AppearanceTheme: Codable, Equatable {
     let version: Int
     let name: String
@@ -128,8 +125,8 @@ enum AppearanceImportError: LocalizedError {
 }
 
 @Observable
-final class MacAppearance {
-    static let shared = MacAppearance()
+final class AppAppearance {
+    static let shared = AppAppearance()
     static let maximumImportBytes = 16_384
     static let maximumCustomThemes = 24
     private static let modeKey = "appearance.mode"
@@ -157,7 +154,7 @@ final class MacAppearance {
     ]
 
     private let defaults: UserDefaults
-    var mode: MacAppearanceMode {
+    var mode: AppAppearanceMode {
         didSet { defaults.set(mode.rawValue, forKey: Self.modeKey) }
     }
     private(set) var paletteID: String {
@@ -167,7 +164,7 @@ final class MacAppearance {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        mode = defaults.string(forKey: Self.modeKey).flatMap(MacAppearanceMode.init(rawValue:)) ?? .auto
+        mode = defaults.string(forKey: Self.modeKey).flatMap(AppAppearanceMode.init(rawValue:)) ?? .auto
         let decoded = defaults.data(forKey: Self.themesKey).flatMap { try? JSONDecoder().decode([Custom].self, from: $0) } ?? []
         let themes = Array(decoded.filter { (try? $0.theme.validated()) != nil }.prefix(Self.maximumCustomThemes))
         custom = themes
@@ -249,9 +246,25 @@ final class MacAppearance {
         }
     }
 }
-struct MacAppearanceScheme: ViewModifier {
+struct AppAppearanceScheme: ViewModifier {
     func body(content: Content) -> some View {
-        content.preferredColorScheme(MacAppearance.shared.mode.colorScheme)
+        #if os(iOS)
+        // `preferredColorScheme(nil)` does not hand an iPhone back to the
+        // system once it has forced one, and sheets and alerts live in their
+        // own controllers. The window's own style reaches all of them.
+        content
+            .onChange(of: AppAppearance.shared.mode, initial: true) { _, mode in
+                let style: UIUserInterfaceStyle = switch mode.colorScheme {
+                case .light: .light
+                case .dark: .dark
+                default: .unspecified
+                }
+                for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                    for window in scene.windows { window.overrideUserInterfaceStyle = style }
+                }
+            }
+        #else
+        content.preferredColorScheme(AppAppearance.shared.mode.colorScheme)
+        #endif
     }
 }
-#endif

@@ -35,11 +35,7 @@ enum Theme {
         }
 
         var color: Color {
-            #if os(macOS)
-            MacAppearance.shared.color(key, fallback: fallback, blackInOLED: blackInOLED)
-            #else
-            fallback
-            #endif
+            AppAppearance.shared.color(key, fallback: fallback, blackInOLED: blackInOLED)
         }
     }
 
@@ -54,6 +50,9 @@ enum Theme {
     private static let nestedSelectionColor = PaletteColor(\.selection, 0xE8E7F0, 0x26213D)
 
     static var accent: Color { accentColor.color }
+    /// The website's violet, fixed. For the brand itself (the wordmark), which
+    /// stays the same product whichever palette the person picked.
+    static let brandAccent = Color.adaptive(light: hex(0x6A3DFF), dark: hex(0x8B5CF6))
     static var secondary: Color { secondaryColor.color }
     static var background: Color { backgroundColor.color }
     static var sidebar: Color { sidebarColor.color }
@@ -75,7 +74,10 @@ enum Theme {
     /// light, the folds and the prism are drawn on an opaque floor, the lit
     /// card floats off it, and the page reads as this app's. The Mac keeps
     /// its window glass, which has a desktop behind it.
-    static let chatStartGround = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
+    static var chatStartGround: Color {
+        AppAppearance.shared.mode == .oled ? .black : chatStartGroundColor
+    }
+    private static let chatStartGroundColor = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
     static var border: Color { borderColor.color }
     /// The edge of the content sheet against the glass chrome. A touch of
     /// light on dark and a touch of shade on light, so the sheet reads as a
@@ -161,11 +163,12 @@ enum Theme {
     /// Exact `sites/tokenstat` ramp. Step 0 is neutral so a quiet day reads as
     /// "nothing here", while the upper levels run violet into fuchsia.
     static var heat: [Color] {
-        #if os(macOS)
-        if MacAppearance.shared.paletteID != "default" {
-            return [sidebar, accent.opacity(0.32), accent.opacity(0.6), accent, secondary]
+        if AppAppearance.shared.paletteID != "default" || AppAppearance.shared.mode == .oled {
+            // Step 0 is the border tone, never a surface: on black a black
+            // cell would vanish and a quiet day would read as a hole. The
+            // upper steps run accent into secondary, like the default ramp.
+            return [border, accent.opacity(0.38), accent.opacity(0.7), accent, secondary]
         }
-        #endif
         return defaultHeat
     }
 

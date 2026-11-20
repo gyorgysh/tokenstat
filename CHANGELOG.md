@@ -7,6 +7,20 @@ desktop is a review build. Newest first.
 
 ## [1.23.0]
 
+### Added
+
+- On iPhone and iPad, choose Auto, Light, Dark or OLED and a color theme under This device in Account.
+
+### Changed
+
+- On iPhone, a chat has a back button again, and a swipe from the left edge returns to the chat list. Tap the chat title to switch to a recent chat in the same repository or start a new one. This replaces the side drawer.
+- The tokenstat name keeps its brand colors in every theme.
+
+### Improved
+
+- On Mac, OLED keeps the glass sidebar, held close to black.
+- The activity calendar follows the chosen theme, and quiet days stay visible in OLED.
+
 ## [1.22.0] - 2026-11-20
 
 ### Added
