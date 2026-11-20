@@ -9,7 +9,7 @@ desktop is a review build. Newest first.
 
 ### Added
 
-- Choose No repository when starting a chat. The chat runs in a shared folder on the selected computer and appears under No repository in the chat list. Update the computer to 1.23.0 to use this from a phone or tablet.
+- Choose No repository when starting a chat. These chats use one working folder on the selected computer and appear under No repository in the chat list. Update the computer to 1.23.0 to use this from a phone or tablet.
 - On iPhone and iPad, choose Auto, Light, Dark or OLED and a color theme under This device in Account.
 - A short setup tour on Home walks you through appearance and remote access. On Mac, it also covers the always-on host and plan limit sharing. Skip it or reopen it from Appearance.
 - The Mac new chat page shows the selected repository’s branch and changes, seven days of spend, and the agent’s plan limits where available.

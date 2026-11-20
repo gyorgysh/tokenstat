@@ -28,6 +28,7 @@ import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.components.tsPanel
+import ai.tokenstat.tokenstat.ui.logic.GeneralFolder
 import ai.tokenstat.tokenstat.ui.logic.HostStatsFormat
 import ai.tokenstat.tokenstat.ui.logic.RelativeClock
 import ai.tokenstat.tokenstat.ui.logic.harnessName
@@ -932,11 +933,12 @@ private fun SecurityKeyRow(
 @Composable
 fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null, peer: String? = null, grouped: Boolean = false) {
     val colors = LocalTsColors.current
+    val isGeneral = GeneralFolder.isGeneral(folder)
     val git = folder["git"] as? JsonObject
     var actionsOpen by remember(folder.str("id"), folder.str("path")) { mutableStateOf(false) }
     var systemActions by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val systemId = peer?.let { ai.tokenstat.tokenstat.ecosystem.SystemProjects.idFor(it, folder.str("id").orEmpty()) }
+    val systemId = peer?.takeUnless { isGeneral }?.let { ai.tokenstat.tokenstat.ecosystem.SystemProjects.idFor(it, folder.str("id").orEmpty()) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -958,7 +960,7 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
                 .background(colors.accent.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.Folder, null, tint = colors.accent, modifier = Modifier.size((ROW_MARK * 0.5f).dp))
+            Icon(if (isGeneral) Icons.Default.ChatBubbleOutline else Icons.Default.Folder, null, tint = colors.accent, modifier = Modifier.size((ROW_MARK * 0.5f).dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
@@ -969,13 +971,13 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                middleTruncate(folder.str("path").orEmpty()),
+                if (isGeneral) L10n.text("common.new_chat.no_repository_help") else middleTruncate(folder.str("path").orEmpty()),
                 style = TsType.caption,
                 color = colors.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            folderSubtitle(folder)?.let { subtitle ->
+            folderSubtitle(folder).takeUnless { isGeneral }?.let { subtitle ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -1005,7 +1007,7 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
                 strokeWidth = 2.dp,
             )
         }
-        if (onRename != null) {
+        if (onRename != null && !isGeneral) {
             Box {
                 IconButton(onClick = { actionsOpen = true }) {
                     Icon(ActionIcon.More.vector, L10n.text("android.sshrows.more_actions.f8d46c25"), tint = colors.textTertiary)
