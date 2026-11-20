@@ -10,6 +10,7 @@ desktop is a review build. Newest first.
 ### Added
 
 - On iPhone and iPad, choose Auto, Light, Dark or OLED and a color theme under This device in Account.
+- Start a chat without a repository. Choose No repository at the top of the repository list on any computer to ask an agent something or try work in a plain folder. Those chats sit under No repository in the sidebar. The computer needs this version.
 
 ### Changed
 

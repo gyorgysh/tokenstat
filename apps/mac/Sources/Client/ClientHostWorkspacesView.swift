@@ -323,7 +323,7 @@ struct ClientHostWorkspacesView: View {
             .padding(.horizontal, 2)
             .padding(.top, Theme.Space.s)
             ClientAdaptiveCards {
-                ForEach(model.folders.filter {
+                ForEach(ChatStartPage.generalFirst(model.folders).filter {
                     search.isEmpty
                         || $0.name.localizedCaseInsensitiveContains(search)
                         || $0.path.localizedCaseInsensitiveContains(search)

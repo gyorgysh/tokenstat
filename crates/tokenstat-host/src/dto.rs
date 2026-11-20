@@ -569,6 +569,10 @@ pub struct WorkspaceDto {
     /// the folder, and absent from older hosts, which read the same way.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub team_organizations: Vec<String>,
+    /// This host's folder for chats with no repository. Clients list it as
+    /// "No repository" and keep it out of project lists. Absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub general: bool,
 }
 
 /// What a folder has in it right now, as counts and nothing else.
@@ -885,6 +889,7 @@ mod tests {
             git: None,
             git_status_pending: Some(true),
             team_organizations: Vec::new(),
+            general: false,
         };
         let quick = serde_json::to_value(&workspace).expect("quick folder serializes");
         assert_eq!(quick["gitStatusPending"], true);

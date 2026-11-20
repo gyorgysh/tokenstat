@@ -98,7 +98,7 @@ struct ClientFolderRow: View {
                         .lineLimit(1)
                     TeamFolderBadges(names: teams.sharedOrganizations(reported: folder.teamOrganizations, workspace: folder.id, isRemote: folder.isRemote))
                 }
-                Text(folder.path)
+                Text(folder.isGeneral ? L10n.text("common.new_chat.no_repository_help") : folder.path)
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -134,7 +134,7 @@ struct ClientFolderRow: View {
         ZStack {
             RoundedRectangle(cornerRadius: ClientRowMark.size * 0.28, style: .continuous)
                 .fill(Theme.accent.opacity(0.12))
-            Image(systemName: "folder.fill")
+            Image(systemName: folder.isGeneral ? "bubble.left.and.bubble.right.fill" : "folder.fill")
                 .font(Theme.font(ClientRowMark.size * 0.5, weight: .medium))
                 .foregroundStyle(Theme.accent)
         }

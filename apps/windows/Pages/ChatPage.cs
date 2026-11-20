@@ -434,10 +434,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         try
         {
-            var listed = await AppServices.Host.CallAsync("workspace.list");
+            var listed = await AppServices.Host.CallAsync("workspace.list", GeneralFolder.ListParameters());
             var array = listed as JsonArray ?? listed["workspaces"] as JsonArray;
             if (array is not null)
             {
+                array = GeneralFolder.Present(array);
                 foreach (var folder in array)
                 {
                     if (Format.Text(folder, "id") == _workspaceId)

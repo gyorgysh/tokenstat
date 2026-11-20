@@ -600,7 +600,7 @@ public sealed partial class MainWindow : Window
             JsonNode listed;
             try
             {
-                listed = await AppServices.Host.CallAsync("workspace.list");
+                listed = await AppServices.Host.CallAsync("workspace.list", GeneralFolder.ListParameters());
             }
             catch
             {
@@ -613,6 +613,7 @@ public sealed partial class MainWindow : Window
             {
                 return;
             }
+            array = GeneralFolder.Present(array);
             var unchanged = _foldersLoaded && JsonNode.DeepEquals(_localFolders, array);
             _foldersLoaded = true;
             if (unchanged) return;
@@ -730,10 +731,13 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // "No repository" leads, and only once it holds a chat, as on the Mac.
     private List<JsonNode?> OrderedLocalFolders(SidebarProjectsSort sort) =>
-        SidebarProjectsLayout.OrderFolders(_localFolders.ToList(), sort,
-            folder => Format.Text(folder, "name", Format.Text(folder, "id")),
-            folder => FolderActivity(Format.Text(folder, "id")));
+        _localFolders.Where(folder => GeneralFolder.IsGeneral(folder) && FolderActivity(Format.Text(folder, "id")) > 0)
+            .Concat(SidebarProjectsLayout.OrderFolders(_localFolders.Where(folder => !GeneralFolder.IsGeneral(folder)).ToList(), sort,
+                folder => Format.Text(folder, "name", Format.Text(folder, "id")),
+                folder => FolderActivity(Format.Text(folder, "id"))))
+            .ToList();
 
     private long FolderActivity(string folderId)
     {

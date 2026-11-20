@@ -100,6 +100,8 @@ pub mod error;
 #[cfg(feature = "local-host")]
 pub(crate) mod fs_browse;
 #[cfg(feature = "local-host")]
+pub mod general_folder;
+#[cfg(feature = "local-host")]
 pub(crate) mod harness_config;
 pub(crate) mod host_policy;
 pub(crate) mod host_stats;
@@ -291,4 +293,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 45 binds execution authority to a non-reused host-approved grant.
 /// Version 52 adds cursor-addressed pull-request list pages.
 /// Version 55 adds `launcher.updates` and `launcher.update`.
-pub const PROTOCOL_VERSION: &str = "55";
+/// Version 56 adds the general folder: `workspace.list` with `includeGeneral`
+/// returns it, marked `general`, for chats that belong to no repository.
+pub const PROTOCOL_VERSION: &str = "56";

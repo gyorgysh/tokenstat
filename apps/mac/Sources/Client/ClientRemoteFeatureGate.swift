@@ -56,6 +56,7 @@ enum RemoteHostFeature: Hashable {
     case teamCheckoutUpdates
     case teamProjectSetup
     case teamChatSelection
+    case generalFolder
 
     var title: String {
         switch self {
@@ -93,6 +94,7 @@ enum RemoteHostFeature: Hashable {
         case .commitAvatars: "Author pictures"
         case .teamChats, .teamSessions, .teamChatSharing: L10n.text("common.teams.chats")
         case .teamCheckouts, .teamConnections, .teamCheckoutUpdates, .teamProjectSetup, .teamChatSelection: L10n.text("common.teams.checkouts")
+        case .generalFolder: L10n.text("common.new_chat.no_repository")
         }
     }
 
@@ -127,7 +129,10 @@ enum RemoteHostFeature: Hashable {
     /// Version 37 adds explicitly requested agent reinstallation.
     /// Version 54 adds `chat.continueInNew` and the prompt cache record on
     /// each conversation. Version 55 adds `launcher.updates` and
-    /// `launcher.update` for agent CLI versions and updates.
+    /// `launcher.update` for agent CLI versions and updates. Version 56 adds
+    /// the general folder for chats with no repository. `workspace.list` only
+    /// returns it beside `includeGeneral`, which an older host ignores, so the
+    /// list itself never offers it where the host cannot serve it.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -179,6 +184,7 @@ enum RemoteHostFeature: Hashable {
         case .teamCheckoutUpdates: 49
         case .teamProjectSetup: 50
         case .teamChatSelection: 51
+        case .generalFolder: 56
         }
     }
 
@@ -218,6 +224,7 @@ enum RemoteHostFeature: Hashable {
         case .commitAvatars: "person.crop.circle"
         case .chatRecovery: "arrow.clockwise"
         case .teamChats, .teamSessions, .teamCheckouts, .teamConnections, .teamChatSharing, .teamCheckoutUpdates, .teamProjectSetup, .teamChatSelection: "person.2"
+        case .generalFolder: "bubble.left.and.bubble.right"
         }
     }
 

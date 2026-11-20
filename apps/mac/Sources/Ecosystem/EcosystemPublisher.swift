@@ -80,7 +80,7 @@ enum EcosystemPublisher {
             await refreshLimits(lease: lease)
             #if os(macOS)
             if let folders = try? await Bridge.workspaces() {
-                publish(projects: folders.filter(\.exists).map {
+                publish(projects: folders.filter { $0.exists && !$0.isGeneral }.map {
                     EcosystemProject(id: $0.id, name: $0.name, host: "This Mac")
                 }, lease: lease, replacing: .local)
             }
@@ -184,7 +184,7 @@ enum EcosystemPublisher {
             publish(calendar: grid, lease: lease)
             #if os(macOS)
             if let folders = try? await Bridge.workspaces() {
-                publish(projects: folders.filter(\.exists).map {
+                publish(projects: folders.filter { $0.exists && !$0.isGeneral }.map {
                     EcosystemProject(id: $0.id, name: $0.name, host: "This Mac")
                 }, lease: lease, replacing: .local)
             }

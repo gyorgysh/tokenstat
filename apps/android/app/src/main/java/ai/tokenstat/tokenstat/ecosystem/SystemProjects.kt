@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ecosystem
 
+import ai.tokenstat.tokenstat.ui.logic.GeneralFolder
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ShortcutInfo
@@ -91,7 +92,7 @@ object SystemProjects {
     @Synchronized fun replace(context: Context, peer: String, folders: JsonArray, observed: String?) {
         if (observed == null || observed != owner) return
         val machine = machines[peer] ?: return
-        val fresh = folders.take(100).mapNotNull { it as? JsonObject }.mapNotNull { folder ->
+        val fresh = folders.take(100).mapNotNull { it as? JsonObject }.filterNot(GeneralFolder::isGeneral).mapNotNull { folder ->
             val id = folder.text("id"); val name = folder.text("name").take(120)
             if (!workspaceValid(id) || name.isBlank() || (folder["exists"] as? JsonPrimitive)?.booleanOrNull == false) null
             else SystemProject(digest("$observed\u0000$peer\u0000$id"), observed, machine.first, peer, id, name, machine.second.take(120))

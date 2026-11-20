@@ -43,6 +43,15 @@ struct ClientProjectRename: ViewModifier {
     @State private var showing = false
     @State private var owner = WorkSessionContext.shared.scope
     func body(content: Content) -> some View {
+        // "No repository" is named by the app, not by the person.
+        if folder.isGeneral {
+            content
+        } else {
+            renamable(content)
+        }
+    }
+
+    private func renamable(_ content: Content) -> some View {
         content.contextMenu {
             Button(L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), .edit) { showing = true }
         }

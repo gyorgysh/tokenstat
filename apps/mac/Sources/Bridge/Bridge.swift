@@ -2056,14 +2056,18 @@ struct PushTestResult: Codable, Sendable {
 extension Bridge {
     /// Registered folders with their current git state. Reads git per folder,
     /// so treat it as a refresh rather than something to call on every keypress.
+    ///
+    /// Asks for the general folder too. An older host ignores the flag and
+    /// simply has none, so "No repository" is offered only where it exists.
     static func workspaces() async throws -> [WorkspaceFolder] {
-        try await background("workspace.list", as: [WorkspaceFolder].self)
+        try await background("workspace.list", ["includeGeneral": true], as: [WorkspaceFolder].self)
+            .map(\.presented)
     }
 
     static func remoteWorkspaces(peer: Peer) async throws -> [WorkspaceFolder] {
-        let folders = try await onPeer(peer.key, "workspace.list", as: [WorkspaceFolder].self)
+        let folders = try await onPeer(peer.key, "workspace.list", ["includeGeneral": true], as: [WorkspaceFolder].self)
         return folders.map { folder in
-            var folder = folder
+            var folder = folder.presented
             folder.id = "remote:\(peer.key):\(folder.id)"
             folder.machineID = peer.key
             folder.machineLabel = peer.label

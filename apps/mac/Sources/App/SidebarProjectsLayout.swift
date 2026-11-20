@@ -67,6 +67,17 @@ enum SidebarProjectsLayout {
         sort: SidebarProjectsSort,
         activity: (WorkspaceFolder) -> Int64
     ) -> [WorkspaceFolder] {
+        // "No repository" leads, and only once it holds a chat: an empty
+        // row would be one more project-shaped line with nothing in it.
+        let general = folders.filter { $0.isGeneral && activity($0) > 0 }
+        return general + ordered(folders.filter { !$0.isGeneral }, sort: sort, activity: activity)
+    }
+
+    private static func ordered(
+        _ folders: [WorkspaceFolder],
+        sort: SidebarProjectsSort,
+        activity: (WorkspaceFolder) -> Int64
+    ) -> [WorkspaceFolder] {
         switch sort {
         case .manual:
             return folders

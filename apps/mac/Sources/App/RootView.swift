@@ -3093,7 +3093,7 @@ struct RootView: View {
                 activeTerminals: activeSessions.count,
                 isStale: folder.machineID.map { workspaces.isRemoteStale($0) } ?? false,
                 isShared: !folder.isRemote && !teams.localProjects(for: folder.id).isEmpty,
-                share: folder.isRemote ? nil : { openSharedProject(folder) },
+                share: folder.isRemote || folder.isGeneral ? nil : { openSharedProject(folder) },
                 rename: { name in
                     let scope = WorkSessionContext.shared.scope
                     let reference = pinReference(for: folder)
@@ -3710,7 +3710,7 @@ struct RootView: View {
             AccountView(model: account)
         case .workspacesOverview:
             WorkspacesOverviewView(
-                folders: workspaces.folders,
+                folders: workspaces.folders.filter { !$0.isGeneral },
                 summaries: workspaces.summaries,
                 directoryPresentation: workspaces.directoryPresentation,
                 directoryError: workspaces.directoryError,
@@ -5277,7 +5277,7 @@ private struct WorkspaceRow: View {
         ZStack(alignment: .trailing) {
             Button(action: action) {
                 HStack(spacing: Theme.Space.s) {
-                    Image(systemName: folder.isRemote ? "network" : (isShared ? "folder.badge.person.crop" : (folder.exists ? "folder" : "questionmark.folder")))
+                    Image(systemName: folder.isGeneral ? folder.symbol : folder.isRemote ? "network" : (isShared ? "folder.badge.person.crop" : (folder.exists ? "folder" : "questionmark.folder")))
                         .symbolVariant(isCurrent ? .fill : .none)
                         .font(Theme.fit(13, weight: .medium))
                         .foregroundStyle(isCurrent ? Theme.accent : Theme.controlGlyph)
@@ -5316,7 +5316,7 @@ private struct WorkspaceRow: View {
                         .allowsHitTesting(isHovering)
                         .accessibilityHidden(!isHovering)
                 }
-                SidebarRowActions(name: folder.name, visible: isHovering, canDelete: !isStale,
+                SidebarRowActions(name: folder.name, visible: isHovering, canDelete: !isStale && !folder.isGeneral,
                                   deleteTitle: L10n.text("apple.rootview.remove_project.704e7388"), delete: remove,
                                   hover: { _ in }, actions: { menu })
                 Button(action: newChat) {
@@ -5369,7 +5369,7 @@ private struct WorkspaceRow: View {
 
     private var menu: [NativeMenuItem] {
         var items = actions()
-        if !isStale {
+        if !isStale && !folder.isGeneral {
             items.insert(.init(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit) { renaming = true }, at: 0)
         }
         return items

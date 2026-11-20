@@ -658,13 +658,14 @@ internal static class RemoteWorkspaces
 
     private static async Task<List<RemoteFolder>> ReadPeerFoldersAsync(string peerKey, string peerLabel)
     {
-        var answer = await CallOnPeerAsync(peerKey, "workspace.list");
+        var answer = await CallOnPeerAsync(peerKey, "workspace.list", GeneralFolder.ListParameters());
         var array = answer as JsonArray ?? answer["folders"] as JsonArray ?? answer["workspaces"] as JsonArray;
         var folders = new List<RemoteFolder>();
         if (array is null)
         {
             throw new InvalidDataException("The host returned no workspace list.");
         }
+        array = GeneralFolder.Present(array);
         foreach (var folder in array.OfType<JsonNode>())
         {
             var inner = Format.Text(folder, "id");

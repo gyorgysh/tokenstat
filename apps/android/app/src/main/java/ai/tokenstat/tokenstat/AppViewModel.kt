@@ -14,6 +14,7 @@ import ai.tokenstat.tokenstat.core.CoreObserver
 import ai.tokenstat.tokenstat.core.NetworkGate
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import ai.tokenstat.tokenstat.ui.logic.ConnectionTracker
+import ai.tokenstat.tokenstat.ui.logic.GeneralFolder
 import ai.tokenstat.tokenstat.ui.logic.ConnectionUiState
 import ai.tokenstat.tokenstat.ui.logic.NetworkClassifier
 import ai.tokenstat.tokenstat.ui.logic.NetworkPlane
@@ -625,8 +626,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ?.takeIf { it == "direct" || it == "relay" }
     }
 
-    suspend fun workspaceSection(peer: String, method: String, params: JsonObject): JsonElement =
-        CoreClient.remote(peer, method, params)
+    suspend fun workspaceSection(peer: String, method: String, params: JsonObject): JsonElement {
+        if (method != "workspace.list") return CoreClient.remote(peer, method, params)
+        // Every folder list asks for the general folder too. An older host
+        // ignores the flag and has none, so "No repository" never appears there.
+        val asked = JsonObject(params + (GeneralFolder.INCLUDE to JsonPrimitive(true)))
+        return GeneralFolder.present(CoreClient.remote(peer, method, asked), L10n.text("common.new_chat.no_repository"))
+    }
 
     /// An agent update started from a chat. It runs here so it outlives the
     /// agent sheet it was started from, and the chat shows it as a toast.

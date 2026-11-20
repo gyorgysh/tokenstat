@@ -347,14 +347,14 @@ struct ChatStartPage: View {
         Menu {
             if repositories.contains(where: { !$0.isRemote }) {
                 Section(L10n.text("apple.rootview.this_computer.058bf37c")) {
-                    ForEach(repositories.filter { !$0.isRemote }) { repository in
+                    ForEach(Self.generalFirst(repositories.filter { !$0.isRemote })) { repository in
                         repositoryChoice(repository)
                     }
                 }
             }
             ForEach(remoteMachines, id: \.id) { machine in
                 Section {
-                    ForEach(repositories.filter { $0.isRemote && ($0.machineID ?? $0.machineLabel ?? $0.id) == machine.id }) { repository in
+                    ForEach(Self.generalFirst(repositories.filter { $0.isRemote && ($0.machineID ?? $0.machineLabel ?? $0.id) == machine.id })) { repository in
                         repositoryChoice(repository)
                     }
                 } header: {
@@ -365,7 +365,7 @@ struct ChatStartPage: View {
             Button(L10n.text("common.new_chat.add_repository"), systemImage: "folder.badge.plus", action: onAdd)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: selected?.isRemote == true ? "globe" : "folder")
+                Image(systemName: selected?.symbol ?? "folder")
                     .font(Theme.fixed(11, weight: .medium))
                     .foregroundStyle(selected == nil ? Theme.accent : Color.secondary)
                 Text(selected?.name ?? L10n.text("common.new_chat.choose_repository"))
@@ -401,9 +401,14 @@ struct ChatStartPage: View {
 
     private func repositoryChoice(_ repository: WorkspaceFolder) -> some View {
         Button { draft.repositoryID = repository.id } label: {
-            Label(repository.name, systemImage: repository.id == draft.repositoryID ? "checkmark" : "folder")
+            Label(repository.name, systemImage: repository.id == draft.repositoryID ? "checkmark" : repository.isGeneral ? repository.symbol : "folder")
         }
-        .help(repository.path)
+        .help(repository.isGeneral ? L10n.text("common.new_chat.no_repository_help") : repository.path)
+    }
+
+    /// Each computer offers its "No repository" folder before its projects.
+    static func generalFirst(_ folders: [WorkspaceFolder]) -> [WorkspaceFolder] {
+        folders.filter(\.isGeneral) + folders.filter { !$0.isGeneral }
     }
 }
 

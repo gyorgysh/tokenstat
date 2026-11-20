@@ -2644,8 +2644,15 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     /// Organizations the owning computer shares this folder with, by id.
     /// Absent from older hosts, which reads the same as not shared.
     var teamOrganizations: [String]?
+    /// The host's folder for chats with no repository. Absent from older
+    /// hosts, which have no such folder.
+    var general: Bool? = nil
 
     var changeCount: Int { git?.files.count ?? 0 }
+    var isGeneral: Bool { general == true }
+    /// Shown where projects are listed. A chat-bubble glyph keeps the general
+    /// folder from reading as one more repository.
+    var symbol: String { isGeneral ? "bubble.left.and.bubble.right" : isRemote ? "globe" : "folder" }
 
     var diffStat: String? {
         guard let git, git.isRepo, !git.files.isEmpty else { return nil }
@@ -2657,6 +2664,7 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     /// Nil when there is nothing worth saying, so a plain folder does not
     /// pretend to be a repository.
     var subtitle: String? {
+        guard !isGeneral else { return nil }
         guard exists else { return L10n.text("apple.models.folder_missing.f06c68a6") }
         guard let git, git.isRepo else { return L10n.text("apple.models.not_a_git_repo.86308fef") }
         var parts: [String] = []
@@ -2670,6 +2678,15 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     }
 
     var isRemote: Bool { machineID != nil }
+
+    /// The general folder carries the host's stored name. Every list shows it
+    /// as "No repository", which is what choosing it means.
+    var presented: WorkspaceFolder {
+        guard isGeneral else { return self }
+        var folder = self
+        folder.name = L10n.text("common.new_chat.no_repository")
+        return folder
+    }
 }
 
 

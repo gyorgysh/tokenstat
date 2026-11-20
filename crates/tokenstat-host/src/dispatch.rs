@@ -1106,6 +1106,7 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
         git: exists.then(|| tokenstat_workspace::git::status(&ws.path)),
         git_status_pending: None,
         team_organizations: Vec::new(),
+        general: crate::general_folder::is_general(ws),
     };
 
     if let Ok(mut cache) = workspace_status_cache().lock() {
@@ -3199,14 +3200,35 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
         // list omits it so a cold mobile client can show registered folders
         // before the status scan finishes.
         "workspace.list" => {
-            let quick = serde_json::from_str::<Value>(params)
-                .ok()
+            let params = serde_json::from_str::<Value>(params).ok();
+            let quick = params
+                .as_ref()
                 .and_then(|value| value.get("includeGit").and_then(Value::as_bool))
                 == Some(false);
+            // The general folder is created on first ask and listed only for
+            // a client that knows to keep it out of its project lists. A
+            // failure to create it costs the option, never the list.
+            let include_general = params
+                .as_ref()
+                .and_then(|value| value.get("includeGeneral").and_then(Value::as_bool))
+                == Some(true);
+            let general = if include_general {
+                crate::general_folder::ensure(now_ms())
+                    .map_err(|error| eprintln!("workspace.list: general folder: {error}"))
+                    .ok()
+            } else {
+                None
+            };
             let folders: Vec<tokenstat_workspace::Workspace> = crate::workspaces::read()
                 .workspaces
                 .iter()
-                .filter(|ws| !is_test_workspace(ws))
+                .filter(|ws| {
+                    if crate::general_folder::is_general(ws) {
+                        general.as_ref().is_some_and(|g| g.id == ws.id)
+                    } else {
+                        !is_test_workspace(ws)
+                    }
+                })
                 .cloned()
                 .collect();
             // Concurrent enough to hide one slow repository, but deliberately
@@ -3225,6 +3247,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                         git: None,
                         git_status_pending: Some(true),
                         team_organizations: Vec::new(),
+                        general: crate::general_folder::is_general(ws),
                     })
                     .collect()
             } else {
@@ -5986,6 +6009,41 @@ mod tests {
         assert_eq!(v["ok"], true, "an unknown file type is not a failure");
         assert!(v["result"]["language"].is_null());
         assert!(v["result"]["note"].is_string(), "{unknown}");
+    }
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn the_general_folder_is_listed_only_for_a_client_that_asks() {
+        let mut s = session();
+        let list = |session: &mut Session, params: Value| -> Vec<Value> {
+            let v: Value =
+                serde_json::from_str(&call(session, "workspace.list", &params.to_string()))
+                    .unwrap();
+            assert_eq!(v["ok"], true, "{v}");
+            v["result"].as_array().cloned().unwrap_or_default()
+        };
+        let general = |rows: &[Value]| -> Vec<Value> {
+            rows.iter()
+                .filter(|row| row["general"] == true)
+                .cloned()
+                .collect()
+        };
+        let asked = list(&mut s, json!({"includeGeneral": true}));
+        let found = general(&asked);
+        assert_eq!(found.len(), 1, "{asked:?}");
+        let path = std::path::PathBuf::from(found[0]["path"].as_str().unwrap());
+        assert!(path.is_dir(), "the folder is created on first ask");
+        assert_eq!(found[0]["name"], "General");
+
+        let quick = list(&mut s, json!({"includeGeneral": true, "includeGit": false}));
+        assert_eq!(general(&quick).len(), 1, "{quick:?}");
+
+        let plain = list(&mut s, json!({}));
+        assert!(
+            plain.iter().all(|row| row["id"] != found[0]["id"]),
+            "an older client never sees it: {plain:?}"
+        );
+        assert!(general(&plain).is_empty());
     }
 
     #[cfg(feature = "local-host")]

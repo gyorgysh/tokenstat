@@ -3,6 +3,7 @@ package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.NoComputerConnected
+import ai.tokenstat.tokenstat.ui.logic.GeneralFolder
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 import ai.tokenstat.tokenstat.ui.components.*
@@ -356,7 +357,10 @@ fun NewChatScreen(
     }
     if (repositoryMenu) TsPickerSheet(newChatCopy("choose_repository"), { repositoryMenu = false }) {
         TsPickerOptionList(
-            choices = folders.map { PickerChoice(it, it.newChatText("name"), it.newChatText("path")) },
+            choices = folders.map {
+                PickerChoice(it, it.newChatText("name"),
+                    if (GeneralFolder.isGeneral(it)) newChatCopy("no_repository_help") else it.newChatText("path"))
+            },
             isSelected = { it.newChatText("id") == selectedRepository },
             prompt = newChatCopy("choose_repository"),
             emptyMessage = newChatCopy("empty"),

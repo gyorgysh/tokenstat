@@ -310,6 +310,8 @@
   "common.new_chat.finding_agents": "Looking for installed agents…",
   "common.new_chat.send_unavailable": "Not available right now",
   "common.new_chat.add_repository": "Add repository",
+  "common.new_chat.no_repository": "No repository",
+  "common.new_chat.no_repository_help": "Chat without a project. The agent works in a plain folder on that computer.",
   "common.new_chat.send": "Send",
   "common.new_chat.choose_host": "Choose a computer",
   "common.new_chat.empty": "Add a repository to start a conversation.",

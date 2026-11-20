@@ -511,7 +511,7 @@ struct ClientWorkspacesView: View {
                 .padding(.horizontal, 2)
                 .padding(.top, Theme.Space.s)
             ClientAdaptiveCards {
-            ForEach(model.folders) { folder in
+            ForEach(ChatStartPage.generalFirst(model.folders)) { folder in
                 NavigationLink {
                     ClientWorkspaceDetailView(
                         peer: peer,
@@ -2003,7 +2003,7 @@ final class ClientWorkspacesModel {
     }
 
     private func publishEcosystem(_ folders: [WorkspaceFolder], peer: String, host: String, lease: EcosystemPublicationLease?) {
-        EcosystemPublisher.publish(projects: folders.filter(\.exists).map {
+        EcosystemPublisher.publish(projects: folders.filter { $0.exists && !$0.isGeneral }.map {
             EcosystemProject(id: $0.id, name: $0.name, host: $0.machineLabel ?? host)
         }, lease: lease, replacing: .peer(peer))
     }
