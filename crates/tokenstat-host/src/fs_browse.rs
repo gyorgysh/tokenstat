@@ -53,9 +53,10 @@ fn roots() -> Vec<(PathBuf, String, &'static str)> {
     if let Some(home) = home() {
         roots.push((home, "Home".to_string(), "home"));
     }
+    let is_general = crate::general_folder::matcher();
     for folder in crate::workspaces::read().workspaces.iter() {
         // Its parent is the app's own data directory, not a place to browse.
-        if crate::general_folder::is_general(folder) {
+        if is_general(folder) {
             continue;
         }
         let Some(parent) = folder.path.parent() else {

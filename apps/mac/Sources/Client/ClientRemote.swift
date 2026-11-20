@@ -274,7 +274,8 @@ enum ClientRemote {
     /// id for the folder screens. Search wants the plain host-local id a
     /// `WorkReference` carries, and wants to ask without pairing first.
     static func folderList(peer: String) async throws -> [WorkspaceFolder] {
-        try await Bridge.onPeer(peer, "workspace.list", as: [WorkspaceFolder].self)
+        try await Bridge.onPeer(peer, "workspace.list", ["includeGeneral": true], as: [WorkspaceFolder].self)
+            .map(\.presented)
     }
 
     /// Every badge on the folder screen, in one call instead of five lists.

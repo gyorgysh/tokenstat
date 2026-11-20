@@ -77,10 +77,11 @@ fn status() -> Result<Value, String> {
 #[cfg(feature = "local-host")]
 fn folders() -> usize {
     // The general folder is not a project somebody added.
+    let is_general = crate::general_folder::matcher();
     crate::workspaces::read()
         .workspaces
         .iter()
-        .filter(|ws| !crate::general_folder::is_general(ws))
+        .filter(|ws| !is_general(ws))
         .count()
 }
 

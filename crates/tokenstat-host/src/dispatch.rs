@@ -3214,16 +3214,17 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 == Some(true);
             let general = if include_general {
                 crate::general_folder::ensure(now_ms())
-                    .map_err(|error| eprintln!("workspace.list: general folder: {error}"))
+                    .inspect_err(|error| eprintln!("workspace.list: general folder: {error}"))
                     .ok()
             } else {
                 None
             };
+            let is_general = crate::general_folder::matcher();
             let folders: Vec<tokenstat_workspace::Workspace> = crate::workspaces::read()
                 .workspaces
                 .iter()
                 .filter(|ws| {
-                    if crate::general_folder::is_general(ws) {
+                    if is_general(ws) {
                         general.as_ref().is_some_and(|g| g.id == ws.id)
                     } else {
                         !is_test_workspace(ws)
@@ -3247,7 +3248,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                         git: None,
                         git_status_pending: Some(true),
                         team_organizations: Vec::new(),
-                        general: crate::general_folder::is_general(ws),
+                        general: is_general(ws),
                     })
                     .collect()
             } else {
@@ -3300,6 +3301,12 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
             let mut registry = crate::workspaces::write();
+            if registry
+                .get(&p.id)
+                .is_some_and(crate::general_folder::is_general)
+            {
+                return Err("The folder for chats without a repository cannot be removed.".into());
+            }
             let removed = registry.remove(&p.id);
             if removed {
                 crate::workspaces::save(&registry)?;
@@ -3313,6 +3320,12 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
             let name = p.name.unwrap_or_default();
             let mut registry = crate::workspaces::write();
+            if registry
+                .get(&p.id)
+                .is_some_and(crate::general_folder::is_general)
+            {
+                return Err("The folder for chats without a repository cannot be renamed.".into());
+            }
             let renamed = registry.rename(&p.id, &name);
             if renamed {
                 crate::workspaces::save(&registry)?;
@@ -6044,6 +6057,19 @@ mod tests {
             "an older client never sees it: {plain:?}"
         );
         assert!(general(&plain).is_empty());
+
+        let id = &found[0]["id"];
+        for (method, params) in [
+            ("workspace.remove", json!({"id": id})),
+            ("workspace.rename", json!({"id": id, "name": "Other"})),
+        ] {
+            let reply: Value =
+                serde_json::from_str(&call(&mut s, method, &params.to_string())).unwrap();
+            assert_eq!(reply["ok"], false, "{method}: {reply}");
+        }
+        let still_registered = general(&list(&mut s, json!({"includeGeneral": true})));
+        assert_eq!(still_registered[0]["id"], *id);
+        assert_eq!(still_registered[0]["name"], "General");
     }
 
     #[cfg(feature = "local-host")]

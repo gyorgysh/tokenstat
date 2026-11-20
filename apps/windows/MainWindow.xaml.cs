@@ -679,21 +679,18 @@ public sealed partial class MainWindow : Window
             {
                 continue;
             }
-            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"])));
+            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"], general: GeneralFolder.IsGeneral(folder))));
         }
         // Another computer's folders sit beside this one's, as on the Mac:
         // one level, named "Computer / folder", not nested under a computer
         // row that pushes every folder and chat a step further in.
-        foreach (var peer in byChat ? Enumerable.Empty<IGrouping<string, RemoteFolder>>() : RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey))
+        var remoteFolders = OrderedRemoteFolders(sort).ToList();
+        foreach (var folder in byChat ? Enumerable.Empty<RemoteFolder>() : remoteFolders)
         {
-            var stale = RemoteWorkspaces.IsStale(peer.Key);
-            foreach (var folder in SidebarProjectsLayout.OrderFolders(peer, sort, folder => folder.Name, folder => FolderActivity(folder.Id)))
-            {
-                var machine = folder.MachineLabel + (stale ? " · Offline" : "");
-                _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git, machine)));
-            }
+            var machine = folder.MachineLabel + (RemoteWorkspaces.IsStale(folder.PeerKey) ? " · Offline" : "");
+            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git, machine, general: folder.IsGeneral)));
         }
-        if (_localFolders.Count == 0 && RemoteWorkspaces.CachedFolders().Count == 0)
+        if (OrderedLocalFolders(sort).Count == 0 && remoteFolders.Count == 0)
         {
             var add = Buttons.Primary(L10n.Text("common.add_project"), ActionIcon.Create, async (_, _) => await AddWorkspaceAsync());
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "projects.firstAdd");
@@ -739,6 +736,12 @@ public sealed partial class MainWindow : Window
                 folder => FolderActivity(Format.Text(folder, "id"))))
             .ToList();
 
+    private IEnumerable<RemoteFolder> OrderedRemoteFolders(SidebarProjectsSort sort) =>
+        RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey).SelectMany(peer =>
+            peer.Where(folder => folder.IsGeneral && FolderActivity(folder.Id) > 0)
+                .Concat(SidebarProjectsLayout.OrderFolders(peer.Where(folder => !folder.IsGeneral), sort,
+                    folder => folder.Name, folder => FolderActivity(folder.Id))));
+
     private long FolderActivity(string folderId)
     {
         long newest = 0;
@@ -755,7 +758,7 @@ public sealed partial class MainWindow : Window
         SidebarProjectsLayout.FolderMatches(_projectsFilter, name, machine,
             _liveChats.Where(chat => chat is not null && Format.Text(chat, "workspaceId") == folderId).Select(chat => chat!));
 
-    private NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null, string? machine = null)
+    private NavigationViewItem FolderParent(string id, string name, bool remote, string path, JsonNode? git = null, string? machine = null, bool general = false)
     {
         var parent = new NavigationViewItem
         {
@@ -771,8 +774,8 @@ public sealed partial class MainWindow : Window
         }
         var menu = ContextMenus.Menu(parent);
         NavigationViewItem CurrentParent() => FindNavItem("ws:" + id + ":Launcher") ?? parent;
-        var shared = !remote && _teamFolderLinks.TryGetValue(id, out var publications) && publications.Count > 0;
-        if (!remote) ContextMenus.Add(menu, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), () => OpenTeamFolder(id, name, path));
+        var shared = !remote && !general && _teamFolderLinks.TryGetValue(id, out var publications) && publications.Count > 0;
+        if (!remote && !general) ContextMenus.Add(menu, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), () => OpenTeamFolder(id, name, path));
         if (shared) ContextMenus.Add(menu, L10n.Text("common.teams.share_project"), () => OpenTeamFolder(id, name, path, shareNew: true));
         if (shared) ContextMenus.AddAsync(menu, L10n.Text("common.teams.stop_sharing"), () => StopSharingTeamFolderAsync(id, name, CurrentParent()));
         async Task NewChat()
@@ -783,7 +786,7 @@ public sealed partial class MainWindow : Window
         }
         ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.new_chat.db18382a"), NewChat);
         WorkPinMenu.Add(menu, id, "", name, name);
-        ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.rename_folder.4e3bd8cf"), async () =>
+        if (!general) ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.rename_folder.4e3bd8cf"), async () =>
         {
             var input = new TextBox { Text = name };
             var dialog = new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.rename_folder.7249f19c"), Content = input, PrimaryButtonText = L10n.Text("common.save"), CloseButtonText = L10n.Text("common.cancel"), DefaultButton = ContentDialogButton.Primary };
@@ -821,7 +824,7 @@ public sealed partial class MainWindow : Window
             SidebarPreferences.Shared.RememberExpansion("row:ws:" + id + ":Launcher", expanded);
             current.IsExpanded = expanded;
         });
-        ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.remove_from_tokenstat.195e6064"), async () =>
+        if (!general) ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.remove_from_tokenstat.195e6064"), async () =>
         {
             var confirm = new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.remove_this_folder.5937b581"), Content = L10n.Text("windows.mainwindow_xaml.the_folder_and_its_files_stay_on_disk.c089e1af"), PrimaryButtonText = L10n.Text("common.remove"), CloseButtonText = L10n.Text("windows.mainwindow_xaml.keep_it.fdce5da2"), DefaultButton = ContentDialogButton.Close };
             if (await Chrome.ShowDialog(CurrentParent(), confirm) != ContentDialogResult.Primary) return;
@@ -2331,7 +2334,7 @@ public sealed partial class MainWindow : Window
             KeepSelectedRow(selectedTag);
             return;
         }
-        QueueRecentReorder();
+        QueueProjectSidebarUpdate();
         var sessionsByFolder = new Dictionary<string, List<JsonNode>>(StringComparer.Ordinal);
         foreach (var session in _liveSessions)
         {
@@ -2495,18 +2498,19 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The Recent sort follows chat activity, which changes with every poll.
-    /// Rebuild the folder rows only when the order actually moved.
+    /// Chat activity can change the Recent order or reveal a previously empty
+    /// No repository row. Compare both local and remote rows before rebuilding.
     /// </summary>
-    private void QueueRecentReorder()
+    private void QueueProjectSidebarUpdate()
     {
-        if (SidebarPreferences.Shared.ProjectsSort != SidebarProjectsSort.Recent) return;
+        if (SidebarPreferences.Shared.ProjectsDisplay == SidebarProjectsDisplay.ByChat) return;
+        var sort = SidebarPreferences.Shared.ProjectsSort;
         var shown = _nav.MenuItems.OfType<NavigationViewItem>()
             .Select(row => row.Tag as string)
-            .Where(tag => tag is not null && tag.StartsWith("ws:", StringComparison.Ordinal) && tag.EndsWith(":Launcher", StringComparison.Ordinal))
-            .ToList();
-        var wanted = OrderedLocalFolders(SidebarProjectsSort.Recent)
-            .Select(folder => "ws:" + Format.Text(folder, "id") + ":Launcher").ToList();
+            .Where(tag => tag is not null && tag.StartsWith("ws:", StringComparison.Ordinal) && tag.EndsWith(":Launcher", StringComparison.Ordinal));
+        var wanted = OrderedLocalFolders(sort).Select(folder => Format.Text(folder, "id"))
+            .Concat(OrderedRemoteFolders(sort).Select(folder => folder.Id))
+            .Select(id => "ws:" + id + ":Launcher");
         if (!shown.SequenceEqual(wanted)) DispatcherQueue.TryEnqueue(RebuildFolderItems);
     }
 
@@ -2851,10 +2855,10 @@ public sealed partial class MainWindow : Window
 
     private IReadOnlyList<NewChatRepository> NewChatRepositories() => _localFolders
         .Where(folder => Format.Text(folder, "id").Length > 0)
-        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path"), IsLocal: true))
+        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), GeneralFolder.IsGeneral(folder) ? L10n.Text("common.new_chat.no_repository_help") : Format.Text(folder, "path"), IsLocal: true))
         .Concat(RemoteWorkspaces.CachedFolders()
             .Where(folder => RemoteWorkspaces.IsConnected(folder.PeerKey))
-            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path, IsLocal: false))).ToArray();
+            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.IsGeneral ? L10n.Text("common.new_chat.no_repository_help") : folder.Path, IsLocal: false))).ToArray();
 
     private void OpenNewChat(string? repository = null)
     {

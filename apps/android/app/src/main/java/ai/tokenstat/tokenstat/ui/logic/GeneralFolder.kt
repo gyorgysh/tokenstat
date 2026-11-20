@@ -2,7 +2,6 @@
 package ai.tokenstat.tokenstat.ui.logic
 
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -18,11 +17,9 @@ object GeneralFolder {
 
     fun isGeneral(folder: JsonObject): Boolean = (folder["general"] as? JsonPrimitive)?.booleanOrNull == true
 
-    /// Names the general folder [label] and lists it first. Anything that is
-    /// not a folder list comes back unchanged.
-    fun present(listed: JsonElement, label: String): JsonElement {
-        val rows = listed as? JsonArray ?: return listed
-        val (general, projects) = rows.partition { (it as? JsonObject)?.let(::isGeneral) == true }
+    /// Names the general folder [label] and lists it first.
+    fun present(listed: JsonArray, label: String): JsonArray {
+        val (general, projects) = listed.partition { (it as? JsonObject)?.let(::isGeneral) == true }
         val named = general.map { JsonObject((it as JsonObject) + ("name" to JsonPrimitive(label))) }
         return JsonArray(named + projects)
     }

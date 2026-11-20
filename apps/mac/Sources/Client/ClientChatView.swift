@@ -953,7 +953,7 @@ struct ClientChatThread: View {
             }
             if opensMenu {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(Theme.font(10, weight: .bold))
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
@@ -2882,6 +2882,7 @@ struct ClientChatThread: View {
         // when there is nothing attached.
         guard !model.isSharedSource, !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         if model.consumeChatCommand() { return }
+        ClientReviewPrompt.noteUse()
         switch model.holdForSignIn(text, backend: chat.backend) {
         case .notNeeded: break
         case .refused: return

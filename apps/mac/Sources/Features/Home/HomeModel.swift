@@ -147,6 +147,14 @@ final class HomeModel {
         return Money(micros: Int64(clamping: micros), estimated: false, complete: true)
     }
 
+    /// The new chat page's spend panel: the last seven days in micros, oldest
+    /// first. Nil until the grid has loaded once.
+    var glance: ChatStartGlanceData? {
+        guard calendar != nil else { return nil }
+        let days = calendarDays.suffix(7).map(\.value)
+        return ChatStartGlanceData(week: days)
+    }
+
     var todayValue: Money {
         let micros = calendarDays.last { $0.date == calendar?.last }?.value ?? 0
         return Money(micros: Int64(clamping: micros), estimated: false, complete: true)

@@ -20,7 +20,7 @@ class GeneralFolderTest {
     @Test
     fun `the general folder is named and listed first`() {
         val listed = JsonArray(listOf(folder("a"), folder("g", general = true), folder("b")))
-        val rows = (GeneralFolder.present(listed, "No repository") as JsonArray).map { it as JsonObject }
+        val rows = GeneralFolder.present(listed, "No repository").map { it as JsonObject }
         assertEquals(listOf("g", "a", "b"), rows.map { it.text("id") })
         assertEquals("No repository", rows.first().text("name"))
         assertEquals("b", rows.last().text("name"))

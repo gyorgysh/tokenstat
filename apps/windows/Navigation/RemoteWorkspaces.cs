@@ -23,7 +23,8 @@ internal sealed record RemoteFolder(
     string Path,
     string PeerKey,
     string MachineLabel,
-    JsonNode? Git = null)
+    JsonNode? Git = null,
+    bool IsGeneral = false)
 {
     /// <summary>How the row reads, matching the desktop Mac sidebar.</summary>
     public string DisplayName =>
@@ -182,7 +183,7 @@ internal static class RemoteWorkspaces
         var inner = Format.Text(folder, "id");
         if (string.IsNullOrEmpty(inner)) return;
         var remote = new RemoteFolder(Join(peer, inner), inner, Format.Text(folder, "name"),
-            Format.Text(folder, "path"), peer, hostName, folder["git"]?.DeepClone());
+            Format.Text(folder, "path"), peer, hostName, folder["git"]?.DeepClone(), GeneralFolder.IsGeneral(folder));
         lock (Gate)
         {
             if (Suppressed.Contains(peer)) return;
@@ -681,7 +682,8 @@ internal static class RemoteWorkspaces
                 Format.Text(folder, "path"),
                 peerKey,
                 peerLabel,
-                folder["git"]?.DeepClone()));
+                folder["git"]?.DeepClone(),
+                GeneralFolder.IsGeneral(folder)));
         }
         return folders;
     }

@@ -32,6 +32,8 @@ struct HomeView: View {
     var recentWork: [DesktopHomeDestination]
     var onOpenRecent: (WorkReference) -> Void
     var onOpenMachine: (Machine) -> Void
+    /// The setup checklist under the greeting. Nil hides it.
+    var setupHints: SetupHintsState? = nil
     @State private var layout = HomeLayout.shared
     @State private var editingHome = false
     @State private var pinsStore = PinnedWorkStore.shared
@@ -74,6 +76,7 @@ struct HomeView: View {
 
                         if model.needsAccountSignIn { accountSignInPrompt }
                         profile
+                        if let setupHints { SetupHintsCard(state: setupHints) }
                         if layout.sections.isEmpty {
                             clearHome
                         } else {

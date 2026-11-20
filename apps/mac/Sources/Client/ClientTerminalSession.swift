@@ -636,6 +636,10 @@ struct ClientTerminalScreen: View {
     }
 
     var body: some View {
+        screen.onAppear { ClientReviewPrompt.noteUse() }
+    }
+
+    private var screen: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

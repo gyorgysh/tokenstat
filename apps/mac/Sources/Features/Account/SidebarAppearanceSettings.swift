@@ -101,6 +101,8 @@ struct SidebarAppearanceSettings: View {
                : L10n.text("apple.sidebarappearance.copy_prompt"),
                copiedPrompt ? .save : .copy, action: copyPrompt)
             .buttonStyle(SecondaryButtonStyle(small: true))
+        Button(L10n.text("apple.setuptour.run_again"), .theme) { SetupTourPreferences.requestShow() }
+            .buttonStyle(SecondaryButtonStyle(small: true))
         if let id = UUID(uuidString: appearance.paletteID) {
             Button(L10n.text("apple.sidebarappearance.remove_theme"), .delete) {
                 appearance.remove(id)

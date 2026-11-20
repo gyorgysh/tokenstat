@@ -20,7 +20,8 @@
 //! unless the caller asks for it, so a client that predates it never shows
 //! it as a project.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use tokenstat_workspace::registry::plain_path;
 
 /// The name the registry stores. Clients show their own localized label.
 const NAME: &str = "General";
@@ -30,21 +31,21 @@ pub fn path() -> Option<PathBuf> {
     tokenstat_paths::data_dir().map(|dir| dir.join("general"))
 }
 
-/// Text form without a Windows verbatim prefix, so a canonical path and the
-/// plain spelling the registry stores compare equal.
-fn plain(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+/// Resolve the general folder once for callers that check a whole list.
+pub(crate) fn matcher() -> impl Fn(&tokenstat_workspace::Workspace) -> bool {
+    let original = path().map(|path| plain_path(&path));
+    let canonical = original
+        .as_ref()
+        .and_then(|path| std::fs::canonicalize(path).ok())
+        .map(|path| plain_path(&path));
+    move |ws| {
+        let stored = plain_path(&ws.path);
+        original.as_ref() == Some(&stored) || canonical.as_ref() == Some(&stored)
+    }
 }
 
-/// Whether a registered folder is this host's general folder.
-pub fn is_general(ws: &tokenstat_workspace::Workspace) -> bool {
-    let Some(general) = path() else {
-        return false;
-    };
-    let stored = plain(&ws.path);
-    stored == plain(&general)
-        || std::fs::canonicalize(&general).is_ok_and(|canonical| stored == plain(&canonical))
+pub(crate) fn is_general(ws: &tokenstat_workspace::Workspace) -> bool {
+    matcher()(ws)
 }
 
 /// Create and register the folder if needed, and return its registry row.
@@ -58,7 +59,10 @@ pub fn ensure(now_ms: i64) -> Result<tokenstat_workspace::Workspace, String> {
         .map_err(|e| e.to_string())?;
     if registry.workspaces.len() != before {
         registry.rename(&ws.id, NAME);
-        crate::workspaces::save(&registry)?;
+        if let Err(error) = crate::workspaces::save(&registry) {
+            registry.remove(&ws.id);
+            return Err(error);
+        }
     }
     let row = registry.get(&ws.id).cloned().unwrap_or(ws);
     Ok(row)

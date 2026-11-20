@@ -6,6 +6,7 @@
 
 import SwiftUI
 #if !os(macOS)
+import StoreKit
 import UIKit
 #endif
 
@@ -30,6 +31,7 @@ import UIKit
 /// the places no system control exists, and there are deliberately very few.
 struct ClientRootView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.requestReview) private var requestReview
     /// iPad and iPhone want different intros. See `signedOut`.
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -101,6 +103,14 @@ struct ClientRootView: View {
     /// sees it, so a reinstall onto an account that already exists does not get
     /// pitched the product it is already using.
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
+    @State private var showingSetupTour = false
+
+    private var canRequestReview: Bool {
+        scenePhase == .active && account.signedIn && navigation.destination == .home
+            && !showingSetupTour && !showAccount && !store.showPaywall
+            && !navigation.showWorkSearch && navigation.presentedChat == nil
+            && navigation.presentedTaskBoard == nil && savedAccess.reader == nil
+    }
 
     /// The layout the person picked, which beats what the app worked out.
     /// Written by the account sheet, read here and nowhere else.
@@ -244,6 +254,8 @@ struct ClientRootView: View {
     private var rootLifecycle: some View {
         rootSurface
         .task {
+            SetupTourPreferences.noteLaunch()
+            ClientReviewPrompt.noteLaunch()
             connectivity.start()
             input.start()
             connection.attach(connectivity)
@@ -398,7 +410,20 @@ struct ClientRootView: View {
         .onContinueUserActivity("ai.tokenstat.open") { activity in
             if let value = activity.userInfo?["url"] as? String, let url = URL(string: value) { ecosystemNavigation.receive(url) }
         }
-        .onOpenURL { ecosystemNavigation.receive($0) }
+        .onOpenURL { url in
+            #if DEBUG
+            // Debug builds can open the setup tour without waiting for its
+            // normal conditions.
+            if url.scheme == "tokenstat", url.host == "debug" {
+                switch url.path {
+                case "/setup": showingSetupTour = true
+                default: break
+                }
+                return
+            }
+            #endif
+            ecosystemNavigation.receive(url)
+        }
         .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
         .onChange(of: account.signedIn) { _, signedIn in
             openEcosystemDestination()
@@ -463,6 +488,44 @@ struct ClientRootView: View {
             ClientWorkSearchPresentation()
         }
         .environment(\.openClientAccount, { showAccount = true })
+        // The setup tour, once per minor version. A phone only reaches this
+        // body signed in, so the tour skips straight to how the Mac's remote
+        // access is turned on. Settings can open it again; a request while
+        // the account sheet is up closes that first, since two sheets on
+        // one view queue instead of stacking.
+        .sheet(isPresented: $showingSetupTour, onDismiss: { SetupTourPreferences.markSeen() }) {
+            SetupTour(signedIn: true, remote: nil, onSignIn: {}, onFinish: { showingSetupTour = false })
+        }
+        // Signed in, on Home, and never on the first run: a new phone has
+        // just been through the intro and the sign-in. Keyed on both, so it
+        // waits for Home rather than appearing over another tab.
+        .task(id: "\(account.signedIn)-\(navigation.destination == .home)") {
+            guard account.signedIn, navigation.destination == .home else { return }
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled, navigation.destination == .home,
+                  SetupTourPreferences.shouldShow(signedIn: account.signedIn), !showAccount else { return }
+            showingSetupTour = true
+        }
+        .task(id: canRequestReview) {
+            guard canRequestReview else { return }
+            do { try await Task.sleep(for: .seconds(4)) } catch { return }
+            guard canRequestReview,
+                  ClientReviewPrompt.isDue(machines: account.account?.machines.count ?? 0) else { return }
+            ClientReviewPrompt.markAsked()
+            requestReview()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tokenstatOpenSetupTour)) { _ in
+            guard account.signedIn else { return }
+            if showAccount {
+                showAccount = false
+                Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    showingSetupTour = true
+                }
+            } else {
+                showingSetupTour = true
+            }
+        }
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet(
                 offersLayoutChoice: ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)

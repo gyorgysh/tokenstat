@@ -2,7 +2,6 @@
 package ai.tokenstat.tokenstat.ui.tasks
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
-import ai.tokenstat.tokenstat.ui.logic.GeneralFolder
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -279,7 +278,7 @@ fun TaskEditorScreen(
                 }
             runCatching { model.workspaceSection(peer, "workspace.list", buildJsonObject {}) }
                 .onSuccess { element ->
-                    liveFolders = GeneralFolder.projects((element as? kotlinx.serialization.json.JsonArray)
+                    liveFolders = ((element as? kotlinx.serialization.json.JsonArray)
                         ?.filterIsInstance<JsonObject>() ?: emptyList()).map(FolderRef::parse)
                 }
             loaded = true

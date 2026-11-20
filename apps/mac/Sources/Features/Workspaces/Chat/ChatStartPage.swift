@@ -25,6 +25,8 @@ struct ChatStartPage: View {
     /// Adds dropped folders as repositories. Only offered where a folder can
     /// be dropped at all.
     var onAddFolders: (([URL]) -> Void)? = nil
+    /// Spend for the glance row under the composer. Nil hides that panel.
+    var glance: ChatStartGlanceData? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.scenePhase) private var scenePhase
@@ -91,8 +93,12 @@ struct ChatStartPage: View {
                         } else {
                             composer
                             if showsStarters {
+                                // Facts about what you are starting first, then
+                                // ideas for what to ask.
+                                ChatStartGlance(repository: selected, data: glance, backend: draft.agent?.backend)
+                                    .padding(.top, -6)
+                                    .transition(.opacity.combined(with: .offset(y: 6)))
                                 ChatStartStarters(onPick: { draft.text = $0 }, revealed: true)
-                                    .padding(.top, -8)
                                     .transition(.opacity)
                             }
                         }

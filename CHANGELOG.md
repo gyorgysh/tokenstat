@@ -9,20 +9,21 @@ desktop is a review build. Newest first.
 
 ### Added
 
+- Choose No repository when starting a chat. The chat runs in a shared folder on the selected computer and appears under No repository in the chat list. Update the computer to 1.23.0 to use this from a phone or tablet.
 - On iPhone and iPad, choose Auto, Light, Dark or OLED and a color theme under This device in Account.
-- Start a chat without a repository. Choose No repository at the top of the repository list on any computer to ask an agent something or try work in a plain folder. Those chats sit under No repository in the sidebar. The computer needs this version.
+- A short setup tour on Home walks you through appearance and remote access. On Mac, it also covers the always-on host and plan limit sharing. Skip it or reopen it from Appearance.
+- The Mac new chat page shows the selected repository’s branch and changes, seven days of spend, and the agent’s plan limits where available.
+- Home on Mac shows a Finish setting up checklist for signing in, turning on remote access and linking another device. Hide it whenever you like.
 
 ### Changed
 
-- On iPhone, a chat has a back button again, and a swipe from the left edge returns to the chat list. Tap the chat title to switch to a recent chat in the same repository or start a new one. This replaces the side drawer.
-- The tokenstat logo keeps its brand colors on the Default theme and turns monochrome on Ink, Ember and Aurora. Plan badges follow the theme's colors.
+- On iPhone, tap the back button or swipe in from the left edge to return to the chat list. Tap the chat title to switch to a recent chat in the same folder or start a new one.
+- The tokenstat logo keeps its colors in the Default theme and turns monochrome in Ink, Ember and Aurora. Plan badges follow the selected theme.
 
 ### Improved
 
-- On Mac, OLED keeps the glass sidebar, held close to black.
-- The chat inspector on Mac is cleaner: sections sit on the pane with thin separators instead of a frame each, and the context status is a small dot.
-- In OLED, cards are a shade above black with a faint edge instead of a grey outline.
-- The activity calendar follows the chosen theme, and quiet days stay visible in OLED.
+- On Mac, the chat inspector uses thin separators and a small dot for context status.
+- OLED keeps the Mac glass sidebar close to black and gives cards a faint edge. The activity calendar follows the selected theme and keeps quiet days visible in OLED.
 
 ## [1.22.0] - 2026-11-20
 

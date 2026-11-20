@@ -56,6 +56,7 @@ struct RootView: View {
     @State private var workspaces = WorkspacesModel()
     @State private var pullCounts = PullCountStore.shared
     @State private var machines = MachinesModel()
+    @State private var showingSetupTour = false
     /// The SSH library, owned by the shell rather than by a screen: the
     /// sidebar draws folders and a host count from it, and the content and
     /// inspector columns are two views over the same records.
@@ -771,6 +772,38 @@ struct RootView: View {
         // sidebar card, from a notification, or from Devices.
         .sheet(item: $deviceRequests.asking) { request in
             DeviceAccessRequestSheet(request: request, model: deviceRequests)
+        }
+        // Once per minor version, a beat after launch so the window has
+        // drawn first. Settings can open it again by hand.
+        .sheet(isPresented: $showingSetupTour, onDismiss: { SetupTourPreferences.markSeen() }) {
+            SetupTour(
+                signedIn: account.signedIn,
+                remote: SetupTourRemote(allowed: machines.remoteReachAllowed,
+                                        enabled: machines.status?.tunnel == true,
+                                        set: { await machines.setTunnel($0) }),
+                host: SetupTourHost(policy: account.hostPolicy,
+                                    saving: account.isSavingHostPolicy,
+                                    set: { await account.setAlwaysOnHost($0) },
+                                    limitsShared: account.limitsSyncEnabled,
+                                    setLimitsShared: { await account.setLimitsSync($0) }),
+                onSignIn: { account.signIn() },
+                onFinish: { showingSetupTour = false }
+            )
+            .modalFrame(width: 540, height: 600)
+            .task { await machines.load() }
+        }
+        // Offered on Home only, signed in, and never on the first run. It
+        // waits for Home if the app opened somewhere else.
+        .task(id: "\(route.isGlobal(.home))-\(account.signedIn)") {
+            SetupTourPreferences.noteLaunch()
+            guard route.isGlobal(.home), account.signedIn else { return }
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled, route.isGlobal(.home),
+                  SetupTourPreferences.shouldShow(signedIn: account.signedIn) else { return }
+            showingSetupTour = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tokenstatOpenSetupTour)) { _ in
+            showingSetupTour = true
         }
         .gitSyncSheetHost()
         // A grant made here is what the phone is waiting on, so look again the
@@ -2634,7 +2667,8 @@ struct RootView: View {
                                     let added, workspaces.folders.contains(where: { $0.id == added }) else { return }
                               chatStart.repositoryID = added
                           }
-                      })
+                      },
+                      glance: home.glance)
             .onAppear {
                 chatStart.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
             }
@@ -3662,7 +3696,17 @@ struct RootView: View {
                 onOpenMachine: { machine in
                     machines.selectAccount(machine)
                     navigate(to: .global(.machines))
-                }
+                },
+                setupHints: SetupHintsState(
+                    signedIn: account.signedIn,
+                    remoteAllowed: machines.remoteReachAllowed,
+                    remoteOn: machines.status?.tunnel == true,
+                    deviceCount: machines.accountMachines.count,
+                    onSignIn: { account.signIn() },
+                    onTurnOnRemote: { Task { await machines.setTunnel(true) } },
+                    onOpenDevices: { navigate(to: .global(.machines)) },
+                    onLoad: { await machines.load() }
+                )
             )
         case .workspace(_, .automations), .global(.automations):
             AutomationsView(

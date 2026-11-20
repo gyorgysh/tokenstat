@@ -695,7 +695,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 warmSession.setConnected(last, true)
                 warmSession.setError(null)
                 warmSession.finishConnecting(ticket)
-                val folders = model.workspaceSection(last, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                val folders = model.workspaceFolders(last, includeGit = false)
                     ?: JsonArray(emptyList())
                 if (!current() || !warmStore.isAutoConnectEnabled(last)) return@launch
                 warmSession.setLists(folders, JsonArray(emptyList()), JsonArray(emptyList()))
@@ -718,7 +718,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 if (current()) warmSession.setLists(folders, sessions, chats)
                 if (folders.any { (it as? JsonObject)?.bool("gitStatusPending") == true }) {
                     val fresh = runCatching {
-                        model.workspaceSection(last, "workspace.list", buildJsonObject {}) as? JsonArray
+                        model.workspaceFolders(last)
                     }.getOrNull() ?: return@launch
                     if (!current() || !warmStore.isAutoConnectEnabled(last)) return@launch
                     warmSession.setFolders(fresh)
@@ -773,7 +773,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 return@LaunchedEffect
             }
             if (check?.bool("allowed") != true) error("No workspace access response")
-            val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject {}) as? JsonArray
+            val folders = model.workspaceFolders(peer)
                 ?: error("No workspace list response")
             val sessions = runCatching {
                 model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
@@ -849,7 +849,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                         }
                                         break
                                     }
-                                    val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                                    val folders = model.workspaceFolders(peer, includeGit = false)
                                         ?: error("No workspace list response")
                                     val sessions = runCatching {
                                         model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
@@ -3386,7 +3386,7 @@ private fun WorkspacesScreen(
             } else if (stillAllowed == true) {
                 layoutStore.setLastConnectedHost(peer)
                 val freshFolders = runCatching {
-                    model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                    model.workspaceFolders(peer, includeGit = false)
                 }.getOrNull()
                 if (freshFolders != null && HomeStores.pinIdentity(model.state.value.account) == owner &&
                     session.connectedPeer.value == peer) {
@@ -3404,7 +3404,7 @@ private fun WorkspacesScreen(
                         )
                         if (freshFolders.any { (it as? JsonObject)?.bool("gitStatusPending") == true }) {
                             val withGit = runCatching {
-                                model.workspaceSection(peer, "workspace.list", buildJsonObject {}) as? JsonArray
+                                model.workspaceFolders(peer)
                             }.getOrNull()
                             if (withGit != null && HomeStores.pinIdentity(model.state.value.account) == owner &&
                                 session.connectedPeer.value == peer) {
@@ -3479,7 +3479,7 @@ private fun WorkspacesScreen(
                 session.setLoadingFolders(true)
                 session.setConnected(peer, true)
                 session.finishConnecting(connectionTicket)
-                val loadedFolders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                val loadedFolders = model.workspaceFolders(peer, includeGit = false)
                     ?: JsonArray(emptyList())
                 if (!current()) return@runCatching
                 ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
@@ -3501,7 +3501,7 @@ private fun WorkspacesScreen(
                 if (current()) session.setLists(loadedFolders, loadedSessions, loadedChats)
                 if (loadedFolders.any { (it as? JsonObject)?.bool("gitStatusPending") == true }) {
                     val fresh = runCatching {
-                        model.workspaceSection(peer, "workspace.list", buildJsonObject {}) as? JsonArray
+                        model.workspaceFolders(peer)
                     }.getOrNull() ?: return@runCatching
                     if (!current()) return@runCatching
                     session.setFolders(fresh)
