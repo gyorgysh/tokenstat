@@ -53,10 +53,29 @@ enum Theme {
     /// The website's violet, fixed. For the brand itself (the wordmark), which
     /// stays the same product whichever palette the person picked.
     static let brandAccent = Color.adaptive(light: hex(0x6A3DFF), dark: hex(0x8B5CF6))
+    /// Whether the logo draws in the brand's own colours.
+    ///
+    /// Only on the Default palette. Beside an orange or teal interface the
+    /// violet mark reads as a sticker from another app, and recolouring it to
+    /// the theme makes it someone else's logo. So a chosen theme gets the
+    /// monochrome lockup the widgets already use: the same three bars on one
+    /// baseline, which is what makes the mark recognisable, in the text colour.
+    static var showsBrandColours: Bool { AppAppearance.shared.paletteID == "default" }
     static var secondary: Color { secondaryColor.color }
     static var background: Color { backgroundColor.color }
     static var sidebar: Color { sidebarColor.color }
-    static var panel: Color { panelColor.color }
+    /// A card on OLED is a step off black, not black inside a drawn frame.
+    /// A ring of grey around every card on a black screen read as cheap,
+    /// and a raised surface is how depth works where there is no light.
+    static var panel: Color {
+        AppAppearance.shared.mode == .oled ? oledPanel : panelColor.color
+    }
+    private static let oledPanel = hex(0x0C0C0F)
+    /// A separator between sections that sit on the pane rather than in
+    /// cards. Fainter than `border`, which has to hold a shape on its own.
+    static var hairline: Color {
+        AppAppearance.shared.mode == .oled ? Color.white.opacity(0.07) : border.opacity(0.7)
+    }
 
     /// Behind a tab strip.
     ///
@@ -78,7 +97,10 @@ enum Theme {
         AppAppearance.shared.mode == .oled ? .black : chatStartGroundColor
     }
     private static let chatStartGroundColor = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
-    static var border: Color { borderColor.color }
+    /// Faint on OLED: the raised panel already carries the shape there.
+    static var border: Color {
+        AppAppearance.shared.mode == .oled ? Color.white.opacity(0.06) : borderColor.color
+    }
     /// The edge of the content sheet against the glass chrome. A touch of
     /// light on dark and a touch of shade on light, so the sheet reads as a
     /// layer rather than a hole cut in the chrome.

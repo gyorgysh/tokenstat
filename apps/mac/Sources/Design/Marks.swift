@@ -177,6 +177,9 @@ extension View {
 /// it sitting visibly high next to any text beside it.
 struct LogoMark: View {
     var size: CGFloat = 18
+    /// The monochrome ramp: light, middle, full, the same order as the
+    /// brand bars, so the chart still rises left to right.
+    private static let monochromeOpacity: [Double] = [0.4, 0.68, 1]
     /// Draw the bars rising in turn, for a screen that is waiting on something.
     ///
     /// The mark's own bars and the mark's own colours, moving the only way a
@@ -211,7 +214,9 @@ struct LogoMark: View {
                 .allowsHitTesting(false)
             ForEach(Array(TokenstatLogoGeometry.bars.enumerated()), id: \.offset) { index, bar in
                 RoundedRectangle(cornerRadius: TokenstatLogoGeometry.cornerRadius * unit)
-                    .fill(bar.color)
+                    .fill(Theme.showsBrandColours
+                          ? AnyShapeStyle(bar.color)
+                          : AnyShapeStyle(Color.primary.opacity(Self.monochromeOpacity[index])))
                     .frame(width: bar.rect.width * unit, height: bar.rect.height * unit)
                     // Anchored at the foot, so a bar grows out of the baseline
                     // it shares with the other two rather than shrinking in
@@ -300,10 +305,12 @@ struct Wordmark: View {
             HStack(spacing: 0) {
                 Text(L10n.text("apple.marks.token.3c469e9d"))
                     .foregroundStyle(.primary)
-                // The brand violet, whatever the theme. The wordmark is the
-                // logo, and the bars beside it never change colour either.
+                // Brand violet on the Default palette, and the quieter text
+                // colour on a chosen theme, so the two halves still read as
+                // two without borrowing the theme's accent for the logo.
                 Text(L10n.text("apple.marks.stat.40460da8"))
-                    .foregroundStyle(Theme.brandAccent)
+                    .foregroundStyle(Theme.showsBrandColours ? AnyShapeStyle(Theme.brandAccent)
+                                                             : AnyShapeStyle(.secondary))
             }
             .font(Theme.fixed(size * 0.88, weight: .bold))
             // Lowercase, always. It is the command you type.
@@ -338,13 +345,11 @@ struct TierMark: View {
             shape
                 .fill(
                     LinearGradient(
-                        // The logo's own two strongest bars, so a badge beside
-                        // a name belongs to the same brand as the mark in the
-                        // corner.
-                        colors: [
-                            Color(red: 0x8B / 255, green: 0x5C / 255, blue: 0xF6 / 255),
-                            Color(red: 0xC0 / 255, green: 0x26 / 255, blue: 0xD3 / 255),
-                        ],
+                        // The theme's own accent into its secondary. On the
+                        // Default palette that is the logo's violet into
+                        // fuchsia, and on a chosen theme the badge belongs to
+                        // the interface around it instead of standing apart.
+                        colors: [Theme.accent, Theme.secondary],
                         startPoint: .top,
                         endPoint: .bottom
                     )

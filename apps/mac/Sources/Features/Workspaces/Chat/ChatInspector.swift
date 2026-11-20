@@ -36,7 +36,7 @@ struct ChatInspector: View {
             Group {
                 if let chat = model.selected {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             identity(chat)
                             ChatContextCard(model: model)
                             ChatActivityCard(model: model)
@@ -52,8 +52,11 @@ struct ChatInspector: View {
                             }
                             .buttonStyle(SecondaryButtonStyle())
                             .disabled(model.currentReference == nil || model.savedCopy != nil)
+                            .padding(.top, Theme.Space.l)
                         }
-                        .padding(Theme.Space.m)
+                        .environment(\.chatSectionStyle, .flat)
+                        .padding(.horizontal, Theme.Space.m)
+                        .padding(.vertical, Theme.Space.s)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .id(model.currentReference)
                     }

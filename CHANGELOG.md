@@ -14,11 +14,13 @@ desktop is a review build. Newest first.
 ### Changed
 
 - On iPhone, a chat has a back button again, and a swipe from the left edge returns to the chat list. Tap the chat title to switch to a recent chat in the same repository or start a new one. This replaces the side drawer.
-- The tokenstat name keeps its brand colors in every theme.
+- The tokenstat logo keeps its brand colors on the Default theme and turns monochrome on Ink, Ember and Aurora. Plan badges follow the theme's colors.
 
 ### Improved
 
 - On Mac, OLED keeps the glass sidebar, held close to black.
+- The chat inspector on Mac is cleaner: sections sit on the pane with thin separators instead of a frame each, and the context status is a small dot.
+- In OLED, cards are a shade above black with a faint edge instead of a grey outline.
 - The activity calendar follows the chosen theme, and quiet days stay visible in OLED.
 
 ## [1.22.0] - 2026-11-20

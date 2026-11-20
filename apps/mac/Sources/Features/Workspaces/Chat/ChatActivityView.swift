@@ -238,9 +238,7 @@ struct ChatActivityCard: View {
                 Text(L10n.text("common.chat.activity.unavailable")).font(Theme.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(Theme.Space.s).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+        .chatSectionSurface()
         .id(model.activityOwner)
     }
 }

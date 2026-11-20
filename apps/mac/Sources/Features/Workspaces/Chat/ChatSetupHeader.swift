@@ -1270,6 +1270,55 @@ struct ChatAgentAvailabilityNotice: View {
 }
 
 /// Settings share the compact disclosure anatomy used by context and activity.
+/// How a chat section draws its edge.
+///
+/// A card where a section stands alone on a page, such as the new chat
+/// form. Flat in the inspector, where a column of framed cards read as a
+/// stack of boxes: there the sections sit on the pane and a hairline
+/// separates them, and the values carry the weight instead of the frames.
+enum ChatSectionStyle {
+    case card, flat
+}
+
+private struct ChatSectionStyleKey: EnvironmentKey {
+    static let defaultValue = ChatSectionStyle.card
+}
+
+extension EnvironmentValues {
+    var chatSectionStyle: ChatSectionStyle {
+        get { self[ChatSectionStyleKey.self] }
+        set { self[ChatSectionStyleKey.self] = newValue }
+    }
+}
+
+private struct ChatSectionSurface: ViewModifier {
+    @Environment(\.chatSectionStyle) private var style
+
+    func body(content: Content) -> some View {
+        switch style {
+        case .card:
+            content
+                .padding(Theme.Space.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
+        case .flat:
+            content
+                .padding(.horizontal, Theme.Space.xs)
+                .padding(.vertical, Theme.Space.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Theme.hairline).frame(height: 1).accessibilityHidden(true)
+                }
+        }
+    }
+}
+
+extension View {
+    /// The one edge every chat section shares, card or flat by context.
+    func chatSectionSurface() -> some View { modifier(ChatSectionSurface()) }
+}
+
 struct ChatSetupSection<Content: View, Primary: View>: View {
     let title: String
     let icon: ActionIcon
@@ -1327,10 +1376,7 @@ struct ChatSetupSection<Content: View, Primary: View>: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(Theme.Space.s)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+        .chatSectionSurface()
     }
     private var rowHeight: CGFloat {
         #if os(macOS)

@@ -13,9 +13,10 @@ struct ChatContextCard: View {
     @State private var conversationOpen = false
     private var owner: ChatActivityOwner { model.activityOwner }
     private var currentInspection: ChatInspection? { model.currentActivityRead?.inspection }
+    @Environment(\.chatSectionStyle) private var sectionStyle
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+        VStack(alignment: .leading, spacing: sectionStyle == .flat ? 0 : Theme.Space.m) {
             context
             servers
         }
@@ -232,11 +233,16 @@ struct ChatContextCard: View {
                     }
                     Spacer(minLength: 8)
                     if showsStatus {
-                        Text(model.selected?.running == true ? L10n.text("common.running") : L10n.text("common.idle"))
-                            .font(Theme.caption.weight(.medium)).fixedSize()
-                            .foregroundStyle(model.selected?.running == true ? Theme.accent : Color.secondary)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Theme.accentSoft, in: Capsule())
+                        // A dot and a word. A filled capsule here was the
+                        // loudest thing in the pane while saying "idle".
+                        let running = model.selected?.running == true
+                        HStack(spacing: 5) {
+                            Circle().fill(running ? Theme.accent : Theme.stateIdle)
+                                .frame(width: 6, height: 6).accessibilityHidden(true)
+                            Text(running ? L10n.text("common.running") : L10n.text("common.idle"))
+                        }
+                        .font(Theme.caption.weight(.medium)).fixedSize()
+                        .foregroundStyle(running ? Theme.accent : Color.secondary)
                     }
                     DisclosureChevron(expanded: expanded.wrappedValue)
                 }
@@ -246,10 +252,7 @@ struct ChatContextCard: View {
             .accessibilityValue(expanded.wrappedValue ? L10n.text("common.collapse") : L10n.text("common.expand"))
             content()
         }
-        .padding(Theme.Space.s)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
+        .chatSectionSurface()
     }
 }
 
