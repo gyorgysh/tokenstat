@@ -91,13 +91,13 @@ private actor MarkdownWarmup {
         for block in blocks {
             switch block.kind {
             case let .heading(_, text), let .paragraph(text), let .quote(text):
-                _ = MarkdownInline.attributed(text)
+                _ = MarkdownInline.parse(text)
             case let .list(items):
-                for item in items { _ = MarkdownInline.attributed(item.text) }
+                for item in items { _ = MarkdownInline.parse(item.text) }
             case let .table(header, rows, _):
-                for cell in header { _ = MarkdownInline.attributed(cell) }
+                for cell in header { _ = MarkdownInline.parse(cell) }
                 for row in rows {
-                    for cell in row { _ = MarkdownInline.attributed(cell) }
+                    for cell in row { _ = MarkdownInline.parse(cell) }
                 }
             case .code, .rule:
                 break
@@ -221,13 +221,7 @@ private enum MarkdownCache {
     /// back through the view's task when the interval is up, so a stream that
     /// arrives faster than a person can read it costs twenty whole-message
     /// parses a second rather than one per token.
-    static var appearanceKey: String {
-        #if os(macOS)
-        return AppAppearance.shared.markdownCacheKey
-        #else
-        return ""
-        #endif
-    }
+    static var appearanceKey: String { AppAppearance.shared.markdownCacheKey }
 
     static let live = LiveMarkdown()
 }
@@ -632,17 +626,18 @@ private struct MarkdownListRow: View {
 /// Separated from the view so the same work can be done ahead of time, off the
 /// main thread, by `MarkdownText.warm`.
 private enum MarkdownInline {
-    static func hasLinks(_ source: String) -> Bool { attributed(source).runs.contains { $0.link != nil } }
-
     static func attributed(_ source: String) -> AttributedString {
+        MarkdownLinks.styled(parse(source), color: Theme.accent)
+    }
+
+    static func parse(_ source: String) -> AttributedString {
         MarkdownCache.inline.value(for: source) {
             let safe = MarkdownSanitizer.inline(source)
             let options = AttributedString.MarkdownParsingOptions(
                 interpretedSyntax: .inlineOnlyPreservingWhitespace,
                 failurePolicy: .returnPartiallyParsedIfPossible
             )
-            let parsed = (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
-            return MarkdownLinks.styled(parsed, color: Theme.accent)
+            return (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
         }
     }
 }

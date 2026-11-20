@@ -30,7 +30,13 @@ support = r'''
 import Foundation
 import SwiftUI
 private let completed = DispatchGroup()
-private enum Theme { static let accent = Color.purple }
+private enum Theme {
+    static var palette = Color.purple
+    static var accent: Color {
+        precondition(Thread.isMainThread, "Only rendering should read the active theme")
+        return palette
+    }
+}
 // This fixture uses web links, not application navigation.
 private struct SimulatorAttachRequest { init?(url: URL) { return nil } }
 private struct DesktopOpenRequest { init?(url: URL) { return nil } }
@@ -117,6 +123,17 @@ checks = r'''
             precondition(kinds == ["heading", "paragraph", "quote", "list", "table", "code", "rule"])
         }
         precondition(MarkdownCache.blocks.stored(for: " \n\t ") == nil)
+        let linked = MarkdownCache.blocks.stored(for: bodies[0])!.first {
+            if case .paragraph = $0.kind { return true }
+            return false
+        }!
+        if case let .paragraph(text) = linked.kind {
+            let before = MarkdownInline.attributed(text)
+            Theme.palette = .mint
+            let after = MarkdownInline.attributed(text)
+            precondition(before.runs.first { $0.link != nil }?.foregroundColor == .purple)
+            precondition(after.runs.first { $0.link != nil }?.foregroundColor == .mint)
+        }
         print("Markdown warm-up: overlapping requests reuse off-main parses; all block kinds retained")
     }
 }
