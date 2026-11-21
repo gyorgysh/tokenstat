@@ -804,9 +804,7 @@ struct ChatView: View {
                         busy: model.busy,
                         paused: follow.paused,
                         resume: {
-                            showNewest()
-                            follow.jump()
-                            Task { await returnToLatest(proxy) }
+                            Task { await returnToLatest(proxy, for: presentation.reading) }
                         },
                         pause: { follow.pause() }
                     )
@@ -825,9 +823,7 @@ struct ChatView: View {
                 pinToLatest(proxy, animated: !model.busy)
             }
             .onChange(of: followPulse) { _, _ in
-                showNewest()
-                follow.jump()
-                Task { await returnToLatest(proxy) }
+                Task { await returnToLatest(proxy, for: presentation.reading) }
             }
             .onChange(of: model.busy) { was, now in
                 guard presentation.reading == model.readingIdentity else { return }
@@ -1168,16 +1164,20 @@ struct ChatView: View {
     }
 
 
-    /// Come back to the latest turn, by the cheapest route that works.
-    ///
-    /// The ForEach is a bounded slice, so scrolling it is cheap. Reopening
-    /// still drops a host window grown by paging back, which is the memory
-    /// and the event list, not the walk.
-    private func returnToLatest(_ proxy: ScrollViewProxy) async {
-        showNewest()
-        if model.transcriptItems.count > TranscriptWindow.reopenAbove {
+    /// A reopened transcript owns its new viewport and places it at the end.
+    /// Only a jump within the current transcript may use this scroll proxy.
+    private func returnToLatest(_ proxy: ScrollViewProxy, for reading: ChatReadingIdentity) async {
+        guard !Task.isCancelled, isActive, reading == model.readingIdentity,
+              !model.openingConversation, !follow.settling else { return }
+        window.release()
+        if let reference = model.currentReference { ChatReadingStore.shared.requestLatest(for: reference) }
+        if model.canDiscardPagedHistory {
+            window.followingEnd = true
             await model.reopenAtLatest()
+            return
         }
+        showNewest()
+        follow.jump()
         await chaseLatest(proxy)
     }
 
@@ -1188,12 +1188,14 @@ struct ChatView: View {
     /// This stops as soon as the scroll callback reports the end steady, so
     /// a short hop costs two frames.
     private func chaseLatest(_ proxy: ScrollViewProxy) async {
+        let reading = model.readingIdentity
         follow.chase(true)
-        defer { follow.chase(false) }
+        defer { if reading == model.readingIdentity { follow.chase(false) } }
         for _ in 0..<Self.chaseFrames {
+            guard !Task.isCancelled, isActive, reading == model.readingIdentity, !follow.abandoned else { return }
             if !follow.atEnd { pinToLatest(proxy, animated: false) }
             try? await Task.sleep(for: .milliseconds(40))
-            guard !Task.isCancelled, !follow.abandoned else { return }
+            guard reading == model.readingIdentity else { return }
             if follow.steadyFrames >= 2 { return }
         }
     }
@@ -1293,7 +1295,7 @@ struct ChatView: View {
             guard presentation.reading == model.readingIdentity else { return }
             // The repair must not compete with opening placement.
             if settledPresentation != presentation || rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
-                || model.openingConversation || follow.scrolling || !follow.pinned || !canScrollToEnd {
+                || model.openingConversation || follow.settling || follow.scrolling || !follow.pinned || !canScrollToEnd {
                 emptySamples = 0
                 if rowMounts.showsRows(viewportHeight: window.viewportHeight) { repairs = 0 }
                 continue
@@ -1308,7 +1310,7 @@ struct ChatView: View {
             withTransaction(transaction) { proxy.scrollTo(last, anchor: .top) }
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled, presentation.reading == model.readingIdentity else { return }
-            guard isActive, follow.pinned, !follow.scrolling, canScrollToEnd else { continue }
+            guard isActive, follow.pinned, !follow.settling, !follow.scrolling, canScrollToEnd else { continue }
             follow.markDrivenInstant()
             lastSilentPinAt = .distantPast
             pinToLatest(proxy, animated: false)

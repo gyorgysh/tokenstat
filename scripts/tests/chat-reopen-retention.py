@@ -18,6 +18,7 @@ struct Conversation { var id: String }
     var selected: Conversation? = .init(id: "chat")
     var selectionGeneration = 0
     var openingConversation = false
+    var earlierInFlight = true, loadingEarlier = true
     var events = ["old page"], outgoing = ["pending"], outgoingWatermark = ["pending": 1]
     var contextRevision = 7, offset = 10, tailCursor = "cursor", liveWindowLoaded = true
     var wait: CheckedContinuation<Bool, Never>?
@@ -37,6 +38,9 @@ METHOD
         let first = Task { await reader.reopenAtLatest() }
         while reader.wait == nil { await Task.yield() }
         precondition(reader.openingConversation && reader.events == ["old page"])
+        precondition(!reader.earlierInFlight && !reader.loadingEarlier)
+        await reader.reopenAtLatest()
+        precondition(reader.selectionGeneration == 1, "a second jump must leave the current opening in charge")
         precondition(reader.outgoing == ["pending"] && reader.outgoingWatermark["pending"] == 1)
         precondition(reader.offset == 10 && reader.tailCursor == "cursor" && reader.liveWindowLoaded && reader.contextRevision == 7)
         reader.wait?.resume(returning: false); reader.wait = nil

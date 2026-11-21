@@ -327,9 +327,8 @@ final class TranscriptFollowState {
     /// opening backfill was still fetching, an image decoding) left the
     /// viewport wherever it happened to be.
     ///
-    /// Answers whether the walk was actually made. The transcript refuses one
-    /// it cannot afford (see `TranscriptWindow.reopenAbove`), and a refusal
-    /// has to stop the following rather than be retried on the next frame.
+    /// Answers whether the walk was actually made. A refusal has to stop the
+    /// following rather than be retried on the next frame.
     @ObservationIgnored var repin: (() -> Bool)?
     @ObservationIgnored private let repinDelivery = TranscriptScrollDelivery()
     @ObservationIgnored private var lastContentHeight: CGFloat = 0
@@ -1548,15 +1547,6 @@ final class TranscriptWindow {
     /// reader hovering at the boundary does not switch it on and off.
     static let measureFrom: CGFloat = 4
     static let measureUntil: CGFloat = 6
-
-    /// Above this many rows, coming back to the latest turn reopens the
-    /// conversation instead of scrolling to it.
-    ///
-    /// `scrollTo` on a lazy stack costs a walk over every item between here
-    /// and the target: SwiftUI has to resolve estimates for all of them. On a
-    /// window grown by paging back, one scroll to the end is seconds, and the
-    /// loop that makes the press land would spend that several times over.
-    static let reopenAbove = 250
 
     // Throttle anchor math: scroll callbacks fire every frame, and the anchor
     // filter+suffix runs over up to 20 reported frames each time.

@@ -81,7 +81,7 @@ struct Conversation { var id = "A"; var sendRevision: UInt64? = 1; var title = "
     var currentReference: Int?, readingRestorationPulse: UInt64 = 0
     var selectionGeneration: UInt64 { generation }
     var pagingUnavailable = false, hasEarlier = false, historyTrimmed = false, reachedStart = false, liveWindowLoaded = false
-    var loadingEarlier = false, earlierInFlight = false
+    var loadingEarlier = false, earlierInFlight = false, hasPagedBack = false
     var sending = false, sendingNow = false
     var outgoing: [String] = [], outgoingWatermark: [String: Int] = [:]
     func advanceSelection(_ reason: String) { openingRead.cancel(); generation &+= 1 }

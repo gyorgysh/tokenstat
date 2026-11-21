@@ -203,6 +203,7 @@ final class ChatModel {
     /// loads on one cursor is how a stale cursor gets written back over a
     /// fresh one. Everything that fetches sets this.
     private var earlierInFlight = false
+    @ObservationIgnored private var hasPagedBack = false
     /// Whether the person has actually paged back in this sitting. Until they
     /// have, saying "start of chat" would be announcing the obvious about a
     /// short conversation.
@@ -2154,6 +2155,10 @@ final class ChatModel {
         }
     }
 
+    var canDiscardPagedHistory: Bool {
+        hasPagedBack && !openingConversation && !sending && !sendingNow && savedCopy == nil
+    }
+
     /// Reopen the conversation on its newest page, dropping the window that
     /// paging back has grown.
     ///
@@ -2166,8 +2171,12 @@ final class ChatModel {
     func reopenAtLatest() async {
         // Send also jumps to the latest rows. Keep its captured selection
         // alive through sign-in, attachment upload and acknowledgement.
-        guard !sending, !sendingNow, let selected else { return }
+        guard !Task.isCancelled, !openingConversation, !sending, !sendingNow, let selected else { return }
         advanceSelection("explicit-latest")
+        // Requests started in the previous generation cannot clear these
+        // flags when they finish, even if the newest-page read fails.
+        earlierInFlight = false
+        loadingEarlier = false
         discardSteerReservations()
         let generation = selectionGeneration
         // Keep the current page and its cursors until a replacement has
@@ -4534,6 +4543,7 @@ final class ChatModel {
         hasEarlier = false
         loadingEarlier = false
         earlierInFlight = false
+        hasPagedBack = false
         reachedStart = false
         historyTrimmed = false
     }
@@ -4583,6 +4593,7 @@ final class ChatModel {
             offset = page.nextOffset
             tailCursor = page.tailCursor
             earlierCursor = page.cursor
+            hasPagedBack = false
             hasEarlier = ChatPaging.hasEarlier(page.hasEarlier, cursor: page.cursor)
             historyTrimmed = page.historyTrimmed
             conversationUsage = page.usage
@@ -4617,7 +4628,7 @@ final class ChatModel {
     func loadEarlier(waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil) async -> Bool {
         // The copy holds no earlier pages, and fetching them would mix live
         // rows into a snapshot the banner describes as saved.
-        guard savedCopy == nil, let selected else { return false }
+        guard savedCopy == nil, !openingConversation, let selected else { return false }
         return await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false,
                           waitToPrepend: waitToPrepend, beforePrepend: beforePrepend)
     }
@@ -4688,6 +4699,7 @@ final class ChatModel {
             // means asking the same question on every frame of every scroll
             // and never reaching the beginning.
             earlierCursor = page.cursor
+            hasPagedBack = !page.reset
             hasEarlier = ChatPaging.hasEarlier(page.hasEarlier, cursor: page.cursor, after: cursor)
             historyTrimmed = page.reset ? page.historyTrimmed : historyTrimmed || page.historyTrimmed
             if page.reset {
@@ -4778,6 +4790,7 @@ final class ChatModel {
                 savedCopy = nil
                 liveWindowLoaded = true
                 earlierCursor = nil
+                hasPagedBack = false
                 hasEarlier = false
                 reachedStart = !chunk.events.isEmpty
                 keepOfflineCopy(

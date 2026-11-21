@@ -1920,6 +1920,7 @@ struct ClientChatThread: View {
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
         let split = TranscriptSlice.split(rows)
+        let reading = model.readingIdentity
         return ScrollViewReader { proxy in
             ScrollView {
                 // Keep the bottom target measured even when a tall lazy row
@@ -2050,9 +2051,7 @@ struct ClientChatThread: View {
                         busy: model.busy,
                         paused: follow.paused,
                         resume: {
-                            showNewest()
-                            resumeLatest()
-                            Task { await returnToLatest(proxy) }
+                            Task { await returnToLatest(proxy, for: reading) }
                         },
                         pause: { follow.pause() }
                     )
@@ -2069,7 +2068,7 @@ struct ClientChatThread: View {
                 holdViewport(proxy)
             }
             .onChange(of: structureToken) { _, _ in
-                if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
+                if !follow.settling, !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
             .onChange(of: followPulse) { _, _ in
                 showNewest()
@@ -2197,7 +2196,7 @@ struct ClientChatThread: View {
                 window.followingEnd = kept == nil
                 if kept == nil {
                     showNewest()
-                    pinToLatest(proxy, animated: false)
+                    if !model.openingConversation { pinToLatest(proxy, animated: false) }
                 }
                 defer {
                     if settleTaskID == ticket {
@@ -2432,16 +2431,19 @@ struct ClientChatThread: View {
     }
 
 
-    /// Come back to the latest turn, by the cheapest route that works.
-    ///
-    /// The ForEach is a bounded slice, so scrolling it is cheap. Reopening
-    /// still drops a host window grown by paging back, which is the memory
-    /// and the event list, not the walk.
-    private func returnToLatest(_ proxy: ScrollViewProxy) async {
-        showNewest()
-        if model.transcriptItems.count > TranscriptWindow.reopenAbove {
+    /// A reopened transcript owns its new viewport and places it at the end.
+    /// Only a jump within the current transcript may use this scroll proxy.
+    private func returnToLatest(_ proxy: ScrollViewProxy, for reading: ChatReadingIdentity) async {
+        guard !Task.isCancelled, isActive, reading == model.readingIdentity,
+              !model.openingConversation, !follow.settling else { return }
+        window.release()
+        resumeLatest()
+        if model.canDiscardPagedHistory {
+            window.followingEnd = true
             await model.reopenAtLatest()
+            return
         }
+        showNewest()
         await chaseLatest(proxy)
     }
 
@@ -2452,12 +2454,14 @@ struct ClientChatThread: View {
     /// This stops as soon as the scroll callback reports the end steady, so
     /// a short hop costs two frames.
     private func chaseLatest(_ proxy: ScrollViewProxy) async {
+        let reading = model.readingIdentity
         follow.chase(true)
-        defer { follow.chase(false) }
+        defer { if reading == model.readingIdentity { follow.chase(false) } }
         for _ in 0..<Self.chaseFrames {
+            guard !Task.isCancelled, isActive, reading == model.readingIdentity, !follow.abandoned else { return }
             if !follow.atEnd { pinToLatest(proxy, animated: false) }
             try? await Task.sleep(for: .milliseconds(40))
-            guard !Task.isCancelled, !follow.abandoned else { return }
+            guard reading == model.readingIdentity else { return }
             if follow.steadyFrames >= 2 { return }
         }
     }
@@ -2607,11 +2611,10 @@ struct ClientChatThread: View {
         while !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard isActive, scenePhase == .active, follow.active else { continue }
-            // The opening cover only hides the stack, so repair under it:
-            // the rows are back by the time it lifts.
+            // Placement and explicit jumps own their corrections while settling.
             let showsRows = rowMounts.showsRows(viewportHeight: window.viewportHeight)
             if showsRows || visibleItems.isEmpty
-                || model.openingConversation || follow.scrolling || scrollAccess.readerIsTouching {
+                || model.openingConversation || follow.settling || follow.scrolling || scrollAccess.readerIsTouching {
                 consecutiveEmptySamples = 0
                 if showsRows { nudged = false; rebuilds = 0 }
                 continue

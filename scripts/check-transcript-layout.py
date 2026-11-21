@@ -397,6 +397,12 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
     subprocess.run(["swift", str(path)], check=True)
 
 mobile = (root / "apps/mac/Sources/Client/ClientChatView.swift").read_text()
+desktop = (root / "apps/mac/Sources/Features/Workspaces/Chat/ChatView.swift").read_text()
+for transcript in (desktop, mobile):
+    jump = transcript[transcript.index("private func returnToLatest("):transcript.index("private static let chaseFrames")]
+    assert "if model.canDiscardPagedHistory" in jump, "even a few rendered rows can hide a large paged archive"
+    assert jump.index("await model.reopenAtLatest()\n            return") < jump.index("await chaseLatest(proxy)"), "the replacement viewport must own placement"
+    assert "reading == model.readingIdentity" in jump, "a local jump must retire with its viewport"
 assert "keepViewport(allowLatest:" not in mobile, "outgoing layouts must not sample transitional rows"
 assert "generation == model.selectionGeneration, readerMoved," in mobile, "programmatic settling must not persist reader geometry"
 assert "readerInitiated: readerMoved" in mobile, "only a reader or explicit row action replaces the kept viewport"

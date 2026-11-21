@@ -36,11 +36,10 @@ const LEGACY_EVENTS_CAP: u64 = 1024 * 1024;
 #[path = "chat_usage_cache.rs"]
 mod usage_cache;
 const PAGE_EVENTS: usize = 300;
-/// The most a client may ask for in one page. A client that wants more than
-/// this wants the whole archive, which is what the cap exists to prevent.
-/// `ChatPaging.hostPageEventsMax` in the Apple client mirrors this. Move
-/// both together.
+/// Screen opening and tail polling stay smaller than deliberate history reads.
 const PAGE_EVENTS_MAX: usize = 2_000;
+/// Mirrors ChatPaging.hostHistoryPageEventsMax in the Apple client.
+const HISTORY_PAGE_EVENTS_MAX: usize = 3_600;
 /// How much is read from disk at a time while walking backwards.
 const PAGE_CHUNK: u64 = 64 * 1024;
 /// The most one page may weigh, whatever its event count. A conversation full
@@ -3386,17 +3385,22 @@ impl Store {
         let path = self.events_path(id);
         let len = transcript_len(&path, chat.last_message_at_ms.is_some())?;
         let first = archive_generation(&path)?;
-        let limit = if limit == 0 {
-            PAGE_EVENTS
-        } else {
-            limit.clamp(1, PAGE_EVENTS_MAX)
-        };
         let (end, reset) = match cursor {
             None => (len, false),
             Some(raw) => match parse_cursor(raw, len, first) {
                 Some(end) => (end, false),
                 None => (len, true),
             },
+        };
+        let max_events = if cursor.is_some() && !reset {
+            HISTORY_PAGE_EVENTS_MAX
+        } else {
+            PAGE_EVENTS_MAX
+        };
+        let limit = if limit == 0 {
+            PAGE_EVENTS
+        } else {
+            limit.clamp(1, max_events)
         };
         let (start, bytes) = read_back(&path, end, limit)?;
         Ok(EventPage {
@@ -17138,6 +17142,39 @@ mod tests {
                 .unwrap()
                 .contains("record exceeds")
         );
+    }
+
+    #[test]
+    fn earlier_pages_use_a_larger_cap_than_opening_and_cursor_reset() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "history-depth");
+        let path = store.events_path("history-depth");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let line = "{\"kind\":\"user\",\"text\":\"row\"}\n";
+        let total = PAGE_EVENTS_MAX + HISTORY_PAGE_EVENTS_MAX + 3;
+        fs::write(&path, line.repeat(total)).unwrap();
+
+        let newest = store.event_page("history-depth", None, total).unwrap();
+        assert_eq!(newest.events.len(), PAGE_EVENTS_MAX);
+        let earlier = store
+            .event_page("history-depth", newest.cursor.as_deref(), total)
+            .unwrap();
+        assert_eq!(earlier.events.len(), HISTORY_PAGE_EVENTS_MAX);
+        assert_eq!(earlier.next_offset, newest.start);
+        assert!(earlier.has_earlier);
+        let oldest = store
+            .event_page("history-depth", earlier.cursor.as_deref(), total)
+            .unwrap();
+        assert_eq!(oldest.events.len(), 3);
+        assert_eq!(oldest.next_offset, earlier.start);
+        assert!(!oldest.has_earlier);
+
+        let reset = store
+            .event_page("history-depth", Some("invalid-cursor"), total)
+            .unwrap();
+        assert!(reset.reset);
+        assert_eq!(reset.events.len(), PAGE_EVENTS_MAX);
     }
 
     #[test]

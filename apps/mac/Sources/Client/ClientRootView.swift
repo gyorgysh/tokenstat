@@ -488,7 +488,7 @@ struct ClientRootView: View {
             ClientWorkSearchPresentation()
         }
         .environment(\.openClientAccount, { showAccount = true })
-        // The setup tour, once per minor version. A phone only reaches this
+        // The setup tour, once per tour revision. A phone only reaches this
         // body signed in, so the tour skips straight to how the Mac's remote
         // access is turned on. Settings can open it again; a request while
         // the account sheet is up closes that first, since two sheets on

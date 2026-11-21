@@ -2,59 +2,6 @@
 
 import SwiftUI
 
-/// When the setup tour shows, and the way back to it.
-///
-/// Once per minor version, so somebody updating meets what changed in how
-/// the app can look and connect, and a patch release does not ask again.
-/// "Don't show this again" turns the automatic showing off for good. Settings
-/// can always open it by hand.
-enum SetupTourPreferences {
-    static let seenKey = "setupTour.seenVersion"
-    static let disabledKey = "setupTour.disabled"
-
-    /// "1.23" from "1.23.4". A version that does not parse is its own key.
-    static func minor(_ version: String) -> String {
-        version.split(separator: ".").prefix(2).joined(separator: ".")
-    }
-
-    static let launchedKey = "setupTour.launchedBefore"
-
-    /// True for the whole of the very first run on this device. The first
-    /// run already has an intro, a sign-in and a first scan to get through,
-    /// and a tour on top of that is noise. It waits for the second launch.
-    static let isFirstLaunch: Bool = {
-        let defaults = UserDefaults.standard
-        let before = defaults.bool(forKey: launchedKey)
-        defaults.set(true, forKey: launchedKey)
-        return !before
-    }()
-
-    /// Call once at launch, so the first run is recorded even when nothing
-    /// asks about the tour during it.
-    static func noteLaunch() { _ = isFirstLaunch }
-
-    /// Signed in, not the first run, not turned off, and not yet seen for
-    /// this minor version. Where it may appear (Home) is the caller's check.
-    static func shouldShow(signedIn: Bool, _ defaults: UserDefaults = .standard) -> Bool {
-        guard signedIn, !isFirstLaunch, !defaults.bool(forKey: disabledKey) else { return false }
-        return defaults.string(forKey: seenKey) != minor(AppInfo.version)
-    }
-
-    static func markSeen(_ defaults: UserDefaults = .standard) {
-        defaults.set(minor(AppInfo.version), forKey: seenKey)
-    }
-
-    /// Ask the root to open the tour, from a settings screen that does not
-    /// own the sheet.
-    static func requestShow() {
-        NotificationCenter.default.post(name: .tokenstatOpenSetupTour, object: nil)
-    }
-}
-
-extension Notification.Name {
-    static let tokenstatOpenSetupTour = Notification.Name("ai.tokenstat.setupTour.open")
-}
-
 /// Remote access as the tour can drive it. Only a host has the switch: the
 /// Mac passes one, a phone passes nil and is told where the switch lives.
 struct SetupTourRemote {

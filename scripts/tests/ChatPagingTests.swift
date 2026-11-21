@@ -5,15 +5,13 @@ import Foundation
 @main enum ChatPagingTests {
     static func main() {
         precondition(ChatPaging.openPageEvents == 1500)
-        precondition(ChatPaging.pageEvents == 1200)
+        precondition(ChatPaging.pageEvents == 3600)
         precondition(ChatPaging.previewPageEvents == ChatPaging.openPageEvents)
-        // The host clamps every request to its own ceiling, so a client page
-        // above that would silently arrive short. The mirror below has to
-        // move with PAGE_EVENTS_MAX in tokenstat-host/src/chat.rs.
+        // The host has separate ceilings for opening and paging back.
         precondition(ChatPaging.hostPageEventsMax == 2000)
+        precondition(ChatPaging.hostHistoryPageEventsMax == 3600)
         precondition(ChatPaging.openPageEvents <= ChatPaging.hostPageEventsMax)
-        precondition(ChatPaging.pageEvents <= ChatPaging.hostPageEventsMax)
-        precondition(ChatPaging.pageEvents <= ChatPaging.openPageEvents)
+        precondition(ChatPaging.pageEvents <= ChatPaging.hostHistoryPageEventsMax)
         precondition(ChatPaging.hasEarlier(true, cursor: "opening"))
         precondition(ChatPaging.hasEarlier(true, cursor: "older", after: "opening"))
         precondition(!ChatPaging.hasEarlier(true, cursor: "opening", after: "opening"))

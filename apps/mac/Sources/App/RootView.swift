@@ -773,7 +773,7 @@ struct RootView: View {
         .sheet(item: $deviceRequests.asking) { request in
             DeviceAccessRequestSheet(request: request, model: deviceRequests)
         }
-        // Once per minor version, a beat after launch so the window has
+        // Once per tour revision, a beat after launch so the window has
         // drawn first. Settings can open it again by hand.
         .sheet(isPresented: $showingSetupTour, onDismiss: { SetupTourPreferences.markSeen() }) {
             SetupTour(
