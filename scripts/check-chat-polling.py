@@ -20,9 +20,21 @@ names = ['private func pollIsCurrent(', 'private func cancelPollReads(', 'func p
          'private func scheduleResponseAttachments(', 'private var responseAttachmentDescriptors:',
          'private func loadResponseAttachments(', 'private func loadResponseAttachment(',
          'private func noteSteerAvailability(']
-methods = '\n'.join(member('    ' + name) for name in names)
+captured_lanes = {'private func startStatusPoll(': ('statusPollLane', 'statusPollCompletion'),
+                  'private func startApprovalPoll(': ('approvalPollLane', 'approvalPollCompletion')}
+members = []
+for name in names:
+    method = member('    ' + name)
+    if name in captured_lanes:
+        lane, completion = captured_lanes[name]
+        method = method.replace(f'        {lane}.start(', f'        let task = {lane}.start(')
+        method = method.removesuffix('    }') + f'        {completion} = task\n        return task\n    }}'
+    members.append(method)
+methods = '\n'.join(members)
 # Substitute only the monotonic clock, allowing metadata ticks without wall-clock sleeps.
 methods = methods.replace('ProcessInfo.processInfo.systemUptime', 'clock')
+methods = methods.replace('        // A held event read must not hold the watcher',
+                          '        eventPollCompletion = events\n        // A held event read must not hold the watcher')
 # Count actual getter rebuilds; event access also occurs in metadata hint inspection.
 methods = methods.replace('if attachmentDescriptorRevision != eventsRevision {', 'if attachmentDescriptorRevision != eventsRevision {\n            descriptorScans += 1')
 assert 'await loadResponseAttachments' not in member('    private func loadEvents(')
@@ -110,6 +122,9 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
     var selected: ChatConversation? = ChatConversation(id: "chat", running: true)
     var pollingIdentity: PollOwner? { guard savedCopy == nil, let reference = currentReference, reference.scope == Context.shared.scope else { return nil }; return .init(reference: reference, generation: selectionGeneration) }
     let eventPollLane = ChatPollLane<PollOwner>(), statusPollLane = ChatPollLane<PollOwner>(), approvalPollLane = ChatPollLane<PollOwner>(), attachmentPollLane = ChatPollLane<PollOwner>()
+    var eventPollCompletion: Task<Void, Never>?
+    var statusPollCompletion: Task<Void, Never>?
+    var approvalPollCompletion: Task<Void, Never>?
     var pollCadence = ChatPollCadence(), cadenceOwner: PollOwner?, clock = 0.0
     var openingConversation = false, savedCopy: Bool?, peer: String?, folderID: String?
     var chats: [ChatConversation] = [], approvals: [String] = [], approvalsLoaded = false, error: String?
@@ -156,9 +171,12 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
     static func downloadFailure(_ error: Error) -> String { "failure" }
 ''' + methods + r'''
 }
-@MainActor func until(_ condition: () -> Bool) async {
-    for _ in 0..<20000 { if condition() { return }; await Task.yield() }
-    precondition(condition(), "Controlled read did not arrive")
+@MainActor func until(_ condition: () -> Bool, line: UInt = #line) async {
+    let deadline = ContinuousClock.now + .seconds(8)
+    while !condition(), ContinuousClock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+    precondition(condition(), "Controlled read did not arrive (test line \(line))")
 }
 @main struct Check {
     @MainActor static func main() async {
@@ -181,8 +199,10 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         await until { Bridge.status.calls == 3 && Bridge.approvals.calls == 3 }
         precondition(m.selected?.running == true)
         Bridge.status.finish(2); Bridge.approvals.finish(2)
+        await m.eventPollCompletion?.value
+        await m.statusPollCompletion?.value
+        await m.approvalPollCompletion?.value
         await until { m.eventsRevision == 1 }
-        for _ in 0..<100 { await Task.yield() }
         // Account retirement fences both successful and failed late replies.
         m.clock = 3; await m.poll(forceStatus: false)
         await until { m.eventWire.calls == 2 && Bridge.status.calls == 4 && Bridge.approvals.calls == 4 }
@@ -190,7 +210,9 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         m.cancelPollReads(owner: old); Context.shared.scope = "B"
         Bridge.statusReply = [.init(id: "chat", running: false)]; Bridge.approvalReply = ["wrong account"]
         m.eventWire.finish(1); Bridge.status.finish(3); Bridge.approvals.finish(3, fail: true)
-        for _ in 0..<100 { await Task.yield() }
+        await m.eventPollCompletion?.value
+        await m.statusPollCompletion?.value
+        await m.approvalPollCompletion?.value
         precondition(m.selected?.running == true && m.approvals == ["late"] && m.events.count == 1 && m.error == nil)
         Context.shared.scope = "A"
         // Usage awaits cannot publish once a status refresh retires them.
@@ -286,13 +308,13 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         catchup.eventWire.finish(0)
         await until { catchup.eventWire.calls == 2 }
         catchup.eventWire.finish(1, fail: true)
-        for _ in 0..<100 { await Task.yield() }
+        await catchup.eventPollCompletion?.value
         precondition(catchup.eventWire.calls == 2, "Failed catch-up must wait for another tick")
         await catchup.poll(forceStatus: false)
         await until { catchup.eventWire.calls == 3 }
         catchup.moreEvents = false
         catchup.eventWire.finish(2)
-        for _ in 0..<100 { await Task.yield() }
+        await catchup.eventPollCompletion?.value
         precondition(catchup.eventWire.calls == 3, "Caught-up readers must stop draining")
         catchup.cancelPollReads()
         // An idle tick drains messages queued behind a note the host has

@@ -705,7 +705,7 @@ struct ChatView: View {
         let verticalPadding = Theme.Space.xl
         #endif
         ScrollViewReader { proxy in
-            ScrollView {
+            let scroll = ScrollView {
                 // Keep the bottom target measured even when a tall lazy row
                 // is offscreen. Following must reach a real frame, not walk
                 // toward an estimate until its correction budget runs out.
@@ -773,6 +773,7 @@ struct ChatView: View {
                 #endif
                 .chatScrollContent()
             }
+            let transcriptScroll = scroll
             .transcriptOpensAtEnd()
             .preserveStreamingScrollback(model.busy && !follow.pinned && !follow.settling, window: window)
             .chatDropSurface(enabled: showsDropTargets, isTargeted: $transcriptDropTargeted, receive: receive)
@@ -814,6 +815,7 @@ struct ChatView: View {
                                     hiddenEarlierRows: hiddenAboveCount, hiddenLaterRows: sliceOffset,
                                     revealEarlier: revealEarlier, revealLater: revealLater,
                                     holdSliceStart: holdSliceStart)
+            transcriptScroll
             .onChange(of: structureToken) { _, _ in
                 // Opening owns placement while the cached rows and the live
                 // page trade places. Later structural changes can follow normally.
@@ -892,23 +894,7 @@ struct ChatView: View {
             }
             #endif
             .onAppear {
-                guard presentation.reading == model.readingIdentity else { return }
-                #if os(macOS)
-                // A new scroll view cannot use the previous window's paging
-                // anchor or first-pin throttle.
-                window.release()
-                window.clearRowFrames()
-                window.followingEnd = true
-                lastSilentPinAt = .distantPast
-                DiagnosticsLog.note("chat viewport remount previousEnd=\(follow.atEnd) rows=\(rows.count)")
-                follow.resetViewport()
-                #if DEBUG
-                TranscriptProbe.shared.noteViewportReset()
-                #endif
-                #endif
-                follow.suppressed = !model.approvals.isEmpty
-                if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
-                window.nearTopChanged = { measuringRows = $0 }
+                prepareTranscript(presentation, rowCount: rows.count)
             }
             .task(id: presentation) {
                 guard !Task.isCancelled, isActive, presentation.reading == model.readingIdentity else { return }
@@ -984,6 +970,25 @@ struct ChatView: View {
 
     private static func selectionKey(_ presentation: ChatPresentationIdentity) -> ChatReadingIdentity {
         ChatReadingIdentity(reference: presentation.reading.reference, generation: presentation.reading.generation)
+    }
+
+    private func prepareTranscript(_ presentation: ChatPresentationIdentity, rowCount: Int) {
+        guard presentation.reading == model.readingIdentity else { return }
+        #if os(macOS)
+        // A new scroll view needs fresh paging anchors and pin timing.
+        window.release()
+        window.clearRowFrames()
+        window.followingEnd = true
+        lastSilentPinAt = .distantPast
+        DiagnosticsLog.note("chat viewport remount previousEnd=\(follow.atEnd) rows=\(rowCount)")
+        follow.resetViewport()
+        #if DEBUG
+        TranscriptProbe.shared.noteViewportReset()
+        #endif
+        #endif
+        follow.suppressed = !model.approvals.isEmpty
+        if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
+        window.nearTopChanged = { measuringRows = $0 }
     }
 
     private func transcriptRow(_ item: ChatDisplayItem, chat: ChatConversation, spinning: String?, isLive: Bool) -> some View {
