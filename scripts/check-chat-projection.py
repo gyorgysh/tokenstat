@@ -23,12 +23,16 @@ def failure(signature, name, returns):
     return f'    func {name}(error: Error, id: String, generation: UInt64, requestedEpoch: UInt64, quiet: Bool = false) async{returns} {{' + body + '\n    }'
 failures = '\n'.join([
     failure('    private func readOpeningEvents(', 'failedOpen', ' -> Bool'),
-    failure('    private func loadEarlier(', 'failedEarlier', ''),
+    failure('    private func loadEarlier(', 'failedEarlier', ' -> Bool'),
     failure('    private func loadEvents(', 'failedTail', ' -> Bool')
 ])
 swift = r'''import Foundation
 struct ChatTimelineEvent { let seq: UInt64?; let text: String }
 struct ChatDisplayItem: Equatable { let text: String }
+enum ChatRowContinuity {
+    static func carrying(_ next: [ChatDisplayItem], from previous: [ChatDisplayItem])
+        -> (rows: [ChatDisplayItem], extendedAtStart: Set<String>) { (next, []) }
+}
 struct Conversation { let id: String; var backend: String? = "agent"; var running = true }
 @MainActor final class Worker {
     var inputs: [[ChatTimelineEvent]] = []
@@ -52,9 +56,12 @@ struct Conversation { let id: String; var backend: String? = "agent"; var runnin
     var eventsRevision: UInt64 = 0, displayRevision: UInt64 = 0
     var displayKey: DisplayKey?, foldKey: Int?, hasRunningToolCacheKey: Int?
     var displayCache: [ChatDisplayItem] = []
+    var displayOwner: UInt64?
+    var selectionGeneration: UInt64 { generation }
+    var rowsExtendedAtStart: Set<String> = []
     var selected: Conversation? = Conversation(id: "A")
     var generation: UInt64 = 1, ownerIsCurrent = true
-    var eventsEpoch: UInt64 = 2, pagingUnavailable = false, error: String?, fallbackCalls = 0
+    var eventsEpoch: UInt64 = 2, pagingUnavailable = false, hasEarlier = true, error: String?, fallbackCalls = 0
     func isUnknownMethod(_ error: Error) -> Bool { true }
     func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool) async -> Bool { fallbackCalls += 1; return true }
     let transcriptProjector = Worker()
@@ -116,12 +123,33 @@ func event(_ text: String, _ seq: UInt64) -> ChatTimelineEvent { .init(seq: seq,
             m.generation = 1; m.ownerIsCurrent = true
         }
         precondition(!m.events.contains { $0.text == "forbidden" })
+        // The archive can change while a projected page waits for the reader.
+        var resume: CheckedContinuation<Bool, Never>?
+        let next = m.transcriptProjector.inputs.count
+        var held = false
+        let resting = Task {
+            await m.publishEvents(id: "A", generation: 1, canPublish: { epoch == 3 },
+                waitToCommit: { await withCheckedContinuation { resume = $0 } },
+                beforeCommit: { held = true }) { [event("displaced page", 0)] + $0 }
+        }
+        await until { m.transcriptProjector.inputs.count == next + 1 }
+        m.transcriptProjector.finish(next)
+        await until { resume != nil }
+        precondition(!held)
+        epoch = 4
+        resume?.resume(returning: true)
+        let acceptedWhileResting = await resting.value
+        precondition(!acceptedWhileResting && !held && !m.events.contains { $0.text == "displaced page" })
+
         enum Failure: Error { case olderPage }
         let fallback = await m.failedOpen(error: Failure.olderPage, id: "A", generation: 1, requestedEpoch: 1)
         precondition(!fallback && m.fallbackCalls == 0 && !m.pagingUnavailable)
-        await m.failedEarlier(error: Failure.olderPage, id: "A", generation: 1, requestedEpoch: 1)
+        let staleFailure = await m.failedEarlier(error: Failure.olderPage, id: "A", generation: 1, requestedEpoch: 1)
+        precondition(!staleFailure && m.hasEarlier)
         _ = await m.failedTail(error: Failure.olderPage, id: "A", generation: 1, requestedEpoch: 1)
         precondition(!m.pagingUnavailable && m.error == nil)
+        let missing = await m.failedEarlier(error: Failure.olderPage, id: "A", generation: 1, requestedEpoch: 2)
+        precondition(!missing && !m.hasEarlier && m.pagingUnavailable)
         let current = await m.failedOpen(error: Failure.olderPage, id: "A", generation: 1, requestedEpoch: 2)
         precondition(current && m.fallbackCalls == 1 && m.pagingUnavailable)
         print("Actual ChatModel publication: replacement/prepend/cursor/metadata/selection/account/cancel fences")

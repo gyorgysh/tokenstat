@@ -47,7 +47,6 @@ struct Page: Sendable {
 }
 typealias ChatEventPage = Page
 struct Conversation { var id = "A"; var sendRevision: UInt64? = 1; var title = "Demo" }
-enum ChatPaging { static let openPageEvents = 1500 }
 @MainActor enum Bridge {
     static var replies: [CheckedContinuation<Page, Error>?] = []
     static var tailCalls = 0
@@ -280,5 +279,6 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-chat-opening-') as directory:
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5',
                     '-D', 'MOBILE_HISTORY_CHECK',
                     str(check), str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatPolling.swift'),
+                    str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatPaging.swift'),
                     '-o', str(work / 'check')], check=True)
     subprocess.run([str(work / 'check')], check=True, timeout=30)

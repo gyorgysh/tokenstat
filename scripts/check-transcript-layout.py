@@ -320,13 +320,14 @@ assert(TranscriptSlice.hiddenAbove(count: 200, olderOffset: 0) == 50, "suffix hi
 assert(TranscriptSlice.revealingEarlier(count: 200, olderOffset: 0) == 50, "one tap cannot overshoot")
 assert(TranscriptSlice.clampOffset(999, count: 200) == 50, "offset cannot exceed the slice")
 let ids = (0..<200).map { ChatDisplayItem(id: "\($0)") }
-assert(TranscriptSlice.holding("0", in: ids, current: 50) == 50, "holding the first visible row keeps the start")
+assert(TranscriptSlice.holding(["0"], in: ids, current: 50) == 50, "holding the first visible row keeps the start")
 let grown = (0..<210).map { ChatDisplayItem(id: "\($0)") }
-assert(TranscriptSlice.holding("0", in: grown, current: 50) == 60, "a turn below must not slide the window")
+assert(TranscriptSlice.holding(["0"], in: grown, current: 50) == 60, "a turn below must not slide the window")
 let earlier = (0..<100).map { ChatDisplayItem(id: "p\($0)") } + ids
-assert(TranscriptSlice.holding("0", in: earlier, current: 50) == 50, "a page above must not replace the window")
+assert(TranscriptSlice.holding(["0"], in: earlier, current: 50) == 50, "a page above must not replace the window")
 assert(TranscriptSlice.range(count: 300, olderOffset: 50) == 100..<250, "held offset after a prepend is the original rows")
-assert(TranscriptSlice.holding("missing", in: ids, current: 50) == 50, "a gone row keeps the last offset")
+assert(TranscriptSlice.holding(["missing"], in: ids, current: 50) == 50, "a gone row keeps the last offset")
+assert(TranscriptSlice.holding(["missing", "10", "20"], in: ids, current: 50) == 40, "a refolded start follows the first surviving row")
 print("PASS: deferred/coalesced corrections, no re-entry, cancellation, wheel gestures, native phases, anchor shifts, viewport resizing, growth, departure, pause, estimate resizing, hidden slice, bounded window")
 '''
 with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
