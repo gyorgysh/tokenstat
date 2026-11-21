@@ -1909,6 +1909,7 @@ struct ClientChatThread: View {
                 && (measuringRows || !follow.atEnd),
             holdingReading: preservesReadingMark
         )
+        .allowsHitTesting(!follow.scrolling)
         .transcriptRowMount(in: rowMounts, id: item.id, window: window)
     }
 
@@ -1926,9 +1927,6 @@ struct ClientChatThread: View {
                 // toward an estimate until its correction budget runs out.
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                        TranscriptEarlierHeader(model: model) {
-                            window.ask(force: true)
-                        }
                         if hiddenAboveCount > 0 {
                             Button(L10n.text("apple.clientchatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
                                 revealEarlier()
@@ -1936,6 +1934,11 @@ struct ClientChatThread: View {
                             .buttonStyle(SecondaryButtonStyle(small: true))
                             .frame(maxWidth: .infinity, alignment: .center)
                             .accessibilityLabel(L10n.text("apple.clientchatview.show_earlier_messages.b6badd18"))
+                        } else {
+                            TranscriptEarlierHeader(model: model) {
+                                follow.stopFollowing()
+                                window.requestArchivePage()
+                            }
                         }
                         ForEach(split.lazy) { item in
                             transcriptRow(item, chat: chat, spinning: spinning)
@@ -1965,10 +1968,7 @@ struct ClientChatThread: View {
                 // Empty space still takes taps so a short transcript can hide
                 // the keyboard, not only a fling on a long one.
                 .contentShape(Rectangle())
-                // One gate for the whole stack, not one per row: hit testing
-                // sleeps mid-fling and wakes 0.35s after the last moved frame.
-                // The pill rides outside this stack and never loses taps.
-                .allowsHitTesting(!follow.scrolling && !model.isShowingCachedTranscript)
+                .allowsHitTesting(!model.isShowingCachedTranscript)
                 .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.m)
@@ -2058,7 +2058,7 @@ struct ClientChatThread: View {
                     )
                 }
             }
-            .transcriptEarlierPages(model, window: window, proxy: proxy,
+            .transcriptEarlierPages(model, window: window, proxy: proxy, isActive: isActive,
                                     hiddenEarlierRows: hiddenAboveCount, hiddenLaterRows: sliceOffset,
                                     revealEarlier: revealEarlier, revealLater: revealLater,
                                     holdSliceStart: holdSliceStart)
@@ -2127,7 +2127,6 @@ struct ClientChatThread: View {
             #endif
             .onAppear {
                 follow.active = isActive
-                window.active = isActive
                 scrollAccess.installHistoryPlacement(on: window)
                 follow.suppressed = !model.approvals.isEmpty
                 if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
@@ -2140,7 +2139,6 @@ struct ClientChatThread: View {
                 }
             }
             .onChange(of: isActive) { _, active in
-                window.active = active
                 if active {
                     follow.active = true
                     scrollAccess.refreshAttachment(retryVisibility: true)
@@ -2513,7 +2511,7 @@ struct ClientChatThread: View {
         // the conversation with nothing loading.
         guard hiddenAboveCount > 0 else {
             window.hasHiddenEarlierRows = false
-            window.ask(force: false)
+            window.ask()
             return
         }
         // Never drop a row the reader can see from the bottom of the slice.

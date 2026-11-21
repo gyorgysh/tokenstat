@@ -17,7 +17,56 @@ slice = source[source.index("enum TranscriptSlice"):source.index("struct Transcr
 mounts_start = source.index("@MainActor\nfinal class TranscriptRowMounts")
 mounts_end = source.index("\nextension View {", mounts_start)
 row_mounts = source[mounts_start:mounts_end].replace("CGRect", "CoreGraphics.CGRect")
+window = source[source.index("final class TranscriptWindow {"):source.index("/// What the top of a transcript")]
+anchor = (root / "apps/mac/Sources/Features/Workspaces/Chat/TranscriptAnchor.swift").read_text()
+anchor = anchor.split("import SwiftUI\n", 1)[1]
+load_earlier = source[source.index("@MainActor\nfunc loadEarlier("):]
 tests = r'''
+@MainActor final class ChatModel {
+    var selectionGeneration: UInt64 = 1
+    var hasEarlier = true
+    var displayItems: [Int] = []
+    var advances = true
+
+    func loadEarlier(waitToPrepend: (() async -> Bool)?, beforePrepend: () -> Void) async -> Bool {
+        advances
+    }
+}
+
+let pagingWindow = TranscriptWindow()
+var archiveRequests: [Bool] = []
+var sliceReveals = 0
+pagingWindow.requestEarlier = { archiveRequests.append($0) }
+pagingWindow.revealEarlier = { sliceReveals += 1 }
+pagingWindow.hasHiddenEarlierRows = true
+pagingWindow.canPage = { false }
+pagingWindow.ask()
+assert(archiveRequests.isEmpty && sliceReveals == 0, "automatic paging needs resting geometry")
+pagingWindow.requestArchivePage()
+pagingWindow.requestArchivePage()
+assert(archiveRequests == [true] && sliceReveals == 0, "a press claims one archive page without waiting for geometry or cached slice state")
+pagingWindow.fetching = false
+pagingWindow.active = false
+pagingWindow.requestArchivePage()
+assert(archiveRequests == [true], "a departed transcript cannot request another page")
+pagingWindow.active = true
+pagingWindow.requestArchivePage()
+assert(archiveRequests == [true, true], "a remounted transcript can page again")
+
+@MainActor func checkEmptyHistoryPage() async {
+    let model = ChatModel()
+    let window = TranscriptWindow()
+    var requests: [Bool] = []
+    window.requestEarlier = { requests.append($0) }
+    window.requestArchivePage()
+    await loadEarlier(model, window: window, manual: true)
+    assert(requests == [true, true], "one press must continue past an empty page with an advancing cursor")
+    model.advances = false
+    await loadEarlier(model, window: window, manual: true)
+    assert(requests == [true, true] && !window.fetching, "a failed request must release its claim without retrying")
+    window.requestArchivePage()
+    assert(requests == [true, true, true], "the reader can retry a failed request")
+}
 @MainActor func checkRowMounts() {
     let mounts = TranscriptRowMounts()
     let older = TranscriptRowMounts.Row()
@@ -328,15 +377,22 @@ assert(TranscriptSlice.holding(["0"], in: earlier, current: 50) == 50, "a page a
 assert(TranscriptSlice.range(count: 300, olderOffset: 50) == 100..<250, "held offset after a prepend is the original rows")
 assert(TranscriptSlice.holding(["missing"], in: ids, current: 50) == 50, "a gone row keeps the last offset")
 assert(TranscriptSlice.holding(["missing", "10", "20"], in: ids, current: 50) == 40, "a refolded start follows the first surviving row")
-print("PASS: deferred/coalesced corrections, no re-entry, cancellation, wheel gestures, native phases, anchor shifts, viewport resizing, growth, departure, pause, estimate resizing, hidden slice, bounded window")
+var historyChecksFinished = false
+Task { @MainActor in
+    await checkEmptyHistoryPage()
+    historyChecksFinished = true
+}
+for _ in 0..<10 where !historyChecksFinished { drain() }
+assert(historyChecksFinished, "manual paging checks must complete")
+print("PASS: manual paging, deferred/coalesced corrections, no re-entry, cancellation, wheel gestures, native phases, anchor shifts, viewport resizing, growth, departure, pause, estimate resizing, hidden slice, bounded window")
 '''
 with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
     path = Path(directory) / "main.swift"
     path.write_text(
-        "import Foundation\nimport Observation\nimport CoreGraphics\n"
+        "import Foundation\nimport Observation\nimport CoreGraphics\nimport struct SwiftUI.UnitPoint\n"
         "enum TranscriptFollow { static let threshold: CGFloat = 56 }\n"
         "struct ChatDisplayItem: Identifiable { let id: String; var tailHeightFloor: Double = 20 }\n"
-        + slice + metrics + delivery + follow + row_mounts + tests
+        + slice + metrics + delivery + follow + row_mounts + anchor + window + load_earlier + tests
     )
     subprocess.run(["swift", str(path)], check=True)
 

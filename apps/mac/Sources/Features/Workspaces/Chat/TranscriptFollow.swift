@@ -1405,7 +1405,7 @@ final class TranscriptWindow {
     var followingEnd = false
     /// Fetch the page before the oldest row held. Installed by the transcript,
     /// which is the only thing that holds a scroll proxy.
-    var requestEarlier: (() -> Void)?
+    var requestEarlier: ((Bool) -> Void)?
     /// Put a row back where it was. Installed beside `requestEarlier`.
     var restore: ((TranscriptAnchor) -> Void)?
     /// Apply an offset correction to an already measured row when the
@@ -1482,7 +1482,7 @@ final class TranscriptWindow {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.held != nil else { return }
             self.release()
-            self.ask(force: false)
+            self.ask()
             self.askLater()
         }
         holdExpiry = work
@@ -1642,7 +1642,7 @@ final class TranscriptWindow {
         if shouldEvaluate {
             lastAnchorCheck = now
             lastDistanceFromTopForAnchor = metrics.distanceFromTop
-            ask(force: false)
+            ask()
             askLater()
         }
     }
@@ -1668,7 +1668,7 @@ final class TranscriptWindow {
             if let held = self.held {
                 self.scheduleRestore(held)
             } else {
-                self.ask(force: false)
+                self.ask()
                 self.askLater()
             }
         }
@@ -1930,33 +1930,29 @@ final class TranscriptWindow {
             && anchor != nil
     }
 
-    /// Ask for the page before the oldest row held.
-    ///
-    /// `force` is the button at the top of the transcript, which asks whatever
-    /// the geometry says.
-    ///
-    /// Rows the slice already holds come first: they are brought in by
-    /// sliding, with the place held, and only once none are left is the
-    /// archive asked. Requiring a press for those rows is what left a reader
-    /// at the top of the slice with nothing happening.
-    func ask(force: Bool) {
-        // Automatic asks wait for the reader to rest, as they did when only
-        // resting rows reported. A page that lands mid-gesture is still held.
-        guard active, !fetching,
-              force || (readingEarlier != false && wantsEarlier && held == nil && !readerIsScrolling) else { return }
-        guard force || canPage?() != false else {
+    /// Automatically reveal held rows before requesting more from the archive.
+    func ask() {
+        guard active, !fetching, readingEarlier != false, wantsEarlier,
+              held == nil, !readerIsScrolling else { return }
+        guard canPage?() != false else {
             settleAfterQuiet()
             return
         }
         if hasHiddenEarlierRows {
-            guard force || Date() >= slideQuietUntil, let revealEarlier else { return }
+            guard Date() >= slideQuietUntil, let revealEarlier else { return }
             slideQuietUntil = Date().addingTimeInterval(Self.slideQuiet)
             revealEarlier()
             return
         }
-        guard canAskEarlier, let requestEarlier else { return }
+        if canAskEarlier { requestArchivePage(manual: false) }
+    }
+
+    /// The archive button is visible only when the rendered slice has no
+    /// hidden rows. It doesn't need an automatic paging geometry sample.
+    func requestArchivePage(manual: Bool = true) {
+        guard active, !fetching, let requestEarlier else { return }
         fetching = true
-        requestEarlier()
+        requestEarlier(manual)
     }
 
     /// Long enough for the slide to be laid out and its hold applied before
@@ -2074,15 +2070,16 @@ extension View {
         _ model: ChatModel,
         window: TranscriptWindow,
         proxy: ScrollViewProxy,
+        isActive: Bool,
         hiddenEarlierRows: Int = 0,
         hiddenLaterRows: Int = 0,
         revealEarlier: (() -> Void)? = nil,
         revealLater: (() -> Void)? = nil,
         holdSliceStart: ((Bool) -> Void)? = nil
     ) -> some View {
-        let request: () -> Void = { [weak window] in
+        let request: (Bool) -> Void = { [weak window] manual in
             guard let window else { return }
-            Task { await loadEarlier(model, window: window) }
+            Task { await loadEarlier(model, window: window, manual: manual) }
         }
         let restore: (TranscriptAnchor) -> Void = { [weak window] anchor in
             guard let window else { return }
@@ -2104,6 +2101,7 @@ extension View {
         // The proxy belongs to this reader, so the closures that use it are
         // installed here and renewed whenever the conversation changes.
         .onAppear {
+            window.active = isActive
             window.hasHiddenEarlierRows = hiddenEarlierRows > 0
             window.hasHiddenLaterRows = hiddenLaterRows > 0
             window.requestEarlier = request
@@ -2113,6 +2111,9 @@ extension View {
             window.holdSliceStart = holdSliceStart
             window.extendedAtStart = extendedAtStart
             window.resolveRow = resolveRow
+        }
+        .onChange(of: isActive) { _, active in
+            window.active = active
         }
         .onDisappear {
             window.active = false
@@ -2135,7 +2136,7 @@ extension View {
         .onChange(of: model.hasEarlier, initial: true) { _, more in
             window.canAskEarlier = more
             guard more else { return }
-            window.ask(force: false)
+            window.ask()
         }
         .onChange(of: hiddenEarlierRows, initial: true) { _, count in
             window.hasHiddenEarlierRows = count > 0
@@ -2152,9 +2153,9 @@ extension View {
 /// here, so the two paths into this (the scroll and the button) cannot run
 /// side by side and write a spent cursor back.
 @MainActor
-func loadEarlier(_ model: ChatModel, window: TranscriptWindow) async {
+func loadEarlier(_ model: ChatModel, window: TranscriptWindow, manual: Bool) async {
     let generation = model.selectionGeneration
-    guard model.hasEarlier else {
+    guard window.active, model.hasEarlier else {
         window.fetching = false
         return
     }
@@ -2190,12 +2191,10 @@ func loadEarlier(_ model: ChatModel, window: TranscriptWindow) async {
     }
     window.fetching = false
     window.canAskEarlier = model.hasEarlier
-    guard advanced else { return }
-    guard published else {
+    if advanced, !published {
         // The page can consume archive records without changing the display.
         // With no layout update, ask again if the reader is still near the top.
         window.release()
-        window.ask(force: false)
-        return
+        if manual, model.hasEarlier { window.requestArchivePage() } else { window.ask() }
     }
 }

@@ -719,10 +719,6 @@ struct ChatView: View {
                         if model.transcriptItems.isEmpty, !chat.running, !model.openingConversation {
                             emptyConversation
                         }
-                        TranscriptEarlierHeader(model: model) {
-                            if hiddenAboveCount > 0 { revealEarlier() }
-                            else { window.ask(force: true) }
-                        }
                         if hiddenAboveCount > 0 {
                             Button(L10n.text("apple.chatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
                                 revealEarlier()
@@ -730,15 +726,22 @@ struct ChatView: View {
                             .buttonStyle(SecondaryButtonStyle(small: true))
                             .frame(maxWidth: .infinity, alignment: .center)
                             .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
+                        } else {
+                            TranscriptEarlierHeader(model: model) {
+                                follow.stopFollowing()
+                                window.requestArchivePage()
+                            }
                         }
                         ForEach(split.lazy) { item in
                             transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
+                                .allowsHitTesting(!follow.scrolling)
                                 .transcriptRowMount(in: rowMounts, id: item.id, window: window)
                         }
                     }
                     // See `TranscriptSlice.measuredTail`.
                     ForEach(split.measured) { item in
                         transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
+                            .allowsHitTesting(!follow.scrolling)
                             .transcriptRowMount(in: rowMounts, id: item.id, window: window)
                     }
                     if sliceOffset == 0 {
@@ -758,12 +761,7 @@ struct ChatView: View {
                         TranscriptBottomSentinel(trailingPadding: verticalPadding)
                     }
                 }
-                // One gate for the whole stack, not one per row: hit testing
-                // sleeps mid-fling so sliding rows under a stationary pointer
-                // fire no hover enter/exit traffic, and wakes 0.35s after the
-                // last moved frame. The pill rides outside this stack and
-                // never loses taps.
-                .allowsHitTesting(!follow.scrolling && !model.isShowingCachedTranscript)
+                .allowsHitTesting(!model.isShowingCachedTranscript)
                 .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
                 .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                 .padding(.top, verticalPadding)
@@ -814,7 +812,7 @@ struct ChatView: View {
                     )
                 }
             }
-            .transcriptEarlierPages(model, window: window, proxy: proxy,
+            .transcriptEarlierPages(model, window: window, proxy: proxy, isActive: isActive,
                                     hiddenEarlierRows: hiddenAboveCount, hiddenLaterRows: sliceOffset,
                                     revealEarlier: revealEarlier, revealLater: revealLater,
                                     holdSliceStart: holdSliceStart)
@@ -861,7 +859,6 @@ struct ChatView: View {
                 }
             }
             .onChange(of: isActive, initial: true) { _, active in
-                window.active = active
                 if active {
                     follow.active = true
                 } else {
@@ -902,10 +899,9 @@ struct ChatView: View {
                 guard presentation.reading == model.readingIdentity else { return }
                 #if os(macOS)
                 // A new scroll view cannot use the previous window's paging
-                // anchor, in-flight claim or first-pin throttle.
+                // anchor or first-pin throttle.
                 window.release()
                 window.clearRowFrames()
-                window.fetching = false
                 window.followingEnd = true
                 lastSilentPinAt = .distantPast
                 DiagnosticsLog.note("chat viewport remount previousEnd=\(follow.atEnd) rows=\(rows.count)")
@@ -1121,7 +1117,7 @@ struct ChatView: View {
         // the conversation with nothing loading.
         guard hiddenAboveCount > 0 else {
             window.hasHiddenEarlierRows = false
-            window.ask(force: false)
+            window.ask()
             return
         }
         // Never drop a row the reader can see from the bottom of the slice.
