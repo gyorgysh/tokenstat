@@ -151,6 +151,19 @@ for driven in [false, true] {
     gesture.note(native(6751, 7270, 0, scrolling: true))
     assert(gesture.pinned && !gesture.showJump, "scrolling back to the bottom must resume follow")
 }
+let dockedWheel = TranscriptFollowState()
+dockedWheel.note(native(6751, 7270, 0, scrolling: false))
+var dockedPins = 0
+dockedWheel.repin = { dockedPins += 1; return true }
+dockedWheel.releaseForReaderWheel()
+assert(!dockedWheel.pinned && dockedWheel.abandoned, "a trackpad wheel drops the pin before geometry")
+dockedWheel.note(native(6651, 7270, 100, scrolling: false))
+drain()
+assert(dockedPins == 0 && dockedWheel.showJump && !dockedWheel.pinned,
+       "an idle phase after that wheel must not pin the reader back to the end")
+dockedWheel.note(native(6751, 7270, 0, scrolling: true))
+assert(dockedWheel.pinned && !dockedWheel.showJump, "scrolling back down still resumes follow")
+
 let growingRetreat = TranscriptFollowState()
 growingRetreat.note(native(6751, 7270, 0, scrolling: false))
 var pinsDuringRetreat = 0

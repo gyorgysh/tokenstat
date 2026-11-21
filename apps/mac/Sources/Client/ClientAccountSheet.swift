@@ -79,6 +79,7 @@ private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
     @Environment(ClientTabCustomization.self) private var tabCustomization
     @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.openURL) private var openURL
 
     @State private var showSample = false
     @State private var showLicenses = false
@@ -308,6 +309,7 @@ private struct ClientAccountContent: View {
     private var legalPane: some View {
         sampleHelp
         legalCard
+        rateCard
         licensesCard
         privacyNote
     }
@@ -627,6 +629,37 @@ private struct ClientAccountContent: View {
             legalLink(L10n.text("apple.clientaccountsheet.privacy_policy.ba445cff"), url: ClientWebPages.privacy())
             ThemeRule()
             legalLink(L10n.text("apple.clientaccountsheet.terms_of_service.e69e0614"), url: ClientWebPages.terms())
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+    }
+
+    /// A rating the person asked for, from Legal.
+    ///
+    /// The in-app rating sheet is reserved for the automatic ask, which
+    /// waits two weeks between appearances and may show nothing. Apple's
+    /// rule for a button is to open the App Store write-review page
+    /// instead. Tapping it also starts that two-week wait, so the
+    /// automatic sheet does not follow someone who just rated.
+    private var rateCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.rate_tokenstat.4e91c0ab"), mark: "mark_license")
+            Text(L10n.text("apple.clientaccountsheet.opens_the_app_store_page_where_you_can_leave.b7d24e18"))
+                .font(ClientType.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(L10n.text("apple.clientaccountsheet.rate_on_the_app_store.6a30f1c5"), .appStore) {
+                guard let url = URL(string: "https://apps.apple.com/app/id6800501432?action=write-review") else { return }
+                ClientReviewPrompt.markAsked()
+                openURL(url)
+            }
+            .buttonStyle(.plain)
+            .font(ClientType.label.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .foregroundStyle(Theme.accent)
+            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

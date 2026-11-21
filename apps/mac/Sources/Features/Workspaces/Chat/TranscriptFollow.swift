@@ -336,6 +336,12 @@ final class TranscriptFollowState {
     @ObservationIgnored private var lastOffset: CGFloat = 0
     @ObservationIgnored private var lastDistanceFromBottom: CGFloat = 0
     @ObservationIgnored private var readerIsScrolling = false
+    /// The next geometry sample belongs to a trackpad wheel that already
+    /// let go of the end. Mac scroll phase stays idle for that wheel, and
+    /// an idle sample past the end is otherwise read as layout drift and
+    /// pinned back. That pin is a walk of the lazy stack, which is the
+    /// hitch a person feels scrolling up from the latest line.
+    @ObservationIgnored private var forcedWheel = false
     /// Opening samples this on its timer because unchanged geometry emits no callback.
     @ObservationIgnored private(set) var layoutRevision: UInt64 = 0
     /// Offset drift outside our own scrolls, accumulated across frames. Scroll
@@ -526,6 +532,7 @@ final class TranscriptFollowState {
         lastOffset = 0
         lastDistanceFromBottom = 0
         readerIsScrolling = false
+        forcedWheel = false
         layoutRevision &+= 1
         programmaticUntil = .distantPast
         undrivenDrift = 0
@@ -547,12 +554,25 @@ final class TranscriptFollowState {
         let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
         let resized = abs(metrics.viewportHeight - lastViewportHeight) > 0.5
         if grew || shrank || moved || resized { layoutRevision &+= 1 }
-        readerIsScrolling = metrics.readerIsScrolling == true
+        // A stale sample can arrive before the wheel's offset does. Hold
+        // the flag until the viewport actually moves, or that first idle
+        // sample is what schedules the pin back.
+        let fromWheel = forcedWheel
+        let wheelMoved = fromWheel
+            && (moved || metrics.distanceFromBottom > lastDistanceFromBottom + 0.5)
+        if wheelMoved { forcedWheel = false }
+        readerIsScrolling = metrics.readerIsScrolling == true || fromWheel
         if readerIsScrolling { repinDelivery.cancel() }
+        if wheelMoved { trackScrolling(moved: true) }
         // Motion only: growth under a still viewport is a stream arriving,
         // not a gesture, and rows stay interactive while it is followed.
-        let readerMoved = moved && metrics.readerIsScrolling != false
+        let readerMoved = moved && (fromWheel || metrics.readerIsScrolling != false)
         trackScrolling(moved: readerMoved)
+        // The wheel already dropped the pin. Say so as soon as the viewport
+        // actually leaves the end, including a nudge that is still inside
+        // the follow threshold. An idle phase would otherwise wait until
+        // the reader was a whole threshold away.
+        if wheelMoved, !settling { set(jump: true) }
 
         // Small growth or a shorter viewport stays inside the threshold and
         // left the last row (the token count) hidden under the composer.
@@ -665,7 +685,7 @@ final class TranscriptFollowState {
         }
         let pastContent = metrics.viewportPastContent
         if metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent,
-           (grew && !moved) || metrics.readerIsScrolling == false || pastContent {
+           (grew && !moved) || (metrics.readerIsScrolling == false && !fromWheel) || pastContent {
             // Layout can move the offset or resize the viewport without
             // input. Keep following within the existing scroll budget.
             if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent {
@@ -751,6 +771,25 @@ final class TranscriptFollowState {
         }
     }
 
+    /// Let go of the latest line because a trackpad wheel moved upward.
+    ///
+    /// Called from the wheel event, before AppKit applies it. The scroll
+    /// phase for that event often stays idle, so waiting for geometry
+    /// schedules a pin back to the end on the same gesture. The scrollbar
+    /// does not have this problem: dragging it reports a real scroll phase
+    /// and the ordinary path lets go. `pinned` is not observed, so this
+    /// does not redraw inside the event.
+    func releaseForReaderWheel() {
+        guard pinned || settling else { return }
+        forcedWheel = true
+        abandoned = true
+        repinDelivery.cancel()
+        pinned = false
+        undrivenDrift = 0
+        farMovedFrames = 0
+        retreatingFrames = 0
+    }
+
     /// Stop following the end and offer the way back.
     ///
     /// For a transcript refusing a walk it cannot afford. A window grown by
@@ -778,6 +817,7 @@ final class TranscriptFollowState {
         undrivenDrift = 0
         farMovedFrames = 0
         retreatingFrames = 0
+        forcedWheel = false
         markDriven()
         set(jump: false)
     }
@@ -1402,6 +1442,9 @@ final class TranscriptWindow {
     /// prefetch for them either. It turns off as soon as they leave the end,
     /// which is screens before the boundary comes near.
     var followingEnd = false
+    /// Drop the follow pin. The transcript installs this so a wheel event
+    /// can release the end before that event is turned into a scroll.
+    var releaseFollow: (() -> Void)?
     /// Fetch the page before the oldest row held. Installed by the transcript,
     /// which is the only thing that holds a scroll proxy.
     var requestEarlier: ((Bool) -> Void)?
@@ -1573,6 +1616,9 @@ final class TranscriptWindow {
         lastMovedAt = lastWheelAt
         readerIsScrolling = true
         if held != nil { release() }
+        // Upward only. A wheel toward the end must still be allowed to
+        // resume following once the viewport arrives there.
+        if towardEarlier { releaseFollow?() }
         settleAfterQuiet()
     }
     #endif

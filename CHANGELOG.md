@@ -5,6 +5,16 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
+## [1.24.1]
+
+### Fixed
+
+- On Mac, scrolling up from the latest message with a trackpad no longer stalls. The first wheel movement stops following the end, so the transcript does not jump back while you scroll.
+
+### Added
+
+- On iPhone and iPad, Legal includes Rate tokenstat. It opens the App Store page where you leave a rating. The in-app rating sheet still waits two weeks between automatic asks.
+
 ## [1.24.0]
 
 ### Fixed

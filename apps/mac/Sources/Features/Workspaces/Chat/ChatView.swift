@@ -979,6 +979,7 @@ struct ChatView: View {
         window.release()
         window.clearRowFrames()
         window.followingEnd = true
+        window.releaseFollow = { [follow] in follow.releaseForReaderWheel() }
         lastSilentPinAt = .distantPast
         DiagnosticsLog.note("chat viewport remount previousEnd=\(follow.atEnd) rows=\(rowCount)")
         follow.resetViewport()
