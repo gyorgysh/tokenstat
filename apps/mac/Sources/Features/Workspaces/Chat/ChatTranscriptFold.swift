@@ -392,7 +392,8 @@ enum ChatTranscriptFold {
         into out: inout [ChatDisplayItem],
         isOpen: (String) -> Bool
     ) {
-        let id = groupID(firstMember: members[0].id)
+        let fresh = groupID(firstMember: members[0].id)
+        let id = ChatFoldContinuity.current?.id("group", members: members.map(\.id), fresh: fresh) ?? fresh
         var group = group
         group.open = isOpen(id)
         var header = ChatDisplayItem(id: id, kind: .group(group), lastSequence: members.last?.lastSequence)

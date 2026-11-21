@@ -5,6 +5,16 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
+## [1.24.0]
+
+### Fixed
+
+- Reading back through a long chat keeps your place. Earlier messages load above what you are reading instead of jumping you to the top of what just arrived, including inside long replies, and older messages keep loading on their own on Mac, iPhone and iPad.
+- Scrolling back while a reply streams is smoother. The working indicator rests while you read elsewhere, and the newest words stop fading in until you return.
+- Scrolling past very long replies has fewer long stalls on macOS 15 and later. The app draws the visible lines while keeping the full reply layout.
+
+- Codex chats follow your Codex setup on every turn. A Codex update now reaches existing chats' model lists, and chats use your `config.toml` defaults, MCP servers, `AGENTS.md`, skills and rules. Plugins, notify scripts and project trust stay with your own Codex, and the approval gate stays on.
+
 ## [1.23.0]
 
 ### Added

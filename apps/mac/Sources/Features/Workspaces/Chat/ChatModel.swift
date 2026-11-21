@@ -1301,9 +1301,18 @@ final class ChatModel {
         let rows = coalescedItems
         let key = FoldKey(display: displayKey, detail: detail, open: open, toggled: toggled)
         if key != foldKey {
-            foldCache = ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(rows)), detail: detail, running: selected?.running == true) {
-                open != toggled.contains($0)
+            if foldContinuityOwner != selectionGeneration {
+                foldContinuity.reset()
+                foldContinuityOwner = selectionGeneration
             }
+            let running = selected?.running == true
+            foldCache = ChatFoldContinuity.$current.withValue(foldContinuity) {
+                ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(rows)),
+                                        detail: detail, running: running) {
+                    open != toggled.contains($0)
+                }
+            }
+            foldContinuity.finish()
             foldKey = key
         }
         var shown = pending.isEmpty ? foldCache : foldCache + pending
@@ -1333,6 +1342,21 @@ final class ChatModel {
     /// from the two flags rather than the rows, so the menus that ask do not
     /// redraw on every streamed token.
     var anyGroupOpen: Bool { groupsOpen || !toggledGroups.isEmpty }
+
+    /// The row that shows `id` now, after a page refolded the rows around it.
+    /// The row itself, the group it joined, the step a group was named after,
+    /// or the block that covers a text start. Nil when nothing does.
+    func transcriptRow(holding id: String) -> String? {
+        let rows = transcriptItems
+        if rows.contains(where: { $0.id == id }) { return id }
+        let member = id.hasPrefix("g:") ? String(id.dropFirst(2)) : id
+        for row in rows {
+            if case let .group(group) = row.kind, group.memberIDs.contains(member) { return row.id }
+            if row.imageRowIDs.contains(member) { return row.id }
+        }
+        if rows.contains(where: { $0.id == member }) { return member }
+        return ChatReadingAnchor.resolve(member, items: rows, events: events)
+    }
 
     /// The row to scroll to for `id`. A step folded into a closed group
     /// opens that group, so a search hit or a kept reading place lands on
@@ -4280,6 +4304,13 @@ final class ChatModel {
     }
 
     /// `displayItems` without the prompts still being sent.
+    /// Rows the last page extended at their start: a page brought
+    /// earlier deltas of a reply already on screen. Read by the transcript
+    /// when it puts the reader back, never drawn.
+    @ObservationIgnored private(set) var rowsExtendedAtStart: Set<String> = []
+    /// The selection the display cache was last published for.
+    @ObservationIgnored private var displayOwner: UInt64?
+
     private var coalescedItems: [ChatDisplayItem] {
         _ = displayRevision
         return displayCache
@@ -4292,6 +4323,7 @@ final class ChatModel {
     private func publishEvents(id: String, generation: UInt64,
                                canPublish: () -> Bool = { true },
                                rebasesWindow: Bool = true, recordsChanged: Bool = true,
+                               waitToCommit: (() async -> Bool)? = nil,
                                beforeCommit: (() -> Void)? = nil,
                                transform: ([ChatTimelineEvent]) -> [ChatTimelineEvent]) async -> Bool {
         let initialRevision = eventsRevision
@@ -4303,6 +4335,10 @@ final class ChatModel {
             let next = transform(events)
             guard let rows = try? await transcriptProjector.project(next, backend: backend, running: running),
                   !Task.isCancelled, selectionMatches(id: id, generation: generation), canPublish() else { return false }
+            if let waitToCommit, displayCache != rows {
+                guard await waitToCommit(), !Task.isCancelled,
+                      selectionMatches(id: id, generation: generation), canPublish() else { return false }
+            }
             guard rebasesWindow || eventsRevision == initialRevision else { return false }
             guard revision == eventsRevision, backend == selected?.backend,
                   running == (selected?.running == true) else { continue }
@@ -4314,7 +4350,15 @@ final class ChatModel {
         return false
     }
 
-    private func commitDisplay(_ rows: [ChatDisplayItem]) {
+    private func commitDisplay(_ projected: [ChatDisplayItem]) {
+        // Only within one conversation: archive row ids repeat across them.
+        let sameReader = displayOwner == selectionGeneration
+        displayOwner = selectionGeneration
+        let carried = ChatRowContinuity.carrying(projected, from: sameReader ? displayCache : [])
+        let rows = carried.rows
+        // Kept until the next page: polls publish between a page landing and
+        // the transcript putting the reader back, and must not erase it.
+        if !carried.extendedAtStart.isEmpty { rowsExtendedAtStart = carried.extendedAtStart }
         let nextKey = DisplayKey(epoch: eventsRevision, count: events.count,
             firstSeq: events.first?.seq, lastSeq: events.last?.seq,
             backend: selected?.backend, running: selected?.running == true)
@@ -4389,6 +4433,9 @@ final class ChatModel {
     }
 
     @ObservationIgnored private var foldCache: [ChatDisplayItem] = []
+    /// Group and gallery ids across folds. See `ChatFoldContinuity`.
+    @ObservationIgnored private let foldContinuity = ChatFoldContinuity()
+    @ObservationIgnored private var foldContinuityOwner: UInt64?
     @ObservationIgnored private var foldKey: FoldKey?
 
     /// Show the prompt in the transcript the moment Send is pressed.
@@ -4536,7 +4583,7 @@ final class ChatModel {
             offset = page.nextOffset
             tailCursor = page.tailCursor
             earlierCursor = page.cursor
-            hasEarlier = page.hasEarlier
+            hasEarlier = ChatPaging.hasEarlier(page.hasEarlier, cursor: page.cursor)
             historyTrimmed = page.historyTrimmed
             conversationUsage = page.usage
             usageThrough = page.events.compactMap(\.seq).max()
@@ -4564,20 +4611,23 @@ final class ChatModel {
     /// Pull the page before the oldest one held, and put it in front.
     ///
     /// Called by the transcript as the top comes near, so the page is usually
-    /// already there by the time somebody reaches it.
-    func loadEarlier(beforePrepend: (() -> Void)? = nil) async {
+    /// already there by the time somebody reaches it. Returns whether a
+    /// regular page was consumed, so callers can continue past an empty page.
+    @discardableResult
+    func loadEarlier(waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil) async -> Bool {
         // The copy holds no earlier pages, and fetching them would mix live
         // rows into a snapshot the banner describes as saved.
-        guard savedCopy == nil, let selected else { return }
-        await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false, beforePrepend: beforePrepend)
+        guard savedCopy == nil, let selected else { return false }
+        return await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false,
+                          waitToPrepend: waitToPrepend, beforePrepend: beforePrepend)
     }
 
     private func loadEarlier(id: String, generation: UInt64, quiet: Bool,
-                             beforePrepend: (() -> Void)? = nil) async {
-        guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
+                             waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil) async -> Bool {
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         guard !pagingUnavailable, hasEarlier, !earlierInFlight,
               let cursor = earlierCursor
-        else { return }
+        else { return false }
         var restoreAfterReplacement = false
         earlierInFlight = true
         loadingEarlier = !quiet
@@ -4599,7 +4649,11 @@ final class ChatModel {
                 id: id, cursor: cursor, limit: ChatPaging.pageEvents, peer: peer
             )
             guard selectionMatches(id: id, generation: generation),
-                  requestedEpoch == eventsEpoch, cursor == earlierCursor else { return }
+                  requestedEpoch == eventsEpoch, cursor == earlierCursor else { return false }
+            #if DEBUG
+            TranscriptHoldTrace.note("earlier page reset=\(page.reset) got=\(page.events.count) seqs=\(page.events.first?.seq ?? 0)...\(page.events.last?.seq ?? 0) window=\(events.count) first=\(events.first?.seq ?? 0) last=\(events.last?.seq ?? 0)")
+            defer { TranscriptHoldTrace.note("after page window=\(events.count) first=\(events.first?.seq ?? 0) last=\(events.last?.seq ?? 0) rows=\(displayItems.count)") }
+            #endif
             if page.reset {
                 // The archive was trimmed while this was in flight, so the
                 // offsets under the cursor no longer mean anything. This page
@@ -4608,7 +4662,7 @@ final class ChatModel {
                 let replacement = beginWindowReplacement()
                 let replacementEpoch = eventsEpoch
                 defer { finishWindowReplacement(replacement) }
-                guard await publishEvents(id: id, generation: generation, canPublish: { replacementEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in page.events }) else { return }
+                guard await publishEvents(id: id, generation: generation, canPublish: { replacementEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in page.events }) else { return false }
                 reconcileOutgoing()
                 offset = page.nextOffset
                 tailCursor = page.tailCursor
@@ -4619,13 +4673,14 @@ final class ChatModel {
                 // Pages do not overlap, but a trim or a retry could still put
                 // a record in two answers. Identity is the record's place in
                 // the archive, so a repeat is cheap to spot.
+                rowsExtendedAtStart = []
                 guard await publishEvents(id: id, generation: generation, canPublish: {
                     requestedEpoch == self.eventsEpoch && cursor == self.earlierCursor
-                }, beforeCommit: beforePrepend, transform: { held in
+                }, waitToCommit: waitToPrepend, beforeCommit: beforePrepend, transform: { held in
                     let oldest = held.first?.seq ?? UInt64.max
                     let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
                     return fresh + held
-                }) else { return }
+                }) else { return false }
                 warmMarkdown()
             }
             // Always, even for a page that carried nothing this window can
@@ -4633,20 +4688,23 @@ final class ChatModel {
             // means asking the same question on every frame of every scroll
             // and never reaching the beginning.
             earlierCursor = page.cursor
-            hasEarlier = page.hasEarlier
+            hasEarlier = ChatPaging.hasEarlier(page.hasEarlier, cursor: page.cursor, after: cursor)
             historyTrimmed = page.reset ? page.historyTrimmed : historyTrimmed || page.historyTrimmed
             if page.reset {
-                reachedStart = !hasEarlier && !page.events.isEmpty
+                reachedStart = !page.hasEarlier && !page.events.isEmpty
                 restoreAfterReplacement = true
-            } else if !hasEarlier {
+            } else if !page.hasEarlier {
                 reachedStart = true
             }
             scheduleResponseAttachments(id: id, generation: generation)
+            return !page.reset
         } catch {
             if !Task.isCancelled, selectionMatches(id: id, generation: generation),
                requestedEpoch == eventsEpoch, isUnknownMethod(error) {
                 pagingUnavailable = true
+                hasEarlier = false
             }
+            return false
         }
     }
 

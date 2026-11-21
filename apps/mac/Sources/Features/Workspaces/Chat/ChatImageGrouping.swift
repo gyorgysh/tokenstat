@@ -33,6 +33,14 @@ enum ChatImageGrouping {
                 result.append(gallery)
             }
         }
+        // A gallery is named after its first image row. See `ChatFoldContinuity`.
+        if let continuity = ChatFoldContinuity.current {
+            for index in result.indices {
+                guard case .attachment = result[index].kind, !result[index].imageRowIDs.isEmpty else { continue }
+                let id = continuity.id("gallery", members: result[index].imageRowIDs, fresh: result[index].id)
+                if id != result[index].id { result[index] = result[index].carrying(id: id) }
+            }
+        }
         return result
     }
 

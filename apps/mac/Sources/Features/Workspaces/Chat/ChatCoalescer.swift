@@ -42,7 +42,9 @@ extension ChatDisplayItem {
         var textID = ""
         var textBackend: String?
         var textLastSequence: UInt64?
+        var textFirstSequence: UInt64?
         var thinkingLastSequence: UInt64?
+        var thinkingFirstSequence: UInt64?
         var thinking = ""
         var thinkingID = ""
         var lastBackend: String?
@@ -55,7 +57,8 @@ extension ChatDisplayItem {
                     ChatDisplayItem(
                         id: textID,
                         kind: .assistant(body, backend: textBackend ?? defaultBackend),
-                        lastSequence: textLastSequence
+                        lastSequence: textLastSequence,
+                        firstSequence: textFirstSequence
                     )
                 )
             }
@@ -63,16 +66,20 @@ extension ChatDisplayItem {
             textID = ""
             textBackend = nil
             textLastSequence = nil
+            textFirstSequence = nil
         }
 
         func flushThinking() {
             let body = thinking.trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty {
-                items.append(ChatDisplayItem(id: thinkingID, kind: .thinking(body), lastSequence: thinkingLastSequence))
+                items.append(ChatDisplayItem(id: thinkingID, kind: .thinking(body),
+                                             lastSequence: thinkingLastSequence,
+                                             firstSequence: thinkingFirstSequence))
             }
             thinking = ""
             thinkingID = ""
             thinkingLastSequence = nil
+            thinkingFirstSequence = nil
         }
 
         func closeRunningTools(failed: Bool, at: Int64?, detail: String?) {
@@ -274,13 +281,17 @@ extension ChatDisplayItem {
                 flushThinking()
                 if text.isEmpty {
                     textID = "text-\(stamp(event, items.count))"
+                    textFirstSequence = event.seq
                     textBackend = event.backend ?? defaultBackend
                 }
                 text += agent.delta ?? ""
                 textLastSequence = event.seq
             case "thinking":
                 flushText()
-                if thinking.isEmpty { thinkingID = "think-\(stamp(event, items.count))" }
+                if thinking.isEmpty {
+                    thinkingID = "think-\(stamp(event, items.count))"
+                    thinkingFirstSequence = event.seq
+                }
                 thinking += agent.delta ?? ""
                 thinkingLastSequence = event.seq
             case "toolStart":

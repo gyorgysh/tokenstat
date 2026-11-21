@@ -33,4 +33,10 @@ enum ChatPaging {
     /// The most records the host hands back in one page. Mirrors
     /// `PAGE_EVENTS_MAX`; a request above this is clamped, not refused.
     static let hostPageEventsMax = 2000
+
+    /// An earlier page has to give the reader a usable, unspent cursor.
+    static func hasEarlier(_ reported: Bool, cursor: String?, after previous: String? = nil) -> Bool {
+        guard reported, let cursor, !cursor.isEmpty else { return false }
+        return cursor != previous
+    }
 }

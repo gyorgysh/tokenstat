@@ -77,6 +77,11 @@ enum DebugUIHooks {
             case "backdrop": MainActor.assumeIsolated { toggleBackdropProbe() }
             case "sidebar": NotificationCenter.default.post(name: .toggleLeftSidebar, object: nil)
             case "inspector": NotificationCenter.default.post(name: .toggleRightSidebar, object: nil)
+            case let wheel? where wheel.hasPrefix("wheel:"):
+                let parts = wheel.split(separator: ":")
+                let points = Int32(parts.count > 1 ? parts[1] : "") ?? 0
+                let steps = Int(parts.count > 2 ? parts[2] : "") ?? 1
+                MainActor.assumeIsolated { DebugTranscriptWheel.gesture(points: points, steps: steps) }
             case let other?: NotificationCenter.default.post(name: keyRequested, object: other)
             default: break
             }

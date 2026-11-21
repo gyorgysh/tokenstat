@@ -250,11 +250,16 @@ enum ChatClock {
 /// row rebuilds itself because one of them grew by a word.
 struct ChatDisplayItem: Identifiable, Equatable, Sendable {
     var isSteer: Bool = false
-    let id: String
+    /// Settable only here, by `carrying(id:)`.
+    private(set) var id: String
     let kind: Kind
     /// Inclusive end of a coalesced text/thinking block in the loaded archive.
     /// Lets a mark from a partial page resolve after earlier deltas arrive.
     var lastSequence: UInt64? = nil
+    /// Where that block actually starts in the loaded archive. Usually what
+    /// its id says, but not after `ChatRowContinuity` kept an id across a
+    /// page that brought the block's earlier deltas.
+    var firstSequence: UInt64? = nil
     var groupID: String? = nil
     /// How a step under an open Compact line is drawn. Nil everywhere else.
     var plainStep: PlainStep? = nil
@@ -399,5 +404,67 @@ extension ChatDisplayItem {
         case let .plan(steps):
             return base + steps.reduce(0) { $0 + $1.text.utf8.count + $1.status.utf8.count }
         }
+    }
+}
+
+extension ChatDisplayItem {
+    /// The same row under the identity it already had on screen.
+    func carrying(id: String) -> ChatDisplayItem {
+        var row = self
+        row.id = id
+        return row
+    }
+}
+
+/// Keep a folded group's or an image gallery's identity when a page brings
+/// rows in front of it.
+///
+/// Both are named after their first member. A page whose last rows belong to
+/// the same group or gallery as the first rows on screen makes one of those
+/// the new first member, and the row is renamed. To SwiftUI that is a row
+/// removed and another inserted, which loses whatever was holding the
+/// reader's place on it, and a group opened by hand closes again because
+/// the open state is kept by id. A group that still holds a member it had
+/// last time is that group, so it keeps the id it had.
+///
+/// One per transcript, handed to the fold through `current`, and reset when
+/// the conversation changes: archive row ids repeat across conversations.
+final class ChatFoldContinuity: @unchecked Sendable {
+    @TaskLocal static var current: ChatFoldContinuity?
+
+    private var previous: [String: String] = [:]
+    private var next: [String: String] = [:]
+    private var claimed: Set<String> = []
+
+    /// The id for a group or gallery with these members. `kind` keeps the two
+    /// apart: a gallery's member is a raw row, a group's member may be a
+    /// gallery.
+    func id(_ kind: String, members: [String], fresh: String) -> String {
+        var chosen = fresh
+        for member in members {
+            if let was = previous[kind + "|" + member], !claimed.contains(was) {
+                chosen = was
+                break
+            }
+        }
+        #if DEBUG
+        if chosen != fresh { TranscriptHoldTrace.note("carry \(kind) \(fresh.prefix(20)) -> \(chosen.prefix(20))") }
+        #endif
+        claimed.insert(chosen)
+        for member in members { next[kind + "|" + member] = chosen }
+        return chosen
+    }
+
+    /// One fold is complete. What it named is what the next one starts from.
+    func finish() {
+        previous = next
+        next = [:]
+        claimed = []
+    }
+
+    func reset() {
+        previous = [:]
+        next = [:]
+        claimed = []
     }
 }

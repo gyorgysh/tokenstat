@@ -252,7 +252,7 @@ struct ChatView: View {
     /// `olderOffset` is counted from the newest row, so a turn arriving
     /// below or a page landing above would otherwise replace what is on
     /// screen. This id is what keeps those rows still.
-    @State private var sliceAnchor: String?
+    @State private var sliceAnchor: [String] = []
     @State private var paneDropTargeted = false
     @State private var transcriptDropTargeted = false
     @State private var dropPresentation: UInt64 = 0
@@ -733,13 +733,13 @@ struct ChatView: View {
                         }
                         ForEach(split.lazy) { item in
                             transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
-                                .transcriptRowMount(in: rowMounts)
+                                .transcriptRowMount(in: rowMounts, id: item.id, window: window)
                         }
                     }
                     // See `TranscriptSlice.measuredTail`.
                     ForEach(split.measured) { item in
                         transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
-                            .transcriptRowMount(in: rowMounts)
+                            .transcriptRowMount(in: rowMounts, id: item.id, window: window)
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript, let chat = model.selected, chat.routing?.limit != nil {
@@ -751,7 +751,8 @@ struct ChatView: View {
                                 seed: model.faceSeed,
                                 mood: mood,
                                 step: TranscriptFollow.liveStep(model.transcriptItems),
-                                startedAt: model.selected.flatMap { model.turnStartedAt(for: $0.id) }
+                                startedAt: model.selected.flatMap { model.turnStartedAt(for: $0.id) },
+                                still: follow.showJump
                             )
                         }
                         TranscriptBottomSentinel(trailingPadding: verticalPadding)
@@ -763,13 +764,14 @@ struct ChatView: View {
                 // last moved frame. The pill rides outside this stack and
                 // never loses taps.
                 .allowsHitTesting(!follow.scrolling && !model.isShowingCachedTranscript)
+                .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
                 .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                 .padding(.top, verticalPadding)
                 .padding(.bottom, sliceOffset == 0 ? 0 : verticalPadding)
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
                 #if os(macOS)
-                .background { TranscriptScrollBounds().allowsHitTesting(false) }
+                .background { TranscriptScrollBounds(transcript: window).allowsHitTesting(false) }
                 #endif
                 .chatScrollContent()
             }
@@ -812,7 +814,10 @@ struct ChatView: View {
                     )
                 }
             }
-            .transcriptEarlierPages(model, window: window, proxy: proxy, hiddenEarlierRows: hiddenAboveCount)
+            .transcriptEarlierPages(model, window: window, proxy: proxy,
+                                    hiddenEarlierRows: hiddenAboveCount, hiddenLaterRows: sliceOffset,
+                                    revealEarlier: revealEarlier, revealLater: revealLater,
+                                    holdSliceStart: holdSliceStart)
             .onChange(of: structureToken) { _, _ in
                 // Opening owns placement while the cached rows and the live
                 // page trade places. Later structural changes can follow normally.
@@ -856,6 +861,7 @@ struct ChatView: View {
                 }
             }
             .onChange(of: isActive, initial: true) { _, active in
+                window.active = active
                 if active {
                     follow.active = true
                 } else {
@@ -898,7 +904,7 @@ struct ChatView: View {
                 // A new scroll view cannot use the previous window's paging
                 // anchor, in-flight claim or first-pin throttle.
                 window.release()
-                window.rowFrames = [:]
+                window.clearRowFrames()
                 window.fetching = false
                 window.followingEnd = true
                 lastSilentPinAt = .distantPast
@@ -1057,8 +1063,7 @@ struct ChatView: View {
         // mid-scroll: that is a report per row per frame.
         .transcriptRowFrame(
             item.id,
-            watched: !follow.scrolling
-                && ((model.hasEarlier && measuringRows) || !follow.atEnd)
+            watched: !follow.scrolling && (measuringRows || !follow.atEnd)
         )
     }
 
@@ -1080,8 +1085,8 @@ struct ChatView: View {
     /// `olderOffset` counted from the live end, or the offset that still
     /// starts on `sliceAnchor` after rows arrived above or below.
     private var sliceOffset: Int {
-        if olderOffset > 0, let anchor = sliceAnchor {
-            return TranscriptSlice.holding(anchor, in: model.transcriptItems, current: olderOffset)
+        if olderOffset > 0, !sliceAnchor.isEmpty {
+            return TranscriptSlice.holding(sliceAnchor, in: model.transcriptItems, current: olderOffset)
         }
         return TranscriptSlice.clampOffset(olderOffset, count: model.transcriptItems.count)
     }
@@ -1090,11 +1095,62 @@ struct ChatView: View {
         applySlice(0)
     }
 
+    /// Keep the slice on the row it starts on while a page lands (`true`),
+    /// then let a slice the page did not move glue to the end again.
+    private func holdSliceStart(_ holding: Bool) {
+        if holding {
+            let start = visibleItems.prefix(8).map(\.id)
+            guard !start.isEmpty else { return }
+            sliceAnchor = start
+            olderOffset = max(olderOffset, 1)
+        } else if sliceOffset == 0, olderOffset > 0 {
+            olderOffset = 0
+            sliceAnchor = []
+        }
+    }
+
+    /// Slide the built slice towards the start, holding the reader's row
+    /// where it is. Without the hold the rows brought in above pushed the
+    /// conversation down by a whole slide, the reader landed at the top of
+    /// them, and that was the top of the slice again: the next slide fired,
+    /// and the one after, until the start of the chat.
     private func revealEarlier() {
+        // The window's flag runs ahead of the view after a page lands. With
+        // nothing actually above the slice, ask the archive instead of
+        // sliding a slice that cannot move, which was a loop at the top of
+        // the conversation with nothing loading.
+        guard hiddenAboveCount > 0 else {
+            window.hasHiddenEarlierRows = false
+            window.ask(force: false)
+            return
+        }
+        // Never drop a row the reader can see from the bottom of the slice.
+        let room = window.slideRoom(in: visibleItems.map(\.id), later: false)
+        guard room > 0 else { return }
         follow.stopFollowing()
+        window.holdPlace("slide-earlier")
         applySlice(
             TranscriptSlice.revealingEarlier(
-                count: model.transcriptItems.count, olderOffset: sliceOffset
+                count: model.transcriptItems.count, olderOffset: sliceOffset, limit: room
+            )
+        )
+    }
+
+    /// Slide back towards the newest rows as the reader reaches the end of
+    /// the slice. The rows dropped from the top move what is on screen up by
+    /// their height, so the place is held the same way.
+    private func revealLater() {
+        guard sliceOffset > 0 else {
+            window.hasHiddenLaterRows = false
+            return
+        }
+        // Nor from its top.
+        let room = window.slideRoom(in: visibleItems.map(\.id), later: true)
+        guard room > 0 else { return }
+        window.holdPlace("slide-later")
+        applySlice(
+            TranscriptSlice.revealingLater(
+                count: model.transcriptItems.count, olderOffset: sliceOffset, limit: room
             )
         )
     }
@@ -1107,10 +1163,10 @@ struct ChatView: View {
         if clamped > 0 {
             sliceAnchor = TranscriptSlice.items(
                 model.transcriptItems, olderOffset: clamped
-            ).first?.id
+            ).prefix(8).map(\.id)
             follow.sliceHidesNewest = true
         } else {
-            sliceAnchor = nil
+            sliceAnchor = []
             follow.sliceHidesNewest = false
         }
     }
@@ -1329,7 +1385,7 @@ struct ChatView: View {
     /// below it and the earlier part one button above.
     private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
         guard isActive else { return }
-        applySlice(TranscriptSlice.holding(id, in: model.transcriptItems, current: 0))
+        applySlice(TranscriptSlice.holding([id], in: model.transcriptItems, current: 0))
         follow.markDrivenInstant()
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -1727,19 +1783,110 @@ private struct OpeningSkeleton: View {
 /// Keep the native clip view within its document while the reader is at an
 /// edge. A rubber-band frame can make the lazy history change its estimates
 /// and trigger a follow correction while the scroll view is springing back.
+#if DEBUG
+/// A reader's wheel gesture, delivered to the transcript's own scroll view.
+///
+/// Built as real phased scroll events rather than an offset change, so the
+/// transcript sees what it sees from a trackpad: `interacting`, then rest.
+/// `ai.tokenstat.debug.key` with `wheel:<points per step>:<steps>`. Positive
+/// points move towards the start of the conversation.
+@MainActor
+enum DebugTranscriptWheel {
+    fileprivate static weak var reporter: TranscriptScrollBounds.Reporter?
+
+    static func gesture(points: Int32, steps: Int) {
+        guard let scrollView = reporter?.enclosingScrollView else { return }
+        Task { @MainActor in
+            for step in 0..<max(1, steps) {
+                if points != 0 { reporter?.noteWheel(towardEarlier: points > 0) }
+                let phase: Int64 = step == 0 ? 1 : 2
+                send(points, phase: phase, to: scrollView)
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            send(0, phase: 4, to: scrollView)
+        }
+    }
+
+    private static func send(_ points: Int32, phase: Int64, to scrollView: NSScrollView) {
+        guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                                  wheel1: points, wheel2: 0, wheel3: 0) else { return }
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(points))
+        guard let nsEvent = NSEvent(cgEvent: event) else { return }
+        scrollView.scrollWheel(with: nsEvent)
+    }
+}
+#endif
+
 private struct TranscriptScrollBounds: NSViewRepresentable {
-    func makeNSView(context: Context) -> Reporter { Reporter() }
-    func updateNSView(_ view: Reporter, context: Context) { view.clampScrolling() }
+    let transcript: TranscriptWindow
+
+    func makeNSView(context: Context) -> Reporter {
+        let view = Reporter()
+        view.transcript = transcript
+        return view
+    }
+
+    func updateNSView(_ view: Reporter, context: Context) {
+        view.transcript = transcript
+        view.clampScrolling()
+    }
 
     final class Reporter: NSView {
+        weak var transcript: TranscriptWindow?
+        private var wheelMonitor: Any?
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             clampScrolling()
+            if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+            wheelMonitor = nil
+            guard window != nil else { return }
+            wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                MainActor.assumeIsolated {
+                    if let self, let scroll = self.enclosingScrollView,
+                       !self.isHiddenOrHasHiddenAncestor, event.window === self.window, event.scrollingDeltaY != 0,
+                       scroll.bounds.contains(scroll.convert(event.locationInWindow, from: nil)) {
+                        self.noteWheel(towardEarlier: event.scrollingDeltaY > 0)
+                    }
+                }
+                return event
+            }
         }
 
+        func noteWheel(towardEarlier: Bool) { transcript?.noteWheel(towardEarlier: towardEarlier) }
+
+        deinit {
+            if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+        }
+
+        #if DEBUG
+        override func layout() {
+            super.layout()
+            if window != nil { DebugTranscriptWheel.reporter = self }
+        }
+        #endif
+
         func clampScrolling() {
-            guard let scrollView = enclosingScrollView, scrollView.verticalScrollElasticity != .none else { return }
-            scrollView.verticalScrollElasticity = .none
+            #if DEBUG
+            DebugTranscriptWheel.reporter = self
+            #endif
+            guard let scrollView = enclosingScrollView else { return }
+            if scrollView.verticalScrollElasticity != .none {
+                scrollView.verticalScrollElasticity = .none
+            }
+            transcript?.restoreMeasured = { [weak scrollView] drift in
+                guard let scrollView else { return false }
+                let clip = scrollView.contentView
+                var bounds = clip.bounds
+                bounds.origin.y += clip.isFlipped ? drift : -drift
+                let target = clip.constrainBoundsRect(bounds).origin
+                guard abs(target.y - clip.bounds.origin.y) >= 0.5 else { return false }
+                clip.scroll(to: target)
+                scrollView.reflectScrolledClipView(clip)
+                return true
+            }
         }
     }
 }

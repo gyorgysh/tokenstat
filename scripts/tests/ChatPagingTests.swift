@@ -14,6 +14,12 @@ import Foundation
         precondition(ChatPaging.openPageEvents <= ChatPaging.hostPageEventsMax)
         precondition(ChatPaging.pageEvents <= ChatPaging.hostPageEventsMax)
         precondition(ChatPaging.pageEvents <= ChatPaging.openPageEvents)
-        print("Chat paging: tripled transcript pages under the host ceiling, previews match the opening page")
+        precondition(ChatPaging.hasEarlier(true, cursor: "opening"))
+        precondition(ChatPaging.hasEarlier(true, cursor: "older", after: "opening"))
+        precondition(!ChatPaging.hasEarlier(true, cursor: "opening", after: "opening"))
+        precondition(!ChatPaging.hasEarlier(true, cursor: nil))
+        precondition(!ChatPaging.hasEarlier(true, cursor: ""))
+        precondition(!ChatPaging.hasEarlier(false, cursor: "older", after: "opening"))
+        print("Chat paging: bounded page sizes, matching previews, and only advancing cursors")
     }
 }

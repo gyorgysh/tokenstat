@@ -733,6 +733,32 @@ struct MessageMarkdown: View {
     }
 }
 
+#if os(macOS)
+/// Keep the full text layout and selection while drawing the lines that
+/// intersect the graphics context's clip.
+@available(macOS 15, *)
+private struct VisibleMarkdownLines: TextRenderer {
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        let clip = context.clipBoundingRect
+        for line in layout where clip.intersects(line.typographicBounds.rect) {
+            context.draw(line)
+        }
+    }
+}
+
+private struct MarkdownLineDrawing: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *), enabled {
+            content.textRenderer(VisibleMarkdownLines())
+        } else {
+            content
+        }
+    }
+}
+#endif
+
 private struct MessageMarkdownContent: View {
     private let cachedSegments: [MessageSegment]
     private let source: String
@@ -891,6 +917,9 @@ private struct MessageMarkdownContent: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    #if os(macOS)
+                    .modifier(MarkdownLineDrawing(enabled: style == .chat && !isLive && segments.count >= 4))
+                    #endif
                 case let .block(block):
                     MarkdownBlockView(
                         block: block,

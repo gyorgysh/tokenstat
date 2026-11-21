@@ -779,7 +779,7 @@ struct ClientChatThread: View {
     /// First row of the built slice, when it is not glued to the end. Same
     /// lock as the Mac: the offset is from the newest row, so a turn or a
     /// page would otherwise replace what is on screen.
-    @State private var sliceAnchor: String?
+    @State private var sliceAnchor: [String] = []
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
     /// geometry readers exist for the stretch that can need an anchor and
@@ -1906,10 +1906,10 @@ struct ClientChatThread: View {
         .clientTranscriptRowFrame(
             item.id,
             watched: (!follow.scrolling || (follow.settling && !follow.pinned))
-                && ((model.hasEarlier && measuringRows) || !follow.atEnd),
+                && (measuringRows || !follow.atEnd),
             holdingReading: preservesReadingMark
         )
-        .transcriptRowMount(in: rowMounts)
+        .transcriptRowMount(in: rowMounts, id: item.id, window: window)
     }
 
     private func transcript(_ chat: ChatConversation) -> some View {
@@ -1955,7 +1955,8 @@ struct ClientChatThread: View {
                                 seed: model.faceSeed,
                                 mood: mood,
                                 step: TranscriptFollow.liveStep(model.transcriptItems),
-                                startedAt: model.selected.flatMap { model.turnStartedAt(for: $0.id) }
+                                startedAt: model.selected.flatMap { model.turnStartedAt(for: $0.id) },
+                                still: follow.showJump
                             )
                         }
                         TranscriptBottomSentinel()
@@ -1968,6 +1969,7 @@ struct ClientChatThread: View {
                 // sleeps mid-fling and wakes 0.35s after the last moved frame.
                 // The pill rides outside this stack and never loses taps.
                 .allowsHitTesting(!follow.scrolling && !model.isShowingCachedTranscript)
+                .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.m)
                 .padding(.bottom, Theme.Space.l)
@@ -2056,7 +2058,10 @@ struct ClientChatThread: View {
                     )
                 }
             }
-            .transcriptEarlierPages(model, window: window, proxy: proxy)
+            .transcriptEarlierPages(model, window: window, proxy: proxy,
+                                    hiddenEarlierRows: hiddenAboveCount, hiddenLaterRows: sliceOffset,
+                                    revealEarlier: revealEarlier, revealLater: revealLater,
+                                    holdSliceStart: holdSliceStart)
             .onPreferenceChange(ClientTranscriptReadingFramesKey.self) { geometry in
                 readingFrames.replace(geometry)
                 scrollAccess.refreshAttachment()
@@ -2122,6 +2127,8 @@ struct ClientChatThread: View {
             #endif
             .onAppear {
                 follow.active = isActive
+                window.active = isActive
+                scrollAccess.installHistoryPlacement(on: window)
                 follow.suppressed = !model.approvals.isEmpty
                 if follow.pinned, let id = model.approvals.first?.id { scrollTarget = "approval-\(id)" }
                 window.nearTopChanged = { measuringRows = $0 }
@@ -2133,6 +2140,7 @@ struct ClientChatThread: View {
                 }
             }
             .onChange(of: isActive) { _, active in
+                window.active = active
                 if active {
                     follow.active = true
                     scrollAccess.refreshAttachment(retryVisibility: true)
@@ -2472,8 +2480,8 @@ struct ClientChatThread: View {
     /// `olderOffset` counted from the live end, or the offset that still
     /// starts on `sliceAnchor` after rows arrived above or below.
     private var sliceOffset: Int {
-        if olderOffset > 0, let anchor = sliceAnchor {
-            return TranscriptSlice.holding(anchor, in: model.transcriptItems, current: olderOffset)
+        if olderOffset > 0, !sliceAnchor.isEmpty {
+            return TranscriptSlice.holding(sliceAnchor, in: model.transcriptItems, current: olderOffset)
         }
         return TranscriptSlice.clampOffset(olderOffset, count: model.transcriptItems.count)
     }
@@ -2482,11 +2490,58 @@ struct ClientChatThread: View {
         applySlice(0)
     }
 
+    /// Keep the slice on the row it starts on while a page lands (`true`),
+    /// then let a slice the page did not move glue to the end again.
+    private func holdSliceStart(_ holding: Bool) {
+        if holding {
+            let start = visibleItems.prefix(8).map(\.id)
+            guard !start.isEmpty else { return }
+            sliceAnchor = start
+            olderOffset = max(olderOffset, 1)
+        } else if sliceOffset == 0, olderOffset > 0 {
+            olderOffset = 0
+            sliceAnchor = []
+        }
+    }
+
+    /// Slide the built slice towards the start, holding the reader's row
+    /// where it is. See the Mac transcript's `revealEarlier`.
     private func revealEarlier() {
+        // The window's flag runs ahead of the view after a page lands. With
+        // nothing actually above the slice, ask the archive instead of
+        // sliding a slice that cannot move, which was a loop at the top of
+        // the conversation with nothing loading.
+        guard hiddenAboveCount > 0 else {
+            window.hasHiddenEarlierRows = false
+            window.ask(force: false)
+            return
+        }
+        // Never drop a row the reader can see from the bottom of the slice.
+        let room = window.slideRoom(in: visibleItems.map(\.id), later: false)
+        guard room > 0 else { return }
         follow.stopFollowing()
+        window.holdPlace("slide-earlier")
         applySlice(
             TranscriptSlice.revealingEarlier(
-                count: model.transcriptItems.count, olderOffset: sliceOffset
+                count: model.transcriptItems.count, olderOffset: sliceOffset, limit: room
+            )
+        )
+    }
+
+    /// Slide back towards the newest rows as the reader reaches the end of
+    /// the slice, holding the place across the rows dropped above.
+    private func revealLater() {
+        guard sliceOffset > 0 else {
+            window.hasHiddenLaterRows = false
+            return
+        }
+        // Nor from its top.
+        let room = window.slideRoom(in: visibleItems.map(\.id), later: true)
+        guard room > 0 else { return }
+        window.holdPlace("slide-later")
+        applySlice(
+            TranscriptSlice.revealingLater(
+                count: model.transcriptItems.count, olderOffset: sliceOffset, limit: room
             )
         )
     }
@@ -2499,10 +2554,10 @@ struct ClientChatThread: View {
         if clamped > 0 {
             sliceAnchor = TranscriptSlice.items(
                 model.transcriptItems, olderOffset: clamped
-            ).first?.id
+            ).prefix(8).map(\.id)
             follow.sliceHidesNewest = true
         } else {
-            sliceAnchor = nil
+            sliceAnchor = []
             follow.sliceHidesNewest = false
         }
     }
@@ -2836,7 +2891,7 @@ struct ClientChatThread: View {
     private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
         guard isActive, follow.active, scenePhase == .active, scrollAccess.isEligible,
               model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
-        applySlice(TranscriptSlice.holding(id, in: model.transcriptItems, current: 0))
+        applySlice(TranscriptSlice.holding([id], in: model.transcriptItems, current: 0))
         follow.markDrivenInstant()
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -3228,6 +3283,19 @@ private final class ClientTranscriptScrollAccess {
         let maximum = max(minimum, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
         let target = view.contentOffset.y + distance
         return target >= minimum && target <= maximum
+    }
+
+    func installHistoryPlacement(on window: TranscriptWindow) {
+        window.canRestore = { [weak self] in
+            guard let scroll = self?.view else { return true }
+            return !scroll.isTracking && !scroll.isDragging
+        }
+        window.canPage = { [weak self] in self?.readerIsTouching != true }
+        window.restoreMeasured = { [weak self] drift in
+            guard let self, self.isEligible, !self.readerIsTouching else { return false }
+            self.nudge(by: drift)
+            return true
+        }
     }
 
     /// Move the visible region by `distance`, clamped to the content. The

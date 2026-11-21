@@ -75,7 +75,22 @@ struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision:
                 precondition(projected == actual, "Worker changed transcript rows")
                 // The legacy oracle predates additive image provenance;
                 // its tool/backend metadata is checked independently above.
-                let legacyRows = actual.map { row in var row = row; row.sourceBackend = nil; return row }
+                let legacyRows = actual.map { row in
+                    var row = row
+                    row.sourceBackend = nil
+                    row.firstSequence = nil
+                    return row
+                }
+                // A block's start is the sequence its id is named after.
+                for row in actual {
+                    switch row.kind {
+                    case .assistant, .thinking:
+                        let named = row.id.split(separator: "s").last.flatMap { UInt64($0) }
+                        precondition(named == nil || row.firstSequence == named, "First sequence \(row.id)")
+                    default:
+                        precondition(row.firstSequence == nil, "Unexpected first sequence \(row.id)")
+                    }
+                }
                 precondition(reference == legacyRows, "Mismatch seed \(seed), running \(running)")
                 cases += 1
             }

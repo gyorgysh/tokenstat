@@ -8,7 +8,7 @@ import SwiftUI
     var currentReference: WorkReference?
     var openingConversation = false
     var displayItems: [Row] = [ChatModel.Row(id: "text-s1")]
-    struct Row { let id: String; var lastSequence: UInt64? = nil }
+    struct Row { let id: String; var lastSequence: UInt64? = nil; var firstSequence: UInt64? = nil }
     var events: [ChatTimelineEvent] = []
     var hasEarlier = false
     var reachedStart = false

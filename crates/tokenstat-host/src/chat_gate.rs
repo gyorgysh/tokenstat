@@ -214,17 +214,28 @@ pub(crate) fn team_hooks_document(helper: &Path, flavor: &str) -> Value {
 /// Passing the home without the flag is fail-open, which is the bug this whole
 /// module exists to stop.
 pub fn write_codex_home(home: &Path, helper: Option<&Path>) -> Result<(), String> {
+    let source = user_codex_home();
+    if source
+        .as_ref()
+        .is_some_and(|source| paths_match(source, home))
+    {
+        return Err("the private Codex home resolves to the user's Codex home".into());
+    }
     std::fs::create_dir_all(home).map_err(|error| error.to_string())?;
     if let Some(helper) = helper {
-        std::fs::write(
-            home.join("hooks.json"),
-            hooks_document(helper, "codex").to_string(),
+        write_replacing(
+            &home.join("hooks.json"),
+            hooks_document(helper, "codex").to_string().as_bytes(),
         )
         .map_err(|error| error.to_string())?;
     } else {
         clear_codex_hooks(home)?;
     }
-    link_credential(home, ".codex", "auth.json")
+    link_credential(home, ".codex", "auth.json")?;
+    if let Some(source) = source {
+        share_codex_home(&source, home, helper.is_some()).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// Retire the hook configuration without touching Codex's session history.
@@ -233,6 +244,303 @@ pub fn clear_codex_hooks(home: &Path) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.to_string()),
+    }
+}
+
+/// The person's own Codex home: `$CODEX_HOME` when set, else `~/.codex`.
+fn user_codex_home() -> Option<PathBuf> {
+    let user_home = tokenstat_paths::home_dir()?;
+    let source = credential_source(
+        &user_home,
+        ".codex",
+        "auth.json",
+        std::env::var_os("CODEX_HOME").map(PathBuf::from).as_deref(),
+    );
+    source.parent().map(Path::to_path_buf)
+}
+
+/// Personal files a chat's Codex reads from the person's own home, linked
+/// rather than copied so an edit there reaches the next turn.
+const SHARED_CODEX_FILES: &[&str] = &["AGENTS.md"];
+
+/// Directories whose entries are linked one by one. Entries the private home
+/// already holds as real files are left alone, which covers what Codex
+/// installs into every home it runs in (`skills/.system`).
+const SHARED_CODEX_ENTRIES: &[&str] = &["skills", "rules"];
+
+/// Caches Codex rewrites on its own schedule. A copy, never a link: Codex
+/// replaces the file when it refreshes, which would turn a link back into a
+/// private file that then goes stale.
+const SHARED_CODEX_CACHES: &[&str] = &["models_cache.json"];
+
+/// The first line of a `config.toml` tokenstat wrote, so a file Codex or the
+/// person put there is never mistaken for one we may remove.
+const CHAT_CONFIG_MARKER: &str = "# Written by tokenstat from your Codex config.toml before every chat turn. Edits here are replaced.";
+
+/// Bring a chat's private Codex home up to date with the person's own.
+///
+/// `CODEX_HOME` relocates everything Codex keeps, not just hooks, and a home
+/// that only links the sign-in forks the rest on its first turn: the model
+/// list, instructions, skills and configuration then stay as they were the
+/// day the chat started. This runs before every turn so a Codex update or an
+/// edit to `~/.codex` reaches existing chats too.
+///
+/// What stays private is what makes the home private: `hooks.json`,
+/// `sessions/` (resume history) and Codex's own state databases.
+///
+/// Optional files are shared best effort. Preparing the gated configuration
+/// must succeed before the turn starts.
+fn share_codex_home(source: &Path, home: &Path, gated: bool) -> std::io::Result<()> {
+    for name in SHARED_CODEX_FILES {
+        share_file(&source.join(name), &home.join(name));
+    }
+    for name in SHARED_CODEX_ENTRIES {
+        share_entries(&source.join(name), &home.join(name));
+    }
+    for name in SHARED_CODEX_CACHES {
+        refresh_cache(&source.join(name), &home.join(name));
+    }
+    write_chat_config(
+        &source.join("config.toml"),
+        &home.join("config.toml"),
+        gated,
+    )
+}
+
+fn paths_match(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+}
+
+/// Link one file, or retire our link once the person removed the original.
+fn share_file(source: &Path, target: &Path) {
+    if source.is_file() {
+        let _ = link_path(source, target);
+    } else if std::fs::read_link(target).is_ok_and(|path| path == source) {
+        let _ = remove_shared_link(source, target);
+    }
+}
+
+/// Link each entry of `source` into `target`, and drop links of ours whose
+/// original is gone. A real entry already in `target` is never replaced.
+fn share_entries(source: &Path, target: &Path) {
+    if is_link(target) {
+        return;
+    }
+    match std::fs::read_dir(source) {
+        Ok(entries) => {
+            if std::fs::create_dir_all(target).is_err() {
+                return;
+            }
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if !name.to_string_lossy().starts_with('.') {
+                    let _ = link_path(&entry.path(), &target.join(name));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return,
+    }
+    let Ok(private) = std::fs::read_dir(target) else {
+        return;
+    };
+    for entry in private.flatten() {
+        let link = entry.path();
+        let original = source.join(entry.file_name());
+        if std::fs::read_link(&link).is_ok_and(|path| path == original)
+            && std::fs::metadata(&original)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            let _ = remove_shared_link(&original, &link);
+        }
+    }
+}
+
+fn remove_shared_link(source: &Path, target: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        if source.is_dir()
+            || std::fs::symlink_metadata(target)?
+                .file_type()
+                .is_symlink_dir()
+        {
+            return std::fs::remove_dir(target);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = source;
+    std::fs::remove_file(target)
+}
+
+/// A personal file that already exists in this home belongs to that home.
+fn link_path(source: &Path, target: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(target).is_ok() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, target)
+    }
+    #[cfg(windows)]
+    {
+        if source.is_dir() {
+            std::os::windows::fs::symlink_dir(source, target)
+        } else {
+            std::os::windows::fs::symlink_file(source, target)
+        }
+    }
+}
+
+/// Copy the person's cache over the chat's when theirs is newer. A chat whose
+/// own Codex refreshed more recently keeps its copy.
+fn refresh_cache(source: &Path, target: &Path) {
+    let modified = |path: &Path| {
+        std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+    };
+    let Some(theirs) = modified(source) else {
+        return;
+    };
+    if modified(target).is_some_and(|ours| ours >= theirs) && !is_link(target) {
+        return;
+    }
+    let Ok(bytes) = std::fs::read(source) else {
+        return;
+    };
+    let _ = write_replacing(target, &bytes);
+}
+
+/// Write through a sibling temporary file so Codex never reads half a file.
+fn write_replacing(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let parent = target.parent().ok_or(std::io::ErrorKind::InvalidInput)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(bytes)?;
+    temporary
+        .persist(target)
+        .map(|_| ())
+        .map_err(|error| error.error)
+}
+
+/// Publish a managed configuration atomically. An unmanaged file is retained
+/// for ungated turns and blocks a gated turn because it could switch hooks off.
+fn write_chat_config(source: &Path, target: &Path, gated: bool) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(target) {
+        Ok(metadata) => {
+            let managed = metadata.is_file()
+                && std::fs::read_to_string(target)
+                    .is_ok_and(|text| text.starts_with(CHAT_CONFIG_MARKER));
+            if !managed {
+                return if gated {
+                    Err(std::io::Error::other(
+                        "unmanaged config.toml in the private Codex home",
+                    ))
+                } else {
+                    Ok(())
+                };
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let generated = std::fs::read_to_string(source)
+        .ok()
+        .and_then(|text| chat_codex_config(&text, gated));
+    if let Some(text) = generated.or_else(|| {
+        gated.then(|| chat_codex_config("", true).expect("empty Codex config is valid"))
+    }) {
+        write_replacing(target, text.as_bytes())?;
+    } else if let Err(error) = std::fs::remove_file(target)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Keys removed from the person's config before a chat turn reads it.
+///
+/// - `hooks`: their hook trust records name their own `hooks.json`, and
+///   inline hooks would run beside the gate under its trust bypass.
+/// - `projects`: project trust would load a repository's own `.codex` layer,
+///   hooks included, under that same bypass.
+/// - `plugins`, `marketplaces`: Codex installs enabled plugins into the home
+///   it runs in, which would be a full copy per chat.
+/// - `notify`: a script that expects to hear about the person's own turns.
+/// - `approval_policy`, `sandbox_mode`: the chat's autonomy sets these on the
+///   command line, and a config value must not compete with it.
+const STRIPPED_CODEX_KEYS: &[&str] = &[
+    "hooks",
+    "projects",
+    "plugins",
+    "marketplaces",
+    "notify",
+    "approval_policy",
+    "sandbox_mode",
+];
+
+/// Derive a chat's `config.toml` from the person's. `None` when theirs does
+/// not parse, which Codex itself would refuse too.
+pub(crate) fn chat_codex_config(text: &str, gated: bool) -> Option<String> {
+    let mut document = text.parse::<toml_edit::DocumentMut>().ok()?;
+    scrub_codex_table(document.as_table_mut(), gated);
+    if let Some(profiles) = document
+        .get_mut("profiles")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    {
+        for (_, profile) in profiles.iter_mut() {
+            if let Some(profile) = profile.as_table_like_mut() {
+                scrub_codex_table(profile, gated);
+            }
+        }
+    }
+    if gated {
+        // On by default today. Saying so keeps the gate from depending on a
+        // default a later Codex might change.
+        match document
+            .get_mut("features")
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            Some(features) => {
+                features.insert("hooks", toml_edit::value(true));
+            }
+            None => {
+                let mut features = toml_edit::Table::new();
+                features.insert("hooks", toml_edit::value(true));
+                document.insert("features", toml_edit::Item::Table(features));
+            }
+        }
+    }
+    Some(format!("{CHAT_CONFIG_MARKER}\n{document}"))
+}
+
+fn scrub_codex_table(table: &mut dyn toml_edit::TableLike, gated: bool) {
+    for key in STRIPPED_CODEX_KEYS {
+        table.remove(key);
+    }
+    if !gated {
+        return;
+    }
+    // A gated turn with hooks switched off runs every tool unasked.
+    if let Some(features) = table
+        .get_mut("features")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    {
+        features.remove("codex_hooks");
+        if features.contains_key("hooks") {
+            features.insert("hooks", toml_edit::value(true));
+        }
     }
 }
 
@@ -969,6 +1277,184 @@ mod tests {
         assert!(!home.join("hooks.json").exists());
         assert_eq!(std::fs::read(&rollout).unwrap(), b"session history");
         clear_codex_hooks(&home).unwrap();
+    }
+
+    #[test]
+    fn chat_config_keeps_the_persons_choices_and_drops_what_their_home_owns() {
+        let text = r#"model = "gpt-6.2-sol"
+notify = ["/bin/echo"]
+approval_policy = "untrusted"
+sandbox_mode = "danger-full-access"
+
+[projects."/repo"]
+trust_level = "trusted"
+
+[hooks.state."/home/.codex/hooks.json:pre_tool_use:0:0"]
+enabled = true
+
+[plugins."browser@bundled"]
+enabled = true
+
+[features]
+codex_hooks = false
+hooks = false
+js_repl = false
+
+[profiles.quiet]
+approval_policy = "never"
+features = { hooks = false }
+
+[mcp_servers.repl]
+command = "node"
+"#;
+        let gated = chat_codex_config(text, true).unwrap();
+        assert!(gated.starts_with(CHAT_CONFIG_MARKER), "{gated}");
+        let document = gated.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(document["model"].as_str(), Some("gpt-6.2-sol"));
+        assert_eq!(
+            document["mcp_servers"]["repl"]["command"].as_str(),
+            Some("node")
+        );
+        for key in STRIPPED_CODEX_KEYS {
+            assert!(document.get(key).is_none(), "{key} survived");
+        }
+        assert_eq!(document["features"]["hooks"].as_bool(), Some(true));
+        assert!(document["features"].get("codex_hooks").is_none());
+        assert_eq!(document["features"]["js_repl"].as_bool(), Some(false));
+        let quiet = &document["profiles"]["quiet"];
+        assert!(quiet.get("approval_policy").is_none());
+        assert_eq!(quiet["features"]["hooks"].as_bool(), Some(true));
+
+        let plain = chat_codex_config("model = \"m\"\n", false).unwrap();
+        assert!(!plain.contains("features"), "{plain}");
+        let forced = chat_codex_config("model = \"m\"\n", true).unwrap();
+        let forced = forced.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(forced["features"]["hooks"].as_bool(), Some(true));
+        assert!(chat_codex_config("features = \"x\"\n", true).is_some());
+        assert!(chat_codex_config("not toml = = =", true).is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_chat_home_follows_the_persons_codex_home_on_every_turn() {
+        use std::time::{Duration, SystemTime};
+
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("codex");
+        let home = root.path().join("chat").join("codex-hook");
+        std::fs::create_dir_all(source.join("skills/mine")).unwrap();
+        std::fs::create_dir_all(source.join("skills/.system")).unwrap();
+        std::fs::create_dir_all(source.join("rules")).unwrap();
+        std::fs::write(source.join("rules/default.rules"), b"rule").unwrap();
+        std::fs::write(source.join("AGENTS.md"), b"be brief").unwrap();
+        std::fs::write(source.join("config.toml"), b"model = \"m\"\n").unwrap();
+        std::fs::write(source.join("models_cache.json"), b"new").unwrap();
+        // What Codex installs into every home it runs in stays private.
+        std::fs::create_dir_all(home.join("skills/.system/own")).unwrap();
+        std::fs::write(home.join("models_cache.json"), b"old").unwrap();
+        let past = SystemTime::now() - Duration::from_secs(3600);
+        std::fs::File::options()
+            .write(true)
+            .open(home.join("models_cache.json"))
+            .unwrap()
+            .set_modified(past)
+            .unwrap();
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::write(home.join("sessions/rollout.jsonl"), b"history").unwrap();
+
+        share_codex_home(&source, &home, true).unwrap();
+        assert_eq!(
+            std::fs::read(home.join("models_cache.json")).unwrap(),
+            b"new"
+        );
+        assert!(!is_link(&home.join("models_cache.json")));
+        assert_eq!(
+            std::fs::read_link(home.join("AGENTS.md")).unwrap(),
+            source.join("AGENTS.md")
+        );
+        assert_eq!(
+            std::fs::read_link(home.join("skills/mine")).unwrap(),
+            source.join("skills/mine")
+        );
+        assert!(home.join("skills/.system/own").is_dir());
+        assert_eq!(
+            std::fs::read(home.join("rules/default.rules")).unwrap(),
+            b"rule"
+        );
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(config.contains("model = \"m\""), "{config}");
+        assert!(config.contains("hooks = true"), "{config}");
+
+        // A chat whose own Codex refreshed later keeps its copy.
+        std::fs::write(home.join("models_cache.json"), b"chat").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(source.join("models_cache.json"))
+            .unwrap()
+            .set_modified(past)
+            .unwrap();
+        share_codex_home(&source, &home, true).unwrap();
+        assert_eq!(
+            std::fs::read(home.join("models_cache.json")).unwrap(),
+            b"chat"
+        );
+
+        // Removing the originals retires our links and our config, nothing else.
+        std::fs::remove_dir_all(source.join("skills")).unwrap();
+        std::fs::remove_dir_all(source.join("rules")).unwrap();
+        std::fs::remove_file(source.join("AGENTS.md")).unwrap();
+        std::fs::remove_file(source.join("config.toml")).unwrap();
+        share_codex_home(&source, &home, true).unwrap();
+        assert!(std::fs::symlink_metadata(home.join("skills/mine")).is_err());
+        assert!(std::fs::symlink_metadata(home.join("rules/default.rules")).is_err());
+        assert!(std::fs::symlink_metadata(home.join("AGENTS.md")).is_err());
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(config.contains("hooks = true"));
+        assert!(!config.contains("model ="));
+        share_codex_home(&source, &home, false).unwrap();
+        assert!(!home.join("config.toml").exists());
+        assert!(home.join("skills/.system/own").is_dir());
+        assert_eq!(
+            std::fs::read(home.join("sessions/rollout.jsonl")).unwrap(),
+            b"history"
+        );
+
+        // A config.toml tokenstat did not write is never removed.
+        std::fs::write(home.join("config.toml"), b"model = \"theirs\"\n").unwrap();
+        assert!(share_codex_home(&source, &home, true).is_err());
+        share_codex_home(&source, &home, false).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.join("config.toml")).unwrap(),
+            "model = \"theirs\"\n"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn sharing_leaves_private_files_and_symlink_destinations_alone() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("personal");
+        let home = root.path().join("private");
+        let unrelated = root.path().join("unrelated");
+        std::fs::create_dir_all(source.join("rules")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&unrelated).unwrap();
+        std::fs::write(source.join("AGENTS.md"), b"personal").unwrap();
+        std::fs::write(home.join("AGENTS.md"), b"private").unwrap();
+        std::fs::write(source.join("rules/new.rules"), b"new").unwrap();
+        symlink(&unrelated, home.join("rules")).unwrap();
+        symlink(
+            unrelated.join("scratch"),
+            home.join("config.toml.tokenstat-tmp"),
+        )
+        .unwrap();
+
+        share_codex_home(&source, &home, true).unwrap();
+
+        assert_eq!(std::fs::read(home.join("AGENTS.md")).unwrap(), b"private");
+        assert!(std::fs::read_dir(&unrelated).unwrap().next().is_none());
     }
 
     #[test]

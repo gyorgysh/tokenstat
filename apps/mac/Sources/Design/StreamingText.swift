@@ -29,6 +29,14 @@ struct StreamingWordAttribute: TextAttribute {
     }
 }
 
+extension EnvironmentValues {
+    /// The reader has left the latest turn. The word fade then stops: it
+    /// redraws the whole growing block on the CPU every frame, and a live
+    /// reply off screen was still paying for it, sixty times a second,
+    /// underneath a reader trying to scroll back through the conversation.
+    @Entry var streamingWordsPaused = false
+}
+
 /// Opacity changes only in drawing: text, layout and stored messages stay intact.
 struct StreamingText: View {
     let text: Text
@@ -37,10 +45,11 @@ struct StreamingText: View {
     let revision: Int
     @AppStorage("chat.smoothStreaming") private var enabled = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.streamingWordsPaused) private var paused
 
     var body: some View {
         // Settled chunks do not need a timeline or a custom text renderer.
-        if #available(macOS 15, iOS 18, *), live && enabled && !reduceMotion && !arrivals.isEmpty {
+        if #available(macOS 15, iOS 18, *), live && enabled && !reduceMotion && !paused && !arrivals.isEmpty {
             StreamingWordText(text: text, arrivals: arrivals, revision: revision)
         } else {
             text

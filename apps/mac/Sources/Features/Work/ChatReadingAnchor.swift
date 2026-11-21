@@ -15,7 +15,10 @@ enum ChatReadingAnchor {
             guard let position = UInt64(eventID.dropFirst(prefix.count)),
                   events.contains(where: { $0.seq == position && $0.event?.kind == kind }) else { return nil }
             return items.first { row in
-                guard row.id.hasPrefix(prefix), let start = UInt64(row.id.dropFirst(prefix.count)),
+                // `firstSequence` first: a row can keep an older id after a
+                // page brought its earlier deltas (see `ChatRowContinuity`).
+                guard row.id.hasPrefix(prefix),
+                      let start = row.firstSequence ?? UInt64(row.id.dropFirst(prefix.count)),
                       let end = row.lastSequence else { return false }
                 return start <= position && position <= end
             }?.id

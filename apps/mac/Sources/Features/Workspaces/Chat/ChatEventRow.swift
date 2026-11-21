@@ -580,6 +580,10 @@ struct ChatWorkingIndicator: View {
     /// What a running tool is doing, in words. Empty leaves the mood's own word.
     var step: String? = nil
     var startedAt: Date? = nil
+    /// Still, because the reader is somewhere else in the conversation. The
+    /// character and the light across its words redraw every frame, and
+    /// off screen that was work stolen from the scroll the reader is doing.
+    var still = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -605,13 +609,14 @@ struct ChatWorkingIndicator: View {
                 .accessibilityHidden(true)
             }
             .frame(width: 30, height: 30)
+            .environment(\.personaMotionAllowed, !still)
             // Face swaps must not animate or the seat height jitters. Phrase
             // morph keeps its own withAnimation below.
             .transaction { $0.animation = nil }
             // Just the words beside the character, no chrome. The light that
             // sweeps across them is what says the turn is still going.
             HStack(spacing: 6) {
-                SeatLivePhrase(mood: mood, step: step, animate: !reduceMotion)
+                SeatLivePhrase(mood: mood, step: step, animate: !reduceMotion && !still)
                     .layoutPriority(1)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 if let startedAt {
