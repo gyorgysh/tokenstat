@@ -219,16 +219,28 @@ struct ChatView: View {
             let count: Int
             let first: String?
             let last: String?
+            let whole: Bool
         }
 
         private var key: Key?
         private var start = 0
 
-        func split(_ rows: [ChatDisplayItem], generation: UInt64)
+        /// `streaming` keeps the usual tail while a turn is written. `docked`
+        /// is the reader on the
+        /// latest turn, the only place a change of layout cannot move what
+        /// somebody is reading. A slice measured whole stays whole until a
+        /// turn streams or its rows change, wherever the reader goes.
+        func split(_ rows: [ChatDisplayItem], generation: UInt64, streaming: Bool, docked: Bool)
             -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
-            let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id)
+            let sameRows = key.map {
+                $0.generation == generation && $0.count == rows.count && $0.first == rows.first?.id
+                    && $0.last == rows.last?.id
+            } ?? false
+            let whole = !streaming && (docked || (sameRows && key?.whole == true))
+            let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id,
+                           whole: whole)
             if next != key {
-                start = TranscriptSlice.measuredTailStart(rows)
+                start = TranscriptSlice.measuredTailStart(rows, whole: whole)
                 key = next
             }
             return TranscriptSlice.split(rows, measuredFrom: start)
@@ -707,7 +719,8 @@ struct ChatView: View {
         // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
-        let split = measuredTail.split(rows, generation: model.selectionGeneration)
+        let split = measuredTail.split(rows, generation: model.selectionGeneration,
+                                      streaming: model.busy, docked: follow.pinned || follow.settling)
         let liveRowID = model.busy && sliceOffset == 0 && !model.isShowingCachedTranscript ? rows.last?.id : nil
         let presentation = ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)
         #if os(macOS)
@@ -749,11 +762,26 @@ struct ChatView: View {
                                 .transcriptRowMount(in: rowMounts, id: item.id, window: window)
                         }
                     }
-                    // See `TranscriptSlice.measuredTail`.
-                    ForEach(split.measured) { item in
+                    // See `TranscriptSlice.measuredTail`. The rows above the
+                    // newest sit in a stack of their own: a stream changes the
+                    // newest row's height on every revision, and a settled
+                    // stack keeps its size instead of every sibling being
+                    // sized again. Scrolling during a stream measured about
+                    // half the main-thread time this way.
+                    if split.measured.count > 1 {
+                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                            ForEach(split.measured.dropLast()) { item in
+                                transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
+                                    .allowsHitTesting(!follow.scrolling)
+                                    .transcriptRowMount(in: rowMounts, id: item.id, window: window)
+                            }
+                        }
+                    }
+                    if let item = split.measured.last {
                         transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
                             .allowsHitTesting(!follow.scrolling)
                             .transcriptRowMount(in: rowMounts, id: item.id, window: window)
+                            .id(item.id)
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript, let chat = model.selected, chat.routing?.limit != nil {
@@ -801,6 +829,8 @@ struct ChatView: View {
                 guard isActive, presentation.reading == model.readingIdentity else { return }
                 #if DEBUG
                 TranscriptProbe.shared.noteMetrics()
+                TranscriptProbe.shared.noteOffset(top: metrics.distanceFromTop, bottom: metrics.distanceFromBottom,
+                                                  content: metrics.contentHeight)
                 TranscriptProbe.shared.pinned = follow.pinned
                 TranscriptProbe.shared.scrolling = follow.scrolling
                 TranscriptProbe.shared.built = rows.count
@@ -943,6 +973,9 @@ struct ChatView: View {
                 if await restoreReadingPlace(proxy) != .unavailable { return }
                 guard !Task.isCancelled, settleTaskID == ticket,
                       presentation.reading == model.readingIdentity else { return }
+                #if os(macOS)
+                await warmLazyEstimates(proxy, ticket: ticket, presentation: presentation)
+                #endif
                 var previousBottomLayout: UInt64?
                 var correctionPins = 0
                 for _ in 0..<Self.settleFrames {
@@ -982,6 +1015,38 @@ struct ChatView: View {
         #endif
         }
     }
+
+    #if os(macOS)
+    /// Let the lazy stack settle its estimates before the reader scrolls.
+    ///
+    /// Rows above the measured tail carry estimated heights, and each change
+    /// of offset makes the stack measure a few more of them. On a reader's
+    /// first scroll after opening, that is the content above the viewport
+    /// growing or shrinking by a screen in the middle of their gesture. Move
+    /// the viewport up and back a few times while the opening cover is still
+    /// up, so most of them settle here. The settle loop after this puts the
+    /// end back under the viewport before anything is revealed. Measured on
+    /// a long chat this halved the first scroll's swing; a short slice
+    /// avoids it entirely by being measured whole.
+    private func warmLazyEstimates(_ proxy: ScrollViewProxy, ticket: UUID,
+                                   presentation: ChatPresentationIdentity) async {
+        // A short slice is measured whole and has no estimates to settle.
+        guard visibleItems.count > TranscriptSlice.measuredWhole,
+              settledSelection != Self.selectionKey(presentation),
+              let move = window.restoreMeasured else { return }
+        for _ in 0..<Self.warmMoves {
+            guard !Task.isCancelled, settleTaskID == ticket,
+                  presentation.reading == model.readingIdentity, !follow.abandoned else { return }
+            guard move(-Self.warmDistance) else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            _ = move(Self.warmDistance)
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    private static let warmMoves = 6
+    private static let warmDistance: CGFloat = 60
+    #endif
 
     private static func selectionKey(_ presentation: ChatPresentationIdentity) -> ChatReadingIdentity {
         ChatReadingIdentity(reference: presentation.reading.reference, generation: presentation.reading.generation)

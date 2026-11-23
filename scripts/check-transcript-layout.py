@@ -375,6 +375,8 @@ assert(TranscriptSlice.split((0..<100).map { ChatDisplayItem(id: "\($0)") }).mea
 assert(TranscriptSlice.split((0..<10).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 1200) }).measured.count == 2, "tall rows that cover the end need no more")
 assert(TranscriptSlice.split((0..<10).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 5000) }).measured.count == 2, "the tail never drops below its minimum")
 assert(TranscriptSlice.split([ChatDisplayItem(id: "only")]).measured.count == 1, "a one-row list is all tail")
+assert(TranscriptSlice.measuredTailStart((0..<10).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 1200) }, whole: true) == 0, "a short settled slice is measured whole")
+assert(TranscriptSlice.measuredTailStart((0..<80).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 1200) }, whole: true) == 78, "a long slice keeps its lazy head")
 assert(TranscriptSlice.split([]).measured.isEmpty, "an empty list has no tail")
 assert(TranscriptSlice.range(count: 260, olderOffset: 0) == 60..<260, "glued to the end is a suffix")
 assert(TranscriptSlice.range(count: 260, olderOffset: 60) == 0..<200, "full slide reaches the start")

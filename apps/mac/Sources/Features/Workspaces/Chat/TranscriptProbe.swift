@@ -56,6 +56,9 @@ final class TranscriptProbe {
         install()
         recordedTurns.removeAll(keepingCapacity: true)
         recordedOpens.removeAll(keepingCapacity: true)
+        recordedOffsets.removeAll(keepingCapacity: true)
+        recordedRows.removeAll(keepingCapacity: true)
+        rowHeights.removeAll(keepingCapacity: true)
         recordingStarted = ProcessInfo.processInfo.systemUptime
         cpuStarted = Self.threadCPUMilliseconds()
         resizeCount = 0
@@ -63,6 +66,26 @@ final class TranscriptProbe {
     }
 
     func noteResize() { if recording { resizeCount += 1 } }
+
+    /// Every geometry sample while recording: time, offset from the top,
+    /// distance from the end, content height. A pull back against a scroll
+    /// shows as the offset reversing.
+    private var recordedOffsets: [[Double]] = []
+    private var rowHeights: [String: Double] = [:]
+    private var recordedRows: [String] = []
+    /// A row whose height changed while recording, by how much.
+    func noteRow(_ id: String, height: Double) {
+        guard recording else { return }
+        let before = rowHeights[id]
+        rowHeights[id] = height
+        guard let before, abs(before - height) > 0.5, recordedRows.count < 5000 else { return }
+        let at = (ProcessInfo.processInfo.systemUptime - recordingStarted) * 1000
+        recordedRows.append(String(format: "%.1f %@ %.1f -> %.1f", at, id, before, height))
+    }
+    func noteOffset(top: Double, bottom: Double, content: Double) {
+        guard recording, recordedOffsets.count < 20_000 else { return }
+        recordedOffsets.append([(ProcessInfo.processInfo.systemUptime - recordingStarted) * 1000, top, bottom, content])
+    }
 
     func noteOpen(milliseconds: Double, preview: Bool, phase: String) {
         guard recording, recordedOpens.count < 200 else { return }
@@ -95,6 +118,8 @@ final class TranscriptProbe {
             "over_33_3_ms": sorted.filter { $0 > 33.3 }.count,
             "over_100_ms": sorted.filter { $0 > 100 }.count,
             "chat_opens": recordedOpens,
+            "offsets": recordedOffsets,
+            "rows": recordedRows,
         ]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-ui-performance.json"), options: .atomic)

@@ -165,9 +165,20 @@ enum TranscriptSlice {
     static let measuredTail = 40
     static let measuredMinimum = 2
     static let measuredCover = 2400.0
+    /// A slice this short is measured whole while nothing streams. A few
+    /// rows of long replies are tens of thousands of points the lazy stack
+    /// would only estimate, and the reader's first scroll is what makes it
+    /// measure them: the content above the viewport grows or shrinks by a
+    /// screen and the text under their hand jumps. Measuring a handful of
+    /// settled rows once costs less than that. A streaming turn keeps the
+    /// usual tail: switching rebuilds the rows it moves, and a reader
+    /// following a reply is not scrolling through estimates.
+    static let measuredWhole = 64
 
     /// The built rows, split into the lazy head and the measured tail.
-    static func measuredTailStart(_ rows: [ChatDisplayItem]) -> Int {
+    /// `whole` allows a short slice to be measured entirely.
+    static func measuredTailStart(_ rows: [ChatDisplayItem], whole: Bool = false) -> Int {
+        if whole, rows.count <= measuredWhole { return 0 }
         var count = 0
         var covered = 0.0
         for row in rows.reversed() {
@@ -929,6 +940,9 @@ private struct TranscriptRowMount: ViewModifier {
             content
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptFollow.spaceName)) } action: { frame in
                     row.frame = frame
+                    #if DEBUG
+                    TranscriptProbe.shared.noteRow(id, height: frame.height)
+                    #endif
                     if mounts.contains(row) { window.report(id, mount: row, frame: frame) }
                 }
                 .onAppear {
