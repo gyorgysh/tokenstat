@@ -229,14 +229,15 @@ struct ChatView: View {
         /// is the reader on the
         /// latest turn, the only place a change of layout cannot move what
         /// somebody is reading. A slice measured whole stays whole until a
-        /// turn streams or its rows change, wherever the reader goes.
+        /// turn streams, wherever the reader goes. Past `measuredWhole` rows
+        /// the usual tail applies either way.
         func split(_ rows: [ChatDisplayItem], generation: UInt64, streaming: Bool, docked: Bool)
             -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
-            let sameRows = key.map {
-                $0.generation == generation && $0.count == rows.count && $0.first == rows.first?.id
-                    && $0.last == rows.last?.id
-            } ?? false
-            let whole = !streaming && (docked || (sameRows && key?.whole == true))
+            // Rows arriving above the reader (an earlier page) keep a whole
+            // slice whole while it stays short: moving every row into the
+            // lazy stack under the page's hold is what lost the held row.
+            let sameReading = key?.generation == generation
+            let whole = !streaming && (docked || (sameReading && key?.whole == true))
             let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id,
                            whole: whole)
             if next != key {
@@ -803,9 +804,9 @@ struct ChatView: View {
                 .allowsHitTesting(!model.isShowingCachedTranscript)
                 .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
                 .onChange(of: follow.showJump || sliceOffset > 0, initial: true) { _, away in
-                    LiveMarkdownReader.setAway(away)
+                    LiveMarkdownReader.setAway(away, for: follow)
                 }
-                .onDisappear { LiveMarkdownReader.setAway(false) }
+                .onDisappear { LiveMarkdownReader.remove(follow) }
                 .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                 .padding(.top, verticalPadding)
                 .padding(.bottom, sliceOffset == 0 ? 0 : verticalPadding)

@@ -42,9 +42,10 @@ struct ClientReviewSheet: View {
                 .padding(.horizontal, Theme.Space.l)
                 VStack(spacing: Theme.Space.s) {
                     Button {
+                        guard let url = ClientReviewPrompt.writeReviewURL else { return }
                         ClientReviewPrompt.stop()
                         dismiss()
-                        openURL(ClientReviewPrompt.writeReviewURL)
+                        openURL(url)
                     } label: {
                         ActionIcon.appStore.label(L10n.text("apple.review.rate")).frame(maxWidth: .infinity)
                     }

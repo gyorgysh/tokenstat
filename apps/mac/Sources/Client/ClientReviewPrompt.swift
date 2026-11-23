@@ -47,7 +47,6 @@ enum ClientReviewPrompt {
 
     /// The App Store page for this app, opened on its review form.
     static let writeReviewURL = URL(string: "https://apps.apple.com/app/id6800501432?action=write-review")
-        ?? URL(fileURLWithPath: "/")
 
     /// The person has answered: no automatic ask on this device again.
     static func stop(_ defaults: UserDefaults = .standard) {

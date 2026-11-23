@@ -13,8 +13,15 @@ struct ChatRecentMessages<Row> {
     /// project pushed the first one's chats out, and coming back reloaded.
     static var perFolderLimit: Int { 10 }
     /// Across every project, so a long session cannot grow without bound.
-    /// Each conversation is capped by `byteLimit`, so this is about 60 MB.
-    static var conversationLimit: Int { 60 }
+    /// Each conversation is capped by `byteLimit`, so this is about 60 MB on
+    /// a Mac and 24 MB on a phone or tablet.
+    static var conversationLimit: Int {
+        #if os(iOS)
+        24
+        #else
+        60
+        #endif
+    }
     /// Raw rows. Three slices fold to a full transcript slice, so the preview matches the live page.
     static var messageLimit: Int { 600 }
     static var byteLimit: Int { 1024 * 1024 }

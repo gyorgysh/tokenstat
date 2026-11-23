@@ -19,8 +19,13 @@ enum ChatPaging {
     /// its own, lower ceiling.
     static let openPageEvents = 3000
     /// Older pages can use the full history capacity without enlarging the
-    /// initial read or the live tail.
+    /// initial read or the live tail. A phone or tablet takes half: it often
+    /// reads over the relay, and decodes and folds the page itself.
+    #if os(iOS)
+    static let pageEvents = hostHistoryPageEventsMax / 2
+    #else
     static let pageEvents = hostHistoryPageEventsMax
+    #endif
     /// The same page a chat opens on, so a warmed preview shows the same rows.
     static let previewPageEvents = openPageEvents
     /// Host ceilings for the newest page and for an advancing history cursor.

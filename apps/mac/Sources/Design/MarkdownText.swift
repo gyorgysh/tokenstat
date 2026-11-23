@@ -383,7 +383,7 @@ private struct MessageSegmentBuilder {
     private mutating func flush() {
         guard !chain.isEmpty else { return }
         out.append(.text(MarkdownLinks.joined(chain[...]), hasLinks: chainHasLinks, wordCount: chainWordCount,
-                         continues: chainContinues))
+                         continues: chainContinues, length: chainLength))
         chain.removeAll(keepingCapacity: true)
         chainLength = 0
         chainLineBreaks = 0
@@ -709,7 +709,7 @@ private struct InlineMarkdown: View {
 /// `Text` never compares equal to a rebuilt one, so each token resolved and
 /// redrew every chain of a 400-line reply. Only the last chain is still
 /// growing: the builder resumes after every finished block, so an earlier
-/// chain with the same word range is the same text. Those compare equal here
+/// chain with the same word range and length is the same text. Those compare equal here
 /// and SwiftUI leaves them alone.
 private struct SettledAwareText: View, Equatable {
     let text: Text
@@ -717,10 +717,14 @@ private struct SettledAwareText: View, Equatable {
     let arrivals: [Int: TimeInterval]
     let wordStart: Int
     let wordEnd: Int
+    /// Characters in the chain. An emphasis closed in a later chunk changes
+    /// an earlier chunk's text without changing its word count.
+    let length: Int
     let settled: Bool
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.settled && rhs.settled && lhs.wordStart == rhs.wordStart && lhs.wordEnd == rhs.wordEnd
+            && lhs.length == rhs.length
             && lhs.arrivals.isEmpty && rhs.arrivals.isEmpty
     }
 
@@ -733,15 +737,30 @@ private struct SettledAwareText: View, Equatable {
 }
 
 private enum MessageSegment {
-    case text(Text, hasLinks: Bool, wordCount: Int, continues: Bool = false)
+    case text(Text, hasLinks: Bool, wordCount: Int, continues: Bool = false, length: Int = 0)
     case block(MarkdownBlock)
 }
 
 /// Whether the person reading has scrolled away from the streaming reply.
 ///
 /// Slows the live reply's refresh while true. See `LiveMarkdown.cadence`.
+///
+/// Each transcript reports for itself. The live reply slows down only when
+/// every transcript on screen is away, so a reply someone is following in
+/// one pane is not slowed by a reader scrolled back in another.
+@MainActor
 enum LiveMarkdownReader {
-    static func setAway(_ away: Bool) { LiveMarkdown.readerAway = away }
+    private static var away: [ObjectIdentifier: Bool] = [:]
+
+    static func setAway(_ isAway: Bool, for transcript: AnyObject) {
+        away[ObjectIdentifier(transcript)] = isAway
+        LiveMarkdown.readerAway = !away.isEmpty && away.values.allSatisfy { $0 }
+    }
+
+    static func remove(_ transcript: AnyObject) {
+        away[ObjectIdentifier(transcript)] = nil
+        LiveMarkdown.readerAway = !away.isEmpty && away.values.allSatisfy { $0 }
+    }
 }
 
 struct MessageMarkdown: View {
@@ -945,14 +964,14 @@ private struct MessageMarkdownContent: View {
         let segments = shownSegments
         let ranges = segments.reduce(into: (end: 0, starts: [Int]())) { result, segment in
             result.starts.append(result.end)
-            if case let .text(_, _, end, _) = segment { result.end = max(result.end, end) }
+            if case let .text(_, _, end, _, _) = segment { result.end = max(result.end, end) }
         }
         let arrivals = wordArrivals.update(source: source, count: ranges.end, now: ProcessInfo.processInfo.systemUptime, animate: smoothStreaming && !reduceStreamingMotion, identity: liveSlot)
         let activeWords = StreamingWordWindow(arrivals)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 switch segment {
-                case let .text(chain, hasLinks, wordEnd, continues):
+                case let .text(chain, hasLinks, wordEnd, continues, length):
                     let wordStart = ranges.starts[index]
                     let arriving = activeWords.words(in: wordStart..<wordEnd)
                     Group {
@@ -966,7 +985,7 @@ private struct MessageMarkdownContent: View {
                         } else {
                             SettledAwareText(
                                 text: chain, live: isLive, arrivals: arriving, wordStart: wordStart,
-                                wordEnd: wordEnd, settled: isLive && index < segments.count - 1
+                                wordEnd: wordEnd, length: length, settled: isLive && index < segments.count - 1
                             )
                             .equatable()
                         }
