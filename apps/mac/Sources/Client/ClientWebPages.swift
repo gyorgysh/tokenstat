@@ -17,6 +17,10 @@ enum ClientWebPages {
         withMobileFlag(url("\(host)/privacy"))
     }
 
+    static func contact(host: String = host) -> URL {
+        withMobileFlag(url("\(host)/contact"))
+    }
+
     static func terms(host: String = host) -> URL {
         withMobileFlag(url("\(host)/terms"))
     }

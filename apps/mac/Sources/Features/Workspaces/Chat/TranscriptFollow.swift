@@ -128,9 +128,9 @@ enum TranscriptFollow {
 /// conversation of any size became a stopped application. The slice stays
 /// this wide. Older built rows are reached by sliding it, not by widening it.
 enum TranscriptSlice {
-    static let length = 150
+    static let length = 200
     /// How far one "show earlier" tap slides toward the start.
-    static let step = 100
+    static let step = 120
 
     static func clampOffset(_ offset: Int, count: Int) -> Int {
         guard count > length else { return 0 }

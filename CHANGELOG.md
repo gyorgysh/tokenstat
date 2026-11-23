@@ -5,6 +5,18 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
+## [1.25.0]
+
+### Changed
+
+- Chats open with more history and load larger pages as you scroll back, so long conversations need fewer pauses to fill in. Update the computer to 1.25.0 for the larger pages from a phone or tablet.
+- On iPhone and iPad, Rate tokenstat in Legal opens a sheet where you can rate on the App Store, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
+
+### Fixed
+
+- Scrolling while a long reply streams is smoother. Finished parts of the reply are no longer redrawn on every new word, and the reply refreshes about once a second while you read elsewhere.
+- Long numbered lists no longer show a stray blank line partway through.
+
 ## [1.24.1]
 
 ### Fixed

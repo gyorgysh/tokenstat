@@ -133,6 +133,7 @@ final class TranscriptProbe {
     }
 
     func noteScroll(_ what: String) {
+        log.info("scroll \(what, privacy: .public) pinned=\(self.pinned, privacy: .public)")
         lastScroll = what
         lastScrollAt = ProcessInfo.processInfo.systemUptime
     }

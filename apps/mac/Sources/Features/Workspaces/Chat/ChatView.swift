@@ -667,6 +667,17 @@ struct ChatView: View {
             guard !Task.isCancelled else { return }
             await model.refillBackendsIfIncomplete()
         }
+        #if DEBUG && os(macOS)
+        // `key type:<text>` appends to the composer, one keystroke's worth of
+        // draft change each, so typing during a stream can be measured.
+        // `key clear-draft` empties it again.
+        .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
+            guard isActive, let command = note.object as? String else { return }
+            if command == "clear-draft" { model.draft = ""; return }
+            guard command.hasPrefix("type:") else { return }
+            model.draft += String(command.dropFirst(5)).replacingOccurrences(of: "\\n", with: "\n")
+        }
+        #endif
         .modifier(ChatFileTransferControls(model: model))
         .modifier(ChatCacheWarningAlert(model: model, isActive: isActive))
         .alert(L10n.text("apple.chatview.chat_unavailable.a45aae80"), isPresented: Binding(
@@ -763,6 +774,10 @@ struct ChatView: View {
                 }
                 .allowsHitTesting(!model.isShowingCachedTranscript)
                 .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
+                .onChange(of: follow.showJump || sliceOffset > 0, initial: true) { _, away in
+                    LiveMarkdownReader.setAway(away)
+                }
+                .onDisappear { LiveMarkdownReader.setAway(false) }
                 .frame(maxWidth: ReadingRoom.laneWidth, alignment: .leading)
                 .padding(.top, verticalPadding)
                 .padding(.bottom, sliceOffset == 0 ? 0 : verticalPadding)
@@ -1796,29 +1811,64 @@ private struct OpeningSkeleton: View {
 /// points move towards the start of the conversation.
 @MainActor
 enum DebugTranscriptWheel {
-    fileprivate static weak var reporter: TranscriptScrollBounds.Reporter?
+    /// Every transcript reports in. Retained panes keep hidden ones alive,
+    /// so the one a gesture goes to is the visible one, not the last laid out.
+    private static let reporters = NSHashTable<TranscriptScrollBounds.Reporter>.weakObjects()
+    fileprivate static var reporter: TranscriptScrollBounds.Reporter? {
+        get {
+            reporters.allObjects.first { view in
+                view.window?.isVisible == true && !view.isHiddenOrHasHiddenAncestor
+                    && (view.enclosingScrollView?.visibleRect.height ?? 0) > 0
+                    && (view.enclosingScrollView?.alphaValue ?? 0) > 0
+            }
+        }
+        set { if let newValue { reporters.add(newValue) } }
+    }
 
-    static func gesture(points: Int32, steps: Int) {
-        guard let scrollView = reporter?.enclosingScrollView else { return }
+    /// A trackpad gesture as the window receives it: finger phases, then a
+    /// momentum tail, delivered to the window so hit
+    /// testing and the scroll view's own handling all run the way they do
+    /// for a real swipe. `momentum` is how many decaying tail events follow.
+    static func gesture(points: Int32, steps: Int, momentum: Int = 0) {
+        guard let scrollView = reporter?.enclosingScrollView, let window = scrollView.window else { return }
+        // An event made here has no window, so AppKit reports its screen
+        // position as its position in the window it is sent to. Give it the
+        // window point, or hit testing lands wherever the window is not.
+        let local = scrollView.convert(NSPoint(x: scrollView.bounds.midX, y: scrollView.bounds.midY), to: nil)
+        let height = NSScreen.screens.first?.frame.height ?? 0
+        let location = CGPoint(x: local.x, y: height - local.y)
+        _ = window
         Task { @MainActor in
             for step in 0..<max(1, steps) {
-                if points != 0 { reporter?.noteWheel(towardEarlier: points > 0) }
-                let phase: Int64 = step == 0 ? 1 : 2
-                send(points, phase: phase, to: scrollView)
+                send(points, phase: step == 0 ? 1 : 2, momentum: 0, at: location)
                 try? await Task.sleep(for: .milliseconds(16))
             }
-            send(0, phase: 4, to: scrollView)
+            send(0, phase: 4, momentum: 0, at: location)
+            guard momentum > 0 else { return }
+            var value = Double(points)
+            for index in 0..<momentum {
+                value *= 0.92
+                let phase: Int64 = index == 0 ? 1 : (index == momentum - 1 ? 3 : 2)
+                send(Int32(value.rounded()), phase: 0, momentum: phase, at: location)
+                try? await Task.sleep(for: .milliseconds(16))
+            }
         }
     }
 
-    private static func send(_ points: Int32, phase: Int64, to scrollView: NSScrollView) {
+    private static func send(_ points: Int32, phase: Int64, momentum: Int64, at location: CGPoint) {
         guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
                                   wheel1: points, wheel2: 0, wheel3: 0) else { return }
+        event.location = location
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+        event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(points))
+        event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Int64(points) << 16)
         guard let nsEvent = NSEvent(cgEvent: event) else { return }
-        scrollView.scrollWheel(with: nsEvent)
+        // A local monitor only sees events the app dequeues, and a Debug
+        // hook runs in the background, so do what the monitor does first.
+        if points != 0 { reporter?.noteWheel(towardEarlier: points > 0) }
+        reporter?.window?.sendEvent(nsEvent)
     }
 }
 #endif

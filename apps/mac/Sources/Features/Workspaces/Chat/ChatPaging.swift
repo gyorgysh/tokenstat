@@ -14,16 +14,18 @@
 enum ChatPaging {
     /// How many records a conversation opens on. One latest page on ordinary
     /// open; what comes before is fetched a page at a time as somebody
-    /// scrolls back.
-    static let openPageEvents = 1500
+    /// scrolls back. A streamed reply is often a thousand records, so this
+    /// is a few turns of history rather than one. An older host caps it at
+    /// its own, lower ceiling.
+    static let openPageEvents = 3000
     /// Older pages can use the full history capacity without enlarging the
     /// initial read or the live tail.
     static let pageEvents = hostHistoryPageEventsMax
     /// The same page a chat opens on, so a warmed preview shows the same rows.
     static let previewPageEvents = openPageEvents
     /// Host ceilings for the newest page and for an advancing history cursor.
-    static let hostPageEventsMax = 2000
-    static let hostHistoryPageEventsMax = 3600
+    static let hostPageEventsMax = 4000
+    static let hostHistoryPageEventsMax = 8000
 
     /// An earlier page has to give the reader a usable, unspent cursor.
     static func hasEarlier(_ reported: Bool, cursor: String?, after previous: String? = nil) -> Bool {

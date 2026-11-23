@@ -34,10 +34,10 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/Tokenstat-Bridging-Header.h
-    MARKETING_VERSION: "1.24.1"
+    MARKETING_VERSION: "1.25.0"
     # App Store Connect consumes a build number on every upload, even for the
     # same marketing version. Its builds list can lag a successful upload.
-    CURRENT_PROJECT_VERSION: "245"
+    CURRENT_PROJECT_VERSION: "246"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

@@ -14,6 +14,10 @@ enum ClientReviewPrompt {
     private static let lastAskedKey = "review.lastAskedAt"
     private static let firstSeenKey = "review.firstSeenAt"
     private static let usesKey = "review.usesSinceAsk"
+    /// Set once the person rated, wrote to us, or said not to ask. The
+    /// automatic ask never comes back after that, and Settings still opens
+    /// the rating sheet by hand.
+    private static let stoppedKey = "review.never"
     static let interval: TimeInterval = 14 * 24 * 3600
     static let settle: TimeInterval = 7 * 24 * 3600
     static let usesNeeded = 5
@@ -31,6 +35,7 @@ enum ClientReviewPrompt {
 
     static func isDue(machines: Int, now: Date = Date(), _ defaults: UserDefaults = .standard) -> Bool {
         guard let firstSeen = defaults.object(forKey: firstSeenKey) as? Date,
+              !defaults.bool(forKey: stoppedKey),
               machines > 0,
               now.timeIntervalSince(firstSeen) >= settle,
               defaults.integer(forKey: usesKey) >= usesNeeded else { return false }
@@ -38,6 +43,19 @@ enum ClientReviewPrompt {
             return now.timeIntervalSince(last) >= interval
         }
         return true
+    }
+
+    /// The App Store page for this app, opened on its review form.
+    static let writeReviewURL = URL(string: "https://apps.apple.com/app/id6800501432?action=write-review")
+        ?? URL(fileURLWithPath: "/")
+
+    /// The person has answered: no automatic ask on this device again.
+    static func stop(_ defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: stoppedKey)
+    }
+
+    static func isStopped(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: stoppedKey)
     }
 
     static func markAsked(now: Date = Date(), _ defaults: UserDefaults = .standard) {

@@ -131,6 +131,7 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
     var events: [ChatTimelineEvent] = [] { didSet { eventsRevision &+= 1 } }
     var eventsRevision: UInt64 = 0, attachmentCacheGeneration: UInt64 = 0
     var attachmentDescriptorRevision: UInt64?, attachmentDescriptors: [ChatAttachment] = []; var descriptorScans = 0
+    var attachmentScan: (count: Int, first: UInt64?, last: UInt64?)?
     var attemptedResponseAttachments: Set<String> = [], loadingResponseAttachments: Set<String> = []
     var responseAttachmentData: [String: Data] = [:], responseAttachmentErrors: [String: String] = [:]
     var responseAttachmentFiles: [String: URL] = [:]

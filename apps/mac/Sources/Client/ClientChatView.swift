@@ -1971,6 +1971,10 @@ struct ClientChatThread: View {
                 .contentShape(Rectangle())
                 .allowsHitTesting(!model.isShowingCachedTranscript)
                 .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
+                .onChange(of: follow.showJump || sliceOffset > 0, initial: true) { _, away in
+                    LiveMarkdownReader.setAway(away)
+                }
+                .onDisappear { LiveMarkdownReader.setAway(false) }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.m)
                 .padding(.bottom, Theme.Space.l)

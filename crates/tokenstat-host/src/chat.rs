@@ -37,16 +37,16 @@ const LEGACY_EVENTS_CAP: u64 = 1024 * 1024;
 mod usage_cache;
 const PAGE_EVENTS: usize = 300;
 /// Screen opening and tail polling stay smaller than deliberate history reads.
-const PAGE_EVENTS_MAX: usize = 2_000;
+const PAGE_EVENTS_MAX: usize = 4_000;
 /// Mirrors ChatPaging.hostHistoryPageEventsMax in the Apple client.
-const HISTORY_PAGE_EVENTS_MAX: usize = 3_600;
+const HISTORY_PAGE_EVENTS_MAX: usize = 8_000;
 /// How much is read from disk at a time while walking backwards.
 const PAGE_CHUNK: u64 = 64 * 1024;
 /// The most one page may weigh, whatever its event count. A conversation full
 /// of long patches reaches this long before it reaches `PAGE_EVENTS_MAX`, so
 /// this moves with the client's page sizes: triple those and leave this, and
 /// dense pages stop where they always did.
-const PAGE_BYTES: u64 = 768 * 1024;
+const PAGE_BYTES: u64 = 2 * 1024 * 1024;
 /// The most that will be read to find a single record's beginning. A record
 /// longer than this is one nothing can display anyway, and the read stops
 /// rather than pulling the whole archive into memory looking for a newline.
@@ -8626,12 +8626,12 @@ mod tests {
     }
 
     #[test]
-    fn a_page_weighs_three_quarters_of_a_megabyte_before_it_stops() {
+    fn a_page_weighs_two_megabytes_before_it_stops() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         conversation_for_receipts(&store, "heavy-window");
         store.save().unwrap();
-        for n in 0..70 {
+        for n in 0..200 {
             store
                 .append(
                     "heavy-window",
@@ -8648,18 +8648,18 @@ mod tests {
             .unwrap();
         assert!(page.has_earlier, "weight still bounds a page");
         assert!(page.start > 0);
-        // The old quarter-megabyte bound could hold at most 26 of these
-        // records. Carrying at least 50 proves the bound moved with the
-        // tripled client pages, while stopping short of all 70 proves a
-        // bound is still there.
+        // The old three-quarter-megabyte bound could hold at most 62 of
+        // these records. Carrying at least 150 proves the bound moved with
+        // the larger client pages, while stopping short of all 200 proves
+        // a bound is still there.
         assert!(
-            (50..70).contains(&page.events.len()),
+            (150..200).contains(&page.events.len()),
             "expected most but not all of the heavy records, got {}",
             page.events.len()
         );
         let newest = page.events.last().unwrap()["text"].as_str().unwrap();
         assert!(
-            newest.starts_with("0069:"),
+            newest.starts_with("0199:"),
             "the page holds the newest records"
         );
     }

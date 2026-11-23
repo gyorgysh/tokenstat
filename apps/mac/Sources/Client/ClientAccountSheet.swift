@@ -79,7 +79,6 @@ private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
     @Environment(ClientTabCustomization.self) private var tabCustomization
     @Environment(ClientNavigationModel.self) private var navigation
-    @Environment(\.openURL) private var openURL
 
     @State private var showSample = false
     @State private var showLicenses = false
@@ -88,6 +87,7 @@ private struct ClientAccountContent: View {
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
     @State private var webURL: URL?
+    @State private var showReview = false
     @State private var confirmSignOut = false
     /// Read by `ClientRootView`, written here. See `ClientLayoutPreference`.
     @AppStorage("client.layoutMode") private var layoutPreference = ClientLayoutPreference.automatic.rawValue
@@ -150,6 +150,7 @@ private struct ClientAccountContent: View {
         .sheet(isPresented: $showPaywall) {
             ClientPaywallView()
         }
+        .sheet(isPresented: $showReview) { ClientReviewSheet() }
         .sheet(isPresented: $showDeletionWeb) {
             ClientWebBrowser(url: deletionURL ?? Self.defaultDeletionURL)
         }
@@ -637,11 +638,9 @@ private struct ClientAccountContent: View {
 
     /// A rating the person asked for, from Legal.
     ///
-    /// The in-app rating sheet is reserved for the automatic ask, which
-    /// waits two weeks between appearances and may show nothing. Apple's
-    /// rule for a button is to open the App Store write-review page
-    /// instead. Tapping it also starts that two-week wait, so the
-    /// automatic sheet does not follow someone who just rated.
+    /// Opens the rating sheet by hand: the App Store review page, feedback
+    /// to us, or no more automatic asks. The automatic ask itself stays the
+    /// system's rating sheet, which is the only one App Review allows.
     private var rateCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.rate_tokenstat.4e91c0ab"), mark: "mark_license")
@@ -650,9 +649,7 @@ private struct ClientAccountContent: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button(L10n.text("apple.clientaccountsheet.rate_on_the_app_store.6a30f1c5"), .appStore) {
-                guard let url = URL(string: "https://apps.apple.com/app/id6800501432?action=write-review") else { return }
-                ClientReviewPrompt.markAsked()
-                openURL(url)
+                showReview = true
             }
             .buttonStyle(.plain)
             .font(ClientType.label.weight(.semibold))

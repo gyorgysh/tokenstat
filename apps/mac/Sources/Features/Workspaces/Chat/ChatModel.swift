@@ -1631,6 +1631,10 @@ final class ChatModel {
     private var attemptedResponseAttachments: Set<String> = []
     @ObservationIgnored private var attachmentDescriptorRevision: UInt64?
     @ObservationIgnored private var attachmentDescriptors: [ChatAttachment] = []
+    /// How much of `events` the descriptors cover, named by the first and
+    /// last record scanned. A stream only appends, so a poll scans its new
+    /// records instead of every delta of a reply thousands of events long.
+    @ObservationIgnored private var attachmentScan: (count: Int, first: UInt64?, last: UInt64?)?
     private(set) var loadingResponseAttachments: Set<String> = []
     private(set) var responseAttachmentErrors: [String: String] = [:]
 
@@ -4981,11 +4985,19 @@ final class ChatModel {
     /// attempted files so cancellation can retry without rebuilding the index.
     private var responseAttachmentDescriptors: [ChatAttachment] {
         if attachmentDescriptorRevision != eventsRevision {
-            attachmentDescriptors = events.compactMap { timeline in
+            func descriptor(_ timeline: ChatTimelineEvent) -> ChatAttachment? {
                 guard let event = timeline.event, event.kind == "attachment", let id = event.id else { return nil }
                 return ChatAttachment(id: id, name: event.name ?? L10n.text("apple.chatmodel.attachment.040d2b36"),
                                       mediaType: event.mediaType, size: event.size)
             }
+            let records = events
+            if let scan = attachmentScan, scan.count > 0, records.count >= scan.count,
+               scan.first != nil, records.first?.seq == scan.first, records[scan.count - 1].seq == scan.last {
+                attachmentDescriptors += records[scan.count...].compactMap(descriptor)
+            } else {
+                attachmentDescriptors = records.compactMap(descriptor)
+            }
+            attachmentScan = (records.count, records.first?.seq, records.last?.seq)
             attachmentDescriptorRevision = eventsRevision
         }
         return attachmentDescriptors

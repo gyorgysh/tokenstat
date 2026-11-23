@@ -81,7 +81,8 @@ enum DebugUIHooks {
                 let parts = wheel.split(separator: ":")
                 let points = Int32(parts.count > 1 ? parts[1] : "") ?? 0
                 let steps = Int(parts.count > 2 ? parts[2] : "") ?? 1
-                MainActor.assumeIsolated { DebugTranscriptWheel.gesture(points: points, steps: steps) }
+                let momentum = Int(parts.count > 3 ? parts[3] : "") ?? 0
+                MainActor.assumeIsolated { DebugTranscriptWheel.gesture(points: points, steps: steps, momentum: momentum) }
             case let other?: NotificationCenter.default.post(name: keyRequested, object: other)
             default: break
             }

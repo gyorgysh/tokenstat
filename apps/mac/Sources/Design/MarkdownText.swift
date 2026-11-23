@@ -242,7 +242,15 @@ private final class LiveMarkdown {
     /// Thirty to sixty milliseconds is below the point where text arriving
     /// later reads as a delay, and far above the token rate, so the parse no
     /// longer runs once per token.
-    static let cadence: TimeInterval = 0.05
+    ///
+    /// Once the reader has scrolled away from the latest turn nobody is
+    /// watching the words arrive, and every revision still rebuilds and
+    /// redraws the reply underneath a person trying to scroll. It then
+    /// refreshes about once a second instead.
+    static var cadence: TimeInterval { readerAway ? 1.0 : 0.05 }
+
+    /// Set by the transcript when the reader leaves or returns to the end.
+    static var readerAway = false
 
     private final class Revision {
         let text: String
@@ -347,6 +355,11 @@ private struct MessageSegmentBuilder {
     private var chainLineBreaks = 0
     private var chainWordCount = 0
     private var chainHasLinks = false
+    /// The chain being built carries on a block the previous chain ended
+    /// inside, such as a long list cut for size. It sits flush under that
+    /// chain, or the cut reads as a paragraph break in the middle of a list.
+    private var chainContinues = false
+    private var nextContinues = false
 
     init(bodyFont: Font, style: MarkdownStyle, maximumCharacters: Int, streaming: Bool) {
         self.bodyFont = bodyFont
@@ -369,7 +382,8 @@ private struct MessageSegmentBuilder {
 
     private mutating func flush() {
         guard !chain.isEmpty else { return }
-        out.append(.text(MarkdownLinks.joined(chain[...]), hasLinks: chainHasLinks, wordCount: chainWordCount))
+        out.append(.text(MarkdownLinks.joined(chain[...]), hasLinks: chainHasLinks, wordCount: chainWordCount,
+                         continues: chainContinues))
         chain.removeAll(keepingCapacity: true)
         chainLength = 0
         chainLineBreaks = 0
@@ -381,6 +395,7 @@ private struct MessageSegmentBuilder {
         if !chain.isEmpty, chainLength + length > maximumCharacters ||
             chainLineBreaks + gapLines + lineBreaks > MarkdownTextChunks.maximumLineBreaks {
             flush()
+            nextContinues = separator != nil
         }
         if !chain.isEmpty {
             chain.append(separator ?? gap())
@@ -389,6 +404,8 @@ private struct MessageSegmentBuilder {
         } else {
             chainLength = length
             chainLineBreaks = lineBreaks
+            chainContinues = nextContinues
+            nextContinues = false
         }
         chain.append(piece)
         chainWordCount = wordCount
@@ -686,9 +703,45 @@ private struct InlineMarkdown: View {
 /// a long stretch and a novel-length reply stays a row of cheap ones.
 /// One prose chain or one block needing its own view. File scope so the
 /// segment cache can hold finished chains across view inits.
+/// One chain of a reply that is not selectable, which is the live row.
+///
+/// Every revision of a streaming reply rebuilds its `Text` values, and a
+/// `Text` never compares equal to a rebuilt one, so each token resolved and
+/// redrew every chain of a 400-line reply. Only the last chain is still
+/// growing: the builder resumes after every finished block, so an earlier
+/// chain with the same word range is the same text. Those compare equal here
+/// and SwiftUI leaves them alone.
+private struct SettledAwareText: View, Equatable {
+    let text: Text
+    let live: Bool
+    let arrivals: [Int: TimeInterval]
+    let wordStart: Int
+    let wordEnd: Int
+    let settled: Bool
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.settled && rhs.settled && lhs.wordStart == rhs.wordStart && lhs.wordEnd == rhs.wordEnd
+            && lhs.arrivals.isEmpty && rhs.arrivals.isEmpty
+    }
+
+    var body: some View {
+        StreamingText(text: text, live: live, arrivals: arrivals, revision: wordEnd)
+            .tint(Theme.accent)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private enum MessageSegment {
-    case text(Text, hasLinks: Bool, wordCount: Int)
+    case text(Text, hasLinks: Bool, wordCount: Int, continues: Bool = false)
     case block(MarkdownBlock)
+}
+
+/// Whether the person reading has scrolled away from the streaming reply.
+///
+/// Slows the live reply's refresh while true. See `LiveMarkdown.cadence`.
+enum LiveMarkdownReader {
+    static func setAway(_ away: Bool) { LiveMarkdown.readerAway = away }
 }
 
 struct MessageMarkdown: View {
@@ -892,14 +945,14 @@ private struct MessageMarkdownContent: View {
         let segments = shownSegments
         let ranges = segments.reduce(into: (end: 0, starts: [Int]())) { result, segment in
             result.starts.append(result.end)
-            if case let .text(_, _, end) = segment { result.end = max(result.end, end) }
+            if case let .text(_, _, end, _) = segment { result.end = max(result.end, end) }
         }
         let arrivals = wordArrivals.update(source: source, count: ranges.end, now: ProcessInfo.processInfo.systemUptime, animate: smoothStreaming && !reduceStreamingMotion, identity: liveSlot)
         let activeWords = StreamingWordWindow(arrivals)
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 switch segment {
-                case let .text(chain, hasLinks, wordEnd):
+                case let .text(chain, hasLinks, wordEnd, continues):
                     let wordStart = ranges.starts[index]
                     let arriving = activeWords.words(in: wordStart..<wordEnd)
                     Group {
@@ -911,15 +964,17 @@ private struct MessageMarkdownContent: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
-                            StreamingText(text: chain, live: isLive, arrivals: arriving, revision: wordEnd)
-                                .tint(Theme.accent)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            SettledAwareText(
+                                text: chain, live: isLive, arrivals: arriving, wordStart: wordStart,
+                                wordEnd: wordEnd, settled: isLive && index < segments.count - 1
+                            )
+                            .equatable()
                         }
                     }
                     #if os(macOS)
                     .modifier(MarkdownLineDrawing(enabled: style == .chat && !isLive && segments.count >= 4))
                     #endif
+                    .padding(.top, index == 0 || continues ? 0 : Theme.Space.m)
                 case let .block(block):
                     MarkdownBlockView(
                         block: block,
@@ -928,6 +983,7 @@ private struct MessageMarkdownContent: View {
                         style: style,
                         selectable: selectable
                     )
+                    .padding(.top, index == 0 ? 0 : Theme.Space.m)
                 }
             }
         }

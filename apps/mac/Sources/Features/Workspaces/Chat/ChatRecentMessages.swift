@@ -13,11 +13,11 @@ struct ChatRecentMessages<Row> {
     /// project pushed the first one's chats out, and coming back reloaded.
     static var perFolderLimit: Int { 10 }
     /// Across every project, so a long session cannot grow without bound.
-    /// Each conversation is capped by `byteLimit`, so this is about 30 MB.
+    /// Each conversation is capped by `byteLimit`, so this is about 60 MB.
     static var conversationLimit: Int { 60 }
     /// Raw rows. Three slices fold to a full transcript slice, so the preview matches the live page.
-    static var messageLimit: Int { 450 }
-    static var byteLimit: Int { 512 * 1024 }
+    static var messageLimit: Int { 600 }
+    static var byteLimit: Int { 1024 * 1024 }
 
     mutating func store(_ messages: [Row], for key: String, speculative: Bool = false, cost: (Row) -> Int) {
         var remaining = Self.byteLimit

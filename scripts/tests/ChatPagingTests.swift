@@ -4,12 +4,12 @@ import Foundation
 
 @main enum ChatPagingTests {
     static func main() {
-        precondition(ChatPaging.openPageEvents == 1500)
-        precondition(ChatPaging.pageEvents == 3600)
+        precondition(ChatPaging.openPageEvents == 3000)
+        precondition(ChatPaging.pageEvents == 8000)
         precondition(ChatPaging.previewPageEvents == ChatPaging.openPageEvents)
         // The host has separate ceilings for opening and paging back.
-        precondition(ChatPaging.hostPageEventsMax == 2000)
-        precondition(ChatPaging.hostHistoryPageEventsMax == 3600)
+        precondition(ChatPaging.hostPageEventsMax == 4000)
+        precondition(ChatPaging.hostHistoryPageEventsMax == 8000)
         precondition(ChatPaging.openPageEvents <= ChatPaging.hostPageEventsMax)
         precondition(ChatPaging.pageEvents <= ChatPaging.hostHistoryPageEventsMax)
         precondition(ChatPaging.hasEarlier(true, cursor: "opening"))
