@@ -1415,6 +1415,9 @@ final class TranscriptWindow {
     /// the moment of asking rather than when the request starts, so a scroll
     /// across the boundary asks once instead of once per frame.
     var fetching = false
+    /// Readers currently mounted on this window. See the paging modifier's
+    /// `onDisappear`.
+    var mounts = 0
     /// Whether the conversation has anything before what is held. Kept in
     /// step with the model, so resting at the beginning of a chat does not
     /// start a request per frame only to have it answer that there is
@@ -2000,7 +2003,12 @@ final class TranscriptWindow {
     /// The archive button is visible only when the rendered slice has no
     /// hidden rows. It doesn't need an automatic paging geometry sample.
     func requestArchivePage(manual: Bool = true) {
-        guard active, !fetching, let requestEarlier else { return }
+        guard active, !fetching, let requestEarlier else {
+            #if DEBUG
+            TranscriptHoldTrace.note("earlier blocked active=\(active) fetching=\(fetching) request=\(requestEarlier != nil) manual=\(manual)")
+            #endif
+            return
+        }
         fetching = true
         requestEarlier(manual)
     }
@@ -2151,6 +2159,7 @@ extension View {
         // The proxy belongs to this reader, so the closures that use it are
         // installed here and renewed whenever the conversation changes.
         .onAppear {
+            window.mounts += 1
             window.active = isActive
             window.hasHiddenEarlierRows = hiddenEarlierRows > 0
             window.hasHiddenLaterRows = hiddenLaterRows > 0
@@ -2166,6 +2175,13 @@ extension View {
             window.active = active
         }
         .onDisappear {
+            // A new conversation gets a new scroll view, and its reader can
+            // appear before the old one disappears. Only the last one to go
+            // may switch paging off, or the reader on screen is left with an
+            // inactive window that refuses every earlier page.
+            window.mounts -= 1
+            guard window.mounts <= 0 else { return }
+            window.mounts = 0
             window.active = false
             window.revealEarlier = nil
             window.revealLater = nil

@@ -15,6 +15,7 @@ desktop is a review build. Newest first.
 ### Fixed
 
 - On Mac, the first scroll up from the latest message no longer jumps or stalls after you open a chat or a reply finishes.
+- On Mac, earlier messages load again after you switch to another chat and come back. Before, scrolling to the top and pressing Earlier messages did nothing until the app restarted.
 - Scrolling while a long reply streams is smoother. Finished parts of the reply are no longer redrawn on every new word, and the reply refreshes about once a second while you read elsewhere.
 - Long numbered lists no longer show a stray blank line partway through.
 
