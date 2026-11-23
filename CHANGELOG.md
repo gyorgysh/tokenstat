@@ -5,7 +5,7 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
-## [1.25.0]
+## [1.25.0] - 2026-11-23
 
 ### Changed
 
@@ -18,7 +18,7 @@ desktop is a review build. Newest first.
 - Scrolling while a long reply streams is smoother. Finished parts of the reply are no longer redrawn on every new word, and the reply refreshes about once a second while you read elsewhere.
 - Long numbered lists no longer show a stray blank line partway through.
 
-## [1.24.1]
+## [1.24.1] - 2026-11-21
 
 ### Fixed
 
@@ -28,7 +28,7 @@ desktop is a review build. Newest first.
 
 - On iPhone and iPad, Legal includes Rate tokenstat. It opens the App Store page where you leave a rating. The in-app rating sheet still waits two weeks between automatic asks.
 
-## [1.24.0]
+## [1.24.0] - 2026-11-21
 
 ### Fixed
 
@@ -38,7 +38,7 @@ desktop is a review build. Newest first.
 
 - Codex chats follow your Codex setup on every turn. A Codex update now reaches existing chats' model lists, and chats use your `config.toml` defaults, MCP servers, `AGENTS.md`, skills and rules. Plugins, notify scripts and project trust stay with your own Codex, and the approval gate stays on.
 
-## [1.23.0]
+## [1.23.0] - 2026-11-20
 
 ### Added
 
