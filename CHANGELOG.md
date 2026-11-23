@@ -18,6 +18,10 @@ desktop is a review build. Newest first.
 - On Mac, earlier messages load again after you switch to another chat and come back. Before, scrolling to the top and pressing Earlier messages did nothing until the app restarted.
 - Scrolling while a long reply streams is smoother. Finished parts of the reply are no longer redrawn on every new word, and the reply refreshes about once a second while you read elsewhere.
 - Long numbered lists no longer show a stray blank line partway through.
+- Antigravity plan limits show again with Antigravity 2.34 and later, read from the running app: the 5-hour and weekly limits for each model group, as the app shows them. A spent limit now reads as used up instead of missing.
+- When the Antigravity app is open but its language server does not answer, tokenstat says so instead of reporting that the app is not running.
+- tokenstat reads the Antigravity sign-in that newer versions keep in the keychain, and skips an expired one instead of failing with an authorization error.
+- When the Antigravity CLI runs out of quota in a chat, the chat shows its message and when the limit resets, instead of a generic exit code.
 
 ## [1.24.1] - 2026-11-21
 

@@ -41,6 +41,8 @@ struct ProcessCandidate {
     pid: u32,
     declared_port: Option<u16>,
     csrf_token: String,
+    /// Ports the IDE published in its hub file, plain HTTP first.
+    hub_ports: Vec<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,25 +74,49 @@ pub fn limits() -> ProviderLimits {
         }
     };
     if connections.is_empty() {
-        return ProviderLimits::unavailable(
-            "antigravity",
-            "Antigravity is not running, so its model limits cannot be read.",
-        );
+        let reason = if hub_announced() {
+            "The Antigravity language server did not answer, so its limits cannot be read."
+        } else {
+            "Antigravity is not running, so its model limits cannot be read."
+        };
+        return ProviderLimits::unavailable("antigravity", reason);
     }
 
     let observed_at_ms = now_ms();
     let mut grouped = QuotaGroups::new();
     let mut plan = None;
+    let mut summary = Vec::new();
     for connection in connections {
-        let Ok(response) = rpc_request(&connection, "GetUserStatus", &serde_json::json!({})) else {
-            continue;
+        if let Ok(response) = rpc_request(&connection, "GetUserStatus", &serde_json::json!({})) {
+            let status = response.get("userStatus").unwrap_or(&response);
+            let plan_name = status
+                .pointer("/planStatus/planInfo/planName")
+                .and_then(Value::as_str);
+            plan = plan.or_else(|| plan_name.map(str::to_string));
+            collect_quota_windows(status, plan_name, observed_at_ms, &mut grouped);
+        }
+        if summary.is_empty()
+            && let Ok(response) = rpc_request(
+                &connection,
+                "RetrieveUserQuotaSummary",
+                &serde_json::json!({}),
+            )
+        {
+            summary = quota_summary_windows(&response);
+        }
+    }
+    // The quota summary is the IDE's own account of its group limits, the
+    // same 5-hour and weekly windows it shows. Per-model quota is only an
+    // approximation of those, kept for servers that predate the summary.
+    if !summary.is_empty() {
+        return ProviderLimits {
+            source: "antigravity".to_string(),
+            plan,
+            windows: summary,
+            observed_at_ms,
+            note: None,
+            stale: false,
         };
-        let status = response.get("userStatus").unwrap_or(&response);
-        let plan_name = status
-            .pointer("/planStatus/planInfo/planName")
-            .and_then(Value::as_str);
-        plan = plan.or_else(|| plan_name.map(str::to_string));
-        collect_quota_windows(status, plan_name, observed_at_ms, &mut grouped);
     }
     let mut windows: Vec<UsageWindow> = grouped
         .into_iter()
@@ -123,6 +149,60 @@ pub fn limits() -> ProviderLimits {
         note: None,
         stale: false,
     }
+}
+
+/// Group limits from `RetrieveUserQuotaSummary`.
+///
+/// Each group holds a weekly and a 5-hour bucket with the fraction left.
+/// Protobuf JSON leaves out a zero, so a bucket without `remainingFraction`
+/// is spent, not unknown. A disabled bucket is left out: it is not what
+/// limits the account while it is switched off.
+fn quota_summary_windows(response: &Value) -> Vec<UsageWindow> {
+    let root = response.get("response").unwrap_or(response);
+    let Some(groups) = root.get("groups").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut windows = Vec::new();
+    for group in groups {
+        let name = group
+            .get("displayName")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Antigravity");
+        let Some(buckets) = group.get("buckets").and_then(Value::as_array) else {
+            continue;
+        };
+        for bucket in buckets {
+            if bucket.get("disabled").and_then(Value::as_bool) == Some(true) {
+                continue;
+            }
+            let window = match bucket.get("window").and_then(Value::as_str).map(str::trim) {
+                Some("5h") => "5-hour".to_string(),
+                Some(other) if !other.is_empty() => other.to_string(),
+                _ => continue,
+            };
+            let remaining = bucket
+                .get("remainingFraction")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+            let percent = (1.0 - remaining) * 100.0;
+            let resets_at_ms = bucket
+                .get("resetTime")
+                .and_then(Value::as_str)
+                .and_then(|raw| raw.parse::<jiff::Timestamp>().ok())
+                .map(|timestamp| timestamp.as_millisecond());
+            windows.push(UsageWindow {
+                label: format!("{name} · {window}"),
+                scope: None,
+                percent,
+                resets_at_ms,
+                severity: LimitSeverity::from_percent(percent),
+            });
+        }
+    }
+    windows
 }
 
 type QuotaGroups = HashMap<(&'static str, &'static str), (f64, Option<i64>)>;
@@ -214,8 +294,13 @@ pub fn sync_sessions(force: bool) -> anyhow::Result<IdeSyncReport> {
 
     let connections = detect_connections()?;
     if connections.is_empty() {
+        let message = if hub_announced() {
+            "Antigravity language server did not answer (restart the app to sync IDE sessions)"
+        } else {
+            "Antigravity IDE not running (open the app to sync IDE sessions)"
+        };
         return Ok(IdeSyncReport {
-            message: "Antigravity IDE not running (open the app to sync IDE sessions)".into(),
+            message: message.into(),
             ..IdeSyncReport::default()
         });
     }
@@ -295,11 +380,29 @@ fn sanitize_filename(id: &str) -> String {
 }
 
 fn detect_connections() -> anyhow::Result<Vec<Connection>> {
-    let candidates = detect_process_candidates()?;
+    // Newer IDEs publish the language server's ports and CSRF token in a
+    // hub file and no longer pass them on the command line. Read those
+    // first; the process table still covers older versions.
+    let mut candidates = hub_candidates(&hub_dir());
+    for candidate in detect_process_candidates()? {
+        if !candidates.iter().any(|known| known.pid == candidate.pid) {
+            candidates.push(candidate);
+        }
+    }
     let mut connections = Vec::new();
 
     for candidate in candidates {
-        let ports = candidate_probe_ports(&candidate, find_listening_ports(candidate.pid)?);
+        let listening = if candidate.hub_ports.is_empty() {
+            find_listening_ports(candidate.pid)?
+        } else {
+            Vec::new()
+        };
+        let mut ports = candidate.hub_ports.clone();
+        for port in candidate_probe_ports(&candidate, listening) {
+            if !ports.contains(&port) {
+                ports.push(port);
+            }
+        }
         for port in ports {
             if probe_heartbeat(port, &candidate.csrf_token) {
                 connections.push(Connection {
@@ -368,6 +471,7 @@ fn detect_unix_process_candidates() -> anyhow::Result<Vec<ProcessCandidate>> {
             pid,
             declared_port: extract_declared_port(&command),
             csrf_token,
+            hub_ports: Vec::new(),
         });
     }
 
@@ -420,9 +524,90 @@ fn parse_windows_process_json(text: &str) -> anyhow::Result<Vec<ProcessCandidate
             pid: pid as u32,
             declared_port: extract_declared_port(command),
             csrf_token,
+            hub_ports: Vec::new(),
         });
     }
     Ok(candidates)
+}
+
+/// Where the IDE writes `hub_<port>.json` for each running language server.
+fn hub_dir() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|dirs| {
+            dirs.home_dir()
+                .join(".gemini")
+                .join("antigravity")
+                .join("daemon")
+        })
+        .unwrap_or_else(|| PathBuf::from(".gemini/antigravity/daemon"))
+}
+
+/// Language servers announced in hub files, newest file first.
+///
+/// A file can outlive its server; the heartbeat that follows is what proves
+/// one is listening, so a stale file costs one refused connection.
+fn hub_candidates(dir: &std::path::Path) -> Vec<ProcessCandidate> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("hub_") && name.ends_with(".json"))
+        })
+        .map(|path| {
+            let modified = fs::metadata(&path)
+                .and_then(|meta| meta.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (modified, path)
+        })
+        .collect();
+    files.sort_by_key(|file| std::cmp::Reverse(file.0));
+    files
+        .into_iter()
+        .filter_map(|(_, path)| {
+            let text = fs::read_to_string(&path).ok()?;
+            parse_hub_file(&text)
+        })
+        .collect()
+}
+
+fn parse_hub_file(text: &str) -> Option<ProcessCandidate> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    let pid = u32::try_from(value.get("pid")?.as_u64()?).ok()?;
+    let csrf_token = value.get("csrfToken")?.as_str()?.trim().to_string();
+    if !is_csrf_token(&csrf_token) {
+        return None;
+    }
+    let port = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok())
+            .filter(|port| *port > 0)
+    };
+    let hub_ports: Vec<u16> = [port("httpPort"), port("httpsPort")]
+        .into_iter()
+        .flatten()
+        .collect();
+    if hub_ports.is_empty() {
+        return None;
+    }
+    Some(ProcessCandidate {
+        pid,
+        declared_port: None,
+        csrf_token,
+        hub_ports,
+    })
+}
+
+/// Whether any hub file names a language server, for a message that says
+/// the IDE is running but not answering rather than that it is closed.
+fn hub_announced() -> bool {
+    !hub_candidates(&hub_dir()).is_empty()
 }
 
 fn is_antigravity_process(command: &str) -> bool {
@@ -435,11 +620,13 @@ fn is_antigravity_process(command: &str) -> bool {
 
 fn extract_csrf_token(command: &str) -> Option<String> {
     let token = extract_flag_value(command, "--csrf_token")?;
-    if token.len() >= 32 && token.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '-') {
-        Some(token)
-    } else {
-        None
-    }
+    is_csrf_token(&token).then_some(token)
+}
+
+/// The token goes into a raw request header, so only the shape the IDE
+/// issues is accepted: at least 32 hex digits and dashes.
+fn is_csrf_token(token: &str) -> bool {
+    token.len() >= 32 && token.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '-')
 }
 
 fn extract_declared_port(command: &str) -> Option<u16> {
@@ -1082,6 +1269,98 @@ fn is_not_found(err: &anyhow::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// Manual check against a running IDE:
+    /// `cargo test -p tokenstat-sync live_antigravity_limits -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_antigravity_limits() {
+        let limits = limits();
+        println!("plan={:?} note={:?}", limits.plan, limits.note);
+        for window in &limits.windows {
+            println!(
+                "{} {:.1}% reset={:?}",
+                window.label, window.percent, window.resets_at_ms
+            );
+        }
+    }
+
+    #[test]
+    fn hub_file_names_the_language_server_ports_and_token() {
+        let candidate = parse_hub_file(
+            r#"{"pid":70607,"httpsPort":54158,"httpPort":54159,"lsVersion":"2.34.0","csrfToken":"00000000-0000-4000-8000-00000000000a"}"#,
+        )
+        .unwrap();
+        assert_eq!(candidate.pid, 70607);
+        assert_eq!(candidate.hub_ports, vec![54159, 54158], "plain HTTP first");
+        assert_eq!(candidate.csrf_token, "00000000-0000-4000-8000-00000000000a");
+        assert!(
+            parse_hub_file(r#"{"pid":1,"httpPort":1}"#).is_none(),
+            "no token"
+        );
+        assert!(
+            parse_hub_file(r#"{"pid":1,"csrfToken":"x"}"#).is_none(),
+            "no port"
+        );
+        assert!(parse_hub_file("not json").is_none());
+    }
+
+    #[test]
+    fn hub_files_are_read_newest_first_and_ignore_other_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("hub_1.json"),
+            r#"{"pid":1,"httpPort":11,"csrfToken":"00000000-0000-4000-8000-00000000000a"}"#,
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(
+            dir.path().join("hub_2.json"),
+            r#"{"pid":2,"httpPort":22,"csrfToken":"00000000-0000-4000-8000-00000000000b"}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("other.json"),
+            r#"{"pid":3,"httpPort":33,"csrfToken":"00000000-0000-4000-8000-00000000000c"}"#,
+        )
+        .unwrap();
+        let pids: Vec<u32> = hub_candidates(dir.path()).iter().map(|c| c.pid).collect();
+        assert_eq!(pids, vec![2, 1]);
+        assert!(hub_candidates(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn quota_summary_maps_group_buckets_to_windows() {
+        let response = serde_json::json!({"response": {"groups": [
+            {"displayName": "Gemini Models", "buckets": [
+                {"bucketId": "gemini-weekly", "window": "weekly", "resetTime": "2026-11-28T15:13:05Z"},
+                {"bucketId": "gemini-5h", "window": "5h", "remainingFraction": 1, "resetTime": "2026-11-23T15:54:16Z", "disabled": true}
+            ]},
+            {"displayName": "Claude and GPT models", "buckets": [
+                {"bucketId": "3p-weekly", "window": "weekly", "remainingFraction": 0.75, "resetTime": "2026-11-30T13:59:07Z"},
+                {"bucketId": "3p-5h", "window": "5h", "remainingFraction": 1}
+            ]}
+        ]}});
+        let windows = quota_summary_windows(&response);
+        let labels: Vec<&str> = windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Gemini Models · weekly",
+                "Claude and GPT models · weekly",
+                "Claude and GPT models · 5-hour",
+            ]
+        );
+        assert_eq!(
+            windows[0].percent, 100.0,
+            "an omitted fraction is zero left"
+        );
+        assert!(windows[0].resets_at_ms.is_some());
+        assert_eq!(windows[1].percent, 25.0);
+        assert_eq!(windows[2].percent, 0.0);
+        assert!(windows[2].resets_at_ms.is_none());
+        assert!(quota_summary_windows(&serde_json::json!({})).is_empty());
+    }
+
     use super::*;
 
     #[test]

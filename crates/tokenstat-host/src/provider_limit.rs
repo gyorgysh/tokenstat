@@ -21,12 +21,24 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         ("claude", "result") if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
             value
         }
+        // The Antigravity CLI ends a refused run with a `result` record
+        // whose status is ERROR and whose `error` is the server's message.
+        ("agy", "result") => {
+            let result = value.get("result")?;
+            let status = result.get("status").and_then(Value::as_str)?;
+            if !status.eq_ignore_ascii_case("error") {
+                return None;
+            }
+            result
+        }
         // Unknown vendor error formats stay manual until verified.
         _ => return None,
     };
     let text = error
         .get("message")
         .or_else(|| error.get("result"))
+        .filter(|_| provider != "agy")
+        .or_else(|| error.get("error"))
         .and_then(Value::as_str)
         .or_else(|| error.as_str())
         .unwrap_or("");
@@ -52,7 +64,11 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         || (provider == "claude"
             && (((lower.starts_with("you've hit your") || lower.starts_with("you’ve hit your"))
                 && lower.contains("limit"))
-                || lower.starts_with("usage limit reached")));
+                || lower.starts_with("usage limit reached")))
+        || (provider == "agy"
+            && (lower.contains("quota reached")
+                || lower.contains("resource_exhausted")
+                || lower.contains("resourceexhausted")));
     let throttle = matches!(code, "rate_limit_error" | "rate_limit_exceeded")
         || (!exhausted && lower.starts_with("rate limit exceeded"));
     let unavailable = matches!(
@@ -84,6 +100,11 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
                     .map(|t| t.as_millisecond())
             })
         })
+        .or_else(|| {
+            (provider == "agy")
+                .then(|| agy_resets_in(&lower, now))
+                .flatten()
+        })
         .filter(|n| plausible_reset(*n, now));
     Some(Limit {
         provider: provider.into(),
@@ -106,6 +127,32 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         resets_at_ms: reset,
         observed_at_ms: now,
     })
+}
+
+/// The Antigravity CLI states the reset as a duration inside its own error,
+/// as in "Resets in 4h49m51s.", and nowhere else.
+fn agy_resets_in(lower: &str, now: i64) -> Option<i64> {
+    let rest = &lower[lower.find("resets in ")? + "resets in ".len()..];
+    let mut seconds: i64 = 0;
+    let mut number: i64 = 0;
+    let mut seen = false;
+    for ch in rest.chars() {
+        if let Some(digit) = ch.to_digit(10) {
+            number = number.checked_mul(10)?.checked_add(i64::from(digit))?;
+            continue;
+        }
+        let unit = match ch {
+            'd' => 86_400,
+            'h' => 3_600,
+            'm' => 60,
+            's' => 1,
+            _ => break,
+        };
+        seconds = seconds.checked_add(number.checked_mul(unit)?)?;
+        number = 0;
+        seen = true;
+    }
+    (seen && seconds > 0).then(|| now.saturating_add(seconds * 1000))
 }
 
 /// Claude Code reports the refused window's reset beside the refusal, as
@@ -181,6 +228,32 @@ pub fn from_exit(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn agy_quota_refusal_is_a_usage_limit_with_its_reset() {
+        let now = 1_795_442_429_000;
+        let record = json!({"type":"result","result":{"status":"ERROR",
+            "error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 4h49m51s."}});
+        let limit = from_record("agy", &record, now).unwrap();
+        assert_eq!(limit.kind, "usage");
+        assert!(
+            limit
+                .reason
+                .starts_with("RESOURCE_EXHAUSTED (code 429): Individual quota reached")
+        );
+        assert_eq!(
+            limit.resets_at_ms,
+            Some(now + (4 * 3600 + 49 * 60 + 51) * 1000)
+        );
+        let other = json!({"type":"result","result":{"status":"ERROR","error":"model not found"}});
+        let failure = from_record("agy", &other, now).unwrap();
+        assert_eq!(
+            (failure.kind.as_str(), failure.reason.as_str()),
+            ("failure", "model not found")
+        );
+        let ok = json!({"type":"result","result":{"status":"SUCCESS","response":"done"}});
+        assert!(from_record("agy", &ok, now).is_none());
+    }
+
     #[test]
     fn observed_claude_login_refusal_is_authentication() {
         let record = json!({"type":"result", "is_error":true,
