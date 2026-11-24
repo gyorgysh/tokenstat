@@ -125,6 +125,10 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.conflate
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.referentialEqualityPolicy
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -252,6 +256,15 @@ fun ChatSection(
     var usage by remember(projectOwner, openId) { mutableStateOf<ChatUsageTotals?>(null) }
     var hasEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
     var loadingEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
+    val pagingContext = LocalContext.current
+    val paging = remember { ChatPaging.forDevice(pagingContext) }
+    // An earlier page is in `events` and its rows are not on screen yet. The
+    // next page waits for it, and the reader's line is restored with it.
+    var earlierPending by remember(projectOwner, openId) { mutableStateOf(false) }
+    // Set by the reader's own scroll away from the latest message. A chat
+    // that just opened sits at the top of its list for a frame before it is
+    // pinned to the end, and that must not read as somebody reaching back.
+    var readerLeftEnd by remember(projectOwner, openId) { mutableStateOf(false) }
     var approvals by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var error by remember(projectOwner) { mutableStateOf<String?>(null) }
     var loading by remember(projectOwner) { mutableStateOf(true) }
@@ -588,7 +601,7 @@ fun ChatSection(
         })
     }
     suspend fun newestPage(id: String): JsonObject = model.workspaceSection(peer, "chat.eventPage", buildJsonObject {
-        put("id", id); put("limit", 160); put("stablePositions", true)
+        put("id", id); put("limit", paging.openPageEvents); put("stablePositions", true)
     }) as JsonObject
 
     suspend fun loadEvents(id: String): Boolean {
@@ -636,10 +649,11 @@ fun ChatSection(
         follow.pause()
         try {
             val page = model.workspaceSection(peer, "chat.eventPage", buildJsonObject {
-                put("id", id); put("cursor", history.cursor); put("limit", 300); put("stablePositions", true)
+                put("id", id); put("cursor", history.cursor); put("limit", paging.earlierPageEvents); put("stablePositions", true)
             }) as JsonObject
             if (openId != id || history.generation != generation) return
             history.page(page)
+            earlierPending = true
             events = history.events
             usage = history.usage
             hasEarlier = history.hasEarlier
@@ -778,6 +792,7 @@ fun ChatSection(
         if (!ownsProject()) return item
         // Pressing Send is the authorisation. Nothing else auto-sends.
         authorized = authorized + item.id
+        ai.tokenstat.tokenstat.ui.legal.ReviewPrompt.noteUse(context)
         return item
     }
 
@@ -1772,12 +1787,23 @@ fun ChatSection(
             val chatActivity = chatActivityData(chatInspection.data, openChat)
             // Status polls also update names, usage and timestamps. Only the
             // row inputs should rebuild an image-rich transcript.
-            val transcript = remember(events, openChat?.str("backend"), openChat?.bol("running")) {
-                coalesceTranscript(
-                    events,
-                    defaultBackend = openChat?.str("backend"),
-                    running = openChat?.bol("running") ?: true,
-                )
+            // Built off the main thread: a page is thousands of records, and
+            // a streaming reply changes them several times a second. Conflated
+            // rather than restarted, so updates that arrive faster than a slow
+            // phone can fold them never starve the screen. The previous rows
+            // stay until the new ones are ready.
+            val backendNow by rememberUpdatedState(openChat?.str("backend"))
+            val runningNow by rememberUpdatedState(openChat?.bol("running") ?: true)
+            var transcript by remember(projectOwner, openId) { mutableStateOf<List<ChatDisplayItem>>(emptyList()) }
+            var builtFrom by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>?>(null, referentialEqualityPolicy()) }
+            LaunchedEffect(projectOwner, openId) {
+                snapshotFlow { Triple(events, backendNow, runningNow) }.conflate().collect { (source, backend, running) ->
+                    val built = withContext(Dispatchers.Default) {
+                        coalesceTranscript(source, defaultBackend = backend, running = running)
+                    }
+                    transcript = built
+                    builtFrom = source
+                }
             }
             val foldedRows = remember(transcript, detail, groupsOpen, toggledGroups, openChat?.bol("running")) {
                 foldTranscript(transcript, detail, running = openChat?.bol("running") ?: true) { id ->
@@ -1789,7 +1815,10 @@ fun ChatSection(
             // Fills, rather than wrapping: the composer below is docked to
             // the bottom edge the way every chat app docks it, instead of
             // floating at whatever height the transcript happened to end.
-            if (transcript.isEmpty()) {
+            if (transcript.isEmpty() && events.isNotEmpty() && builtFrom !== events) {
+                // Read but not folded yet: not an empty conversation.
+                Box(Modifier.weight(1f).fillMaxWidth())
+            } else if (transcript.isEmpty()) {
                 // The character, the way the Apple clients open an empty
                 // conversation with one. A blank rectangle above a composer
                 // says the screen failed to load; the persona says it is
@@ -1834,7 +1863,9 @@ fun ChatSection(
                 // count as the reader leaving, or auto-follow would unpin
                 // itself mid-stream.
                 LaunchedEffect(atBottom, listState.isScrollInProgress) {
-                    follow.note(atBottom, userScroll = listState.isScrollInProgress && !autoScrolling)
+                    val userScroll = listState.isScrollInProgress && !autoScrolling
+                    follow.note(atBottom, userScroll = userScroll)
+                    if (userScroll && !atBottom) readerLeftEnd = true
                 }
                 // A conversation opens on its latest turn, and a pinned
                 // transcript stays on it as turns stream in. A hand on the
@@ -1849,6 +1880,35 @@ fun ChatSection(
                     ) {
                         scrollToEnd()
                     }
+                }
+                // Earlier pages load on their own as the reader nears the top,
+                // the way the Apple clients do. The button stays for a page
+                // that failed or a reader who got there first.
+                val nearTop by remember(listState) {
+                    derivedStateOf { listState.firstVisibleItemIndex <= 3 }
+                }
+                LaunchedEffect(nearTop, readerLeftEnd, hasEarlier, loadingEarlier, earlierPending) {
+                    if (nearTop && readerLeftEnd && hasEarlier && !loadingEarlier && !earlierPending && eventsError == null) {
+                        // In the screen's scope: starting the load changes
+                        // this effect's keys, which would cancel it here.
+                        openId?.let { id -> scope.launch { loadEarlier(id) } }
+                    }
+                }
+                // Before the new rows are measured, so the page and the place
+                // land in one frame.
+                val rowSpacing = with(density) { 6.dp.roundToPx() }
+                val laidOutRows = remember(projectOwner, openId) { arrayOf(emptyList<ChatDisplayItem>()) }
+                SideEffect {
+                    if (earlierPending && builtFrom === events) {
+                        earlierPending = false
+                        earlierPageAnchor(
+                            visible = listState.layoutInfo.visibleItemsInfo.map { RowSpan(it.key, it.offset, it.size) },
+                            before = laidOutRows[0].map { it.id },
+                            after = shownRows.map { it.id },
+                            spacing = rowSpacing,
+                        )?.let { listState.requestScrollToItem(it.row + if (hasEarlier) 1 else 0, -it.offset) }
+                    }
+                    laidOutRows[0] = shownRows
                 }
                 Box(Modifier.weight(1f)) {
                     LazyColumn(

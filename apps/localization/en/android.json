@@ -2695,5 +2695,13 @@
   "android.workbench.recorded_edits": "Recorded edits from this turn. Later edits and commits do not change this view.",
   "android.workbench.patch_unavailable": "No recorded patch is available for this edit.",
   "android.workbench.edit_number": "Edit {0}",
-  "android.workbench.show_more": "Show more lines"
+  "android.workbench.show_more": "Show more lines",
+  "android.review.title": "Rate tokenstat",
+  "android.review.card_body": "Rate tokenstat on Google Play, or tell us directly what works and what doesn’t.",
+  "android.review.body": "Leave a rating on Google Play, or tell us directly what works and what doesn’t. Both help.",
+  "android.review.rate": "Rate on Google Play",
+  "android.review.feedback": "Send feedback",
+  "android.review.close": "Close",
+  "android.review.never": "Don’t ask me again",
+  "android.review.stopped": "tokenstat won’t ask for a rating on its own. You can always find this in Legal."
 }

@@ -177,6 +177,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.android.billingclient:billing-ktx:9.1.0")
+    implementation("com.google.android.play:review-ktx:2.0.2")
     implementation(platform("com.google.firebase:firebase-bom:35.0.1"))
     implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")

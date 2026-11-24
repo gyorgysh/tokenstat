@@ -175,6 +175,9 @@ import ai.tokenstat.tokenstat.ui.chrome.TsRefresh
 import ai.tokenstat.tokenstat.ui.chrome.tabSummary
 import ai.tokenstat.tokenstat.ui.legal.LicensesCard
 import ai.tokenstat.tokenstat.ui.legal.LicensesSheet
+import ai.tokenstat.tokenstat.ui.legal.RateCard
+import ai.tokenstat.tokenstat.ui.legal.RateSheet
+import ai.tokenstat.tokenstat.ui.legal.ReviewPrompt
 import ai.tokenstat.tokenstat.ui.billing.PaywallSheet
 import ai.tokenstat.tokenstat.ui.billing.Plans
 import ai.tokenstat.tokenstat.ui.browser.PortBrowserScreen
@@ -280,6 +283,7 @@ fun TokenstatApp(model: AppViewModel) {
     // account's chat.
     var wasSignedIn by remember { mutableStateOf<Boolean?>(null) }
     val tapScope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { ReviewPrompt.noteLaunch(context) }
     LaunchedEffect(state.signedIn) {
         if (wasSignedIn == true && !state.signedIn) NotificationOpen.take()
         if (wasSignedIn == false && state.signedIn) {
@@ -640,6 +644,21 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         ai.tokenstat.tokenstat.ecosystem.QuickAccess.take(request)
     }
     val context = LocalContext.current
+    // The automatic rating ask: Play's own card, on Home with nothing open
+    // over it and after a short settle. `ReviewPrompt` decides whether it is
+    // due. Leaving Home, or opening anything, cancels the wait.
+    val askOwner = state.account?.get("machines") as? JsonArray
+    val canAsk = selected == Destination.Home && !accountOpen && !teamOpen && !wizardOpen && !searchOpen
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(canAsk, askOwner?.size ?: 0) {
+        if (!canAsk) return@LaunchedEffect
+        delay(4_000)
+        if (!lifecycle.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return@LaunchedEffect
+        val activity = context as? android.app.Activity ?: return@LaunchedEffect
+        if (!ReviewPrompt.isDue(context, askOwner?.size ?: 0)) return@LaunchedEffect
+        ReviewPrompt.markAsked(context)
+        ReviewPrompt.requestPlayReview(activity)
+    }
     val homeStores = remember { HomeStores(context) }
     // Warm the last approved host while Home is visible. The session belongs
     // to the model, so Workspaces consumes these lists without another dial.
@@ -4866,6 +4885,12 @@ private fun AccountDialog(
                             LegalLinkRow(L10n.text("android.tokenstatapp.terms_of_service.e69e0614")) { open("https://tokenstat.ai/terms?mobile=1") }
                         }
                     }
+                    var rateOpen by remember { mutableStateOf(false) }
+                    RateCard(onOpen = { rateOpen = true })
+                    if (rateOpen) RateSheet(
+                        onDismiss = { rateOpen = false },
+                        onFeedback = { open("https://tokenstat.ai/contact?mobile=1") },
+                    )
                     var licensesOpen by remember { mutableStateOf(false) }
                     LicensesCard(onOpen = { licensesOpen = true })
                     if (licensesOpen) LicensesSheet(onDismiss = { licensesOpen = false })

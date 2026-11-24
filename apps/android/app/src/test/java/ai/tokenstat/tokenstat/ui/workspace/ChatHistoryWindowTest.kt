@@ -59,4 +59,16 @@ class ChatHistoryWindowTest {
         assertFalse(history.hasMore)
     }
 
+
+    @Test fun aSpentCursorEndsPagingInsteadOfAskingForItAgain() {
+        val history = ChatHistoryWindow()
+        history.page(json("""{"events":[],"nextOffset":10,"cursor":"a","hasEarlier":true}"""), true)
+        assertTrue(history.hasEarlier)
+        history.page(json("""{"events":[],"cursor":"b","hasEarlier":true}"""))
+        assertTrue(history.hasEarlier)
+        history.page(json("""{"events":[],"cursor":"b","hasEarlier":true}"""))
+        assertFalse(history.hasEarlier)
+        history.page(json("""{"events":[],"nextOffset":10,"cursor":"b","hasEarlier":true}"""), true)
+        assertTrue(history.hasEarlier)
+    }
 }

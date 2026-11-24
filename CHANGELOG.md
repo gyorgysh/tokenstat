@@ -7,6 +7,14 @@ desktop is a review build. Newest first.
 
 ## [1.26.0]
 
+### Added
+
+- On Android, Rate tokenstat in Legal opens a sheet where you can rate on Google Play, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
+
+### Changed
+
+- Android chats open with much more history and load earlier messages on their own as you scroll back, keeping the line you were reading in place. How much history a page holds follows the phone, so older and entry-level phones load smaller pages.
+
 ## [1.25.0] - 2026-11-24
 
 ### Changed

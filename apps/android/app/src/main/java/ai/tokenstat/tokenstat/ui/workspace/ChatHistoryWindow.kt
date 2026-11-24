@@ -30,8 +30,12 @@ internal class ChatHistoryWindow {
             offset = answer["nextOffset"]?.jsonPrimitive?.longOrNull ?: 0
             tailCursor = answer["tailCursor"]?.jsonPrimitive?.contentOrNull
         } else events = rows + events
+        val spent = if (replace) null else cursor
         cursor = answer["cursor"]?.jsonPrimitive?.contentOrNull
-        hasEarlier = answer["hasEarlier"]?.jsonPrimitive?.booleanOrNull == true && !cursor.isNullOrEmpty()
+        // A usable, unspent cursor, or pages that load on their own would ask
+        // for the same one for ever.
+        hasEarlier = answer["hasEarlier"]?.jsonPrimitive?.booleanOrNull == true &&
+            !cursor.isNullOrEmpty() && cursor != spent
         loaded = true
     }
 
