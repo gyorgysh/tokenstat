@@ -1527,6 +1527,21 @@ final class TranscriptWindow {
     private var readingTop: CGFloat = 0
     private var contentTops: [String: CGFloat] = [:]
 
+    /// A drawn row's height and its place in the transcript, for whoever
+    /// lays out the rows that are not drawn. Installed by the transcript.
+    var rowHeightNoted: ((String, CGFloat) -> Void)?
+    /// Make sure a row is laid out before scrolling to it. True when it
+    /// already is. Installed by a transcript that does not lay out every row.
+    var prepareScroll: ((String) -> Bool)?
+
+    /// Rows above the reader changed size by `delta`, and whoever changed
+    /// them has already moved the view by as much. The reading row's place
+    /// moves with them: that is not a change to answer again.
+    func rowsAboveResized(by delta: CGFloat) {
+        guard readingRow != nil else { return }
+        readingTop += delta
+    }
+
     func noteContentTop(_ id: String, _ top: CGFloat) {
         contentTops[id] = top
         guard id == readingRow else { return }
@@ -1589,6 +1604,8 @@ final class TranscriptWindow {
     func uncoverPage() {
         coverExpiry?.cancel()
         coverExpiry = nil
+        quietWork?.cancel()
+        quietWork = nil
         guard covered else { return }
         covered = false
         #if DEBUG
@@ -1598,7 +1615,29 @@ final class TranscriptWindow {
     }
 
     /// The longest a page landing may keep the picture up.
-    private static let coverLimit: TimeInterval = 0.6
+    private static let coverLimit: TimeInterval = 0.9
+
+    /// Take the picture away once the transcript has stopped moving under
+    /// it. The held row being back in place is not the end of it: the rows
+    /// around it finish laying out for a few more frames, and taking the
+    /// picture away at once showed those frames, a screen away and back.
+    /// Every correction while covered starts the wait again.
+    func uncoverWhenQuiet() {
+        guard covered else { return }
+        quietWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.uncoverPage() }
+        quietWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.coverQuiet, execute: work)
+    }
+
+    /// Something moved under the cover: wait again before taking it away.
+    func coveredLayoutMoved() {
+        guard covered, quietWork != nil else { return }
+        uncoverWhenQuiet()
+    }
+
+    private var quietWork: DispatchWorkItem?
+    private static let coverQuiet: TimeInterval = 0.15
 
     var canRestore: (() -> Bool)?
     var canPage: (() -> Bool)?
@@ -1616,7 +1655,7 @@ final class TranscriptWindow {
     private var held: TranscriptAnchor?
     /// Whether the held row has reached its target since the layout changed.
     private var heldLanded = false {
-        didSet { if heldLanded { uncoverPage() } }
+        didSet { if heldLanded { uncoverWhenQuiet() } }
     }
     /// The hold is for a page arriving, the one change that can grow a row
     /// at its start.
@@ -1664,7 +1703,9 @@ final class TranscriptWindow {
         restoreDelivery.cancel()
         holdExpiry?.cancel()
         holdExpiry = nil
-        uncoverPage()
+        // A reader who is moving gets the transcript back at once. Otherwise
+        // the picture stays until the layout has finished moving.
+        if readerIsScrolling { uncoverPage() } else { uncoverWhenQuiet() }
         held = nil
         heldUntil = .distantPast
     }
@@ -1911,6 +1952,7 @@ final class TranscriptWindow {
         #if DEBUG
         MainActor.assumeIsolated { TranscriptHoldTrace.shared.corrected("sync") }
         #endif
+        coveredLayoutMoved()
         restore?(target)
         #if os(macOS)
         // The proxy can settle on an estimate even after the row is built.
@@ -2013,6 +2055,7 @@ final class TranscriptWindow {
         let owner = ObjectIdentifier(mount)
         if let frame {
             rowMounts[id] = owner
+            rowHeightNoted?(id, frame.height)
             rowFrames[id] = frame
         } else if rowMounts[id] == owner {
             rowMounts[id] = nil
@@ -2105,6 +2148,7 @@ final class TranscriptWindow {
             #if DEBUG
             MainActor.assumeIsolated { TranscriptHoldTrace.shared.corrected("late") }
             #endif
+            self.coveredLayoutMoved()
             if let frame, self.restoreMeasured?(target.drift(to: frame)) == true { return }
             // A page landed above a held row that is no longer built: with
             // the offset unchanged, the rows it brought filled the screen and
@@ -2311,10 +2355,19 @@ extension View {
             #if DEBUG
             TranscriptProbe.shared.noteScroll("restore")
             #endif
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                proxy.scrollTo(anchor.id, anchor: anchor.unitPoint(in: window.viewportHeight))
+            func scroll() {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    proxy.scrollTo(anchor.id, anchor: anchor.unitPoint(in: window.viewportHeight))
+                }
+            }
+            // A row that is not laid out cannot be scrolled to. Lay it out,
+            // then scroll on the next turn, once it is there.
+            if window.prepareScroll?(anchor.id) == false {
+                DispatchQueue.main.async { scroll() }
+            } else {
+                scroll()
             }
         }
         let extendedAtStart: (String) -> Bool = { [weak model] id in model?.rowExtendedAtStart(id) == true }

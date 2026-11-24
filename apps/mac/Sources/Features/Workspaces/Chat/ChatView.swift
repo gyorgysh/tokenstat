@@ -212,6 +212,9 @@ struct ChatView: View {
     /// Animated pins (a jump, an approval card) always go through.
     @State private var lastSilentPinAt = Date.distantPast
     @State private var measuredTail = TranscriptMeasuredTail()
+    #if os(macOS)
+    @State private var exactRows = TranscriptExactRows()
+    #endif
     @State private var rowMounts = TranscriptRowMounts()
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
@@ -697,6 +700,40 @@ struct ChatView: View {
         }
     }
 
+    /// The older rows in a lazy stack, which sizes the rows it has not built
+    /// by estimate. The iPhone's transcript, and the Mac's with
+    /// `debug.lazyHead` set.
+    private func lazyHead(_ rows: ArraySlice<ChatDisplayItem>, chat: ChatConversation,
+                          spinning: String?, liveRowID: String?) -> some View {
+        LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+            transcriptHeader(chat)
+            ForEach(rows) { item in
+                transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
+                    .allowsHitTesting(!follow.scrolling)
+                    .transcriptRowMount(in: rowMounts, id: item.id, window: window)
+                    .id(item.id)
+            }
+        }
+        // A lazy stack that gives all its rows to the measured stack below
+        // keeps the size it estimated for them, and only lets it go as a
+        // scroll makes it measure again: coming back to a chat read far
+        // back, hundreds of points of nothing melted away above the reader
+        // as they started to scroll. A new stack starts at its true size.
+        .id(rows.isEmpty)
+    }
+
+    #if os(macOS)
+    /// Whether the older rows are laid out at their real heights. See
+    /// `TranscriptExactRows`.
+    private static var exactHead: Bool {
+        #if DEBUG
+        return !UserDefaults.standard.bool(forKey: "debug.lazyHead")
+        #else
+        return true
+        #endif
+    }
+    #endif
+
     /// What sits above the oldest row: the way to earlier messages, or the
     /// start of the conversation.
     @ViewBuilder
@@ -756,23 +793,25 @@ struct ChatView: View {
                 // is offscreen. Following must reach a real frame, not walk
                 // toward an estimate until its correction budget runs out.
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                        transcriptHeader(chat)
-                        ForEach(split.lazy) { item in
+                    #if os(macOS)
+                    if Self.exactHead {
+                        let _ = exactRows.setRows(split.lazy, generation: model.selectionGeneration)
+                        TranscriptExactHead(items: split.lazy, rows: exactRows) {
+                            transcriptHeader(chat)
+                        } row: { item in
                             transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
                                 .allowsHitTesting(!follow.scrolling)
                                 .transcriptRowMount(in: rowMounts, id: item.id, window: window)
                                 .id(item.id)
+                        } measure: { item in
+                            transcriptRow(item, chat: chat, spinning: spinning, isLive: false)
                         }
+                    } else {
+                        lazyHead(split.lazy, chat: chat, spinning: spinning, liveRowID: liveRowID)
                     }
-                    // A lazy stack that gives all its rows to the measured
-                    // stack below keeps the size it estimated for them, and
-                    // only lets it go as a scroll makes it measure again:
-                    // coming back to a chat read far back, hundreds of
-                    // points of nothing melted away above the reader as
-                    // they started to scroll. A new stack starts at its
-                    // true size.
-                    .id(split.lazy.isEmpty)
+                    #else
+                    lazyHead(split.lazy, chat: chat, spinning: spinning, liveRowID: liveRowID)
+                    #endif
                     // See `TranscriptSlice.measuredTail`. The rows above the
                     // newest sit in a stack of their own: a stream changes the
                     // newest row's height on every revision, and a settled
@@ -855,6 +894,11 @@ struct ChatView: View {
                 follow.note(metrics)
                 window.followingEnd = (follow.pinned || follow.settling) && sliceOffset == 0
                 window.note(metrics)
+                #if os(macOS)
+                if Self.exactHead {
+                    exactRows.update(top: metrics.distanceFromTop - verticalPadding, viewport: metrics.viewportHeight)
+                }
+                #endif
             }
             .transcriptFollowBar {
                 if follow.showJump || model.busy {
@@ -1073,6 +1117,14 @@ struct ChatView: View {
         window.clearRowFrames()
         window.followingEnd = true
         window.releaseFollow = { [follow] in follow.releaseForReaderWheel() }
+        window.rowHeightNoted = { [exactRows] id, height in exactRows.noteHeight(id, height) }
+        window.prepareScroll = { [exactRows] id in !Self.exactHead || exactRows.ensureDrawn(id) }
+        exactRows.shift = { [window] delta in
+            _ = window.restoreMeasured?(delta)
+            window.rowsAboveResized(by: delta)
+            window.coveredLayoutMoved()
+        }
+        exactRows.canShift = { [window] in !window.followingEnd && !window.isRestoringPage }
         // A page put in place under a moving viewport fights the momentum:
         // the hold corrects, the fling carries on, and the held row is lost
         // for frames. Wait until the reader's scroll has come to rest, as
@@ -1458,6 +1510,12 @@ struct ChatView: View {
             showNewest()
         }
         let animate = animated && !reduceMotion
+        #if os(macOS)
+        if id != TranscriptFollow.bottomID, Self.exactHead, !exactRows.ensureDrawn(id) {
+            DispatchQueue.main.async { scrollTo(id, proxy, animated: animated) }
+            return
+        }
+        #endif
         #if DEBUG
         TranscriptProbe.shared.noteScroll(id == TranscriptFollow.bottomID ? "pin" : "row")
         #endif
@@ -1489,11 +1547,21 @@ struct ChatView: View {
         guard isActive else { return }
         applySlice(TranscriptSlice.holding([id], in: model.transcriptItems, current: 0))
         follow.markDrivenInstant()
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            proxy.scrollTo(id, anchor: point)
+        func scroll() {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(id, anchor: point)
+            }
         }
+        #if os(macOS)
+        // A row that is not laid out cannot be scrolled to: lay it out first.
+        if Self.exactHead, !exactRows.ensureDrawn(id) {
+            DispatchQueue.main.async { scroll() }
+            return
+        }
+        #endif
+        scroll()
     }
 
     /// The folder's uncommitted work and the branch's pull request, just
@@ -2123,3 +2191,411 @@ final class TranscriptMeasuredTail {
         return TranscriptSlice.split(rows, measuredFrom: start)
     }
 }
+
+#if os(macOS)
+/// The older rows of a transcript, at their real heights.
+///
+/// A lazy stack sizes every row it has not built with one guess, and the
+/// rows of a chat are very different sizes: a one-line step is 24 points, a
+/// usage line 14, a plan 170, a picture 300, a reply a screen. Reading back
+/// built them, the guesses were corrected, and the conversation's height
+/// changed under the scrollbar by hundreds of points a gesture.
+///
+/// Here only the rows near the reader are drawn. Everything above them is
+/// one empty space and everything below another, each exactly as tall as
+/// the rows it stands for: measured heights for rows that have been drawn
+/// or measured, an estimate (`estimatedHeight`) for the rest. Rows about to
+/// be drawn are measured out of sight first, so a row arriving on screen
+/// changes nothing, and a space above the reader that changes size moves
+/// the view by the same amount in the same update.
+@MainActor @Observable
+final class TranscriptExactRows {
+    /// The first and last row drawn, by id, so rows a page adds above keep
+    /// the same rows drawn.
+    private(set) var firstDrawn: String?
+    private(set) var lastDrawn: String?
+    /// Rows laid out out of sight so their height is known before they are
+    /// drawn. See `noteMeasured`.
+    private(set) var measuring: [String] = []
+    /// Moves when a space changes size, so it is laid out again.
+    private(set) var revision = 0
+
+    /// Move the view by a number of points, keeping what is on screen in
+    /// place, and say so to whoever anchors the reading row.
+    @ObservationIgnored var shift: ((CGFloat) -> Void)?
+    /// False while something else owns the viewport: following the end, a
+    /// page being put in place.
+    @ObservationIgnored var canShift: (() -> Bool)?
+
+    @ObservationIgnored private var heights: [String: CGFloat] = [:]
+    @ObservationIgnored private var ids: [String] = []
+    @ObservationIgnored private var index: [String: Int] = [:]
+    @ObservationIgnored private var sizes: [CGFloat] = []
+    /// `tops[i]` is row i's top below the first row's top, spacing included.
+    /// One entry more than rows.
+    @ObservationIgnored private var tops: [CGFloat] = [0]
+    @ObservationIgnored private var stale = true
+    /// The first row's top in the transcript, learned from drawn rows.
+    @ObservationIgnored private var base: CGFloat = 40
+    @ObservationIgnored private var lastTop: CGFloat?
+    @ObservationIgnored private var lastViewport: CGFloat = 0
+    @ObservationIgnored private var generation: UInt64?
+
+    static let spacing = Theme.Space.m
+    /// How far beyond the screen rows are drawn, in screens. Every drawn
+    /// row reports where it is on every frame of a scroll, so this is kept
+    /// close to what a lazy stack keeps built.
+    private static let ahead: CGFloat = 0.75
+    /// How far beyond the drawn rows heights are measured, in screens, and
+    /// the most rows measured at once.
+    private static let measuredAbove: CGFloat = 2.5
+    private static let measuredBelow: CGFloat = 1
+    private static let measuredMost = 40
+
+    /// The rows in order. Called while the transcript is drawn, so it
+    /// changes nothing a view observes.
+    func setRows(_ items: ArraySlice<ChatDisplayItem>, generation: UInt64) {
+        if generation != self.generation {
+            self.generation = generation
+            heights.removeAll()
+            lastTop = nil
+            baseKnown = false
+            stale = true
+        }
+        if items.count != ids.count || items.first?.id != ids.first || items.last?.id != ids.last
+            || !zip(items, ids).allSatisfy({ $0.id == $1 }) {
+            ids = items.map(\.id)
+            index = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            sizes = items.map { heights[$0.id] ?? Self.estimatedHeight($0) }
+            stale = true
+            rowsVersion &+= 1
+        }
+    }
+
+    /// Moves when the rows change. Handed to the spaces as a plain value:
+    /// a page that adds rows above changes neither the drawn rows nor a
+    /// measured height, and the space above stayed the size it was until
+    /// something else redrew it, a whole page too short.
+    @ObservationIgnored private(set) var rowsVersion = 0
+
+    /// The rows drawn, as positions in the rows last set.
+    var drawn: ClosedRange<Int> {
+        guard !ids.isEmpty else { return 0...0 }
+        let last = ids.count - 1
+        if let lower = firstDrawn.flatMap({ index[$0] }), let upper = lastDrawn.flatMap({ index[$0] }),
+           lower <= upper {
+            return lower...upper
+        }
+        // Nothing placed yet: the newest rows, where a transcript opens.
+        return max(0, last - 30)...last
+    }
+
+    /// The empty space above and below the drawn rows.
+    func spaces(around drawn: ClosedRange<Int>) -> (above: CGFloat, below: CGFloat) {
+        guard !ids.isEmpty else { return (0, 0) }
+        rebuildTops()
+        let above = drawn.lowerBound > 0 ? tops[drawn.lowerBound] - Self.spacing : 0
+        let below = drawn.upperBound < ids.count - 1
+            ? tops[ids.count] - Self.spacing - tops[drawn.upperBound + 1] : 0
+        return (max(0, above), max(0, below))
+    }
+
+    /// Lay out a row that is about to be scrolled to. True when it already
+    /// was.
+    func ensureDrawn(_ id: String) -> Bool {
+        guard let row = index[id] else { return true }
+        if drawn.contains(row) { return true }
+        rebuildTops()
+        let reach = max(lastViewport, 600) * Self.ahead
+        let want = rows(from: tops[row] + base - reach, to: tops[row] + base + reach)
+        firstDrawn = ids[min(want.lowerBound, row)]
+        lastDrawn = ids[max(want.upperBound, row)]
+        return false
+    }
+
+    /// A row laid out out of sight measured itself.
+    ///
+    /// Its space takes the real height now, before the row is drawn. A space
+    /// above the reader that changes size moves everything below it, so the
+    /// view moves by the same amount in the same update.
+    func noteMeasured(_ id: String, _ height: CGFloat) {
+        guard height > 0, let row = index[id] else { return }
+        heights[id] = height
+        let delta = height - sizes[row]
+        guard abs(delta) > 0.5 else { return }
+        rebuildTops()
+        let above = lastTop.map { tops[row] + base < $0 } ?? false
+        sizes[row] = height
+        stale = true
+        revision &+= 1
+        if above, canShift?() != false { shift?(delta) }
+    }
+
+    /// A drawn row measured itself. Its own report moves the reading row's
+    /// anchor if it changed size, so nothing moves the view here.
+    func noteHeight(_ id: String, _ height: CGFloat) {
+        guard height > 0, let row = index[id] else { return }
+        heights[id] = height
+        guard abs(sizes[row] - height) > 0.5 else { return }
+        sizes[row] = height
+        stale = true
+    }
+
+    /// The header above the rows ends at `bottom` in the transcript: the
+    /// first row starts one spacing below it.
+    ///
+    /// The header changes size too: reaching the start of a conversation
+    /// turns the way to earlier messages into its first lines. Everything
+    /// below moves with it, so the view moves by as much, as for a row.
+    func noteHeaderBottom(_ bottom: CGFloat) {
+        let next = bottom + Self.spacing
+        let delta = next - base
+        let reading = lastTop.map { $0 > base } ?? false
+        base = next
+        guard abs(delta) > 0.5, reading, baseKnown else {
+            baseKnown = true
+            return
+        }
+        if canShift?() != false { shift?(delta) }
+    }
+    @ObservationIgnored private var baseKnown = false
+
+    /// Where the reader is: `top` is the viewport's top in the transcript.
+    func update(top: CGFloat, viewport: CGFloat) {
+        lastTop = top
+        lastViewport = viewport
+        guard !ids.isEmpty, viewport > 0 else { return }
+        rebuildTops()
+        let current = drawn
+        let want = rows(from: top - viewport * Self.ahead, to: top + viewport * (1 + Self.ahead))
+        guard firstDrawn != nil else {
+            place(want)
+            return
+        }
+        // What must be drawn this frame: the screen and a little either side.
+        let need = rows(from: top - viewport * 0.25, to: top + viewport * 1.25)
+        if need.lowerBound < current.lowerBound || need.upperBound > current.upperBound
+            || need.upperBound < current.lowerBound || need.lowerBound > current.upperBound {
+            // The screen reached rows that are not drawn: a jump, or a fling
+            // faster than the rows are being drawn. Draw where it is now.
+            place(want)
+            return
+        }
+        // Nothing to do while a screen of drawn rows is left either side.
+        let near = rows(from: top - viewport * 0.5, to: top + viewport * 1.5)
+        if current.lowerBound <= near.lowerBound, current.upperBound >= near.upperBound {
+            planMeasuring(around: current)
+            return
+        }
+        // Otherwise move toward `want` a few rows a frame, as a lazy stack
+        // builds rows as they arrive. A screen of rows built in one frame
+        // was a stall each time the drawn rows moved, and moving them on
+        // every frame cost more than it saved.
+        //
+        // Only into rows already measured out of sight: a row drawn before
+        // its height is known changes size where the reader can see the
+        // text move. Until the measuring catches up, the range waits.
+        let step = Self.rowsPerFrame
+        var lower = current.lowerBound, upper = current.upperBound
+        var added = 0
+        while lower > want.lowerBound, added < step, heights[ids[lower - 1]] != nil {
+            lower -= 1
+            added += 1
+        }
+        if want.lowerBound > lower + step * 2 { lower = min(want.lowerBound, need.lowerBound) }
+        added = 0
+        while upper < want.upperBound, added < step, heights[ids[upper + 1]] != nil {
+            upper += 1
+            added += 1
+        }
+        if want.upperBound < upper - step * 2 { upper = max(want.upperBound, need.upperBound) }
+        place(lower...upper)
+    }
+
+    private func place(_ range: ClosedRange<Int>) {
+        let first = ids[range.lowerBound], last = ids[range.upperBound]
+        if first != firstDrawn { firstDrawn = first }
+        if last != lastDrawn { lastDrawn = last }
+        planMeasuring(around: range)
+    }
+
+    /// How many rows the drawn range grows by in one frame.
+    private static let rowsPerFrame = 8
+
+    /// The rows just outside the drawn ones with no real height yet, enough
+    /// to cover the next stretch the reader can reach before more are
+    /// drawn. Counted in points: a dozen one-line steps are less than a
+    /// screen.
+    private func planMeasuring(around drawn: ClosedRange<Int>) {
+        var next: [String] = []
+        var covered: CGFloat = 0
+        var row = drawn.lowerBound - 1
+        while row >= 0, next.count < Self.measuredMost, covered < lastViewport * Self.measuredAbove {
+            covered += sizes[row]
+            if heights[ids[row]] == nil { next.append(ids[row]) }
+            row -= 1
+        }
+        covered = 0
+        var below = 0
+        row = drawn.upperBound + 1
+        while row < ids.count, below < Self.measuredMost / 2, covered < lastViewport * Self.measuredBelow {
+            covered += sizes[row]
+            if heights[ids[row]] == nil { next.append(ids[row]); below += 1 }
+            row += 1
+        }
+        if next != measuring { measuring = next }
+    }
+
+    /// The rows that cross `from...to`, in transcript coordinates.
+    private func rows(from: CGFloat, to: CGFloat) -> ClosedRange<Int> {
+        let last = ids.count - 1
+        let lower = min(last, max(0, rowAt(from - base)))
+        let upper = min(last, max(lower, rowAt(to - base)))
+        return lower...upper
+    }
+
+    private func rowAt(_ offset: CGFloat) -> Int {
+        var low = 0, high = ids.count
+        while low < high {
+            let mid = (low + high) / 2
+            if tops[mid + 1] <= offset { low = mid + 1 } else { high = mid }
+        }
+        return low
+    }
+
+    private func rebuildTops() {
+        guard stale else { return }
+        stale = false
+        var tops = [CGFloat](repeating: 0, count: sizes.count + 1)
+        for row in sizes.indices {
+            tops[row + 1] = tops[row] + sizes[row] + Self.spacing
+        }
+        self.tops = tops
+    }
+
+    /// What a row nobody has measured is likely to take. From a long chat
+    /// of every kind of row: a one-line step 24, usage 14, a turn's changes
+    /// about 100, a plan about 40 plus 26 a step, a picture about 300. Text
+    /// wraps at about 105 characters a line in the reading lane.
+    static func estimatedHeight(_ item: ChatDisplayItem) -> CGFloat {
+        func prose(_ text: String, padding: CGFloat) -> CGFloat {
+            var lines = 0
+            var run = 0
+            for unit in text.utf8 {
+                if unit == 10 { lines += 1 + run / 105; run = 0 } else { run += 1 }
+            }
+            lines += 1 + run / 105
+            return CGFloat(lines) * 21 + padding
+        }
+        switch item.kind {
+        case let .assistant(text, _): return prose(text, padding: item.part?.isFirst == false ? 16 : 40)
+        case let .user(text): return prose(text, padding: 30)
+        case let .thinking(text), let .failed(text): return min(prose(text, padding: 20), 120)
+        case .group, .tool, .turnSeparator: return 24
+        case .usage: return 14
+        case .changes: return 100
+        case let .plan(steps): return 40 + CGFloat(steps.count) * 26
+        case .attachment: return 300
+        case .edit, .approval, .question: return 120
+        case .handoff: return 75
+        }
+    }
+}
+
+/// The older rows: the drawn ones between two spaces that stand for the
+/// rest. See `TranscriptExactRows`.
+///
+/// Each part watches only what it draws. A space changes size every time a
+/// row is measured, and redrawing the head for that compared every drawn
+/// row again, dozens of times a scroll.
+private struct TranscriptExactHead<Header: View, Row: View, Measure: View>: View {
+    let items: ArraySlice<ChatDisplayItem>
+    let rows: TranscriptExactRows
+    @ViewBuilder let header: () -> Header
+    let row: (ChatDisplayItem) -> Row
+    /// The same row with nothing that reports it as on screen.
+    let measure: (ChatDisplayItem) -> Measure
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: TranscriptExactRows.spacing) {
+            // Where the rows start, from the header above them, on every
+            // layout. Learning it only from drawn rows left it wrong when
+            // none were on screen, and then the rows were drawn where the
+            // screen was not.
+            header()
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.frame(in: .named(TranscriptFollow.contentSpaceName)).maxY
+                } action: { bottom in
+                    rows.noteHeaderBottom(bottom)
+                }
+            TranscriptExactSpace(rows: rows, above: true, version: rows.rowsVersion)
+            TranscriptExactDrawn(items: items, rows: rows, row: row)
+            TranscriptExactSpace(rows: rows, above: false, version: rows.rowsVersion)
+        }
+        .background(alignment: .topLeading) {
+            TranscriptExactMeasuring(items: items, rows: rows, measure: measure)
+        }
+    }
+}
+
+private struct TranscriptExactSpace: View {
+    let rows: TranscriptExactRows
+    let above: Bool
+    /// See `TranscriptExactRows.rowsVersion`.
+    let version: Int
+
+    var body: some View {
+        let _ = rows.revision
+        let spaces = rows.spaces(around: rows.drawn)
+        let height = above ? spaces.above : spaces.below
+        if height > 0 {
+            Color.clear.frame(height: height)
+        }
+    }
+}
+
+private struct TranscriptExactDrawn<Row: View>: View {
+    let items: ArraySlice<ChatDisplayItem>
+    let rows: TranscriptExactRows
+    let row: (ChatDisplayItem) -> Row
+
+    var body: some View {
+        if !items.isEmpty {
+            let drawn = rows.drawn
+            let lower = items.startIndex + drawn.lowerBound
+            let upper = min(items.endIndex - 1, items.startIndex + drawn.upperBound)
+            if lower <= upper {
+                ForEach(items[lower...upper]) { item in
+                    row(item)
+                }
+            }
+        }
+    }
+}
+
+/// Out of sight and out of the layout: these rows only say how tall they
+/// are.
+private struct TranscriptExactMeasuring<Measure: View>: View {
+    let items: ArraySlice<ChatDisplayItem>
+    let rows: TranscriptExactRows
+    let measure: (ChatDisplayItem) -> Measure
+
+    var body: some View {
+        let wanted = Set(rows.measuring)
+        VStack(alignment: .leading, spacing: 0) {
+            if !wanted.isEmpty {
+                ForEach(items.filter { wanted.contains($0.id) }) { item in
+                    measure(item)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            rows.noteMeasured(item.id, height)
+                        }
+                }
+            }
+        }
+        .hidden()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+#endif

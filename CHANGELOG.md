@@ -9,7 +9,7 @@ desktop is a review build. Newest first.
 
 ### Changed
 
-- Chats open with more history and load larger pages as you scroll back, so long conversations need fewer pauses to fill in. Update the computer to 1.25.0 for the larger pages from a phone or tablet.
+- Chats open with more history and load larger pages as you scroll back, so long conversations need fewer pauses to fill in. A phone or tablet gets the larger pages once the computer it connects to runs 1.25.0.
 - On iPhone and iPad, Rate tokenstat in Legal opens a sheet where you can rate on the App Store, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
 
 ### Fixed
@@ -18,13 +18,14 @@ desktop is a review build. Newest first.
 - On Mac, earlier messages load again after you switch to another chat and come back. Before, scrolling to the top and pressing Earlier messages did nothing until the app restarted.
 - On Mac, loading earlier messages keeps the line you were reading where it was, with the older messages appearing above it. Before, it could land on the top of what just arrived and keep loading page after page.
 - Scrolling back through chats full of tool steps, plans and pictures no longer jumps as older rows come into view, and the text stays still when you come back to a chat you had read far back in.
+- On Mac, the scrollbar keeps a steady size and place while you read back through a long chat, because older messages are now laid out at their real height.
 - On iPhone and iPad, a slow drag up just after opening a chat now moves the conversation. Before, it barely followed the finger and sprang back to the latest message on release.
 - Scrolling while a long reply streams is smoother. Finished parts of the reply are no longer redrawn on every new word, and the reply refreshes about once a second while you read elsewhere.
 - Long numbered lists no longer show a stray blank line partway through.
-- Antigravity plan limits show again with Antigravity 2.34 and later, read from the running app: the 5-hour and weekly limits for each model group, as the app shows them. A spent limit now reads as used up instead of missing.
+- Antigravity plan limits show again with Antigravity 2.34 and later. tokenstat reads the 5-hour and weekly limits for each model group from the running app, the same ones the app shows. A spent limit now reads as used up instead of missing.
 - When the Antigravity app is open but its language server does not answer, tokenstat says so instead of reporting that the app is not running.
 - tokenstat reads the Antigravity sign-in that newer versions keep in the keychain, and skips an expired one instead of failing with an authorization error.
-- When the Antigravity CLI runs out of quota in a chat, the chat shows its message and when the limit resets, instead of a generic exit code.
+- When the Antigravity CLI runs out of quota in a chat, the chat shows the CLI's message and when the limit resets, instead of a generic exit code.
 
 ## [1.24.1] - 2026-11-21
 
