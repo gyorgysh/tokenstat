@@ -14,6 +14,9 @@ import SwiftUI
 /// made the live character look like it was travelling.
 enum TranscriptFollow {
     static let spaceName = "chat-scroll"
+    /// The transcript's own content, which a scroll does not move. A row's
+    /// place in it changes only when something above the row changes size.
+    static let contentSpaceName = "chat-content"
     /// How far from the bottom counts as "still with the conversation".
     static let threshold: CGFloat = 56
     /// The live Thinking/Working seat. Fixed so a mood change cannot shove
@@ -128,9 +131,9 @@ enum TranscriptFollow {
 /// conversation of any size became a stopped application. The slice stays
 /// this wide. Older built rows are reached by sliding it, not by widening it.
 enum TranscriptSlice {
-    static let length = 200
+    static let length = 1500
     /// How far one "show earlier" tap slides toward the start.
-    static let step = 120
+    static let step = 600
 
     static func clampOffset(_ offset: Int, count: Int) -> Int {
         guard count > length else { return 0 }
@@ -174,11 +177,31 @@ enum TranscriptSlice {
     /// usual tail: switching rebuilds the rows it moves, and a reader
     /// following a reply is not scrolling through estimates.
     static let measuredWhole = 64
+    /// A longer slice is measured whole too when its rows are small. A chat
+    /// of one-line tool steps between replies and pictures has many rows and
+    /// little to measure, and the lazy stack estimated those steps far too
+    /// tall: the reader's first scroll up built them and the content above
+    /// shrank by hundreds of points at a time. What counts is how much there
+    /// is to lay out, not how many rows hold it.
+    static let measuredWholeMost = 256
+    static let measuredWholeHeight = 40_000.0
+
+    /// Whether `rows` can be measured whole. See `measuredWhole`.
+    static func measuresWhole(_ rows: [ChatDisplayItem]) -> Bool {
+        if rows.count <= measuredWhole { return true }
+        guard rows.count <= measuredWholeMost else { return false }
+        var height = 0.0
+        for row in rows {
+            height += row.tailHeightFloor
+            if height > measuredWholeHeight { return false }
+        }
+        return true
+    }
 
     /// The built rows, split into the lazy head and the measured tail.
-    /// `whole` allows a short slice to be measured entirely.
+    /// `whole` allows a slice with little to lay out to be measured entirely.
     static func measuredTailStart(_ rows: [ChatDisplayItem], whole: Bool = false) -> Int {
-        if whole, rows.count <= measuredWhole { return 0 }
+        if whole, measuresWhole(rows) { return 0 }
         var count = 0
         var covered = 0.0
         for row in rows.reversed() {
@@ -938,10 +961,17 @@ private struct TranscriptRowMount: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 15.0, iOS 18.0, *) {
             content
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TranscriptFollow.contentSpaceName)).minY } action: { top in
+                    // Not gated on the mount: a row's first report arrives
+                    // before it is counted as mounted, and a row on screen
+                    // with no place recorded could never be the reading row.
+                    window.noteContentTop(id, top)
+                }
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptFollow.spaceName)) } action: { frame in
                     row.frame = frame
                     #if DEBUG
                     TranscriptProbe.shared.noteRow(id, height: frame.height)
+                    TranscriptProbe.shared.noteTracked(id, top: frame.minY)
                     #endif
                     if mounts.contains(row) { window.report(id, mount: row, frame: frame) }
                 }
@@ -1470,6 +1500,93 @@ final class TranscriptWindow {
     /// Apply an offset correction to an already measured row when the
     /// platform gives us access to the native scroll view.
     var restoreMeasured: ((CGFloat) -> Bool)?
+    /// The row the reader is reading, and where it sits in the content.
+    ///
+    /// Rows the lazy stack has not built yet are sized by estimate, and a
+    /// chat of one-line tool steps between long replies and pictures is
+    /// estimated far too tall. Scrolling up builds them, the content above
+    /// the reader shrinks by hundreds of points at a time, and AppKit keeps
+    /// the offset from the top, so the text under the reader jumped. The
+    /// row being read keeps its place on screen instead: when its place in
+    /// the content changes, something above it changed size, and the offset
+    /// moves by exactly as much in the same pass, before anything is drawn.
+    private var readingRow: String?
+    private var readingTop: CGFloat = 0
+    private var contentTops: [String: CGFloat] = [:]
+
+    func noteContentTop(_ id: String, _ top: CGFloat) {
+        contentTops[id] = top
+        guard id == readingRow else { return }
+        var shift = top - readingTop
+        readingTop = top
+        // Content that shrinks near the end is partly put right by AppKit
+        // already: the offset cannot pass the new end, so it is pulled back
+        // by whatever the shrink takes beyond the room that was below the
+        // screen. Only the rest moved the reader. Correcting the whole of it
+        // again threw the row a screen away on the first scroll up.
+        if shift < 0 { shift = -min(-shift, distanceFromBottom) }
+        // Following the end, the end owns the viewport. A reader who has
+        // just started scrolling up owns it already, on the first frame,
+        // before the follow state has caught up.
+        let leavingEnd = readerIsScrolling && readingEarlier == true
+        guard abs(shift) > 0.5, active, held == nil, !followingEnd || leavingEnd,
+              readingRowOnScreen, let restoreMeasured else { return }
+        _ = restoreMeasured(shift)
+    }
+
+    private var readingRowOnScreen: Bool {
+        guard let readingRow, let frame = rowFrames[readingRow] else { return false }
+        return frame.maxY > 0 && frame.minY < viewportHeight
+    }
+
+    /// Follow the reader to the row now at the top of the screen.
+    private func pickReadingRow() {
+        guard let id = anchor?.id, id != readingRow, let top = contentTops[id] else { return }
+        readingRow = id
+        readingTop = top
+    }
+
+    /// Cover the transcript with a still picture of what is on screen, and
+    /// take it away again. Installed beside `restoreMeasured`.
+    var cover: (() -> Void)?
+    var uncover: (() -> Void)?
+    private var covered = false
+    private var coverExpiry: DispatchWorkItem?
+
+    /// Keep the reader looking at the screen they had while a page lands.
+    ///
+    /// The rows a page brings above the reader are only estimates until
+    /// they are built, so putting the held row back can take a few passes,
+    /// and each one would be drawn. The page only lands while the reader is
+    /// at rest, so a still picture of that moment is exactly what they were
+    /// looking at. It comes off as soon as the row is back in place.
+    func coverPageLanding() {
+        guard let cover, !covered else { return }
+        covered = true
+        #if DEBUG
+        MainActor.assumeIsolated { TranscriptHoldTrace.shared.corrected("cover") }
+        #endif
+        cover()
+        coverExpiry?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.uncoverPage() }
+        coverExpiry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.coverLimit, execute: work)
+    }
+
+    func uncoverPage() {
+        coverExpiry?.cancel()
+        coverExpiry = nil
+        guard covered else { return }
+        covered = false
+        #if DEBUG
+        MainActor.assumeIsolated { TranscriptHoldTrace.shared.corrected("uncover") }
+        #endif
+        uncover?()
+    }
+
+    /// The longest a page landing may keep the picture up.
+    private static let coverLimit: TimeInterval = 0.6
+
     var canRestore: (() -> Bool)?
     var canPage: (() -> Bool)?
     private let restoreDelivery = TranscriptScrollDelivery()
@@ -1485,7 +1602,9 @@ final class TranscriptWindow {
     /// then a no-op.
     private var held: TranscriptAnchor?
     /// Whether the held row has reached its target since the layout changed.
-    private var heldLanded = false
+    private var heldLanded = false {
+        didSet { if heldLanded { uncoverPage() } }
+    }
     /// The hold is for a page arriving, the one change that can grow a row
     /// at its start.
     private var heldIsPage = false
@@ -1532,6 +1651,7 @@ final class TranscriptWindow {
         restoreDelivery.cancel()
         holdExpiry?.cancel()
         holdExpiry = nil
+        uncoverPage()
         held = nil
         heldUntil = .distantPast
     }
@@ -1632,7 +1752,11 @@ final class TranscriptWindow {
         lastWheelAt = Date()
         lastMovedAt = lastWheelAt
         readerIsScrolling = true
-        if held != nil { release() }
+        // The reader owns the page again, except while a page that just
+        // landed is still being put back under its cover: a wheel that keeps
+        // going then must not drop the hold, or the page would push
+        // everything down by its height. The cover lasts a moment at most.
+        if held != nil, heldLanded || !covered { release() }
         // Upward only. A wheel toward the end must still be allowed to
         // resume following once the viewport arrives there.
         if towardEarlier { releaseFollow?() }
@@ -1661,6 +1785,11 @@ final class TranscriptWindow {
         if held == nil, !wheelIsScrolling, readerIsScrolling, !changed, abs(offsetDelta) > 0.5 {
             readingEarlier = offsetDelta < 0
         }
+        // A change of height is what the reading row answers, so it is not
+        // swapped on a frame that has one, unless it has left the screen:
+        // scrolling into rows that are only estimates changes the height
+        // nearly every frame, and a row that went by answers nothing.
+        if !changed || !readingRowOnScreen { pickReadingRow() }
         // The end owns the viewport while it is being followed. Anything held
         // from before is dropped rather than applied against it.
         if followingEnd {
@@ -1861,6 +1990,8 @@ final class TranscriptWindow {
     func clearRowFrames() {
         rowMounts.removeAll()
         rowFrames.removeAll()
+        contentTops.removeAll()
+        readingRow = nil
     }
 
     /// A row can move between the lazy stack and the measured tail. Keep
@@ -1873,6 +2004,8 @@ final class TranscriptWindow {
         } else if rowMounts[id] == owner {
             rowMounts[id] = nil
             rowFrames[id] = nil
+            contentTops[id] = nil
+            if readingRow == id { readingRow = nil }
             if let held, held.id == id {
                 scheduleRestore(held)
             }
@@ -1919,6 +2052,21 @@ final class TranscriptWindow {
         revealLater()
     }
 
+    /// Put the held row back in the same update that inserted the page.
+    ///
+    /// Left to the next layout, the page is drawn once with the offset
+    /// unchanged, which shows the reader the start of what it brought, and
+    /// the correction after it is a visible jump. A scroll asked for now is
+    /// laid out together with the new rows, so no frame shows the wrong
+    /// place. The usual checks still run once the rows report.
+    func placeHeldPage() {
+        guard active, heldIsPage, let held, !followingEnd, canRestore?() != false else { return }
+        #if DEBUG
+        MainActor.assumeIsolated { TranscriptHoldTrace.shared.corrected("place") }
+        #endif
+        restore?(target(for: held))
+    }
+
     private func scheduleRestore(_ anchor: TranscriptAnchor, after delay: TimeInterval = 0) {
         restoreDelivery.submit(after: delay) { [weak self] in
             guard let self, !self.followingEnd, !(self.readerIsScrolling && self.heldLanded),
@@ -1945,6 +2093,12 @@ final class TranscriptWindow {
             MainActor.assumeIsolated { TranscriptHoldTrace.shared.corrected("late") }
             #endif
             if let frame, self.restoreMeasured?(target.drift(to: frame)) == true { return }
+            // A page landed above a held row that is no longer built: with
+            // the offset unchanged, the rows it brought filled the screen and
+            // pushed the held one out of the built range. The content height
+            // cannot say by how much, since those rows are only estimates.
+            // Scroll to the row itself, at the place the reader had it: that
+            // builds it, and its report makes any last correction exact.
             self.restore?(target)
             if frame == nil {
                 self.scheduleRestore(anchor, after: 0.08)
@@ -2150,8 +2304,17 @@ extension View {
                 proxy.scrollTo(anchor.id, anchor: anchor.unitPoint(in: window.viewportHeight))
             }
         }
-        let extendedAtStart: (String) -> Bool = { [weak model] id in model?.rowsExtendedAtStart.contains(id) == true }
+        let extendedAtStart: (String) -> Bool = { [weak model] id in model?.rowExtendedAtStart(id) == true }
         let resolveRow: (String) -> String? = { [weak model] id in model?.transcriptRow(holding: id) }
+        // The proxy belongs to the scroll view on screen now. One kept from
+        // an earlier pass can belong to a scroll view that is gone, and
+        // scrolling through it does nothing at all, so every page then lands
+        // with the reader at the top of what it brought. Renew the closures
+        // that scroll on every pass. The window is a plain object, so this
+        // redraws nothing.
+        if isActive {
+            window.restore = restore
+        }
         return onPreferenceChange(TranscriptRowFrameKey.self) { frames in
             guard !TranscriptWindow.rowsReportThemselves else { return }
             window.rowFrames = frames
@@ -2242,11 +2405,18 @@ func loadEarlier(_ model: ChatModel, window: TranscriptWindow, manual: Bool) asy
         published = true
         // Take the anchor at publication, after the request and projection.
         // Stream layout during the request has no page insertion to correct.
-        if window.active, let anchor = window.anchor { window.hold(anchor) } else { window.release() }
+        if window.active, let anchor = window.anchor {
+            window.hold(anchor)
+            window.coverPageLanding()
+        } else {
+            window.release()
+        }
         // A slice glued to the end shows the newest rows. A page that takes
         // the conversation past its length would make it drop its oldest,
         // which are the rows the reader is looking at. Keep its start.
         if window.active { window.holdSliceStart?(true) }
+    } afterPrepend: {
+        window.placeHeldPage()
     }
     guard model.selectionGeneration == generation else { return }
     if published { window.holdSliceStart?(false) }

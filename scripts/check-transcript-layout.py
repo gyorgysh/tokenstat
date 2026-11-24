@@ -28,7 +28,8 @@ tests = r'''
     var displayItems: [Int] = []
     var advances = true
 
-    func loadEarlier(waitToPrepend: (() async -> Bool)?, beforePrepend: () -> Void) async -> Bool {
+    func loadEarlier(waitToPrepend: (() async -> Bool)?, beforePrepend: () -> Void,
+                     afterPrepend: () -> Void) async -> Bool {
         advances
     }
 }
@@ -378,18 +379,20 @@ assert(TranscriptSlice.split([ChatDisplayItem(id: "only")]).measured.count == 1,
 assert(TranscriptSlice.measuredTailStart((0..<10).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 1200) }, whole: true) == 0, "a short settled slice is measured whole")
 assert(TranscriptSlice.measuredTailStart((0..<80).map { ChatDisplayItem(id: "\($0)", tailHeightFloor: 1200) }, whole: true) == 78, "a long slice keeps its lazy head")
 assert(TranscriptSlice.split([]).measured.isEmpty, "an empty list has no tail")
-assert(TranscriptSlice.range(count: 260, olderOffset: 0) == 60..<260, "glued to the end is a suffix")
-assert(TranscriptSlice.range(count: 260, olderOffset: 60) == 0..<200, "full slide reaches the start")
-assert(TranscriptSlice.hiddenAbove(count: 260, olderOffset: 0) == 60, "suffix hides the prefix")
-assert(TranscriptSlice.revealingEarlier(count: 260, olderOffset: 0) == 60, "one tap cannot overshoot")
-assert(TranscriptSlice.clampOffset(999, count: 260) == 60, "offset cannot exceed the slice")
-let ids = (0..<260).map { ChatDisplayItem(id: "\($0)") }
+// In terms of the slice length, so a change to it needs no edit here.
+let sliceLength = TranscriptSlice.length
+assert(TranscriptSlice.range(count: sliceLength + 60, olderOffset: 0) == 60..<(sliceLength + 60), "glued to the end is a suffix")
+assert(TranscriptSlice.range(count: sliceLength + 60, olderOffset: 60) == 0..<sliceLength, "full slide reaches the start")
+assert(TranscriptSlice.hiddenAbove(count: sliceLength + 60, olderOffset: 0) == 60, "suffix hides the prefix")
+assert(TranscriptSlice.revealingEarlier(count: sliceLength + 60, olderOffset: 0) == 60, "one tap cannot overshoot")
+assert(TranscriptSlice.clampOffset(sliceLength * 10, count: sliceLength + 60) == 60, "offset cannot exceed the slice")
+let ids = (0..<(sliceLength + 60)).map { ChatDisplayItem(id: "\($0)") }
 assert(TranscriptSlice.holding(["0"], in: ids, current: 60) == 60, "holding the first visible row keeps the start")
-let grown = (0..<270).map { ChatDisplayItem(id: "\($0)") }
+let grown = (0..<(sliceLength + 70)).map { ChatDisplayItem(id: "\($0)") }
 assert(TranscriptSlice.holding(["0"], in: grown, current: 60) == 70, "a turn below must not slide the window")
 let earlier = (0..<100).map { ChatDisplayItem(id: "p\($0)") } + ids
 assert(TranscriptSlice.holding(["0"], in: earlier, current: 60) == 60, "a page above must not replace the window")
-assert(TranscriptSlice.range(count: 360, olderOffset: 60) == 100..<300, "held offset after a prepend is the original rows")
+assert(TranscriptSlice.range(count: sliceLength + 160, olderOffset: 60) == 100..<(sliceLength + 100), "held offset after a prepend is the original rows")
 assert(TranscriptSlice.holding(["missing"], in: ids, current: 60) == 60, "a gone row keeps the last offset")
 assert(TranscriptSlice.holding(["missing", "10", "20"], in: ids, current: 60) == 50, "a refolded start follows the first surviving row")
 var historyChecksFinished = false

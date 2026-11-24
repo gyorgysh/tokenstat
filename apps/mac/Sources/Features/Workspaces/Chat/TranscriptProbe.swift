@@ -58,6 +58,7 @@ final class TranscriptProbe {
         recordedOpens.removeAll(keepingCapacity: true)
         recordedOffsets.removeAll(keepingCapacity: true)
         recordedRows.removeAll(keepingCapacity: true)
+        recordedTrack.removeAll(keepingCapacity: true)
         rowHeights.removeAll(keepingCapacity: true)
         recordingStarted = ProcessInfo.processInfo.systemUptime
         cpuStarted = Self.threadCPUMilliseconds()
@@ -72,9 +73,21 @@ final class TranscriptProbe {
     /// shows as the offset reversing.
     private var recordedOffsets: [[Double]] = []
     private var rowHeights: [String: Double] = [:]
+    /// Every height a row has reported, recording or not (`key heights`).
+    private(set) var measuredHeights: [String: Double] = [:]
     private var recordedRows: [String] = []
+    /// The row whose on-screen position is recorded on every frame while
+    /// recording (`key track`), as `tracked` in the report.
+    var trackedRow: String?
+    private var recordedTrack: [[Double]] = []
+    func noteTracked(_ id: String, top: Double) {
+        guard recording, id == trackedRow, recordedTrack.count < 20_000 else { return }
+        recordedTrack.append([(ProcessInfo.processInfo.systemUptime - recordingStarted) * 1000, top])
+    }
+
     /// A row whose height changed while recording, by how much.
     func noteRow(_ id: String, height: Double) {
+        measuredHeights[id] = height
         guard recording else { return }
         let before = rowHeights[id]
         rowHeights[id] = height
@@ -120,6 +133,8 @@ final class TranscriptProbe {
             "chat_opens": recordedOpens,
             "offsets": recordedOffsets,
             "rows": recordedRows,
+            "tracked": recordedTrack,
+            "trackedRow": trackedRow ?? "",
         ]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-ui-performance.json"), options: .atomic)

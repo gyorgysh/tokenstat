@@ -237,9 +237,18 @@ struct ChatView: View {
             // slice whole while it stays short: moving every row into the
             // lazy stack under the page's hold is what lost the held row.
             let sameReading = key?.generation == generation
-            let whole = !streaming && (docked || (sameReading && key?.whole == true))
+            let whole = docked || (sameReading && key?.whole == true)
             let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id,
                            whole: whole)
+            // Rows arriving at the end, which is a reply streaming in (a long
+            // one adds a piece just before its live one), join the measured
+            // rows. Moving the boundary for them moved rows between the two
+            // stacks on every new piece: the view fell behind the reply and
+            // lurched back, and a reader could not scroll away from it.
+            if let key, sameReading, key.first == rows.first?.id, rows.count >= key.count, start <= rows.count {
+                self.key = next
+                return TranscriptSlice.split(rows, measuredFrom: start)
+            }
             if next != key {
                 start = TranscriptSlice.measuredTailStart(rows, whole: whole)
                 key = next
@@ -687,10 +696,41 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
             guard isActive, let command = note.object as? String else { return }
             if command == "clear-draft" { model.draft = ""; return }
+            // `key earlier` presses Earlier messages. `key where:<label>`
+            // logs the row at the top of the viewport and its offset.
+            if command == "earlier" { window.requestArchivePage(); return }
+            if command == "heights" {
+                // One line per row: kind, estimate, measured height (or -1).
+                let known = TranscriptProbe.shared.measuredHeights
+                let lines = visibleItems.map { item -> String in
+                    let kind = String(describing: item.kind).prefix(while: { $0 != "(" })
+                    return "\(kind)\t\(Int(item.tailHeightFloor))\t\(Int(known[item.id] ?? -1))\t\(item.id)"
+                }
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-heights.tsv")
+                try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+                return
+            }
+            if command == "track" { TranscriptProbe.shared.trackedRow = window.anchor?.id; return }
+            if command.hasPrefix("where") {
+                let anchor = window.anchor
+                TranscriptHoldTrace.note("where \(command.dropFirst(5)) id=\(anchor?.id ?? "none") top=\(Int(anchor?.top ?? 0)) height=\(Int(anchor?.height ?? 0)) rows=\(model.displayItems.count) built=\(visibleItems.count) hidden=\(hiddenAboveCount) later=\(sliceOffset) pinned=\(follow.pinned)")
+                return
+            }
             guard command.hasPrefix("type:") else { return }
             model.draft += String(command.dropFirst(5)).replacingOccurrences(of: "\\n", with: "\n")
         }
         #endif
+        .onChange(of: isActive) { was, active in
+            // Coming back to a chat that paged far back gets a new scroll
+            // view whose older rows are only estimates, and the reader's
+            // first scroll from the latest message is what makes them resize
+            // under it. Open on the newest page instead, the same as Jump to
+            // latest: it is what arriving shows, and earlier pages load again
+            // on the way back.
+            guard active, !was, model.canDiscardPagedHistory, !model.busy,
+                  !TranscriptSlice.measuresWhole(visibleItems) else { return }
+            Task { await model.reopenAtLatest() }
+        }
         .modifier(ChatFileTransferControls(model: model))
         .modifier(ChatCacheWarningAlert(model: model, isActive: isActive))
         .alert(L10n.text("apple.chatview.chat_unavailable.a45aae80"), isPresented: Binding(
@@ -700,6 +740,33 @@ struct ChatView: View {
             Button(L10n.text("apple.chatview.ok.565339bc"), role: .cancel) { model.error = nil }
         } message: {
             Text(model.error ?? "")
+        }
+    }
+
+    /// What sits above the oldest row: the way to earlier messages, or the
+    /// start of the conversation.
+    @ViewBuilder
+    private func transcriptHeader(_ chat: ChatConversation) -> some View {
+        #if !os(macOS)
+        if !model.chats.isEmpty {
+            conversationMenu
+        }
+        #endif
+        if model.transcriptItems.isEmpty, !chat.running, !model.openingConversation {
+            emptyConversation
+        }
+        if hiddenAboveCount > 0 {
+            Button(L10n.text("apple.chatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
+                revealEarlier()
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
+        } else {
+            TranscriptEarlierHeader(model: model) {
+                follow.stopFollowing()
+                window.requestArchivePage()
+            }
         }
     }
 
@@ -736,33 +803,22 @@ struct ChatView: View {
                 // toward an estimate until its correction budget runs out.
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                        #if !os(macOS)
-                        if !model.chats.isEmpty {
-                            conversationMenu
-                        }
-                        #endif
-                        if model.transcriptItems.isEmpty, !chat.running, !model.openingConversation {
-                            emptyConversation
-                        }
-                        if hiddenAboveCount > 0 {
-                            Button(L10n.text("apple.chatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
-                                revealEarlier()
-                            }
-                            .buttonStyle(SecondaryButtonStyle(small: true))
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
-                        } else {
-                            TranscriptEarlierHeader(model: model) {
-                                follow.stopFollowing()
-                                window.requestArchivePage()
-                            }
-                        }
+                        transcriptHeader(chat)
                         ForEach(split.lazy) { item in
                             transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
                                 .allowsHitTesting(!follow.scrolling)
                                 .transcriptRowMount(in: rowMounts, id: item.id, window: window)
+                                .id(item.id)
                         }
                     }
+                    // A lazy stack that gives all its rows to the measured
+                    // stack below keeps the size it estimated for them, and
+                    // only lets it go as a scroll makes it measure again:
+                    // coming back to a chat read far back, hundreds of
+                    // points of nothing melted away above the reader as
+                    // they started to scroll. A new stack starts at its
+                    // true size.
+                    .id(split.lazy.isEmpty)
                     // See `TranscriptSlice.measuredTail`. The rows above the
                     // newest sit in a stack of their own: a stream changes the
                     // newest row's height on every revision, and a settled
@@ -775,6 +831,7 @@ struct ChatView: View {
                                 transcriptRow(item, chat: chat, spinning: spinning, isLive: item.id == liveRowID)
                                     .allowsHitTesting(!follow.scrolling)
                                     .transcriptRowMount(in: rowMounts, id: item.id, window: window)
+                                    .id(item.id)
                             }
                         }
                     }
@@ -801,6 +858,7 @@ struct ChatView: View {
                         TranscriptBottomSentinel(trailingPadding: verticalPadding)
                     }
                 }
+                .coordinateSpace(name: TranscriptFollow.contentSpaceName)
                 .allowsHitTesting(!model.isShowingCachedTranscript)
                 .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
                 .onChange(of: follow.showJump || sliceOffset > 0, initial: true) { _, away in
@@ -1032,7 +1090,7 @@ struct ChatView: View {
     private func warmLazyEstimates(_ proxy: ScrollViewProxy, ticket: UUID,
                                    presentation: ChatPresentationIdentity) async {
         // A short slice is measured whole and has no estimates to settle.
-        guard visibleItems.count > TranscriptSlice.measuredWhole,
+        guard !TranscriptSlice.measuresWhole(visibleItems),
               settledSelection != Self.selectionKey(presentation),
               let move = window.restoreMeasured else { return }
         for _ in 0..<Self.warmMoves {
@@ -1061,6 +1119,11 @@ struct ChatView: View {
         window.clearRowFrames()
         window.followingEnd = true
         window.releaseFollow = { [follow] in follow.releaseForReaderWheel() }
+        // A page put in place under a moving viewport fights the momentum:
+        // the hold corrects, the fling carries on, and the held row is lost
+        // for frames. Wait until the reader's scroll has come to rest, as
+        // the phone does.
+        window.canPage = { [follow] in !follow.scrolling }
         lastSilentPinAt = .distantPast
         DiagnosticsLog.note("chat viewport remount previousEnd=\(follow.atEnd) rows=\(rowCount)")
         follow.resetViewport()
@@ -1909,6 +1972,19 @@ enum DebugTranscriptWheel {
                 send(points, phase: step == 0 ? 1 : 2, momentum: 0, at: location)
                 try? await Task.sleep(for: .milliseconds(16))
             }
+            // A negative tail glides: the same decaying speed a flick coasts
+            // at, sent as the gesture still moving, because AppKit ignores a
+            // momentum phase that no real trackpad started.
+            if momentum < 0 {
+                var value = Double(points)
+                for _ in 0..<(-momentum) {
+                    value *= 0.92
+                    let delta = Int32(value.rounded())
+                    guard delta != 0 else { break }
+                    send(delta, phase: 2, momentum: 0, at: location)
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+            }
             send(0, phase: 4, momentum: 0, at: location)
             guard momentum > 0 else { return }
             var value = Double(points)
@@ -1988,6 +2064,35 @@ private struct TranscriptScrollBounds: NSViewRepresentable {
         }
         #endif
 
+        private var picture: NSView?
+
+        /// A still picture of the scroll view, laid over it. See
+        /// `TranscriptWindow.coverPageLanding`.
+        func cover() {
+            uncover()
+            guard window != nil, !isHiddenOrHasHiddenAncestor, let scroll = enclosingScrollView,
+                  let rep = scroll.bitmapImageRepForCachingDisplay(in: scroll.bounds) else { return }
+            scroll.cacheDisplay(in: scroll.bounds, to: rep)
+            let image = NSImage(size: scroll.bounds.size)
+            image.addRepresentation(rep)
+            let view = NSView(frame: scroll.bounds)
+            view.wantsLayer = true
+            view.layer?.backgroundColor = NSColor(Theme.background).cgColor
+            let content = CALayer()
+            content.frame = view.bounds
+            content.contents = image
+            content.contentsGravity = .resize
+            view.layer?.addSublayer(content)
+            view.autoresizingMask = [.width, .height]
+            scroll.addSubview(view, positioned: .above, relativeTo: nil)
+            picture = view
+        }
+
+        func uncover() {
+            picture?.removeFromSuperview()
+            picture = nil
+        }
+
         func clampScrolling() {
             #if DEBUG
             DebugTranscriptWheel.reporter = self
@@ -1996,8 +2101,15 @@ private struct TranscriptScrollBounds: NSViewRepresentable {
             if scrollView.verticalScrollElasticity != .none {
                 scrollView.verticalScrollElasticity = .none
             }
-            transcript?.restoreMeasured = { [weak scrollView] drift in
-                guard let scrollView else { return false }
+            // The window object outlives each conversation's scroll view, and
+            // an old view on its way out can update after the new one. Only a
+            // reporter that is on screen installs the correction, and it finds
+            // its scroll view when it runs rather than keeping one that went.
+            guard window != nil, !isHiddenOrHasHiddenAncestor else { return }
+            transcript?.cover = { [weak self] in self?.cover() }
+            transcript?.uncover = { [weak self] in self?.uncover() }
+            transcript?.restoreMeasured = { [weak self] drift in
+                guard let self, self.window != nil, let scrollView = self.enclosingScrollView else { return false }
                 let clip = scrollView.contentView
                 var bounds = clip.bounds
                 bounds.origin.y += clip.isFlipped ? drift : -drift

@@ -269,6 +269,8 @@ struct ChatDisplayItem: Identifiable, Equatable, Sendable {
     var imageRowIDs: [String] = []
     /// Backend provenance for explicit image/tool correlation.
     var sourceBackend: String? = nil
+    /// One piece of a long reply drawn as several rows. See `ChatReplySplit`.
+    var part: ChatReplyPart? = nil
 
     /// A Compact line already says what its step was, so a lone step drops
     /// its card and shows only what it produced. Several steps under one
@@ -342,6 +344,12 @@ struct ChatTurnChanges: Equatable, Sendable {
 
 extension ChatDisplayItem {
     /// A low estimate of the row's height in points, for `TranscriptSlice.split`.
+    ///
+    /// The smallest each kind measured on a long chat of every kind of row:
+    /// a one-line step 24, a usage line 14, a turn's changes 78, a plan 125
+    /// (about 20 a step past its title), a picture 128. One guess for every
+    /// row that is not text undercounted plans and pictures several times
+    /// over, so the newest rows measured exactly did not cover the screen.
     var tailHeightFloor: Double {
         func prose(_ text: String) -> Double {
             var lines = 0
@@ -357,6 +365,11 @@ extension ChatDisplayItem {
         case let .user(text), let .thinking(text), let .failed(text): return prose(text) + gap
         case let .assistant(text, _): return prose(text) + gap
         case let .handoff(_, brief): return min(prose(brief), 60) + gap
+        case .usage: return 14 + gap
+        case .changes: return 78 + gap
+        case let .plan(steps): return 40 + 20 * Double(steps.count) + gap
+        case .attachment: return 128 + gap
+        case .edit, .approval, .question: return 60 + gap
         default: return 20 + gap
         }
     }
@@ -466,5 +479,217 @@ final class ChatFoldContinuity: @unchecked Sendable {
         previous = [:]
         next = [:]
         claimed = []
+    }
+}
+
+
+/// Where a row sits inside a long reply that is drawn as several rows.
+struct ChatReplyPart: Equatable, Sendable {
+    var index: Int
+    var isFirst: Bool
+    var isLast: Bool
+    /// Paragraph spacing above this piece: the cut fell between blocks. A cut
+    /// between two list items has none, so the list reads as one.
+    var gapBefore: Bool
+    /// The whole reply, for copying it.
+    var reply: String
+}
+
+/// Long replies, drawn as several rows that read as one.
+///
+/// A reply of several hundred lines was one transcript row thousands of
+/// points tall. The lazy stack only estimates rows it has not built, and an
+/// estimate is an average: wrong by a screen or more when one row is a
+/// sentence and the next is a whole document. Every time it built such a
+/// row, the content above the reader changed height and the text under
+/// their hand moved: on the first scroll from the latest message, and on
+/// every step while reading back. Rows of bounded height keep the estimates
+/// close, so the whole loaded history can stay built.
+///
+/// Cuts fall only between blocks: before a paragraph or heading after a
+/// blank line, or before a top-level list item. Never inside a code fence,
+/// a table or a quote. Which of those places is a cut depends on the line
+/// that starts there, not on how far it is from the start, so a reply that
+/// grows while it streams, or that gains its beginning when an earlier page
+/// lands, keeps its other pieces and their ids.
+enum ChatReplySplit {
+    /// Weighted lines below which a reply stays one row.
+    static let minimumLines = 90
+    /// About one cut every N headings, paragraph starts, or list items.
+    /// Pieces stay under a couple of screens without building a new row
+    /// for every few lines scrolled.
+    static let headingPeriod: UInt64 = 3
+    static let paragraphPeriod: UInt64 = 8
+    static let listPeriod: UInt64 = 40
+
+    struct Piece: Equatable {
+        var text: String
+        var firstLine: String
+        var gapBefore: Bool
+    }
+
+    /// The rows to draw: every long assistant reply replaced by its pieces.
+    static func split(_ items: [ChatDisplayItem], cache: Cache? = nil) -> [ChatDisplayItem] {
+        var out: [ChatDisplayItem] = []
+        out.reserveCapacity(items.count)
+        for item in items {
+            guard case let .assistant(text, backend) = item.kind, item.part == nil else {
+                out.append(item)
+                continue
+            }
+            let pieces: [ChatDisplayItem]?
+            if let cache, let hit = cache.rows(for: item, text: text) {
+                pieces = hit
+            } else {
+                pieces = rows(for: item, text: text, backend: backend)
+                cache?.store(pieces, for: item, text: text)
+            }
+            if let pieces { out += pieces } else { out.append(item) }
+        }
+        return out
+    }
+
+    /// The pieces of one reply as rows, or nil when it stays one row.
+    static func rows(for item: ChatDisplayItem, text: String, backend: String?) -> [ChatDisplayItem]? {
+        let pieces = pieces(text)
+        guard pieces.count > 1 else { return nil }
+        // A piece is named by the cut that ends it: the next piece's first
+        // line. Text that arrives at a reply's start (an earlier page) grows
+        // its first piece without moving that cut, and text that streams in
+        // at its end grows the last, named "end". Either way the names of
+        // the pieces already on screen hold.
+        var seen: [String: Int] = [:]
+        return pieces.enumerated().map { index, piece in
+            var key = index + 1 < pieces.count ? digest(pieces[index + 1].firstLine) : "end"
+            let repeatCount = seen[key, default: 0]
+            seen[key] = repeatCount + 1
+            if repeatCount > 0 { key += "-\(repeatCount)" }
+            var row = ChatDisplayItem(
+                id: "\(item.id)~\(key)",
+                kind: .assistant(piece.text, backend: backend)
+            )
+            row.isSteer = item.isSteer
+            row.lastSequence = item.lastSequence
+            row.firstSequence = item.firstSequence
+            row.groupID = item.groupID
+            row.sourceBackend = item.sourceBackend
+            row.part = ChatReplyPart(
+                index: index, isFirst: index == 0, isLast: index == pieces.count - 1,
+                gapBefore: piece.gapBefore, reply: text
+            )
+            return row
+        }
+    }
+
+    /// The row id a reply's original id now lives at: itself, or its first
+    /// piece. Search results and reading marks name the reply.
+    static func rowID(for id: String, in rows: [ChatDisplayItem]) -> String? {
+        if rows.contains(where: { $0.id == id }) { return id }
+        let prefix = id + "~"
+        return rows.first(where: { $0.id.hasPrefix(prefix) })?.id
+    }
+
+    static func pieces(_ text: String) -> [Piece] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var weighted = 0
+        for line in lines { weighted += 1 + line.utf8.count / 110 }
+        guard weighted >= minimumLines else { return [] }
+
+        var cuts: [(line: Int, gap: Bool)] = []
+        var inFence = false
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.drop(while: { $0 == " " })
+            let fence = trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
+            defer { if fence { inFence.toggle() } }
+            // No minimum length: whether a line is a cut must depend on the
+            // line alone, or text arriving at the reply's start would move
+            // the cuts after it and rename the pieces on screen.
+            guard index > 0, !inFence, !fence, !trimmed.isEmpty else { continue }
+            let previous = lines[index - 1]
+            let previousTrimmed = previous.drop(while: { $0 == " " })
+            let indented = line.first == " " || line.first == "\t"
+            if indented || trimmed.hasPrefix("|") || trimmed.hasPrefix(">") { continue }
+            let afterBlank = previousTrimmed.isEmpty
+            let heading = afterBlank && trimmed.hasPrefix("#")
+            let listItem = !afterBlank && isListItem(line) && !previousTrimmed.hasPrefix("|")
+                && !previousTrimmed.hasPrefix(">")
+            guard afterBlank || listItem else { continue }
+            let period = heading ? headingPeriod : listItem ? listPeriod : paragraphPeriod
+            let chosen = hash(line) % period == 0
+            guard chosen else { continue }
+            cuts.append((index, afterBlank))
+        }
+        guard !cuts.isEmpty else { return [] }
+
+        var pieces: [Piece] = []
+        var start = 0
+        var gap = false
+        for cut in cuts + [(line: lines.count, gap: false)] {
+            let body = lines[start..<cut.line].joined(separator: "\n")
+            let trimmedBody = body.trimmingCharacters(in: .newlines)
+            if !trimmedBody.isEmpty {
+                let first = lines[start..<cut.line].first { !$0.allSatisfy(\.isWhitespace) } ?? ""
+                pieces.append(Piece(text: trimmedBody, firstLine: String(first), gapBefore: gap))
+            }
+            start = cut.line
+            gap = cut.gap
+        }
+        return pieces
+    }
+
+    private static func isListItem(_ line: Substring) -> Bool {
+        guard let first = line.first else { return false }
+        if first == "-" || first == "*" || first == "+" {
+            return line.dropFirst().first == " "
+        }
+        var rest = line[...]
+        var digits = 0
+        while let ch = rest.first, ch.isASCII, ch.isNumber {
+            digits += 1
+            rest = rest.dropFirst()
+        }
+        guard digits > 0, let mark = rest.first, mark == "." || mark == ")" else { return false }
+        return rest.dropFirst().first == " "
+    }
+
+    /// FNV-1a, stable across launches, so a piece keeps its id.
+    private static func hash(_ text: Substring) -> UInt64 {
+        var value: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            value ^= UInt64(byte)
+            value = value &* 0x100_0000_01b3
+        }
+        return value
+    }
+
+    private static func digest(_ text: String) -> String {
+        String(hash(text[...]) % 2_176_782_336, radix: 36)
+    }
+
+    /// The last split of each reply, so a settled reply is not scanned again
+    /// on every poll. Keyed by row id and checked against the text.
+    final class Cache {
+        private var entries: [String: (count: Int, tail: Substring, rows: [ChatDisplayItem]?)] = [:]
+
+        func rows(for item: ChatDisplayItem, text: String) -> [ChatDisplayItem]?? {
+            guard let entry = entries[item.id], entry.count == text.utf8.count,
+                  entry.tail == text.suffix(48) else { return nil }
+            guard var rows = entry.rows else { return .some(nil) }
+            // Fields other than the text can change under a settled reply.
+            for index in rows.indices {
+                rows[index].isSteer = item.isSteer
+                rows[index].lastSequence = item.lastSequence
+                rows[index].firstSequence = item.firstSequence
+                rows[index].groupID = item.groupID
+            }
+            return .some(rows)
+        }
+
+        func store(_ rows: [ChatDisplayItem]?, for item: ChatDisplayItem, text: String) {
+            if entries.count > 2_000 { entries.removeAll(keepingCapacity: true) }
+            entries[item.id] = (text.utf8.count, text.suffix(48), rows)
+        }
+
+        func reset() { entries.removeAll(keepingCapacity: true) }
     }
 }

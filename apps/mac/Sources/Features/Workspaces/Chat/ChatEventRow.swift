@@ -119,24 +119,27 @@ struct ChatEventRow: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             #endif
         case let .assistant(text, backend):
+            let reply = item.part?.reply ?? text
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                #if os(macOS)
-                HStack(spacing: Theme.Space.s) {
-                    Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
-                        .font(Theme.caption.weight(.medium))
-                        .foregroundStyle(Theme.accent)
-                    Spacer(minLength: 0)
-                    RowCopyButton(text: text, help: L10n.text("apple.chateventrow.copy_response.f0f755af"), visible: hovering)
+                if item.part?.isFirst ?? true {
+                    #if os(macOS)
+                    HStack(spacing: Theme.Space.s) {
+                        Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                            .font(Theme.caption.weight(.medium))
+                            .foregroundStyle(Theme.accent)
+                        Spacer(minLength: 0)
+                        RowCopyButton(text: reply, help: L10n.text("apple.chateventrow.copy_response.f0f755af"), visible: hovering)
+                    }
+                    #else
+                    HStack(spacing: Theme.Space.s) {
+                        Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                            .font(Theme.caption.weight(.medium))
+                            .foregroundStyle(Theme.accent)
+                        Spacer(minLength: 0)
+                        RowCopyButton(text: reply, help: L10n.text("apple.chateventrow.copy_response.f0f755af"))
+                    }
+                    #endif
                 }
-                #else
-                HStack(spacing: Theme.Space.s) {
-                    Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
-                        .font(Theme.caption.weight(.medium))
-                        .foregroundStyle(Theme.accent)
-                    Spacer(minLength: 0)
-                    RowCopyButton(text: text, help: L10n.text("apple.chateventrow.copy_response.f0f755af"))
-                }
-                #endif
                 MessageMarkdown(
                     text,
                     bodyFont: Theme.chatBody,
@@ -147,22 +150,13 @@ struct ChatEventRow: View {
                     liveID: "\(markdownCacheID):\(item.id)"
                 )
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.panel.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Theme.border.opacity(answerEdgeOpacity), lineWidth: 1)
-                    #if os(macOS)
-                    .animation(Motion.hover, value: hovering)
-                    #endif
-            }
+            .modifier(ReplyCardChrome(part: item.part, edgeOpacity: item.part == nil ? answerEdgeOpacity : 0.72))
             #if os(macOS)
             .contentShape(.rect)
             .onHover { hovering = $0 }
             #endif
             .contextMenu {
-                Button(L10n.text("apple.chateventrow.copy_response.f0f755af")) { ChatClipboard.copy(text) }
+                Button(L10n.text("apple.chateventrow.copy_response.f0f755af")) { ChatClipboard.copy(reply) }
             }
         case let .turnSeparator(backend):
             HStack(spacing: Theme.Space.s) {
@@ -931,5 +925,88 @@ extension ChatEventRow: Equatable {
         default:
             return true
         }
+    }
+}
+
+
+/// The answer card around a reply, or around one piece of a long reply.
+///
+/// Pieces of one reply (`ChatReplySplit`) draw as a single card: only the
+/// first has the rounded top, only the last the rounded bottom, the sides
+/// run through, and each later piece closes the transcript's row gap. A cut
+/// between paragraphs keeps the paragraph spacing inside the card.
+struct ReplyCardChrome: ViewModifier {
+    let part: ChatReplyPart?
+    let edgeOpacity: Double
+
+    func body(content: Content) -> some View {
+        let top = part?.isFirst ?? true
+        let bottom = part?.isLast ?? true
+        content
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.top, top || part?.gapBefore == true ? Theme.Space.m : 0)
+            .padding(.bottom, bottom ? Theme.Space.m : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel.opacity(0.72), in: ReplyCardShape(top: top, bottom: bottom))
+            .overlay {
+                ReplyCardEdge(top: top, bottom: bottom)
+                    .stroke(Theme.border.opacity(edgeOpacity), lineWidth: 1)
+                #if os(macOS)
+                    .animation(Motion.hover, value: edgeOpacity)
+                #endif
+            }
+            .padding(.top, top ? 0 : -Theme.Space.m)
+    }
+}
+
+/// A card's fill, rounded only at the ends that close it.
+struct ReplyCardShape: Shape {
+    var top: Bool
+    var bottom: Bool
+    var radius: CGFloat = 16
+
+    func path(in rect: CGRect) -> Path {
+        UnevenRoundedRectangle(
+            topLeadingRadius: top ? radius : 0,
+            bottomLeadingRadius: bottom ? radius : 0,
+            bottomTrailingRadius: bottom ? radius : 0,
+            topTrailingRadius: top ? radius : 0,
+            style: .continuous
+        ).path(in: rect)
+    }
+}
+
+/// A card's outline without the edges where it continues into the next
+/// piece, so the pieces of one reply show no seams.
+struct ReplyCardEdge: Shape {
+    var top: Bool
+    var bottom: Bool
+    var radius: CGFloat = 16
+
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: 0.5, dy: 0.5)
+        var path = Path()
+        // An open end runs a little past the edge, so the next piece's side
+        // meets it without a gap on any pixel grid.
+        let topY = top ? r.minY + radius : rect.minY - 0.5
+        let bottomY = bottom ? r.maxY - radius : rect.maxY + 0.5
+        // Leading side, then the bottom when it closes here.
+        path.move(to: CGPoint(x: r.minX, y: topY))
+        path.addLine(to: CGPoint(x: r.minX, y: bottomY))
+        if bottom {
+            path.addQuadCurve(to: CGPoint(x: r.minX + radius, y: r.maxY), control: CGPoint(x: r.minX, y: r.maxY))
+            path.addLine(to: CGPoint(x: r.maxX - radius, y: r.maxY))
+            path.addQuadCurve(to: CGPoint(x: r.maxX, y: r.maxY - radius), control: CGPoint(x: r.maxX, y: r.maxY))
+        } else {
+            path.move(to: CGPoint(x: r.maxX, y: bottomY))
+        }
+        // Trailing side, then the top when it closes here.
+        path.addLine(to: CGPoint(x: r.maxX, y: topY))
+        if top {
+            path.addQuadCurve(to: CGPoint(x: r.maxX - radius, y: r.minY), control: CGPoint(x: r.maxX, y: r.minY))
+            path.addLine(to: CGPoint(x: r.minX + radius, y: r.minY))
+            path.addQuadCurve(to: CGPoint(x: r.minX, y: r.minY + radius), control: CGPoint(x: r.minX, y: r.minY))
+        }
+        return path
     }
 }

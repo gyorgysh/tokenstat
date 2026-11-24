@@ -93,13 +93,16 @@ struct ClientChatEventRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         case let .assistant(text, backend):
+            let reply = item.part?.reply ?? text
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                HStack(spacing: Theme.Space.s) {
-                    Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
-                        .font(ClientType.caption.weight(.medium))
-                        .foregroundStyle(Theme.accent)
-                    Spacer(minLength: 0)
-                    RowCopyButton(text: text, help: L10n.text("apple.clientchatrows.copy_response.f0f755af"))
+                if item.part?.isFirst ?? true {
+                    HStack(spacing: Theme.Space.s) {
+                        Label(backend.map(agentLabel) ?? defaultAgentName, systemImage: "sparkles")
+                            .font(ClientType.caption.weight(.medium))
+                            .foregroundStyle(Theme.accent)
+                        Spacer(minLength: 0)
+                        RowCopyButton(text: reply, help: L10n.text("apple.clientchatrows.copy_response.f0f755af"))
+                    }
                 }
                 MessageMarkdown(
                     text,
@@ -111,15 +114,9 @@ struct ClientChatEventRow: View {
                     liveID: "\(markdownCacheID):\(item.id)"
                 )
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.panel.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
-            }
+            .modifier(ReplyCardChrome(part: item.part, edgeOpacity: 0.72))
             .contextMenu {
-                Button(L10n.text("apple.clientchatrows.copy_response.f0f755af")) { ChatClipboard.copy(text) }
+                Button(L10n.text("apple.clientchatrows.copy_response.f0f755af")) { ChatClipboard.copy(reply) }
             }
         case let .turnSeparator(backend):
             HStack(spacing: Theme.Space.s) {

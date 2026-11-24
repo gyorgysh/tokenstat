@@ -1293,7 +1293,10 @@ final class ChatModel {
             let preview = recentMessagePreview
             let key = PreviewFoldKey(revision: previewRevision, detail: detail, open: open, toggled: toggled)
             if key != previewFoldKey {
-                previewFoldCache = ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(preview)), detail: detail, running: false) { open != toggled.contains($0) }
+                previewFoldCache = ChatReplySplit.split(
+                    ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(preview)), detail: detail, running: false) { open != toggled.contains($0) },
+                    cache: replySplitCache
+                )
                 previewFoldKey = key
             }
             return previewFoldCache
@@ -1314,6 +1317,11 @@ final class ChatModel {
                 }
             }
             foldContinuity.finish()
+            if replySplitOwner != selectionGeneration {
+                replySplitCache.reset()
+                replySplitOwner = selectionGeneration
+            }
+            foldCache = ChatReplySplit.split(foldCache, cache: replySplitCache)
             foldKey = key
         }
         var shown = pending.isEmpty ? foldCache : foldCache + pending
@@ -1324,6 +1332,10 @@ final class ChatModel {
         }
         return shown
     }
+
+    /// Long replies already cut into pieces, by row. See `ChatReplySplit`.
+    @ObservationIgnored private let replySplitCache = ChatReplySplit.Cache()
+    @ObservationIgnored private var replySplitOwner: UInt64?
 
     /// Every group starts open (Expand all) or closed. A group in
     /// `toggledGroups` is the other way, because a person opened or closed it.
@@ -1344,6 +1356,16 @@ final class ChatModel {
     /// redraw on every streamed token.
     var anyGroupOpen: Bool { groupsOpen || !toggledGroups.isEmpty }
 
+    /// Whether the last page grew this row at its start. A piece of a long
+    /// reply that grew counts too: the new text lands in its first pieces,
+    /// and for a piece whose height did not change, holding its bottom edge
+    /// is the same as holding its top.
+    func rowExtendedAtStart(_ id: String) -> Bool {
+        if rowsExtendedAtStart.contains(id) { return true }
+        guard let cut = id.range(of: "~") else { return false }
+        return rowsExtendedAtStart.contains(String(id[..<cut.lowerBound]))
+    }
+
     /// The row that shows `id` now, after a page refolded the rows around it.
     /// The row itself, the group it joined, the step a group was named after,
     /// or the block that covers a text start. Nil when nothing does.
@@ -1356,6 +1378,27 @@ final class ChatModel {
             if row.imageRowIDs.contains(member) { return row.id }
         }
         if rows.contains(where: { $0.id == member }) { return member }
+        // A reply a page completed at its start was, on screen, its own end.
+        // Grown long enough to be drawn as pieces, that end is its last
+        // piece, and the reader's place is the bottom of it.
+        if rowsExtendedAtStart.contains(member), rows.contains(where: { $0.id == member + "~end" }) {
+            return member + "~end"
+        }
+        // A long reply is drawn as pieces (`ChatReplySplit`): its own id names
+        // the first piece, and a piece of a reply no longer split names it.
+        if let piece = ChatReplySplit.rowID(for: member, in: rows) { return piece }
+        if let cut = member.range(of: "~") {
+            if rows.contains(where: { $0.id == member[..<cut.lowerBound] }) {
+                return String(member[..<cut.lowerBound])
+            }
+            // A piece is named by the cut that ends it. A page that brings a
+            // reply's beginning can give the reply another id, but the cut
+            // that ended the piece is still there: find the piece ending at it.
+            let end = member[cut.lowerBound...]
+            if let piece = rows.first(where: { $0.part != nil && $0.id.hasSuffix(end) }) {
+                return piece.id
+            }
+        }
         return ChatReadingAnchor.resolve(member, items: rows, events: events)
     }
 
@@ -1365,7 +1408,9 @@ final class ChatModel {
     @discardableResult
     func revealRow(_ id: String) -> String {
         if let owner = ChatTranscriptFold.owner(of: id, in: transcriptItems) { toggleGroup(owner) }
-        return ChatImageGrouping.rowID(for: id, in: transcriptItems)
+        let rows = transcriptItems
+        let row = ChatImageGrouping.rowID(for: id, in: rows)
+        return ChatReplySplit.rowID(for: row, in: rows) ?? row
     }
 
     /// Where a kept reading place lands. A mark taken on a closed group's
@@ -4338,6 +4383,7 @@ final class ChatModel {
                                rebasesWindow: Bool = true, recordsChanged: Bool = true,
                                waitToCommit: (() async -> Bool)? = nil,
                                beforeCommit: (() -> Void)? = nil,
+                               afterCommit: (() -> Void)? = nil,
                                transform: ([ChatTimelineEvent]) -> [ChatTimelineEvent]) async -> Bool {
         let initialRevision = eventsRevision
         while !Task.isCancelled, selectionMatches(id: id, generation: generation), canPublish() {
@@ -4355,9 +4401,11 @@ final class ChatModel {
             guard rebasesWindow || eventsRevision == initialRevision else { return false }
             guard revision == eventsRevision, backend == selected?.backend,
                   running == (selected?.running == true) else { continue }
-            if let beforeCommit, displayCache != rows { beforeCommit() }
+            let changesRows = displayCache != rows
+            if let beforeCommit, changesRows { beforeCommit() }
             if recordsChanged { events = next }
             commitDisplay(rows)
+            if let afterCommit, changesRows { afterCommit() }
             return true
         }
         return false
@@ -4629,16 +4677,18 @@ final class ChatModel {
     /// already there by the time somebody reaches it. Returns whether a
     /// regular page was consumed, so callers can continue past an empty page.
     @discardableResult
-    func loadEarlier(waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil) async -> Bool {
+    func loadEarlier(waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil,
+                     afterPrepend: (() -> Void)? = nil) async -> Bool {
         // The copy holds no earlier pages, and fetching them would mix live
         // rows into a snapshot the banner describes as saved.
         guard savedCopy == nil, !openingConversation, let selected else { return false }
         return await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false,
-                          waitToPrepend: waitToPrepend, beforePrepend: beforePrepend)
+                          waitToPrepend: waitToPrepend, beforePrepend: beforePrepend, afterPrepend: afterPrepend)
     }
 
     private func loadEarlier(id: String, generation: UInt64, quiet: Bool,
-                             waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil) async -> Bool {
+                             waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil,
+                             afterPrepend: (() -> Void)? = nil) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         guard !pagingUnavailable, hasEarlier, !earlierInFlight,
               let cursor = earlierCursor
@@ -4691,7 +4741,8 @@ final class ChatModel {
                 rowsExtendedAtStart = []
                 guard await publishEvents(id: id, generation: generation, canPublish: {
                     requestedEpoch == self.eventsEpoch && cursor == self.earlierCursor
-                }, waitToCommit: waitToPrepend, beforeCommit: beforePrepend, transform: { held in
+                }, waitToCommit: waitToPrepend, beforeCommit: beforePrepend,
+                   afterCommit: afterPrepend, transform: { held in
                     let oldest = held.first?.seq ?? UInt64.max
                     let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
                     return fresh + held
