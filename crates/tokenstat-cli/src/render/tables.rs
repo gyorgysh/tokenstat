@@ -402,7 +402,7 @@ pub fn blocks(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -> 
 fn format_block_instant(ms: i64, tz: &jiff::tz::TimeZone) -> String {
     match jiff::Timestamp::from_millisecond(ms) {
         Ok(ts) => {
-            let z = ts.to_zoned(tz.clone());
+            let z = ts.to_zoned_datetime(tz.clone());
             format!("{}", z.strftime("%Y-%m-%d %H:%M"))
         }
         Err(_) => ms.to_string(),

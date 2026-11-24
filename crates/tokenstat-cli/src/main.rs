@@ -392,7 +392,7 @@ impl Window {
     fn to_query(&self, tz: &jiff::tz::TimeZone) -> Result<Query> {
         let since = match (self.last, &self.since) {
             (Some(n), _) => {
-                let today = jiff::Timestamp::now().to_zoned(tz.clone()).date();
+                let today = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
                 Some(
                     today
                         .checked_sub(jiff::Span::new().try_days(i64::from(n) - 1)?)

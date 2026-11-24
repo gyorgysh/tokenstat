@@ -269,7 +269,7 @@ pub fn backfill_events(
             let Some(ts) = date
                 .parse::<jiff::civil::Date>()
                 .ok()
-                .and_then(|d| d.at(12, 0, 0, 0).to_zoned(tz.clone()).ok())
+                .and_then(|d| d.at(12, 0, 0, 0).to_zoned_datetime(tz.clone()).ok())
                 .map(|z| z.timestamp().as_millisecond())
             else {
                 continue;

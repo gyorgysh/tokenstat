@@ -3131,7 +3131,7 @@ fn stamp(ts_ms: Option<i64>, body: String) -> String {
 
 fn format_clock(ms: i64) -> Option<String> {
     let ts = jiff::Timestamp::from_millisecond(ms).ok()?;
-    let zoned = ts.to_zoned(jiff::tz::TimeZone::system());
+    let zoned = ts.to_zoned_datetime(jiff::tz::TimeZone::system());
     Some(format!(
         "{:02}:{:02}:{:02}",
         zoned.hour(),

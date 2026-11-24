@@ -323,7 +323,7 @@ impl App {
                     .unwrap_or_else(|| {
                         i32::from(
                             jiff::Timestamp::now()
-                                .to_zoned(self.tz.clone())
+                                .to_zoned_datetime(self.tz.clone())
                                 .date()
                                 .year(),
                         )
@@ -509,7 +509,9 @@ impl App {
                             .ok_or_else(|| anyhow::anyhow!("--last needs a day count"))?,
                     )
                     .map_err(anyhow::Error::msg)?;
-                    let today = jiff::Timestamp::now().to_zoned(self.tz.clone()).date();
+                    let today = jiff::Timestamp::now()
+                        .to_zoned_datetime(self.tz.clone())
+                        .date();
                     let since = today
                         .checked_sub(jiff::Span::new().try_days(i64::from(n) - 1)?)
                         .context("invalid --last span")?;

@@ -55,7 +55,7 @@ pub fn cost_by_day(split: &[SplitBucket], prices: &PriceTable) -> Vec<(String, u
 /// Here rather than in each caller so that a front end does not need its own
 /// date library to ask a question the archive already knows the answer to.
 pub fn today(tz: &jiff::tz::TimeZone) -> jiff::civil::Date {
-    jiff::Timestamp::now().to_zoned(tz.clone()).date()
+    jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date()
 }
 
 /// One day in the activity calendar.

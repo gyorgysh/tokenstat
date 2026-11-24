@@ -162,7 +162,7 @@ pub fn status(
     prices: &PriceTable,
 ) -> Result<BudgetStatus, CoreError> {
     let limits = BudgetLimits::load(store)?;
-    let today = jiff::Timestamp::now().to_zoned(tz.clone()).date();
+    let today = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
     let today_date = today.to_string();
     let month_key = today_date.get(..7).unwrap_or(&today_date).to_string();
     let month_start = format!("{month_key}-01");
@@ -253,7 +253,7 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
         let today = jiff::Timestamp::now()
-            .to_zoned(tz.clone())
+            .to_zoned_datetime(tz.clone())
             .date()
             .to_string();
         // 1M input @ $10/M = $10

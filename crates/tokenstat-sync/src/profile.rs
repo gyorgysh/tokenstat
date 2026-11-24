@@ -1307,7 +1307,7 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
     } else {
         let totals = store.totals(&tokenstat_core::Query::default())?;
         let today = jiff::Timestamp::now()
-            .to_zoned(tz.clone())
+            .to_zoned_datetime(tz.clone())
             .date()
             .to_string();
         let cursor_from = config::cursor_for(&host)?.map(|c| c.from);

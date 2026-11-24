@@ -385,8 +385,14 @@ pub fn wrapped(
     year: Option<i32>,
     json: bool,
 ) -> Result<()> {
-    let y = year
-        .unwrap_or_else(|| i32::from(jiff::Timestamp::now().to_zoned(tz.clone()).date().year()));
+    let y = year.unwrap_or_else(|| {
+        i32::from(
+            jiff::Timestamp::now()
+                .to_zoned_datetime(tz.clone())
+                .date()
+                .year(),
+        )
+    });
     let q = Query {
         since: Some(format!("{y:04}-01-01")),
         until: Some(format!("{y:04}-12-31")),

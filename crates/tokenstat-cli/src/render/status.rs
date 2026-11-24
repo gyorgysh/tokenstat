@@ -474,7 +474,7 @@ pub fn statusline(
     db_path: &Path,
     tz_name: Option<&str>,
 ) -> Result<()> {
-    let today = jiff::Timestamp::now().to_zoned(tz.clone()).date();
+    let today = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
     let month_start = today.first_of_month();
     let today_s = today.to_string();
     let month_s = month_start.to_string();

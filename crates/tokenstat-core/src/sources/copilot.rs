@@ -240,7 +240,7 @@ fn parse_created_at(s: Option<&str>) -> i64 {
                 // SQLite datetime('now') shape without timezone.
                 jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S", text)
                     .ok()
-                    .and_then(|dt| dt.to_zoned(jiff::tz::TimeZone::UTC).ok())
+                    .and_then(|dt| dt.to_zoned_datetime(jiff::tz::TimeZone::UTC).ok())
                     .map(|z| z.timestamp().as_millisecond())
             })
     })

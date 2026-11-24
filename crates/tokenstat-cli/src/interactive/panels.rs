@@ -101,7 +101,9 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             .saturating_sub(4 + ui::HEAT_GUTTER)
             .div_ceil(ui::HEAT_COL)
             .clamp(8, 53);
-        let today = jiff::Timestamp::now().to_zoned(app.tz.clone()).date();
+        let today = jiff::Timestamp::now()
+            .to_zoned_datetime(app.tz.clone())
+            .date();
         if let Some(cal) = ui::heat_calendar(pairs, weeks, today, &app.days_unmeasured) {
             lines.push(Line::from(Span::styled(
                 cal.header(),
@@ -527,7 +529,7 @@ pub(super) fn format_sync_hint(info: &tokenstat_sync::SchedulingInfo) -> String 
         if let Ok(until_ts) = until.parse::<jiff::Timestamp>() {
             let now = jiff::Timestamp::now();
             if until_ts > now {
-                let secs = (until_ts - now).get_seconds().max(0);
+                let secs = (until_ts - now).as_secs().max(0);
                 let mins = (secs + 59) / 60;
                 parts.push(format!("next sync in ~{mins} min"));
             } else {
@@ -571,7 +573,11 @@ pub(super) fn block_lines(app: &App) -> Vec<Line<'static>> {
 
     for b in app.blocks.iter().rev().take(40) {
         let start = match jiff::Timestamp::from_millisecond(b.start_ms) {
-            Ok(ts) => format!("{}", ts.to_zoned(app.tz.clone()).strftime("%Y-%m-%d %H:%M")),
+            Ok(ts) => format!(
+                "{}",
+                ts.to_zoned_datetime(app.tz.clone())
+                    .strftime("%Y-%m-%d %H:%M")
+            ),
             Err(_) => b.start_ms.to_string(),
         };
         let c = &b.counters;
@@ -744,7 +750,9 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
         .saturating_sub(2 + ui::HEAT_GUTTER)
         .div_ceil(ui::HEAT_COL)
         .clamp(8, 53);
-    let today = jiff::Timestamp::now().to_zoned(app.tz.clone()).date();
+    let today = jiff::Timestamp::now()
+        .to_zoned_datetime(app.tz.clone())
+        .date();
     let Some(cal) = ui::heat_calendar(pairs, weeks, today, &app.days_unmeasured) else {
         return lines;
     };
@@ -915,7 +923,7 @@ pub(super) fn wrapped_detail_lines(
     if !days.is_empty() {
         lines.push(Line::from(""));
         let year_end = jiff::civil::date(year as i16, 12, 31);
-        let now = jiff::Timestamp::now().to_zoned(tz.clone()).date();
+        let now = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
         let anchor = if now < year_end { now } else { year_end };
         let weeks = (anchor.day_of_year() as usize).div_ceil(7) + 1;
         // The popup is narrower than a terminal, so a full year has to trim to

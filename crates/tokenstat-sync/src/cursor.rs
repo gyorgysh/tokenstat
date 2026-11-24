@@ -907,7 +907,7 @@ fn date_to_ms(date: &str) -> Option<i64> {
     if let Ok(datetime) = date.parse::<jiff::civil::DateTime>() {
         return Some(
             datetime
-                .to_zoned(jiff::tz::TimeZone::UTC)
+                .to_zoned_datetime(jiff::tz::TimeZone::UTC)
                 .ok()?
                 .timestamp()
                 .as_millisecond(),
@@ -918,7 +918,7 @@ fn date_to_ms(date: &str) -> Option<i64> {
     let day = date.parse::<jiff::civil::Date>().ok()?;
     Some(
         day.at(12, 0, 0, 0)
-            .to_zoned(jiff::tz::TimeZone::UTC)
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
             .ok()?
             .timestamp()
             .as_millisecond(),

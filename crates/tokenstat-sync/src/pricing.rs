@@ -113,7 +113,7 @@ fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<Pr
     let large_moves = detect_large_moves(path, &snapshot);
     // Age is measured before the write, against the book we are about to replace.
     let today = jiff::Timestamp::now()
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .date();
     let stale = age_allows_large_moves(local_age(path))
         || local_effective_from(path).is_some_and(|from| content_allows_large_moves(&from, today));

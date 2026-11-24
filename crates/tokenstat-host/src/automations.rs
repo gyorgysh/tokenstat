@@ -208,7 +208,7 @@ fn next_wall_clock(
     use jiff::civil::DateTime;
 
     let from = jiff::Timestamp::from_millisecond(from_ms).ok()?;
-    let zoned = from.to_zoned(tz.clone());
+    let zoned = from.to_zoned_datetime(tz.clone());
     let mut day = zoned.date();
     for _ in 0..400 {
         let on_day = match day_mask {
@@ -229,7 +229,7 @@ fn next_wall_clock(
                 0,
             )
             .ok()?;
-            let z = dt.to_zoned(tz.clone()).ok()?;
+            let z = dt.to_zoned_datetime(tz.clone()).ok()?;
             let ms = z.timestamp().as_millisecond();
             if ms > from_ms {
                 return Some(ms);
@@ -3066,7 +3066,7 @@ mod tests {
         assert!(next > from);
         let zoned = jiff::Timestamp::from_millisecond(next)
             .unwrap()
-            .to_zoned(ny());
+            .to_zoned_datetime(ny());
         // Compatible disambiguation lands after the gap, still on that date.
         assert_eq!(zoned.date().to_string(), "2026-03-08");
         assert!(zoned.hour() >= 3);

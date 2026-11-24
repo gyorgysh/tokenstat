@@ -358,7 +358,7 @@ fn retry_after_seconds(header: Option<&str>, now: i64) -> Option<i64> {
     }
     let date = jiff::civil::DateTime::strptime("%a, %d %b %Y %H:%M:%S GMT", raw).ok()?;
     let at = date
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .ok()?
         .timestamp()
         .as_millisecond();
