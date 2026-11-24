@@ -392,12 +392,27 @@ fn detect_connections() -> anyhow::Result<Vec<Connection>> {
     let mut connections = Vec::new();
 
     for candidate in candidates {
+        // A stale hub file can name a process that has exited, and lsof
+        // fails for that. Skip such a file rather than the whole search.
         let listening = if candidate.hub_ports.is_empty() {
             find_listening_ports(candidate.pid)?
         } else {
+            find_listening_ports(candidate.pid).unwrap_or_default()
+        };
+        // A hub file is only a hint. Its server may be gone and its port
+        // taken by another program, which must never receive the token, so
+        // a hub port is used only while the named process listens on it.
+        let mut ports: Vec<u16> = candidate
+            .hub_ports
+            .iter()
+            .copied()
+            .filter(|port| listening.contains(port))
+            .collect();
+        let listening = if candidate.hub_ports.is_empty() {
+            listening
+        } else {
             Vec::new()
         };
-        let mut ports = candidate.hub_ports.clone();
         for port in candidate_probe_ports(&candidate, listening) {
             if !ports.contains(&port) {
                 ports.push(port);
@@ -544,8 +559,8 @@ fn hub_dir() -> PathBuf {
 
 /// Language servers announced in hub files, newest file first.
 ///
-/// A file can outlive its server; the heartbeat that follows is what proves
-/// one is listening, so a stale file costs one refused connection.
+/// A file can outlive its server, so `detect_connections` checks that the
+/// named process still listens on a port before sending it anything.
 fn hub_candidates(dir: &std::path::Path) -> Vec<ProcessCandidate> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
