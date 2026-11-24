@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 static CACHE_EPOCH: AtomicU64 = AtomicU64::new(0);
-fn cache_epoch() -> u64 {
+pub(crate) fn cache_epoch() -> u64 {
     CACHE_EPOCH.load(Ordering::Acquire)
 }
 use std::time::{Duration, Instant};
@@ -285,6 +285,7 @@ fn diff_cache()
 
 fn clear_read_cache() {
     CACHE_EPOCH.fetch_add(1, Ordering::AcqRel);
+    crate::pull_states::clear();
     clear_list_cache();
     branch_cache()
         .lock()
@@ -523,6 +524,7 @@ fn branch(p: &Params) -> Result<Value, String> {
     match tokenstat_sync::forge::for_branch(&repo, &branch) {
         Ok(pull) => {
             remember_branch(&p.workspace_id, &branch, &repo, pull.clone(), epoch);
+            crate::pull_states::learn(&repo, pull.iter().map(Into::into), epoch);
             Ok(json!({"branch": branch, "pull": pull, "connected": true}))
         }
         Err(tokenstat_sync::forge::ForgeError::NotSignedIn) => {
@@ -659,6 +661,7 @@ fn write(
     let repo = repo_for(&p.workspace_id, method)?;
     action(&repo, number).map_err(|error| error.to_string())?;
     invalidate_workspace(&p.workspace_id);
+    crate::pull_states::changed(&repo, number);
     Ok(json!({"ok": true}))
 }
 
@@ -688,6 +691,7 @@ fn view(p: &Params) -> Result<Value, String> {
     }
     let value = tokenstat_sync::forge::view(&repo, number).map_err(|error| error.to_string())?;
     remember(detail_cache(), key, value.clone(), epoch);
+    crate::pull_states::learn(&repo, [(&value).into()], epoch);
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
@@ -847,6 +851,13 @@ fn list_page(p: &Params) -> Result<tokenstat_sync::forge::PullListPage, String> 
     let started = Instant::now();
     let page = tokenstat_sync::forge::list_page(&repo, scope, state, limit, p.cursor.as_deref())
         .map_err(|error| error.to_string())?;
+    crate::pull_states::learn(
+        &repo,
+        page.rows
+            .iter()
+            .map(|pull| crate::pull_states::State::listed(&repo, pull)),
+        epoch,
+    );
     let mut cache = list_cache().lock().unwrap_or_else(PoisonError::into_inner);
     if epoch == cache_epoch() {
         remember_list(&mut cache, key, page.clone(), epoch, started);

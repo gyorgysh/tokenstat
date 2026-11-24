@@ -519,6 +519,8 @@
   "apple.branchpull.merged": "Merged",
   "apple.branchpull.number": "PR #{0}",
   "apple.branchpull.open": "Open",
+  "apple.branchpull.open_browser": "Open in browser",
+  "apple.branchpull.view_here": "View in tokenstat",
   "apple.bridge.0_is_used_to_reach_other_servers_so_it_nee.ab2795d6": "{0} is used to reach other servers, so it needs a saved key rather than a password.",
   "apple.bridge.chat.460b3a7d": "Chat",
   "apple.bridge.could_not_read_the_response_to_0_1.cd118b6b": "Could not read the response to {0}: {1}",

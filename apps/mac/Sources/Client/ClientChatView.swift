@@ -572,12 +572,7 @@ private struct ClientChatContent: View {
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
-                    if let pull = chat.pull {
-                        Image(systemName: pull.symbol)
-                            .font(ClientType.caption.weight(.medium))
-                            .foregroundStyle(pull.tint)
-                            .accessibilityLabel(L10n.text("apple.branchpull.chip", "\(pull.number)", pull.stateLabel))
-                    }
+                    ChatPullMark(pulls: chat.pulls, font: ClientType.caption)
                     // Words waiting in this thread. The mark reads the draft
                     // store itself, so this list is not rebuilt every time
                     // somebody pauses typing in one of them.

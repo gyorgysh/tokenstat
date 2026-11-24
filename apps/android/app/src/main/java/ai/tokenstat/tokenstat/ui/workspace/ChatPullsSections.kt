@@ -1652,7 +1652,7 @@ fun ChatSection(
                     ) {
                         TsCard(Modifier.fillMaxWidth().clickable { openId = chat.str("id") }) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.weight(1f)) { ChatRow(chat) }
+                                Box(Modifier.weight(1f)) { ChatRow(chat, peer, hostLabel) }
                                 chatActions(chat)
                             }
                         }
@@ -2533,7 +2533,7 @@ private fun ChatAgentMenuItem(label: String, checked: Boolean, onClick: () -> Un
 /// The mode changes what the next turn may do and should be visible before
 /// opening a conversation.
 @Composable
-private fun ChatRow(chat: JsonObject) {
+private fun ChatRow(chat: JsonObject, peer: String, hostLabel: String) {
     val colors = LocalTsColors.current
     val atMs = chat["lastMessageAtMs"]?.jsonPrimitive?.longOrNull
         ?: chat["updatedAtMs"]?.jsonPrimitive?.longOrNull
@@ -2569,7 +2569,7 @@ private fun ChatRow(chat: JsonObject) {
                 color = colors.textSecondary, compact = true,
             )
         }
-        (chat["pull"] as? JsonObject)?.let { BranchPullBadge(it) }
+        ChatPullMark(chat, peer, hostLabel)
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.controlGlyph)
     }
 }

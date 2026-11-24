@@ -258,7 +258,7 @@ internal static class SidebarLive
             MaxWidth = caption is null ? double.PositiveInfinity : 110, TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-        if (chat["pull"] is JsonObject pull) trailing.Children.Add(WorkspaceBranchPull.Badge(pull));
+        if (WorkspaceBranchPull.Badge(chat) is UIElement pulls) trailing.Children.Add(pulls);
         trailing.Children.Add(age);
         Grid.SetColumn(trailing, 2);
         panel.Children.Add(trailing);

@@ -119,6 +119,10 @@ internal static class Theme
 
     public static Color Accent => Hex(IsDark ? 0x8B5CF6u : 0x6A3DFFu);
     public static Color Secondary => Hex(IsDark ? 0xE879F9u : 0xC026D3u);
+    // A pull request's state, in the colours every forge uses for it.
+    public static Color PullOpen => Hex(IsDark ? 0x3FB950u : 0x1A7F37u);
+    public static Color PullMerged => Hex(IsDark ? 0xA371F7u : 0x8250DFu);
+    public static Color PullClosed => Hex(IsDark ? 0xF85149u : 0xCF222Eu);
     public static Color Background => Hex(IsDark ? 0x08070Du : 0xFBFBFDu);
     public static Color Sidebar => Hex(IsDark ? 0x12101Du : 0xF3F2F8u);
     public static Color Panel => IsDark ? Hex(0x100E1Au) : Color.FromArgb(255, 255, 255, 255);

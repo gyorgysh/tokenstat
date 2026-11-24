@@ -2267,19 +2267,20 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     }
     match method {
         "chat.list" => {
-            let mut value = serde_json::to_value(
-                store.list(&p.workspace_id.ok_or("chat.list needs a workspaceId")?),
-            )
-            .envelope()?;
+            let workspace = p.workspace_id.ok_or("chat.list needs a workspaceId")?;
+            let mut value = serde_json::to_value(store.list(&workspace)).envelope()?;
             store.attach_pending_steers(&mut value);
             store.attach_routing(&mut value);
             attach_branch_pulls(&mut value);
+            crate::chat_pulls::attach(&mut value);
+            crate::chat_pulls::listed(&workspace);
             Ok(value)
         }
         "chat.recent" => {
             let mut value =
                 serde_json::to_value(store.recent(p.limit.unwrap_or(20) as usize)).envelope()?;
             attach_branch_pulls(&mut value);
+            crate::chat_pulls::attach(&mut value);
             Ok(value)
         }
         "chat.create" => serde_json::to_value(store.create(p.create())?).envelope(),
@@ -2295,13 +2296,30 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         )
         .envelope(),
         "chat.remove" => {
-            Ok(json!({ "removed": store.remove(&p.id.ok_or("chat.remove needs id")?)? }))
+            let id = p.id.ok_or("chat.remove needs id")?;
+            let removed = store.remove(&id)?;
+            if removed {
+                crate::chat_pulls::forget(&[id]);
+            }
+            Ok(json!({ "removed": removed }))
         }
-        "chat.removeAll" => Ok(json!({
-            "removed": store.remove_all(
-                &p.workspace_id.ok_or("chat.removeAll needs a workspaceId")?
-            )?
-        })),
+        "chat.removeAll" => {
+            let workspace = p.workspace_id.ok_or("chat.removeAll needs a workspaceId")?;
+            let before = store.list(&workspace);
+            let removed = store.remove_all(&workspace)?;
+            let kept: std::collections::HashSet<String> = store
+                .list(&workspace)
+                .into_iter()
+                .map(|chat| chat.id)
+                .collect();
+            let gone: Vec<String> = before
+                .into_iter()
+                .map(|chat| chat.id)
+                .filter(|id| !kept.contains(id))
+                .collect();
+            crate::chat_pulls::forget(&gone);
+            Ok(json!({ "removed": removed }))
+        }
         "chat.send" | "chat.compact" => serde_json::to_value(store.send(
             &p.id.ok_or("chat send needs id")?,
             &if method == "chat.compact" {
@@ -2487,8 +2505,15 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         // positions; updated clients opt into stable row identities and
         // reset-aware tailing.
         "chat.eventPage" => {
+            let id = p.id.ok_or("chat.eventPage needs id")?;
+            // The newest page is a conversation being opened.
+            if p.cursor.is_none()
+                && let Ok(chat) = store.get(&id)
+            {
+                crate::chat_pulls::opened(&chat.workspace_id, &id);
+            }
             let page = store.event_page_positions_with_usage(
-                &p.id.ok_or("chat.eventPage needs id")?,
+                &id,
                 p.cursor.as_deref(),
                 p.limit.unwrap_or(0) as usize,
                 p.stable_positions.unwrap_or(false),

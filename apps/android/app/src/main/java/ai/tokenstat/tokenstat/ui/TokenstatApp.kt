@@ -644,6 +644,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         ai.tokenstat.tokenstat.ecosystem.QuickAccess.take(request)
     }
     val context = LocalContext.current
+    ai.tokenstat.tokenstat.ui.workspace.PullOpenerHost(model)
     // The automatic rating ask: Play's own card, on Home with nothing open
     // over it and after a short settle. `ReviewPrompt` decides whether it is
     // due. Leaving Home, or opening anything, cancels the wait.
@@ -4402,7 +4403,7 @@ private fun WorkspaceList(
                                                 modifier = Modifier.padding(start = Space.m))
                                             val folderName = work.folders.firstOrNull { it.string("id") == chat.string("workspaceId") }
                                                 ?.string("name") ?: L10n.text("android.tokenstatapp.project.98595978")
-                                            WorkspaceChatRow(chat = chat, folderName = folderName, grouped = true,
+                                            WorkspaceChatRow(chat = chat, folderName = folderName, peer = peer, grouped = true,
                                                 onOpen = { if (peer == connectedPeer) onChat(chat) else onOtherChat(machine, chat) })
                                         }
                                         if (work.chats.size > 2) {
@@ -4471,7 +4472,7 @@ private fun WorkspaceList(
             items(otherChats, key = { "$peer:chat:${it.string("id")}" }) { chat ->
                 val folderName = work.folders.firstOrNull { it.string("id") == chat.string("workspaceId") }
                     ?.string("name") ?: L10n.text("android.tokenstatapp.project.98595978")
-                WorkspaceChatRow(chat = chat, folderName = folderName,
+                WorkspaceChatRow(chat = chat, folderName = folderName, peer = peer,
                     onOpen = { onOtherChat(machine, chat) })
             }
             items(otherSessions, key = { "$peer:session:${it.string("id")}" }) { info ->
@@ -4576,7 +4577,7 @@ private fun WorkspaceList(
                     val shown = if (chatsExpanded) chatRows else chatRows.take(5)
                     items(shown) { chat ->
                         val folderName = folderRows.find { it.string("id") == chat.string("workspaceId") }?.string("name") ?: L10n.text("android.tokenstatapp.project.98595978")
-                        WorkspaceChatRow(chat = chat, folderName = folderName, onOpen = { onChat(chat) })
+                        WorkspaceChatRow(chat = chat, folderName = folderName, peer = connectedPeer.orEmpty(), onOpen = { onChat(chat) })
                     }
                     if (chatRows.size > 5) {
                         item {

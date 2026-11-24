@@ -2738,6 +2738,9 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     /// older than protocol 30.
     var branch: String?
     var pull: BranchPull?
+    /// Every pull request this chat opened or talked about, newest first.
+    /// Empty on a host older than 1.26.0, which only knows the branch's own.
+    var pulls: [ChatPull] = []
     /// What the last turn left in the provider's prompt cache. Absent for an
     /// agent that does not report it and on a host older than protocol 54.
     var promptCache: ChatPromptCache? = nil
@@ -2769,7 +2772,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
         case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, runRevision, runStartedAtMs, pendingSteer, nativeSteer, nativeSteerAttachments
-        case branch, pull, routing, promptCache, continuedFrom
+        case branch, pull, pulls, routing, promptCache, continuedFrom
     }
 
     init(from decoder: Decoder) throws {
@@ -2806,6 +2809,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         // Decoration: a pull request shape this client cannot read must not
         // cost it the conversation.
         pull = try? c.decodeIfPresent(BranchPull.self, forKey: .pull)
+        pulls = (try? c.decodeIfPresent([ChatPull].self, forKey: .pulls)) ?? pull.map { [ChatPull($0)] } ?? []
         // Advice, never a reason to lose the conversation.
         promptCache = try? c.decodeIfPresent(ChatPromptCache.self, forKey: .promptCache)
         continuedFrom = try c.decodeIfPresent(String.self, forKey: .continuedFrom)

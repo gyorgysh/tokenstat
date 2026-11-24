@@ -691,8 +691,9 @@ fn private_codex_home(has_hooks: bool) -> bool {
     cfg!(unix) || has_hooks
 }
 
+static STORE: OnceLock<Arc<Store>> = OnceLock::new();
+
 pub fn shared() -> Arc<Store> {
-    static STORE: OnceLock<Arc<Store>> = OnceLock::new();
     Arc::clone(STORE.get_or_init(|| {
         let store = Arc::new(Store::load());
         router::start(&store);
@@ -3253,6 +3254,31 @@ impl Store {
         Ok(())
     }
 
+    /// Where this archive keeps its files.
+    pub(crate) fn root_path(&self) -> &Path {
+        &self.root
+    }
+
+    /// The records after one sequence number, oldest first, and at most the
+    /// newest `limit` of them.
+    pub(crate) fn records_after(
+        &self,
+        id: &str,
+        seq: u64,
+        limit: usize,
+    ) -> Result<Vec<Value>, String> {
+        let mut out = Vec::new();
+        self.visit_events_backwards(id, |row| {
+            if row["seq"].as_u64().is_some_and(|at| at <= seq) || out.len() >= limit {
+                return Ok(false);
+            }
+            out.push(row);
+            Ok(true)
+        })?;
+        out.reverse();
+        Ok(out)
+    }
+
     fn visit_events_backwards(
         &self,
         id: &str,
@@ -5273,6 +5299,15 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
         drop(runner);
+        // Only the archive this process serves: a store opened over another
+        // directory must not read or write beside that one.
+        if STORE
+            .get()
+            .is_some_and(|served| std::ptr::eq(&**served, self))
+            && let Ok(chat) = &status
+        {
+            crate::chat_pulls::turn_ended(&chat.workspace_id, id);
+        }
         status.map(|_| ())
     }
 
@@ -5727,7 +5762,7 @@ impl Store {
         }
     }
 
-    fn get(&self, id: &str) -> Result<Conversation, String> {
+    pub(crate) fn get(&self, id: &str) -> Result<Conversation, String> {
         self.conversations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

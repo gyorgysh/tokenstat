@@ -1080,7 +1080,7 @@ fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen
 /// lives. Port of `ClientRecentChatRow`. This device keeps no read receipts,
 /// so the dot is attention only: unread tracking lives on the Apple client.
 @Composable
-fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit, grouped: Boolean = false) {
+fun WorkspaceChatRow(chat: JsonObject, folderName: String, peer: String, onOpen: () -> Unit, grouped: Boolean = false) {
     val colors = LocalTsColors.current
     val needsAttention = (chat["needsAttention"] as? JsonPrimitive)?.booleanOrNull == true
     val running = (chat["running"] as? JsonPrimitive)?.booleanOrNull == true
@@ -1133,7 +1133,7 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit, g
                 }
             }
         }
-        (chat["pull"] as? JsonObject)?.let { BranchPullBadge(it) }
+        ChatPullMark(chat, peer)
         Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
     }
 }

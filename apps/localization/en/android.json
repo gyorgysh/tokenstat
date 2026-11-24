@@ -265,6 +265,7 @@
   "android.branchpull.merged": "Merged",
   "android.branchpull.number": "PR #{0}",
   "android.branchpull.open": "Open",
+  "android.branchpull.open_browser": "Open in browser",
   "android.browserlistenercalls.the_browser_listener_did_not_return_an_add.dc0150b1": "The browser listener did not return an address.",
   "android.browserlisteners.the_browser_listener_returned_an_invalid_a.a911e003": "The browser listener returned an invalid address.",
   "android.chatagentpanel.0_effort.b0d63362": "{0} effort",

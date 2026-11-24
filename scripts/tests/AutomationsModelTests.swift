@@ -14,6 +14,7 @@ enum Theme {
 struct WorkReference { var itemID: String?; var workspaceID: String }
 struct ChatRoutingState: Codable, Sendable, Hashable {}
 struct BranchPull: Codable, Sendable, Hashable {}
+struct ChatPull: Codable, Sendable, Hashable { init(_ pull: BranchPull) {} }
 struct RelayUsage: Codable, Sendable, Hashable {}
 struct ChatTimelineEvent: Codable, Sendable, Hashable {}
 struct ChatUsageTotals: Codable, Sendable, Equatable {}

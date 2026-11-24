@@ -140,6 +140,21 @@ pub struct BranchPull {
     pub base_ref: String,
 }
 
+/// One pull request a conversation touched, in what a mark and its card show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullBrief {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    /// `open`, `merged` or `closed`.
+    pub state: String,
+    pub draft: bool,
+    pub base_ref: String,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
 /// A forge account or team shown around a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

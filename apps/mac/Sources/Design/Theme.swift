@@ -180,6 +180,13 @@ enum Theme {
     static let diffAdded = Color.adaptive(light: hex(0x2E8B57), dark: hex(0x5FBF8B))
     static let diffRemoved = Color.adaptive(light: hex(0xC2453F), dark: hex(0xE8827C))
 
+    /// A pull request's state, in the colours every forge uses for it. Like
+    /// the diff pair, these are read by colour alone, so they do not follow
+    /// the palette.
+    static let pullOpen = Color.adaptive(light: hex(0x1A7F37), dark: hex(0x3FB950))
+    static let pullMerged = Color.adaptive(light: hex(0x8250DF), dark: hex(0xA371F7))
+    static let pullClosed = Color.adaptive(light: hex(0xCF222E), dark: hex(0xF85149))
+
     /// Five steps of activity, idle first.
     ///
     /// Exact `sites/tokenstat` ramp. Step 0 is neutral so a quiet day reads as

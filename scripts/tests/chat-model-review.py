@@ -58,6 +58,7 @@ recovery_policy = source[source.index('    func refreshSharingSource('):source.i
 shared_fixture = r'''import Foundation
 struct WorkReference: Equatable { var itemID: String?; var workspaceID: String }
 struct BranchPull: Codable, Hashable, Sendable {}
+struct ChatPull: Codable, Sendable, Hashable { init(_ pull: BranchPull) {} }
 struct ChatRoutingState: Codable, Hashable, Sendable {}
 CONVERSATION
 struct ChatCommandRules { static func canSteer(_ text: String, attachments: Bool, acceptsAttachments: Bool) -> Bool { false } }

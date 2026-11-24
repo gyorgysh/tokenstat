@@ -83,6 +83,83 @@ struct BranchPull: Codable, Sendable, Hashable {
     }
 }
 
+/// A pull request a chat opened or talked about, as the host last saw it.
+struct ChatPull: Codable, Sendable, Hashable, Identifiable {
+    var id: String { url }
+    let number: UInt32
+    let title: String
+    let url: String
+    /// `open`, `merged` or `closed`.
+    let state: String
+    let draft: Bool
+    /// `owner/repo`. Absent for the branch's own pull request.
+    var repo: String?
+    var additions: UInt32?
+    var deletions: UInt32?
+    var opened: Bool?
+    /// The folder on that computer whose pull request page shows it.
+    var workspaceId: String?
+
+    init(_ pull: BranchPull) {
+        number = pull.number
+        title = pull.title
+        url = pull.url
+        state = pull.state
+        draft = pull.draft
+    }
+
+    var webURL: URL? {
+        guard let value = URL(string: url), value.scheme?.lowercased() == "https", value.host != nil else { return nil }
+        return value
+    }
+
+    /// `owner/repo #53`, read from the address when the host did not say.
+    var name: String {
+        let parts = webURL?.pathComponents.filter { $0 != "/" } ?? []
+        guard let repo = repo ?? (parts.count >= 2 ? "\(parts[0])/\(parts[1])" : nil) else { return "#\(number)" }
+        return "\(repo) #\(number)"
+    }
+
+    var stateLabel: String {
+        if draft, state == "open" { return L10n.text("apple.branchpull.draft") }
+        switch state {
+        case "merged": return L10n.text("apple.branchpull.merged")
+        case "closed": return L10n.text("apple.branchpull.closed")
+        default: return L10n.text("apple.branchpull.open")
+        }
+    }
+
+    /// The one whose state a row shows: work still open first, then merged.
+    static func lead(of pulls: [ChatPull]) -> ChatPull? {
+        pulls.first { $0.state == "open" && !$0.draft } ?? pulls.first { $0.state == "open" }
+            ?? pulls.first { $0.state == "merged" } ?? pulls.first
+    }
+}
+
+/// A pull request somebody asked to see, until its folder's page takes it.
+@MainActor @Observable
+final class PullOpenRequest {
+    static let shared = PullOpenRequest()
+
+    struct Pending: Equatable {
+        let id = UUID()
+        let folderID: String
+        let pull: ChatPull
+    }
+
+    var pending: Pending?
+}
+
+extension PullSummary {
+    /// Enough to open the page on. The page reads the rest itself.
+    init(_ pull: ChatPull) {
+        self.init(number: pull.number, title: pull.title, author: "", authorAvatar: nil, createdAt: "", updatedAt: "",
+                  headRef: "", baseRef: "", additions: pull.additions ?? 0, deletions: pull.deletions ?? 0,
+                  changedFiles: 0, state: pull.state, draft: pull.draft, reviewDecision: nil, labels: [],
+                  comments: 0, checks: nil)
+    }
+}
+
 struct BranchPullAnswer: Codable, Sendable, Equatable {
     let branch: String?
     let pull: BranchPull?

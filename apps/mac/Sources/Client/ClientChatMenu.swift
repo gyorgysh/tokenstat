@@ -19,6 +19,7 @@ struct ClientChatMenu: View {
     var onDelete: ((ChatConversation) -> Void)?
     var onViewportChoice: (() -> Void)?
     @State private var rename = false
+    @State private var openedPull: ChatPull?
     @State private var supportsFork = false
     @State private var copying = false
     @State private var removing = false
@@ -26,6 +27,7 @@ struct ClientChatMenu: View {
     @State private var owner = WorkSessionContext.shared.scope
     @State private var visible = false
     @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.openURL) private var openURL
 
     private var ownsProject: Bool {
         owner != nil && owner == WorkSessionContext.shared.scope
@@ -49,6 +51,18 @@ struct ClientChatMenu: View {
                     if let onHandoff {
                         Button(L10n.text("apple.clientchatview.continue_on_another_device.b5836f9a"), .device, action: onHandoff)
                             .disabled(conversation.teamShare != nil)
+                    }
+                }
+            }
+            if !conversation.pulls.isEmpty {
+                Menu(L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")) {
+                    ForEach(conversation.pulls, id: \.url) { pull in
+                        Menu("\(pull.stateLabel) · \(pull.name)") {
+                            Button(L10n.text("apple.branchpull.view_here"), .source) { openedPull = pull }
+                            Button(L10n.text("apple.branchpull.open_browser"), .external) {
+                                if let url = pull.webURL { openURL(url) }
+                            }
+                        }
                     }
                 }
             }
@@ -118,6 +132,9 @@ struct ClientChatMenu: View {
         .onAppear { visible = true }
         .onDisappear { visible = false }
         .task(id: peer) { supportsFork = await RemoteHostFeature.chatFork.isSupported(peer: peer) }
+        .sheet(item: $openedPull) { pull in
+            ClientPullSheet(pull: pull, peer: peer, workspaceID: pull.workspaceId ?? workspaceID)
+        }
         .sheet(isPresented: $rename) {
             ClientNameEditor(title: L10n.text("apple.clientchatmenu.rename_chat.26076241"), initial: conversation.title) { title in
                 guard ownsProject else { throw ClientActionOwnership.changed }

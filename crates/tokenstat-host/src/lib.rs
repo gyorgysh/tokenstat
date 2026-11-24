@@ -81,6 +81,8 @@ pub(crate) mod chat_inspection;
 #[cfg(feature = "local-host")]
 pub mod chat_live;
 pub mod chat_plan;
+#[cfg(feature = "local-host")]
+pub(crate) mod chat_pulls;
 pub mod chat_question;
 #[cfg(feature = "local-host")]
 pub mod chat_receipts;
@@ -124,6 +126,8 @@ pub(crate) mod presence;
 pub mod pricing;
 pub(crate) mod provision;
 mod proxy_http;
+#[cfg(feature = "local-host")]
+pub(crate) mod pull_states;
 #[cfg(feature = "local-host")]
 pub(crate) mod pulls;
 pub mod remote;

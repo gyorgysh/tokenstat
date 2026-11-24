@@ -10,6 +10,7 @@ desktop is a review build. Newest first.
 ### Added
 
 - On Android, Rate tokenstat in Legal opens a sheet where you can rate on Google Play, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
+- Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Hover the mark on Mac, tap it on Android, or open the chat menu on iPhone and iPad to see them, then view one in tokenstat or open it in the browser. On Windows, hover the mark for the list. Update the computer to 1.26.0 to see more than the branch's own.
 
 ### Changed
 

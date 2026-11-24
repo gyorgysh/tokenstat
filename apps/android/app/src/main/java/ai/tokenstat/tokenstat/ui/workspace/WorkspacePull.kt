@@ -276,22 +276,7 @@ fun BranchPullButton(
     }
 }
 
-/// A cached state mark on a conversation row. Drawing it never asks the forge.
-@Composable
-fun BranchPullBadge(pull: JsonObject) {
-    val colors = LocalTsColors.current
-    val state = branchPullState(pull)
-    val tint = when (pull.str("state")) {
-        "merged" -> colors.secondary
-        "closed" -> colors.danger
-        else -> if (pull.bol("draft")) colors.stateIdle else colors.accent
-    }
-    Icon(ActionIcon.Merge.vector,
-        L10n.text("android.branchpull.help", state, pull.str("number").orEmpty(), pull.str("title").orEmpty()),
-        tint = tint, modifier = Modifier.size(14.dp))
-}
-
-private fun branchPullState(pull: JsonObject): String = when (pull.str("state")) {
+internal fun branchPullState(pull: JsonObject): String = when (pull.str("state")) {
     "merged" -> L10n.text("android.branchpull.merged")
     "closed" -> L10n.text("android.branchpull.closed")
     else -> if (pull.bol("draft")) L10n.text("android.branchpull.draft") else L10n.text("android.branchpull.open")

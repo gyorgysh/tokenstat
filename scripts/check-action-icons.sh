@@ -43,6 +43,10 @@ SKIP_STARTERS = (
 # Snippet must uniquely identify that one button, not every Button in the file.
 ALLOWED = [
     ("Features/Teams/TeamEditorSheet.swift", "Button(submitTitle, submitIcon, role:"),
+    # A chat row in the sidebar, led by its agent's mark.
+    ("App/RootView.swift", "HarnessMark(id: conversation.backend"),
+    # A pull request in a chat's card, led by its own state drawing.
+    ("Design/PullMark.swift", "PullGlyphView(state: pull.state"),
     # An organization card's header row. The organization's own letter mark
     # leads it and the row style adds the chevron, like a sidebar row.
     ("Features/Teams/TeamDashboard.swift", "store.select(organization)"),

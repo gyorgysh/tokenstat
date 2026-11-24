@@ -52,6 +52,7 @@ struct RootView: View {
     @State private var home = HomeModel()
     @State private var account = AccountModel()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @State private var teams = TeamStore(api: .live)
     @State private var workspaces = WorkspacesModel()
     @State private var pullCounts = PullCountStore.shared
@@ -548,6 +549,12 @@ struct RootView: View {
             await teams.refreshSelected()
         }
         .task(id: teams.selectionKey) { await teams.refreshSelected() }
+        #if os(macOS)
+        .task(id: scenePhase == .active) {
+            guard scenePhase == .active else { return }
+            await refreshSidebarPullMarks()
+        }
+        #endif
         .task(id: TeamAppPresenceKey(owner: teams.owner, active: scenePhase == .active && teams.phase == .ready, supported: teams.capabilities?.supportsAppPresence == true)) {
             await teams.watchAppPresence(keepsWatching: true, active: {
                 // Present while a window of the app is on screen, not only while
@@ -3036,6 +3043,7 @@ struct RootView: View {
             remove: {
                 Task { await chat.remove(conversation, in: folder.id) }
             },
+            openPull: { openPull($0, from: folder) },
             warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) },
             caption: folder.isRemote
                 ? "\(folder.machineLabel ?? L10n.text("apple.rootview.remote.ffa98e02")) / \(folder.name)"
@@ -3392,6 +3400,41 @@ struct RootView: View {
         projectsSort = sort
         SidebarPreferences.shared.projectsSort = sort
     }
+
+    /// Show a chat's pull request on its own repository's page. One whose
+    /// repository is not a folder here opens in the browser.
+    private func openPull(_ pull: ChatPull, from folder: WorkspaceFolder) {
+        let own = Bridge.chatRoute(workspaceID: folder.id, peer: nil)
+        let target = workspaces.folders.first {
+            let route = Bridge.chatRoute(workspaceID: $0.id, peer: nil)
+            return route.peer == own.peer && route.workspaceID == pull.workspaceId
+        }
+        guard let target else {
+            if let url = pull.webURL { openURL(url) }
+            return
+        }
+        PullOpenRequest.shared.pending = .init(folderID: target.id, pull: pull)
+        openSection(.pulls, in: target.id)
+    }
+
+    #if os(macOS)
+    /// A folder's list answers from what the host knew, and the host looks at
+    /// the pull requests that had aged only after answering. Read the lists
+    /// already on screen again to show what it found. Folders on this Mac
+    /// only: a mark is no reason to dial a computer.
+    private func refreshSidebarPullMarks() async {
+        var wait: Duration = .seconds(6)
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: wait) } catch { return }
+            wait = .seconds(60)
+            for folder in workspaces.folders where chat.hasSidebarList(for: folder.id) {
+                guard !Task.isCancelled else { return }
+                guard Bridge.chatRoute(workspaceID: folder.id, peer: nil).peer == nil else { continue }
+                await chat.warmWorkspacePreviews(folder.id, includeMessages: false)
+            }
+        }
+    }
+    #endif
 
     private func warmAllProjectChatLists(onlyUnread: Bool = false) async {
         chat.retainSidebarWorkspaceLists(workspaces.folders.map(\.id))
@@ -4175,6 +4218,7 @@ struct RootView: View {
                     remove: {
                         Task { await chat.remove(conversation, in: folder.id) }
                     },
+                    openPull: { openPull($0, from: folder) },
                     warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) },
                     folderIsOpen: isCurrent
                 )
@@ -5766,6 +5810,7 @@ private struct ChatSidebarConversationRow: View {
     let isSelected: Bool
     let select: () -> Void
     let remove: () -> Void
+    let openPull: (ChatPull) -> Void
     let warmPreview: () async -> Void
     /// The folder's name, for the chat list where rows from every folder
     /// share one list. Takes the age's seat: the day heading already says when.
@@ -5799,13 +5844,7 @@ private struct ChatSidebarConversationRow: View {
                         .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
                         .lineLimit(1)
                         .layoutPriority(1)
-                    if let pull = conversation.pull {
-                        Image(systemName: pull.symbol)
-                            .font(Theme.fit(11, weight: .medium))
-                            .foregroundStyle(pull.tint)
-                            .help(L10n.text("apple.branchpull.help", pull.stateLabel, "\(pull.number)", pull.title))
-                            .accessibilityLabel(L10n.text("apple.branchpull.chip", "\(pull.number)", pull.stateLabel))
-                    }
+                    SidebarChatPullMark(pulls: conversation.pulls, open: openPull)
                     ChatDraftMark(reference: draft)
                     Spacer(minLength: 0)
 

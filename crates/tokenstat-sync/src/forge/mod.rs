@@ -17,9 +17,9 @@ pub use auth::{
 };
 pub use avatars::{CommitAvatars, commit_avatars};
 pub use model::{
-    Availability, BranchPull, CheckState, ForgeConnection, MergeMethod, PullActor, PullCheck,
-    PullDetail, PullFile, PullListPage, PullReview, PullSummary, Repo, Scope, State, TimelineEvent,
-    TimelinePage, Verdict,
+    Availability, BranchPull, CheckState, ForgeConnection, MergeMethod, PullActor, PullBrief,
+    PullCheck, PullDetail, PullFile, PullListPage, PullReview, PullSummary, Repo, Scope, State,
+    TimelineEvent, TimelinePage, Verdict,
 };
 pub use write::{
     CreatedPull, close, comment, create, default_branch, merge, ready, reopen, review,
@@ -153,6 +153,49 @@ fn for_branch_once(
     let reset = rate_limit_reset(&response);
     let text = response_text(response)?;
     query::decode_branch(&text, reset, &repo.owner, &repo.repo).map_err(HttpFailure::from)
+}
+
+/// The most numbers one [`briefs`] request may carry.
+pub const BRIEFS_LIMIT: usize = 40;
+
+/// What a mark needs about several pull requests of one repository, in one
+/// request. Numbers that are not pull requests are absent from the answer.
+pub fn briefs(repo: &Repo, numbers: &[u32]) -> Result<Vec<PullBrief>, ForgeError> {
+    let numbers = &numbers[..numbers.len().min(BRIEFS_LIMIT)];
+    if numbers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(credential) = credential(&repo.host) else {
+        return Err(ForgeError::NotSignedIn);
+    };
+    match briefs_once(repo, numbers, &credential) {
+        Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
+            briefs_once(repo, numbers, &refreshed).map_err(Into::into)
+        }
+        result => result.map_err(Into::into),
+    }
+}
+
+fn briefs_once(
+    repo: &Repo,
+    numbers: &[u32],
+    credential: &Credential,
+) -> Result<Vec<PullBrief>, HttpFailure> {
+    let response = auth::http_client()?
+        .post(graphql_endpoint(repo))
+        .header("accept", "application/vnd.github+json")
+        .header("x-github-api-version", "2022-11-28")
+        .bearer_auth(credential.bearer())
+        .json(&serde_json::json!({
+            "query": query::briefs_query(numbers),
+            "variables": {"owner": repo.owner, "repo": repo.repo},
+        }))
+        .send()
+        .map_err(ForgeError::from)?;
+    let reset = rate_limit_reset(&response);
+    let text = response_text(response)?;
+    query::decode_briefs(&text, reset, numbers).map_err(HttpFailure::from)
 }
 
 /// Read the pull request's summary, people, files, reviews and check runs.

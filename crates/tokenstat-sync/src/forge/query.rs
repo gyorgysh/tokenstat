@@ -5,8 +5,8 @@
 use serde::Deserialize;
 
 use super::{
-    BranchPull, CheckState, ForgeError, PullActor, PullCheck, PullDetail, PullFile, PullListPage,
-    PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
+    BranchPull, CheckState, ForgeError, PullActor, PullBrief, PullCheck, PullDetail, PullFile,
+    PullListPage, PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
 };
 
 pub(super) const LIST: &str = r#"
@@ -398,6 +398,62 @@ pub(super) fn decode_branch(
         .cloned())
 }
 
+/// One request for several numbers, each under its own alias. The numbers are
+/// integers, so nothing from a conversation is spliced into the query.
+pub(super) fn briefs_query(numbers: &[u32]) -> String {
+    let mut out = String::from(
+        "query PullBriefs($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {",
+    );
+    for number in numbers {
+        out.push_str(&format!(
+            " p{number}: pullRequest(number: {number}) {{ number title url state isDraft baseRefName additions deletions }}"
+        ));
+    }
+    out.push_str(" } }");
+    out
+}
+
+/// The pull requests that exist among the numbers asked for. A number that is
+/// an issue, or nothing, comes back as a NOT_FOUND error beside the rest of
+/// the answer, and is absent here rather than a failure.
+pub(super) fn decode_briefs(
+    raw: &str,
+    rate_limit_reset: Option<u64>,
+    numbers: &[u32],
+) -> Result<Vec<PullBrief>, ForgeError> {
+    let mut body: serde_json::Value = serde_json::from_str(raw)?;
+    let only_missing = array(&body["errors"])
+        .iter()
+        .all(|error| error["type"].as_str() == Some("NOT_FOUND"));
+    if body["data"]["repository"].is_object() && only_missing {
+        body["errors"] = serde_json::Value::Null;
+    }
+    let body = match body["errors"].is_null() {
+        true => body,
+        false => graphql_body(raw, rate_limit_reset)?,
+    };
+    let repository = &body["data"]["repository"];
+    Ok(numbers
+        .iter()
+        .filter_map(|number| {
+            let node = &repository[format!("p{number}")];
+            let url = text(&node["url"]);
+            (integer(&node["number"]) == *number && url.starts_with("https://")).then(|| {
+                PullBrief {
+                    number: *number,
+                    title: text(&node["title"]),
+                    url,
+                    state: text(&node["state"]).to_ascii_lowercase(),
+                    draft: node["isDraft"].as_bool().unwrap_or(false),
+                    base_ref: text(&node["baseRefName"]),
+                    additions: integer(&node["additions"]),
+                    deletions: integer(&node["deletions"]),
+                }
+            })
+        })
+        .collect())
+}
+
 pub(super) fn decode_detail(
     raw: &str,
     rate_limit_reset: Option<u64>,
@@ -758,6 +814,24 @@ fn integer(value: &serde_json::Value) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn briefs_keep_what_exists_and_drop_what_does_not() {
+        let raw = r#"{"data":{"repository":{"p7":{"number":7,"title":"Bump","url":"https://github.com/o/r/pull/7","state":"MERGED","isDraft":false,"baseRefName":"main","additions":3,"deletions":1},"p8":null}},
+            "errors":[{"type":"NOT_FOUND","message":"Could not resolve to a PullRequest"}]}"#;
+        let rows = decode_briefs(raw, None, &[7, 8]).expect("partial answer");
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].number, rows[0].state.as_str()), (7, "merged"));
+        let denied =
+            r#"{"data":{"repository":null},"errors":[{"type":"FORBIDDEN","message":"no"}]}"#;
+        assert!(decode_briefs(denied, None, &[7]).is_err());
+        let gone = r#"{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","message":"no repository"}]}"#;
+        assert!(
+            decode_briefs(gone, None, &[7]).is_err(),
+            "a lost repository says nothing about its pull requests"
+        );
+        assert!(briefs_query(&[7, 8]).contains("p8: pullRequest(number: 8)"));
+    }
 
     #[test]
     fn a_branch_prefers_its_open_pull_and_ignores_forks() {

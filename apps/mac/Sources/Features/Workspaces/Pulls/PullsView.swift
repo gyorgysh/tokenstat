@@ -128,6 +128,7 @@ struct PullsView: View {
                     },
                     model: selectedDetail
                 )
+                .id(selectedPull.number)
             } else {
                 VStack(spacing: 0) {
                     #if os(macOS)
@@ -197,7 +198,10 @@ struct PullsView: View {
             }
             .onChange(of: model.availability) { old, new in
                 if old != new && !matchesRestoredAvailability(old: old, new: new) { clearDetailSelection() }
+                takeOpenRequest()
             }
+            .onAppear { takeOpenRequest() }
+            .onChange(of: PullOpenRequest.shared.pending) { _, _ in takeOpenRequest() }
             .onChange(of: selectedDetail?.accessLost) { _, lost in
                 guard lost == true else { return }
                 detailCache.clear()
@@ -213,7 +217,11 @@ struct PullsView: View {
         .onChange(of: peer) { _, _ in resetWorkspace() }
         .onChange(of: WorkSessionContext.shared.generation) { _, _ in resetWorkspace() }
         .onChange(of: isActive) { _, active in
-            if !active { selectedDetail?.prepareForCache() }
+            if !active {
+                selectedDetail?.prepareForCache()
+                // Left before it could be shown, so it is not shown later.
+                if PullOpenRequest.shared.pending?.folderID == workspaceID { PullOpenRequest.shared.pending = nil }
+            }
         }
     }
 
@@ -248,6 +256,16 @@ struct PullsView: View {
                 summary: pull, model: selectedDetail, listScope: model.scope, listState: model.state)
         }
         #endif
+    }
+
+    /// A pull request opened from a chat. Waits for the connection answer,
+    /// which clears whatever was selected before it.
+    private func takeOpenRequest() {
+        guard isActive, model.availability?.state == "ready",
+              let pending = PullOpenRequest.shared.pending, pending.folderID == workspaceID else { return }
+        PullOpenRequest.shared.pending = nil
+        selectedDetail?.prepareForCache()
+        select(PullSummary(pending.pull))
     }
 
     private func retirePullHandoff() {

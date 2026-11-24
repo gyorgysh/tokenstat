@@ -247,14 +247,7 @@ struct GitSyncLoadingView: View {
 }
 
 extension BranchPull {
-    var tint: Color {
-        if draft, state == "open" { return Theme.stateIdle }
-        switch state {
-        case "merged": return Theme.secondary
-        case "closed": return Theme.danger
-        default: return Theme.accent
-        }
-    }
+    var tint: Color { ChatPull(self).tint }
 }
 
 /// The branch's pull request, or the way to open one. Beside Pull and Push
