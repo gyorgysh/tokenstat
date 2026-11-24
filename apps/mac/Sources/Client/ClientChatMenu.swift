@@ -19,7 +19,7 @@ struct ClientChatMenu: View {
     var onDelete: ((ChatConversation) -> Void)?
     var onViewportChoice: (() -> Void)?
     @State private var rename = false
-    @State private var openedPull: ChatPull?
+    @State private var pullSheet: PullSheet?
     @State private var supportsFork = false
     @State private var copying = false
     @State private var removing = false
@@ -28,6 +28,33 @@ struct ClientChatMenu: View {
     @State private var visible = false
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.openURL) private var openURL
+
+    private enum PullSheet: Identifiable {
+        case ask(ChatPull), page(ChatPull)
+
+        var id: String {
+            switch self {
+            case let .ask(pull): "ask:" + pull.id
+            case let .page(pull): "page:" + pull.id
+            }
+        }
+    }
+
+    private func open(_ pull: ChatPull) {
+        guard pull.workspaceId != nil else {
+            if let url = pull.webURL { openURL(url) }
+            return
+        }
+        switch PullOpenPreference.shared.choice {
+        case .ask: pullSheet = .ask(pull)
+        case let choice: open(pull, in: choice)
+        }
+    }
+
+    private func open(_ pull: ChatPull, in choice: PullOpenPreference.Choice) {
+        pullSheet = choice == .here ? .page(pull) : nil
+        if choice != .here, let url = pull.webURL { openURL(url) }
+    }
 
     private var ownsProject: Bool {
         owner != nil && owner == WorkSessionContext.shared.scope
@@ -57,12 +84,7 @@ struct ClientChatMenu: View {
             if !conversation.pulls.isEmpty {
                 Menu(L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")) {
                     ForEach(conversation.pulls, id: \.url) { pull in
-                        Menu("\(pull.stateLabel) · \(pull.name)") {
-                            Button(L10n.text("apple.branchpull.view_here"), .source) { openedPull = pull }
-                            Button(L10n.text("apple.branchpull.open_browser"), .external) {
-                                if let url = pull.webURL { openURL(url) }
-                            }
-                        }
+                        Button("\(pull.stateLabel) · \(pull.name)", .merge) { open(pull) }
                     }
                 }
             }
@@ -132,8 +154,12 @@ struct ClientChatMenu: View {
         .onAppear { visible = true }
         .onDisappear { visible = false }
         .task(id: peer) { supportsFork = await RemoteHostFeature.chatFork.isSupported(peer: peer) }
-        .sheet(item: $openedPull) { pull in
-            ClientPullSheet(pull: pull, peer: peer, workspaceID: pull.workspaceId ?? workspaceID)
+        .sheet(item: $pullSheet) { sheet in
+            switch sheet {
+            case let .ask(pull): PullOpenSheet(pull: pull) { open(pull, in: $0) }
+            case let .page(pull):
+                ClientPullSheet(pull: pull, peer: peer, workspaceID: pull.workspaceId ?? workspaceID)
+            }
         }
         .sheet(isPresented: $rename) {
             ClientNameEditor(title: L10n.text("apple.clientchatmenu.rename_chat.26076241"), initial: conversation.title) { title in

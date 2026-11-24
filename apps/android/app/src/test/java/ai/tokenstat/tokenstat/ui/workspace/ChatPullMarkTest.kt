@@ -29,4 +29,10 @@ class ChatPullMarkTest {
         assertEquals("x/y #7", pullName(json("""{"number":7,"repo":"x/y"}""")))
         assertEquals("#7", pullName(json("""{"number":7}""")))
     }
+
+    @Test fun anUnknownChoiceAsksAgain() {
+        assertEquals(PullOpenChoice.Ask, PullOpenChoice.of(null))
+        assertEquals(PullOpenChoice.Ask, PullOpenChoice.of("window"))
+        assertEquals(PullOpenChoice.Here, PullOpenChoice.of("here"))
+    }
 }

@@ -4829,6 +4829,7 @@ private fun AccountDialog(
                     // mark. The switch used to be a bare row above the cards,
                     // so the pane opened on an unlabelled toggle.
                     DeviceNotificationsCard()
+                    ai.tokenstat.tokenstat.ui.workspace.PullOpenCard()
                     var tabsOpen by remember { mutableStateOf(false) }
                     TabsCard(
                         summary = tabSummary(

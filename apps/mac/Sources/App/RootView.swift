@@ -52,6 +52,7 @@ struct RootView: View {
     @State private var home = HomeModel()
     @State private var account = AccountModel()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var pullToOpen: PendingPullOpen?
     @Environment(\.openURL) private var openURL
     @State private var teams = TeamStore(api: .live)
     @State private var workspaces = WorkspacesModel()
@@ -549,6 +550,12 @@ struct RootView: View {
             await teams.refreshSelected()
         }
         .task(id: teams.selectionKey) { await teams.refreshSelected() }
+        .sheet(item: $pullToOpen) { pending in
+            PullOpenSheet(pull: pending.pull) { choice in
+                pullToOpen = nil
+                openPull(pending.pull, from: pending.folder, in: choice)
+            }
+        }
         #if os(macOS)
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { return }
@@ -3401,20 +3408,40 @@ struct RootView: View {
         SidebarPreferences.shared.projectsSort = sort
     }
 
-    /// Show a chat's pull request on its own repository's page. One whose
-    /// repository is not a folder here opens in the browser.
+    /// Open a chat's pull request where this person wants them, asking the
+    /// first time. One whose repository is not a folder here only has the
+    /// browser.
     private func openPull(_ pull: ChatPull, from folder: WorkspaceFolder) {
-        let own = Bridge.chatRoute(workspaceID: folder.id, peer: nil)
-        let target = workspaces.folders.first {
-            let route = Bridge.chatRoute(workspaceID: $0.id, peer: nil)
-            return route.peer == own.peer && route.workspaceID == pull.workspaceId
-        }
-        guard let target else {
+        guard pullFolder(pull, from: folder) != nil else {
             if let url = pull.webURL { openURL(url) }
             return
         }
-        PullOpenRequest.shared.pending = .init(folderID: target.id, pull: pull)
-        openSection(.pulls, in: target.id)
+        switch PullOpenPreference.shared.choice {
+        case .ask:
+            Task {
+                // The card this came from has to be gone before a sheet.
+                try? await Task.sleep(for: .milliseconds(200))
+                pullToOpen = PendingPullOpen(pull: pull, folder: folder)
+            }
+        case let choice: openPull(pull, from: folder, in: choice)
+        }
+    }
+
+    private func openPull(_ pull: ChatPull, from folder: WorkspaceFolder, in choice: PullOpenPreference.Choice) {
+        if choice == .here, let target = pullFolder(pull, from: folder) {
+            PullOpenRequest.shared.pending = .init(folderID: target.id, pull: pull)
+            openSection(.pulls, in: target.id)
+        } else if let url = pull.webURL {
+            openURL(url)
+        }
+    }
+
+    private func pullFolder(_ pull: ChatPull, from folder: WorkspaceFolder) -> WorkspaceFolder? {
+        let own = Bridge.chatRoute(workspaceID: folder.id, peer: nil)
+        return workspaces.folders.first {
+            let route = Bridge.chatRoute(workspaceID: $0.id, peer: nil)
+            return route.peer == own.peer && route.workspaceID == pull.workspaceId
+        }
     }
 
     #if os(macOS)
@@ -5844,7 +5871,11 @@ private struct ChatSidebarConversationRow: View {
                         .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
                         .lineLimit(1)
                         .layoutPriority(1)
-                    SidebarChatPullMark(pulls: conversation.pulls, open: openPull)
+                    if !conversation.pulls.isEmpty {
+                        SidebarChatPullMark.label(conversation.pulls)
+                            .hidden()
+                            .anchorPreference(key: SidebarPullMarkSeat.self, value: .bounds) { $0 }
+                    }
                     ChatDraftMark(reference: draft)
                     Spacer(minLength: 0)
 
@@ -5876,6 +5907,15 @@ private struct ChatSidebarConversationRow: View {
                     .disabled(renaming || confirmsRemoval || copying || actionError != nil)
             }
             .padding(.trailing, Theme.Space.s + 2)
+        }
+        .overlayPreferenceValue(SidebarPullMarkSeat.self) { seat in
+            GeometryReader { row in
+                if let seat {
+                    let frame = row[seat]
+                    SidebarChatPullMark(pulls: conversation.pulls, open: openPull)
+                        .position(x: frame.midX, y: frame.midY)
+                }
+            }
         }
         .background(
             SidebarRowSeat(isSelected: isSelected, isHovering: isHovering,
@@ -6307,3 +6347,10 @@ private struct ActiveSessionRow: View {
 #endif
 
 #endif
+
+/// A pull request waiting for the answer about where to open it.
+private struct PendingPullOpen: Identifiable {
+    let pull: ChatPull
+    let folder: WorkspaceFolder
+    var id: String { pull.id }
+}

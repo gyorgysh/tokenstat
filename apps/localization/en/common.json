@@ -914,5 +914,12 @@
   "common.chat.setup.read_only": "This conversation is read-only on this device.",
   "common.chat.approval.allow_once": "Allow once",
   "common.chat.approval.tool_scope": "Always allow lets this chat use {0} on any file or target. Other tools still ask.",
-  "common.chat.approval.command_scope": "Always allow approves commands starting with {0} in this chat. Other commands still ask."
+  "common.chat.approval.command_scope": "Always allow approves commands starting with {0} in this chat. Other commands still ask.",
+  "common.pulls.open_browser": "Open in browser",
+  "common.pulls.open_in": "Open pull requests in",
+  "common.pulls.open_in_ask": "Ask",
+  "common.pulls.open_in_browser": "Browser",
+  "common.pulls.open_remember": "Your choice is remembered. You can change it in settings.",
+  "common.pulls.open_title": "Open pull request",
+  "common.pulls.view_here": "View in tokenstat"
 }

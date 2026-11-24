@@ -3,11 +3,17 @@ package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
+import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
+import ai.tokenstat.tokenstat.ui.components.TsCard
+import ai.tokenstat.tokenstat.ui.components.TsProminentButton
+import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.TsColors
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,13 +21,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,7 +45,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -48,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.net.toUri
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
@@ -131,7 +140,7 @@ fun ChatPullMark(chat: JsonObject, peer: String, hostLabel: String = "") {
     val pulls = chatPulls(chat)
     val lead = leadPull(pulls) ?: return
     val colors = LocalTsColors.current
-    val uri = LocalUriHandler.current
+    val context = LocalContext.current
     var open by remember(chat.str("id")) { mutableStateOf(false) }
     val spoken = pulls.joinToString(", ") {
         L10n.text("android.branchpull.help", branchPullState(it), it.str("number").orEmpty(), it.str("title").orEmpty())
@@ -158,35 +167,41 @@ fun ChatPullMark(chat: JsonObject, peer: String, hostLabel: String = "") {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(pull.str("title").orEmpty(), style = TsType.caption, color = colors.textPrimary,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Row(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalAlignment = Alignment.CenterVertically) {
-                                PullGlyph(pull.str("state"), pullTint(pull, colors), 12.dp)
-                                Text(branchPullState(pull), style = TsType.caption2, color = pullTint(pull, colors))
-                                Text(pullName(pull), style = TsType.caption2, color = colors.textSecondary)
-                                pull.str("additions")?.let { Text("+$it", style = TsType.caption2, color = colors.diffAdded) }
-                                pull.str("deletions")?.let { Text("−$it", style = TsType.caption2, color = colors.diffRemoved) }
-                            }
-                        }
-                    },
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            open = false
-                            pull.str("url")?.takeIf { it.startsWith("https://") }?.let { runCatching { uri.openUri(it) } }
-                        }) {
-                            Icon(ActionIcon.External.vector, L10n.text("android.branchpull.open_browser"),
-                                tint = colors.textSecondary, modifier = Modifier.size(16.dp))
+                            PullSummaryLine(pull)
                         }
                     },
                     onClick = {
                         open = false
-                        val folder = pull.str("workspaceId")
-                        if (folder != null) {
-                            PullOpener.request = PullOpener.Request(peer, folder, hostLabel, pull)
-                        } else {
-                            pull.str("url")?.takeIf { it.startsWith("https://") }?.let { runCatching { uri.openUri(it) } }
-                        }
+                        openPull(context, pull, peer, hostLabel)
                     },
                 )
             }
+        }
+    }
+}
+
+/// Where opening a chat's pull request leads, on this device.
+internal enum class PullOpenChoice(val key: String) {
+    Ask("ask"),
+    Here("here"),
+    Browser("browser");
+
+    val label: String
+        get() = when (this) {
+            Ask -> L10n.text("common.pulls.open_in_ask")
+            Here -> "tokenstat"
+            Browser -> L10n.text("common.pulls.open_in_browser")
+        }
+
+    companion object {
+        private fun prefs(context: Context) = context.getSharedPreferences("tokenstat.chat.v1", Context.MODE_PRIVATE)
+
+        fun of(key: String?) = entries.firstOrNull { it.key == key } ?: Ask
+
+        fun read(context: Context) = of(prefs(context).getString("pullsOpenIn", null))
+
+        fun write(context: Context, choice: PullOpenChoice) {
+            prefs(context).edit().putString("pullsOpenIn", choice.key).apply()
         }
     }
 }
@@ -196,13 +211,90 @@ fun ChatPullMark(chat: JsonObject, peer: String, hostLabel: String = "") {
 internal object PullOpener {
     data class Request(val peer: String, val workspace: String, val hostLabel: String, val pull: JsonObject)
 
+    /// Waiting for the answer about where to open it.
+    var asking by mutableStateOf<Request?>(null)
     var request by mutableStateOf<Request?>(null)
+}
+
+private fun browse(context: Context, pull: JsonObject) {
+    val url = pull.str("url")?.takeIf { it.startsWith("https://") } ?: return
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
+}
+
+/// One whose repository is not a folder on that computer only has the browser.
+private fun openPull(context: Context, pull: JsonObject, peer: String, hostLabel: String) {
+    val folder = pull.str("workspaceId") ?: return browse(context, pull)
+    val request = PullOpener.Request(peer, folder, hostLabel, pull)
+    when (PullOpenChoice.read(context)) {
+        PullOpenChoice.Ask -> PullOpener.asking = request
+        PullOpenChoice.Here -> PullOpener.request = request
+        PullOpenChoice.Browser -> browse(context, pull)
+    }
+}
+
+/// `Merged  owner/repo #53  +1839 −1391`
+@Composable
+private fun PullSummaryLine(pull: JsonObject) {
+    val colors = LocalTsColors.current
+    Row(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+        PullGlyph(pull.str("state"), pullTint(pull, colors), 12.dp)
+        Text(branchPullState(pull), style = TsType.caption2, color = pullTint(pull, colors))
+        Text(pullName(pull), style = TsType.caption2, color = colors.textSecondary)
+        pull.str("additions")?.let { Text("+$it", style = TsType.caption2, color = colors.diffAdded) }
+        pull.str("deletions")?.let { Text("−$it", style = TsType.caption2, color = colors.diffRemoved) }
+    }
+}
+
+/// Asked the first time a pull request is opened. The answer is kept.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PullOpenSheet(request: PullOpener.Request) {
+    val colors = LocalTsColors.current
+    val context = LocalContext.current
+    fun pick(choice: PullOpenChoice) {
+        PullOpenChoice.write(context, choice)
+        PullOpener.asking = null
+        if (choice == PullOpenChoice.Here) PullOpener.request = request else browse(context, request.pull)
+    }
+    ModalBottomSheet(onDismissRequest = { PullOpener.asking = null }, containerColor = colors.background) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(bottom = Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            Text(L10n.text("common.pulls.open_title"), style = TsType.headline, color = colors.textPrimary)
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text(request.pull.str("title").orEmpty(), style = TsType.body, color = colors.textPrimary,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                PullSummaryLine(request.pull)
+            }
+            TsProminentButton(L10n.text("common.pulls.view_here"), onClick = { pick(PullOpenChoice.Here) },
+                icon = ActionIcon.Merge.vector, modifier = Modifier.fillMaxWidth())
+            TsSecondaryButton(L10n.text("common.pulls.open_browser"), onClick = { pick(PullOpenChoice.Browser) },
+                icon = ActionIcon.External.vector, modifier = Modifier.fillMaxWidth())
+            Text(L10n.text("common.pulls.open_remember"), style = TsType.caption, color = colors.textSecondary)
+        }
+    }
+}
+
+/// The same choice, in settings.
+@Composable
+internal fun PullOpenCard() {
+    val context = LocalContext.current
+    var choice by remember { mutableStateOf(PullOpenChoice.read(context)) }
+    TsCard(title = L10n.text("common.pulls.open_in")) {
+        SegmentedCapsulePicker(
+            options = PullOpenChoice.entries.map { Triple(it, it.label, null as ImageVector?) },
+            selection = choice,
+            onSelect = { choice = it; PullOpenChoice.write(context, it) },
+        )
+    }
 }
 
 @Composable
 internal fun PullOpenerHost(model: AppViewModel) {
     // Leaving the signed-in app must not leave one waiting for the next account.
-    DisposableEffect(Unit) { onDispose { PullOpener.request = null } }
+    DisposableEffect(Unit) { onDispose { PullOpener.request = null; PullOpener.asking = null } }
+    PullOpener.asking?.let { PullOpenSheet(it) }
     val request = PullOpener.request ?: return
     val number = request.pull.str("number")?.toLongOrNull() ?: return
     val dismiss = { PullOpener.request = null }

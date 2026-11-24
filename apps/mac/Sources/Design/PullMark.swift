@@ -78,61 +78,89 @@ struct ChatPullMark: View {
     }
 }
 
-/// Every pull request a chat opened or talked about. A row opens it here, and
-/// the button beside it opens the forge's own page.
+/// Every pull request a chat opened or talked about.
 struct ChatPullList: View {
     let pulls: [ChatPull]
     let open: (ChatPull) -> Void
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(pulls, id: \.url) { pull in
-                HStack(spacing: 0) {
-                    Button { open(pull) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(pull.title)
-                                .font(Theme.callout.weight(.medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            HStack(spacing: 5) {
-                                PullGlyphView(state: pull.state, tint: pull.tint, size: 12)
-                                Text(pull.stateLabel).foregroundStyle(pull.tint)
-                                Text(verbatim: "·").foregroundStyle(.tertiary)
-                                Text(verbatim: pull.name).foregroundStyle(.secondary)
-                                Spacer(minLength: Theme.Space.m)
-                                if let additions = pull.additions, let deletions = pull.deletions {
-                                    Text(verbatim: "+\(additions)").foregroundStyle(Theme.diffAdded)
-                                    Text(verbatim: "−\(deletions)").foregroundStyle(Theme.diffRemoved)
-                                }
-                            }
-                            .font(Theme.numeric(11))
+            ForEach(pulls) { pull in
+                Button { open(pull) } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(pull.title)
+                            .font(Theme.callout.weight(.medium))
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
-                        }
-                        .padding(.vertical, 7)
-                        .padding(.leading, Theme.Space.m)
-                        .padding(.trailing, Theme.Space.s)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(.rect)
+                        ChatPullSummaryLine(pull: pull)
                     }
-                    .buttonStyle(.plain)
-                    if let url = pull.webURL {
-                        Button { openURL(url) } label: {
-                            ActionIcon.external.label(L10n.text("apple.branchpull.open_browser"))
-                                .labelStyle(.iconOnly)
-                                .font(Theme.fit(11))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 28, height: 32)
-                                .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .help(L10n.text("apple.branchpull.open_browser"))
-                        .padding(.trailing, Theme.Space.s)
-                    }
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, Theme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 5)
+    }
+}
+
+/// `Merged · owner/repo #53   +1839 −1391`
+struct ChatPullSummaryLine: View {
+    let pull: ChatPull
+
+    var body: some View {
+        HStack(spacing: 5) {
+            PullGlyphView(state: pull.state, tint: pull.tint, size: 12)
+            Text(pull.stateLabel).foregroundStyle(pull.tint)
+            Text(verbatim: "·").foregroundStyle(.tertiary)
+            Text(verbatim: pull.name).foregroundStyle(.secondary)
+            Spacer(minLength: Theme.Space.m)
+            if let additions = pull.additions, let deletions = pull.deletions {
+                Text(verbatim: "+\(additions)").foregroundStyle(Theme.diffAdded)
+                Text(verbatim: "−\(deletions)").foregroundStyle(Theme.diffRemoved)
+            }
+        }
+        .font(Theme.numeric(11))
+        .lineLimit(1)
+    }
+}
+
+/// Asked the first time a pull request is opened. The answer is kept.
+struct PullOpenSheet: View {
+    let pull: ChatPull
+    let choose: (PullOpenPreference.Choice) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ThemedSheet(title: L10n.text("common.pulls.open_title"),
+                    subtitle: L10n.text("common.pulls.open_remember"), icon: .merge,
+                    onClose: { dismiss() }) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text(pull.title)
+                    .font(Theme.callout.weight(.medium))
+                    .lineLimit(2)
+                ChatPullSummaryLine(pull: pull)
+            }
+        } actions: {
+            Button(L10n.text("common.pulls.open_browser"), .external) { pick(.browser) }
+            Button(L10n.text("common.pulls.view_here"), .source) { pick(.here) }
+                .buttonStyle(AccentButtonStyle())
+                .keyboardShortcut(.defaultAction)
+        }
+        #if os(macOS)
+        .modalFrame(width: 460, height: 230)
+        #else
+        .presentationDetents([.medium])
+        #endif
+    }
+
+    private func pick(_ choice: PullOpenPreference.Choice) {
+        // The presenter moves on from here. Dismissing as well would race it
+        // when the next thing is another sheet.
+        PullOpenPreference.shared.choice = choice
+        choose(choice)
     }
 }
 
@@ -148,24 +176,38 @@ extension ChatPull {
 }
 
 #if os(macOS)
-/// The row's mark, with the list beside it while the pointer rests on either.
+/// The row's mark, with the list beside it while the pointer rests on either,
+/// or after a click until it is dismissed.
 struct SidebarChatPullMark: View {
     let pulls: [ChatPull]
     let open: (ChatPull) -> Void
     @State private var showing = false
+    @State private var held = false
     @State private var overMark = false
     @State private var overCard = false
 
-    var body: some View {
+    /// What the mark takes up in a row, for the row to leave room for.
+    static func label(_ pulls: [ChatPull]) -> some View {
         ChatPullMark(pulls: pulls, size: DisplayFit.dp(13), font: Theme.fit(11))
             .padding(.vertical, 4)
             .contentShape(.rect)
+    }
+
+    var body: some View {
+        Button {
+            held = !(held && showing)
+            showing = held
+        } label: { Self.label(pulls) }
+            .buttonStyle(.plain)
             .onHover { overMark = $0 }
             .task(id: overMark || overCard) {
                 // A pause before opening, so crossing the list does not flash
                 // cards, and one before closing, so the pointer can get there.
                 do { try await Task.sleep(for: .milliseconds(overMark || overCard ? 250 : 200)) } catch { return }
-                showing = overMark || overCard
+                showing = held || overMark || overCard
+            }
+            .onChange(of: showing) { _, shown in
+                if !shown { held = false }
             }
             .onChange(of: SidebarMenuTracking.shared.active) { _, active in
                 if active { showing = false }
@@ -179,6 +221,15 @@ struct SidebarChatPullMark: View {
                     .onHover { overCard = $0 }
                     .onDisappear { overCard = false }
             }
+    }
+}
+
+/// Where a chat row left room for its mark. The mark itself sits over the row,
+/// because a control inside the row's own button never gets its click.
+struct SidebarPullMarkSeat: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
     }
 }
 #endif

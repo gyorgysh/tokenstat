@@ -136,6 +136,31 @@ struct ChatPull: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// Where opening a chat's pull request leads, on this device.
+@MainActor @Observable
+final class PullOpenPreference {
+    enum Choice: String, CaseIterable, Sendable { case ask, here, browser }
+
+    static let shared = PullOpenPreference()
+    private static let key = "pulls.openIn"
+
+    var choice: Choice {
+        didSet { UserDefaults.standard.set(choice.rawValue, forKey: Self.key) }
+    }
+
+    private init() {
+        choice = UserDefaults.standard.string(forKey: Self.key).flatMap(Choice.init) ?? .ask
+    }
+
+    static func label(_ choice: Choice) -> String {
+        switch choice {
+        case .ask: L10n.text("common.pulls.open_in_ask")
+        case .here: "tokenstat"
+        case .browser: L10n.text("common.pulls.open_in_browser")
+        }
+    }
+}
+
 /// A pull request somebody asked to see, until its folder's page takes it.
 @MainActor @Observable
 final class PullOpenRequest {

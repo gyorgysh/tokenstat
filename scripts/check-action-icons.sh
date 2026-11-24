@@ -46,7 +46,9 @@ ALLOWED = [
     # A chat row in the sidebar, led by its agent's mark.
     ("App/RootView.swift", "HarnessMark(id: conversation.backend"),
     # A pull request in a chat's card, led by its own state drawing.
-    ("Design/PullMark.swift", "PullGlyphView(state: pull.state"),
+    ("Design/PullMark.swift", "ChatPullSummaryLine(pull: pull)"),
+    # The mark on a chat row, whose whole surface is that drawing.
+    ("Design/PullMark.swift", "Self.label(pulls)"),
     # An organization card's header row. The organization's own letter mark
     # leads it and the row style adds the chevron, like a sidebar row.
     ("Features/Teams/TeamDashboard.swift", "store.select(organization)"),
