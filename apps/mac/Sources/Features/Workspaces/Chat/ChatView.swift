@@ -211,53 +211,7 @@ struct ChatView: View {
     /// changes, and pulses share one ~150ms gate, same as the growth repins.
     /// Animated pins (a jump, an approval card) always go through.
     @State private var lastSilentPinAt = Date.distantPast
-    // The boundary between eager and lazy rows changes their SwiftUI identity.
-    // Keep it fixed while an existing reply grows.
-    private final class MeasuredTail {
-        struct Key: Equatable {
-            let generation: UInt64
-            let count: Int
-            let first: String?
-            let last: String?
-            let whole: Bool
-        }
-
-        private var key: Key?
-        private var start = 0
-
-        /// `streaming` keeps the usual tail while a turn is written. `docked`
-        /// is the reader on the
-        /// latest turn, the only place a change of layout cannot move what
-        /// somebody is reading. A slice measured whole stays whole until a
-        /// turn streams, wherever the reader goes. Past `measuredWhole` rows
-        /// the usual tail applies either way.
-        func split(_ rows: [ChatDisplayItem], generation: UInt64, streaming: Bool, docked: Bool)
-            -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
-            // Rows arriving above the reader (an earlier page) keep a whole
-            // slice whole while it stays short: moving every row into the
-            // lazy stack under the page's hold is what lost the held row.
-            let sameReading = key?.generation == generation
-            let whole = docked || (sameReading && key?.whole == true)
-            let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id,
-                           whole: whole)
-            // Rows arriving at the end, which is a reply streaming in (a long
-            // one adds a piece just before its live one), join the measured
-            // rows. Moving the boundary for them moved rows between the two
-            // stacks on every new piece: the view fell behind the reply and
-            // lurched back, and a reader could not scroll away from it.
-            if let key, sameReading, key.first == rows.first?.id, rows.count >= key.count, start <= rows.count {
-                self.key = next
-                return TranscriptSlice.split(rows, measuredFrom: start)
-            }
-            if next != key {
-                start = TranscriptSlice.measuredTailStart(rows, whole: whole)
-                key = next
-            }
-            return TranscriptSlice.split(rows, measuredFrom: start)
-        }
-    }
-
-    @State private var measuredTail = MeasuredTail()
+    @State private var measuredTail = TranscriptMeasuredTail()
     @State private var rowMounts = TranscriptRowMounts()
     /// Whether rows are reporting where they are. Set from the scroll
     /// callback as the top of the loaded conversation comes near, so the
@@ -2123,3 +2077,49 @@ private struct TranscriptScrollBounds: NSViewRepresentable {
     }
 }
 #endif
+
+// The boundary between eager and lazy rows changes their SwiftUI identity.
+// Keep it fixed while an existing reply grows.
+final class TranscriptMeasuredTail {
+    struct Key: Equatable {
+        let generation: UInt64
+        let count: Int
+        let first: String?
+        let last: String?
+        let whole: Bool
+    }
+
+    private var key: Key?
+    private var start = 0
+
+    /// `streaming` keeps the usual tail while a turn is written. `docked`
+    /// is the reader on the
+    /// latest turn, the only place a change of layout cannot move what
+    /// somebody is reading. A slice measured whole stays whole until a
+    /// turn streams, wherever the reader goes. Past `measuredWhole` rows
+    /// the usual tail applies either way.
+    func split(_ rows: [ChatDisplayItem], generation: UInt64, streaming: Bool, docked: Bool)
+        -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
+        // Rows arriving above the reader (an earlier page) keep a whole
+        // slice whole while it stays short: moving every row into the
+        // lazy stack under the page's hold is what lost the held row.
+        let sameReading = key?.generation == generation
+        let whole = docked || (sameReading && key?.whole == true)
+        let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id,
+                       whole: whole)
+        // Rows arriving at the end, which is a reply streaming in (a long
+        // one adds a piece just before its live one), join the measured
+        // rows. Moving the boundary for them moved rows between the two
+        // stacks on every new piece: the view fell behind the reply and
+        // lurched back, and a reader could not scroll away from it.
+        if let key, sameReading, key.first == rows.first?.id, rows.count >= key.count, start <= rows.count {
+            self.key = next
+            return TranscriptSlice.split(rows, measuredFrom: start)
+        }
+        if next != key {
+            start = TranscriptSlice.measuredTailStart(rows, whole: whole)
+            key = next
+        }
+        return TranscriptSlice.split(rows, measuredFrom: start)
+    }
+}

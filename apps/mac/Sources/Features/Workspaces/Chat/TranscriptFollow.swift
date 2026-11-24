@@ -640,15 +640,28 @@ final class TranscriptFollowState {
             // hand on the trackpad. Nothing here may out-argue that: the
             // chase after Jump to latest would otherwise drag somebody back
             // for the length of its budget.
+            //
+            // A finger on the glass moving away is the reader, however slowly.
+            // A gentle drag on a phone moves a few points a frame, and asking
+            // for eight a frame meant it never counted: the settle pulled the
+            // text back under the finger and sprang to the end on release.
+            // Without a finger, eight points in one frame is what tells a hand
+            // from a lazy row finding its height.
             let retreat = lastOffset - metrics.distanceFromTop
             let retreated = readerMoved && (pinned || Date() >= programmaticUntil)
-                && (readerIsScrolling ? retreat > 2 : !grew && !shrank)
-                && metrics.distanceFromBottom > lastDistanceFromBottom + 8
+                && (readerIsScrolling
+                    ? retreat > 2 && metrics.distanceFromBottom > lastDistanceFromBottom + 0.5
+                    : !grew && !shrank && metrics.distanceFromBottom > lastDistanceFromBottom + 8)
             lastContentHeight = metrics.contentHeight
             lastOffset = metrics.distanceFromTop
             lastDistanceFromBottom = metrics.distanceFromBottom
             if retreated {
+                // Let go of the end too, as a wheel does. Stopping only the
+                // chase left the pin on, and the settle ending put the reader
+                // straight back at the latest message.
                 abandoned = true
+                pinned = false
+                repinDelivery.cancel()
                 set(jump: false)
                 return
             }

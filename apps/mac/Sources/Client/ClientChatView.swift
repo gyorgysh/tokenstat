@@ -751,6 +751,7 @@ struct ClientChatThread: View {
     @State private var scrollTarget: String?
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
+    @State private var measuredTail = TranscriptMeasuredTail()
     @State private var scrollAccess = ClientTranscriptScrollAccess()
     @State private var readingFrames = ClientTranscriptReadingFrames()
     @State private var rowMounts = TranscriptRowMounts()
@@ -1919,7 +1920,11 @@ struct ClientChatThread: View {
         // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
-        let split = TranscriptSlice.split(rows)
+        // The same split as the Mac: a docked slice with little to lay out
+        // is measured whole, so starting to scroll has no estimates to
+        // correct under the reader's finger. See `TranscriptMeasuredTail`.
+        let split = measuredTail.split(rows, generation: model.selectionGeneration,
+                                      streaming: model.busy, docked: follow.pinned || follow.settling)
         let reading = model.readingIdentity
         return ScrollViewReader { proxy in
             ScrollView {
@@ -1945,6 +1950,9 @@ struct ClientChatThread: View {
                             transcriptRow(item, chat: chat, spinning: spinning)
                         }
                     }
+                    // See the Mac transcript: a lazy stack that gave all its
+                    // rows away keeps the size it estimated for them.
+                    .id(split.lazy.isEmpty)
                     // See `TranscriptSlice.measuredTail`.
                     ForEach(split.measured) { item in
                         transcriptRow(item, chat: chat, spinning: spinning)
@@ -1966,6 +1974,9 @@ struct ClientChatThread: View {
                         TranscriptBottomSentinel()
                     }
                 }
+                // Rows report their place in the transcript here. See
+                // `TranscriptWindow.noteContentTop`.
+                .coordinateSpace(name: TranscriptFollow.contentSpaceName)
                 // Empty space still takes taps so a short transcript can hide
                 // the keyboard, not only a fling on a long one.
                 .contentShape(Rectangle())
@@ -2065,6 +2076,22 @@ struct ClientChatThread: View {
                                     hiddenEarlierRows: hiddenAboveCount, hiddenLaterRows: sliceOffset,
                                     revealEarlier: revealEarlier, revealLater: revealLater,
                                     holdSliceStart: holdSliceStart)
+            #if DEBUG
+            // `notifyutil -p ai.tokenstat.debug.<track|perf-start|perf-stop|where>`
+            // in the simulator, the phone's side of the Mac's debug keys.
+            .onAppear { ClientDebugHooks.start() }
+            .onReceive(NotificationCenter.default.publisher(for: ClientDebugHooks.command)) { note in
+                guard isActive, let command = note.object as? String else { return }
+                switch command {
+                case "track": TranscriptProbe.shared.trackedRow = window.anchor?.id
+                case "perf-start": TranscriptProbe.shared.startRecording()
+                case "perf-stop": TranscriptProbe.shared.finishRecording()
+                default:
+                    let anchor = window.anchor
+                    TranscriptHoldTrace.note("where id=\(anchor?.id ?? "none") top=\(Int(anchor?.top ?? 0)) rows=\(model.displayItems.count) built=\(visibleItems.count) pinned=\(follow.pinned)")
+                }
+            }
+            #endif
             .onPreferenceChange(ClientTranscriptReadingFramesKey.self) { geometry in
                 readingFrames.replace(geometry)
                 scrollAccess.refreshAttachment()
@@ -4043,4 +4070,24 @@ private struct ClientTranscriptScrollReporter: UIViewRepresentable {
     }
 }
 
+#if DEBUG
+import notify
+
+/// Debug commands from outside the app, as Darwin notifications.
+enum ClientDebugHooks {
+    static let command = Notification.Name("ai.tokenstat.client.debug")
+    private nonisolated(unsafe) static var started = false
+
+    static func start() {
+        guard !started else { return }
+        started = true
+        for name in ["track", "perf-start", "perf-stop", "where"] {
+            var token: Int32 = 0
+            notify_register_dispatch("ai.tokenstat.debug.\(name)", &token, .main) { _ in
+                NotificationCenter.default.post(name: command, object: name)
+            }
+        }
+    }
+}
+#endif
 #endif

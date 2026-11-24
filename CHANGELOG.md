@@ -17,7 +17,8 @@ desktop is a review build. Newest first.
 - On Mac, the first scroll up from the latest message no longer jumps or stalls after you open a chat or a reply finishes.
 - On Mac, earlier messages load again after you switch to another chat and come back. Before, scrolling to the top and pressing Earlier messages did nothing until the app restarted.
 - On Mac, loading earlier messages keeps the line you were reading where it was, with the older messages appearing above it. Before, it could land on the top of what just arrived and keep loading page after page.
-- On Mac, scrolling back through chats full of tool steps, plans and pictures no longer jumps as older rows come into view, and the text stays still when you come back to a chat you had read far back in.
+- Scrolling back through chats full of tool steps, plans and pictures no longer jumps as older rows come into view, and the text stays still when you come back to a chat you had read far back in.
+- On iPhone and iPad, a slow drag up just after opening a chat now moves the conversation. Before, it barely followed the finger and sprang back to the latest message on release.
 - Scrolling while a long reply streams is smoother. Finished parts of the reply are no longer redrawn on every new word, and the reply refreshes about once a second while you read elsewhere.
 - Long numbered lists no longer show a stray blank line partway through.
 - Antigravity plan limits show again with Antigravity 2.34 and later, read from the running app: the 5-hour and weekly limits for each model group, as the app shows them. A spent limit now reads as used up instead of missing.
