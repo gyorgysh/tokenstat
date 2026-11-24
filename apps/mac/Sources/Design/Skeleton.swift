@@ -5,6 +5,11 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Placeholders shaped like the thing that is coming.
 ///
@@ -28,29 +33,11 @@ enum Skeleton {
         var phase: Double = 0
 
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
-        @State private var bright = false
 
         var body: some View {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Theme.border)
-                // The pulse animates the opacity and nothing else. Scoped
-                // after the frame, a forever animation also caught the bar's
-                // position while the layout was still settling (landscape, a
-                // split column, an iPhone Duo opening) and swung it between
-                // the old place and the new one for as long as it showed.
-                .animation(
-                    reduceMotion
-                        ? nil
-                        : .easeInOut(duration: 0.95)
-                            .repeatForever(autoreverses: true)
-                            .delay(phase)
-                ) { $0.opacity(reduceMotion ? 1 : (bright ? 1 : 0.52)) }
+            SkeletonPulse(phase: phase, animates: !reduceMotion)
                 .frame(width: width, height: height)
                 .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-                .onAppear {
-                    guard !reduceMotion else { return }
-                    bright = true
-                }
         }
     }
 
@@ -145,5 +132,189 @@ extension AnyTransition {
     /// Collapses to a plain fade when Reduce Motion is on.
     static func smoothIn(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4))
+    }
+}
+
+/// Lines of a diff on their way: two gutters and code of varying length.
+struct DiffSkeleton: View {
+    var lines = 14
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(0..<lines, id: \.self) { index in
+                HStack(spacing: Theme.Space.s) {
+                    Skeleton.Bar(width: 22, height: 7, phase: Double(index) * 0.05)
+                    Skeleton.Bar(width: 22, height: 7, phase: Double(index) * 0.05)
+                    Skeleton.Bar(width: Self.widths[index % Self.widths.count], height: 8, phase: Double(index) * 0.05)
+                        .padding(.leading, Theme.Space.s + CGFloat(Self.indents[index % Self.indents.count]) * 14)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .opacity(0.75)
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityHidden(true)
+    }
+
+    private static let widths: [CGFloat] = [220, 310, 180, 260, 140, 340, 200]
+    private static let indents = [0, 1, 1, 2, 2, 1, 0]
+}
+
+/// Rows of a list in a side panel: a mark, a name and a short value.
+struct PanelListSkeleton: View {
+    var rows = 12
+    /// A second line under the name, as a commit has.
+    var twoLine = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: twoLine ? 14 : 12) {
+            ForEach(0..<rows, id: \.self) { index in
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    Skeleton.Bar(width: twoLine ? 20 : 13, height: twoLine ? 20 : 11, phase: Double(index) * 0.05)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Skeleton.Bar(width: Self.widths[index % Self.widths.count], height: 9, phase: Double(index) * 0.05)
+                        if twoLine {
+                            Skeleton.Bar(width: 110, height: 7, phase: Double(index) * 0.05 + 0.04)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .opacity(0.75)
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .accessibilityHidden(true)
+    }
+
+    private static let widths: [CGFloat] = [150, 96, 178, 120, 164, 88]
+}
+
+/// A review on its way: the file list and the diff beside it.
+struct ReviewSkeleton: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            PanelListSkeleton(rows: 8).frame(width: 220)
+            Rectangle().fill(Theme.border).frame(width: 1)
+            DiffSkeleton(lines: 18).frame(maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// The grey bar and its pulse, drawn by Core Animation.
+///
+/// Not a SwiftUI animation. A view being removed stays alive until its
+/// animations have finished, and one that repeats for ever never finishes: a
+/// placeholder replaced inside an animated change went on being drawn, out of
+/// sight, for the rest of the session, at a third of the main thread. Here the
+/// pulse runs in the render server and ends with the layer.
+#if os(macOS)
+struct SkeletonPulse: NSViewRepresentable {
+    let phase: Double
+    let animates: Bool
+
+    func makeNSView(context: Context) -> SkeletonPulseView { SkeletonPulseView() }
+    func updateNSView(_ view: SkeletonPulseView, context: Context) { view.set(phase: phase, animates: animates) }
+}
+
+final class SkeletonPulseView: NSView {
+    private var phase = 0.0
+    private var animates = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        layer?.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+    override var wantsUpdateLayer: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor(Theme.border).cgColor
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        restart()
+    }
+
+    func set(phase: Double, animates: Bool) {
+        guard self.phase != phase || self.animates != animates || layer?.backgroundColor == nil else { return }
+        self.phase = phase
+        self.animates = animates
+        needsDisplay = true
+        restart()
+    }
+
+    private func restart() {
+        guard let layer else { return }
+        SkeletonPulseMotion.apply(to: layer, phase: phase, animates: animates && window != nil)
+    }
+}
+#else
+struct SkeletonPulse: UIViewRepresentable {
+    let phase: Double
+    let animates: Bool
+
+    func makeUIView(context: Context) -> SkeletonPulseView { SkeletonPulseView() }
+    func updateUIView(_ view: SkeletonPulseView, context: Context) { view.set(phase: phase, animates: animates) }
+}
+
+final class SkeletonPulseView: UIView {
+    private var phase = 0.0
+    private var animates = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = UIColor(Theme.border)
+        layer.cornerRadius = 4
+        layer.cornerCurve = .continuous
+        // The system drops layer animations with the app in the background.
+        NotificationCenter.default.addObserver(self, selector: #selector(restart),
+                                               name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        restart()
+    }
+
+    func set(phase: Double, animates: Bool) {
+        guard self.phase != phase || self.animates != animates else { return }
+        self.phase = phase
+        self.animates = animates
+        restart()
+    }
+
+    @objc private func restart() {
+        SkeletonPulseMotion.apply(to: layer, phase: phase, animates: animates && window != nil)
+    }
+}
+#endif
+
+private enum SkeletonPulseMotion {
+    static func apply(to layer: CALayer, phase: Double, animates: Bool) {
+        layer.removeAnimation(forKey: "pulse")
+        guard animates else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 0.52
+        pulse.toValue = 1
+        pulse.duration = 0.95
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        // Offset into the cycle rather than delayed, so a bar is never still.
+        pulse.timeOffset = phase
+        layer.add(pulse, forKey: "pulse")
     }
 }

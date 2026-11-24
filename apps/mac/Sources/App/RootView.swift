@@ -514,6 +514,26 @@ struct RootView: View {
             } else {
                 selectWorkspace(folder.id)
             }
+        case "inspector":
+            // `inspector:<files|changes|history>`, the inspector's own tabs.
+            switch parts.count > 1 ? parts[1] : "" {
+            case "changes": workspaces.inspectorTab = .changes
+            case "history": workspaces.inspectorTab = .history
+            default: workspaces.inspectorTab = .files
+            }
+        case "pull":
+            // `pull:<folder>:<number>`, as a chat's mark opens it.
+            guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0"), parts.count > 2,
+                  let number = UInt32(parts[2]),
+                  let pull = chat.sidebarChats(in: folder.id).lazy.flatMap(\.pulls).first(where: { $0.number == number }) else { return }
+            openPull(pull, from: folder, in: .here)
+        case "review":
+            // `review:<folder>:<n>`, the nth changed file, as its row opens it.
+            guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0"), let files = folder.git?.files else { return }
+            let index = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
+            guard files.indices.contains(index) else { return }
+            workspaces.focusWorkingTree(in: folder.id, path: files[index].path)
+            openWorkbench(.changes, in: folder.id)
         default:
             if let section = parts.first.flatMap(GlobalSection.init(rawValue:)) {
                 navigate(to: .global(section))
@@ -5253,7 +5273,12 @@ private struct StateBadge: View {
                     // Only the live state breathes, and only when the system
                     // allows motion. A pulsing dot on an idle row would be
                     // movement that means nothing.
-                    .opacity(pulsing ? 0.45 : 1)
+                    // Scoped to the opacity. Started with `withAnimation`, a
+                    // forever animation also caught whatever else changed in
+                    // that frame, and kept drawing it for the whole session.
+                    .animation(pulsing ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil) {
+                        $0.opacity(pulsing ? 0.45 : 1)
+                    }
                     .onAppear { startPulse() }
                     .onChange(of: state) { _, _ in startPulse() }
             }
@@ -5282,10 +5307,7 @@ private struct StateBadge: View {
             pulsing = false
             return
         }
-        pulsing = false
-        withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
-            pulsing = true
-        }
+        pulsing = true
     }
 }
 

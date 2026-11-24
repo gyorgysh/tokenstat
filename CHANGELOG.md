@@ -16,6 +16,16 @@ desktop is a review build. Newest first.
 
 - Android chats open with much more history and load earlier messages on their own as you scroll back, keeping the line you were reading in place. How much history a page holds follows the phone, so older and entry-level phones load smaller pages.
 
+### Improved
+
+- On Mac, Changes in a pull request shows the file list beside the diff. Files, Git, History and the pull request tabs stay ready once opened, so switching back is immediate, and they show the shape of what is loading instead of a spinner.
+- On Mac, the pull request header uses the same small buttons as the rest of the app.
+
+### Fixed
+
+- On Mac, opening Changes on a large pull request no longer freezes the app.
+- On Mac, loading placeholders no longer leave a hidden animation running that slowed the app until it was restarted.
+
 ## [1.25.0] - 2026-11-24
 
 ### Changed

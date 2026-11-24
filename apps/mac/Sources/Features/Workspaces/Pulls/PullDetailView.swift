@@ -17,17 +17,95 @@ struct PullDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var descriptionExpanded = false
+    #if os(macOS)
+    /// Which of the page's own tabs is behind Changes.
+    @State private var pageTab: PullDetailTab = .conversation
+    @State private var visitedChanges = false
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar(scope: scope, leading: {
-                Button(action: onBack) { ActionIcon.back.label(L10n.text("apple.pulldetailview.pull_requests.d9e3f260")) }
-                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                ToolbarIconButton(systemImage: ActionIcon.back.symbol,
+                                  help: L10n.text("apple.pulldetailview.pull_requests.d9e3f260"), action: onBack)
             }) {
                 detailActions
             }
+            // Both stay once visited. Building either one again costs a tenth
+            // of a second or more, which is what made the tabs feel stuck.
+            ZStack {
+                let showsChanges = model.tab == .changes && model.detail != nil
+                page
+                    .retainedPane(isActive: !showsChanges)
+                    .opacity(showsChanges ? 0 : 1)
+                    .allowsHitTesting(!showsChanges)
+                    .accessibilityHidden(showsChanges)
+                if let detail = model.detail, showsChanges || visitedChanges {
+                    changesPage(detail)
+                        .retainedPane(isActive: showsChanges)
+                        .opacity(showsChanges ? 1 : 0)
+                        .allowsHitTesting(showsChanges)
+                        .accessibilityHidden(!showsChanges)
+                }
+            }
+            .transaction(value: model.tab) { $0.animation = nil }
+            #else
+            page
             #endif
+        }
+        .desktopPaneBackground()
+        .task(id: summary.number) {
+            #if os(macOS)
+            if model.tab == .changes { visitedChanges = true } else { pageTab = model.tab }
+            #endif
+            await model.open(workspaceID: workspaceID, peer: peer, number: summary.number)
+        }
+        .onChange(of: summary.number) { _, _ in descriptionExpanded = false }
+        #if DEBUG && os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
+            // `pulltab:<conversation|changes|checks>` and `pullfile:<n>`.
+            let parts = (note.object as? String ?? "").split(separator: ":").map(String.init)
+            guard parts.count == 2 else { return }
+            switch (parts[0], parts[1]) {
+            case ("pulltab", "changes"): model.tab = .changes
+            case ("pulltab", "checks"): model.tab = .checks
+            case ("pulltab", _): model.tab = .conversation
+            case ("pullfile", let index):
+                if let index = Int(index), model.diffs.indices.contains(index) { model.selectedPath = model.diffs[index].path }
+            default: break
+            }
+        }
+        #endif
+        .onChange(of: model.tab) { _, tab in
+            #if os(macOS)
+            if tab == .changes { visitedChanges = true } else { pageTab = tab }
+            #endif
+            guard tab == .changes else { return }
+            Task { await model.loadDiff(workspaceID: workspaceID, peer: peer, number: summary.number) }
+        }
+        .refreshable {
+            await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true)
+        }
+        .confirmationDialog(L10n.text("apple.pulldetailview.close_this_pull_request.54b5c0b1"), isPresented: $model.confirmingClose, titleVisibility: .visible) {
+            Button(L10n.text("apple.pulldetailview.close_pull_request.672e174d"), role: .destructive) {
+                Task { await model.setOpen(false, workspaceID: workspaceID, peer: peer, number: summary.number) }
+            }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.text("apple.pulldetailview.other_people_will_see_it_as_closed_you_can.7b0cb552"))
+        }
+        .confirmationDialog(L10n.text("apple.pulldetailview.merge_this_pull_request.6ea40a2a"), isPresented: $model.confirmingMerge, titleVisibility: .visible) {
+            Button(L10n.text("apple.pulldetailview.merge_with_0.9456a9db", "\(model.mergeMethod.title.lowercased())")) {
+                Task { await model.merge(workspaceID: workspaceID, peer: peer, number: summary.number) }
+            }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.text("apple.pulldetailview.this_changes_the_shared_repository_and_can.ef54ace2"))
+        }
+    }
+
+    private var page: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.l) {
                     #if !os(macOS)
@@ -79,35 +157,6 @@ struct PullDetailView: View {
                 .padding(Theme.Space.xl)
                 .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
             }
-        }
-        .desktopPaneBackground()
-        .task(id: summary.number) {
-            await model.open(workspaceID: workspaceID, peer: peer, number: summary.number)
-        }
-        .onChange(of: summary.number) { _, _ in descriptionExpanded = false }
-        .onChange(of: model.tab) { _, tab in
-            guard tab == .changes else { return }
-            Task { await model.loadDiff(workspaceID: workspaceID, peer: peer, number: summary.number) }
-        }
-        .refreshable {
-            await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true)
-        }
-        .confirmationDialog(L10n.text("apple.pulldetailview.close_this_pull_request.54b5c0b1"), isPresented: $model.confirmingClose, titleVisibility: .visible) {
-            Button(L10n.text("apple.pulldetailview.close_pull_request.672e174d"), role: .destructive) {
-                Task { await model.setOpen(false, workspaceID: workspaceID, peer: peer, number: summary.number) }
-            }
-            Button(L10n.text("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(L10n.text("apple.pulldetailview.other_people_will_see_it_as_closed_you_can.7b0cb552"))
-        }
-        .confirmationDialog(L10n.text("apple.pulldetailview.merge_this_pull_request.6ea40a2a"), isPresented: $model.confirmingMerge, titleVisibility: .visible) {
-            Button(L10n.text("apple.pulldetailview.merge_with_0.9456a9db", "\(model.mergeMethod.title.lowercased())")) {
-                Task { await model.merge(workspaceID: workspaceID, peer: peer, number: summary.number) }
-            }
-            Button(L10n.text("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(L10n.text("apple.pulldetailview.this_changes_the_shared_repository_and_can.ef54ace2"))
-        }
     }
 
     private var topBar: some View {
@@ -142,8 +191,14 @@ struct PullDetailView: View {
     @ViewBuilder
     private var detailActions: some View {
         if let raw = model.detail?.url, let url = URL(string: raw) {
+            #if os(macOS)
+            // The bar's own size, like the toggles beside it.
+            ToolbarIconButton(systemImage: ActionIcon.external.symbol,
+                              help: L10n.text("apple.pulldetailview.open_on_github.03f69885")) { openURL(url) }
+            #else
             Button { openURL(url) } label: { ActionIcon.external.label(L10n.text("apple.pulldetailview.open_on_github.03f69885")) }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
+            #endif
         }
         refreshButton
     }
@@ -244,11 +299,24 @@ struct PullDetailView: View {
     }
 
     @ViewBuilder private func selectedContent(_ detail: PullDetail) -> some View {
+        #if os(macOS)
+        // The conversation keeps its built cards behind Checks, at no height.
+        ZStack(alignment: .top) {
+            conversation(detail)
+                .frame(height: pageTab == .conversation ? nil : 0, alignment: .top)
+                .clipped()
+                .opacity(pageTab == .conversation ? 1 : 0)
+                .allowsHitTesting(pageTab == .conversation)
+                .accessibilityHidden(pageTab != .conversation)
+            if pageTab == .checks { checks(detail) }
+        }
+        #else
         switch model.tab {
         case .conversation: conversation(detail)
         case .changes: changes
         case .checks: checks(detail)
         }
+        #endif
     }
 
     private func inspector(_ detail: PullDetail) -> some View {
@@ -376,7 +444,9 @@ struct PullDetailView: View {
                         Text(diff.path).font(Theme.monoText(11, weight: .medium, relativeTo: .caption))
                             .padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading)
                             .background(Theme.accent.opacity(0.055))
-                        ScrollView(.horizontal) { DiffBody(diff: diff) }
+                        // Inside a sideways scroll view a lazy stack builds every
+                        // line at once, so this one pages instead.
+                        ScrollView(.horizontal) { DiffBody(diff: diff, lazy: false) }
                     }
                     .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -385,6 +455,67 @@ struct PullDetailView: View {
             }
         }
     }
+
+    #if os(macOS)
+    /// Changes as a page of its own: the files on one side and the diff filling
+    /// the rest, the way the working tree review does it. The diff has to own
+    /// its scroll view to build only the lines on screen. Nested in the page's
+    /// scroll it built every one of them, and a large dependency bump held the
+    /// app for seconds.
+    private func changesPage(_ detail: PullDetail) -> some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack(spacing: Theme.Space.s) {
+                    PullStateMark(detail: detail)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(detail.title).font(Theme.body.weight(.semibold)).lineLimit(1).truncationMode(.tail)
+                            .textSelection(.enabled)
+                        HStack(spacing: Theme.Space.xs) {
+                            Text(verbatim: "#\(detail.number)").foregroundStyle(.secondary)
+                            changeCount("+\(detail.additions)", tint: Theme.diffAdded)
+                            changeCount("−\(detail.deletions)", tint: Theme.diffRemoved)
+                        }
+                        .font(Theme.caption)
+                    }
+                    Spacer(minLength: 0)
+                }
+                DetailTabs(selection: $model.tab, checks: detail.checks.count, incompleteChecks: detail.hasIncompleteChecks)
+                if let error = model.displayDiffError { inlineError(error) }
+            }
+            .padding(.horizontal, Theme.Space.xl)
+            .padding(.vertical, Theme.Space.m)
+            ThemeRule()
+            if model.diffs.isEmpty {
+                if model.diffError == nil, model.loadingDiff || !model.didLoadDiff {
+                    ReviewSkeleton()
+                } else {
+                    ScrollView {
+                        changes
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Theme.Space.xl)
+                    }
+                }
+            } else {
+                let counts = Dictionary(detail.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+                ReviewFileBrowser(
+                    files: model.diffs.map {
+                        ReviewFileChoice(path: $0.path, added: counts[$0.path].map { UInt64($0.additions) },
+                                         removed: counts[$0.path].map { UInt64($0.deletions) })
+                    },
+                    selection: $model.selectedPath
+                ) {
+                    if let diff = model.diffs.first(where: { $0.path == model.selectedPath }) ?? model.diffs.first {
+                        VStack(spacing: 0) {
+                            ReviewFileHeading(path: diff.path)
+                            DiffDocumentView(diffs: [diff], fileHeaders: false) { EmptyView() }
+                                .id(diff.path)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #endif
 
     private func checks(_ detail: PullDetail) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {

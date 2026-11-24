@@ -91,8 +91,7 @@ struct WorkspaceFilesView: View {
                     }
                 }
             } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                PanelListSkeleton(rows: 20)
             }
         } else {
             InspectorEmptyState(

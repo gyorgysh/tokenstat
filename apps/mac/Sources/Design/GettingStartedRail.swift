@@ -142,8 +142,10 @@ private struct GettingStartedDisc: View {
                 Circle()
                     .fill(Theme.accent.opacity(0.16))
                     .frame(width: 30, height: 30)
-                    .scaleEffect(reduceMotion || !pulsing ? 1 : 1.42)
-                    .opacity(reduceMotion || !pulsing ? 1 : 0)
+                    // Scoped to the halo: see the working dot in `RootView`.
+                    .animation(pulsing ? .easeOut(duration: 1.8).repeatForever(autoreverses: false) : nil) {
+                        $0.scaleEffect(pulsing ? 1.42 : 1).opacity(pulsing ? 0 : 1)
+                    }
             }
             Circle()
                 .fill(fill)
@@ -154,9 +156,7 @@ private struct GettingStartedDisc: View {
         .frame(width: 30, height: 30)
         .onAppear {
             guard !reduceMotion, state == .now else { return }
-            withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false)) {
-                pulsing = true
-            }
+            pulsing = true
         }
     }
 

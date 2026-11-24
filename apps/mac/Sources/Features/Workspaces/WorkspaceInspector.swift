@@ -206,7 +206,53 @@ struct WorkspaceInspector: View {
                 InspectorEmptyState(title: L10n.text("apple.workspaceinspector.open_a_conversation.6de86c4a"), subtitle: L10n.text("apple.workspaceinspector.chat_settings_appear_here_when_a_conversat.258869ce"))
             }
         } else {
-        switch tab.wrappedValue {
+            #if os(macOS)
+            // A tab stays once it has been opened. Each one is a list of rows
+            // that costs a tenth of a second or more to build, and it used to
+            // be built again on every switch.
+            ZStack {
+                ForEach(InspectorTab.allCases) { item in
+                    let shown = tab.wrappedValue == item
+                    if mounted.folder == folder?.id, mounted.tabs.contains(item) {
+                        pane(item)
+                            .retainedPane(isActive: shown)
+                            .opacity(shown ? 1 : 0)
+                            .allowsHitTesting(shown)
+                            .accessibilityHidden(!shown)
+                    } else if shown {
+                        // The click answers on the next frame, with the shape
+                        // of what is coming, and the rows are built behind it.
+                        PanelListSkeleton(rows: 16, twoLine: item == .history)
+                            .task {
+                                try? await Task.sleep(for: .milliseconds(24))
+                                guard !Task.isCancelled else { return }
+                                if mounted.folder != folder?.id { mounted = Mounted(folder: folder?.id) }
+                                mounted.tabs.insert(item)
+                            }
+                            .id(folder?.id)
+                    }
+                }
+            }
+            .transaction(value: tab.wrappedValue) { $0.animation = nil }
+            #else
+            pane(tab.wrappedValue)
+            #endif
+        }
+    }
+
+    #if os(macOS)
+    /// Another folder starts over: its lists would otherwise be built for
+    /// tabs nobody has opened there.
+    private struct Mounted: Equatable {
+        var folder: String?
+        var tabs: Set<InspectorTab> = []
+    }
+    @State private var mounted = Mounted()
+    #endif
+
+    @ViewBuilder
+    private func pane(_ item: InspectorTab) -> some View {
+        switch item {
         case .changes:
             #if os(macOS)
             WorkspaceChangesView(
@@ -224,7 +270,6 @@ struct WorkspaceInspector: View {
         case .history:
             WorkspaceHistoryView(model: model, folder: folder, account: account,
                 onReviewCommit: onReviewCommit)
-        }
         }
     }
 }
@@ -343,8 +388,7 @@ struct WorkspaceHistoryView: View {
                     tint: Theme.danger
                 )
             } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                PanelListSkeleton(rows: 16, twoLine: true)
             }
         } else {
             InspectorEmptyState(

@@ -199,11 +199,31 @@ struct LogoMark: View {
     @State private var pulse = false
 
     var body: some View {
+        if animated, loops, !reduceMotion {
+            // A clock rather than a repeating animation. A view being removed
+            // waits for its animations, and one that repeats for ever keeps it
+            // being drawn after the launch it was covering.
+            TimelineView(.animation) { clock in
+                mark { Self.loopScale(bar: $0, at: clock.date) }
+            }
+        } else {
+            mark { _ in animated && !raised && !reduceMotion ? 0.35 : 1 }
+        }
+    }
+
+    /// 0.62 seconds each way, each bar a beat after the one before it.
+    private static func loopScale(bar: Int, at date: Date) -> CGFloat {
+        let time = date.timeIntervalSinceReferenceDate - Double(bar) * 0.14
+        let cycle = (time / 0.62).truncatingRemainder(dividingBy: 2)
+        return 0.35 + 0.65 * (0.5 - 0.5 * cos(cycle * .pi))
+    }
+
+    private func mark(scale: @escaping (Int) -> CGFloat) -> some View {
         // One scale factor from the artboard, so every number above is the
         // website's own and none of them are re-derived by hand.
         let unit = size / TokenstatLogoGeometry.inkSide
 
-        ZStack(alignment: .topLeading) {
+        return ZStack(alignment: .topLeading) {
             // Offsets do not participate in layout, so without this the ZStack
             // sizes to a single bar (12 units wide) and `.frame(width:size)`
             // centres that box, sliding every bar 15 units to the right of the
@@ -221,21 +241,11 @@ struct LogoMark: View {
                     // Anchored at the foot, so a bar grows out of the baseline
                     // it shares with the other two rather than shrinking in
                     // place. Each starts a beat after the one before it.
-                    .scaleEffect(
-                        y: !reduceMotion && ((animated && !raised) || pulse) ? 0.35 : 1,
-                        anchor: .bottom
-                    )
                     .animation(
-                        animated && !reduceMotion
-                            ? (loops
-                                ? .easeInOut(duration: 0.62)
-                                    .repeatForever(autoreverses: true)
-                                    .delay(Double(index) * 0.14)
-                                : .easeInOut(duration: 1.2)
-                                    .delay(Double(index) * 0.15))
-                            : nil,
-                        value: raised
-                    )
+                        animated && !loops && !reduceMotion
+                            ? .easeInOut(duration: 1.2).delay(Double(index) * 0.15) : nil
+                    ) { $0.scaleEffect(y: scale(index), anchor: .bottom) }
+                    .scaleEffect(y: !reduceMotion && pulse ? 0.35 : 1, anchor: .bottom)
                     .animation(
                         reduceMotion ? nil : .easeInOut(duration: 0.26).delay(Double(index) * 0.07),
                         value: pulse

@@ -1430,7 +1430,10 @@ private struct StatusDot: View {
         Circle()
             .fill(color)
             .frame(width: 8, height: 8)
-            .opacity(online != nil || reduceMotion ? 1 : (pulsing ? 0.3 : 1))
+            // Scoped to the opacity: see the working dot in `RootView`.
+            .animation(pulsing ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : nil) {
+                $0.opacity(pulsing ? 0.3 : 1)
+            }
             .onAppear { updatePulse() }
             .onChange(of: online) { _, _ in updatePulse() }
             .onChange(of: reduceMotion) { _, _ in updatePulse() }
@@ -1439,9 +1442,7 @@ private struct StatusDot: View {
     }
 
     private func updatePulse() {
-        pulsing = false
-        guard online == nil, !reduceMotion else { return }
-        withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulsing = true }
+        pulsing = online == nil && !reduceMotion
     }
 
     private var accessibilityText: String {

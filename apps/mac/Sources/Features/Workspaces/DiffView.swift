@@ -166,12 +166,14 @@ struct DiffRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            gutter(continuation ? nil : line.oldLine)
-            gutter(continuation ? nil : line.newLine)
-            Text(marker)
-                .font(Theme.mono(11))
-                .foregroundStyle(line.kind.tint)
-                .frame(width: 14, alignment: .center)
+            // One text for both numbers and the marker. A screen of a diff is
+            // sixty of these, and four views a line was most of its cost.
+            (Text(Self.column(continuation ? nil : line.oldLine) + Self.column(continuation ? nil : line.newLine) + " ")
+                .foregroundStyle(.tertiary)
+                + Text(marker).foregroundStyle(line.kind.tint))
+                .font(Theme.mono(10))
+                .fixedSize()
+                .padding(.trailing, Theme.Space.s)
             Text(line.text.isEmpty ? " " : line.text)
                 .font(Theme.mono(11))
                 .foregroundStyle(line.kind == .context ? Color.primary : line.kind.tint)
@@ -194,12 +196,10 @@ struct DiffRow: View {
         }
     }
 
-    private func gutter(_ number: UInt32?) -> some View {
-        Text(number.map(String.init) ?? "·")
-            .font(Theme.numeric(10))
-            .foregroundStyle(.tertiary)
-            .frame(width: 44, alignment: .trailing)
-            .padding(.trailing, Theme.Space.xs)
+    /// A line number right-aligned in seven monospaced characters.
+    private static func column(_ number: UInt32?) -> String {
+        let text = number.map(String.init) ?? "·"
+        return String(repeating: " ", count: max(1, 7 - text.count)) + text
     }
 
     private var background: Color {

@@ -41,7 +41,7 @@ struct DiffDocumentView<Header: View>: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     header()
-                    ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+                    DiffSkeleton()
                     Spacer(minLength: 0)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)

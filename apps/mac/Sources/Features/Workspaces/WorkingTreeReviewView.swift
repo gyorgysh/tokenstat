@@ -71,7 +71,7 @@ struct WorkingTreeReviewView: View {
                                 DiffDocumentView(diffs: [diff], fileHeaders: false) { EmptyView() }
                                     .id("\(file.path):\(focus?.generation ?? 0)")
                             } else if loading {
-                                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                                DiffSkeleton(lines: 18).frame(maxHeight: .infinity, alignment: .top)
                             } else {
                                 InspectorEmptyState(systemImage: "exclamationmark.circle",
                                     title: L10n.text("apple.workingtreereviewview.could_not_load_changes.07be1deb"),
