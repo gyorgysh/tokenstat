@@ -1,6 +1,6 @@
 {
   "name": "tokenstat-charts",
-  "version": "1.25.0",
+  "version": "1.26.0",
   "private": true,
   "scripts": {
     "build": "node build.mjs",
