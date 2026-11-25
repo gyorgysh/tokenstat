@@ -940,14 +940,22 @@ struct ChatAgentPanel: View {
                     showingSetup.toggle()
                 }
                 Spacer(minLength: 0)
-                Button(L10n.text("common.refresh"), .refresh) {
+                Button(refreshingAgents ? L10n.text("common.agent_updates.checking") : L10n.text("common.refresh"), .refresh) {
                     guard !refreshingAgents else { return }
                     refreshingAgents = true
                     Task {
+                        // Agents and models, and whether each agent has a
+                        // newer version. The host keeps the answer, so the
+                        // rows and the composer mark it straight after.
+                        let peer = model.peer
+                        if await RemoteHostFeature.agentUpdates.isSupported(peer: peer) {
+                            _ = try? await Bridge.agentUpdates(check: true, peer: peer)
+                        }
                         await model.reloadBackends(refreshModels: canRefresh)
                         refreshingAgents = false
                     }
                 }
+                .help(L10n.text("common.agent_updates.refresh_help"))
                 .disabled(installing != nil || locked || refreshingAgents)
                 .opacity(refreshingAgents ? 0.5 : 1)
             }

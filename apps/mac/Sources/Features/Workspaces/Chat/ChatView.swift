@@ -690,6 +690,7 @@ struct ChatView: View {
         }
         .modifier(ChatFileTransferControls(model: model))
         .modifier(ChatCacheWarningAlert(model: model, isActive: isActive))
+        .modifier(AgentUpdatePromptSheet(model: model, isActive: isActive))
         .alert(L10n.text("apple.chatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil },
             set: { if !$0 && isActive { model.error = nil } }
@@ -1583,7 +1584,8 @@ struct ChatView: View {
         return false
     }
 
-    private func submit(from chat: ChatConversation, sendNow: Bool = false, cacheConfirmed: Bool = false) {
+    private func submit(from chat: ChatConversation, sendNow: Bool = false, cacheConfirmed: Bool = false,
+                        updateAnswered: Bool = false) {
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isSharedSource, !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         if model.consumeChatCommand() { return }
@@ -1630,6 +1632,18 @@ struct ChatView: View {
                 return
             }
         }
+        // The agent this chat runs on is behind. Offer the update before the
+        // message goes, once per version. The words stay in the composer
+        // until the answer.
+        if !updateAnswered, model.updatingAgentID == nil,
+           AgentUpdatePrompt.isDue(model.backend(for: chat.backend), peer: model.peer),
+           let backend = model.backend(for: chat.backend) {
+            model.agentUpdatePrompt = AgentUpdatePrompt(backend: backend) {
+                guard model.selected?.id == chat.id, let current = model.selected else { return }
+                submit(from: current, cacheConfirmed: cacheConfirmed, updateAnswered: true)
+            }
+            return
+        }
         // A long pause emptied the prompt cache: this message would make the
         // agent read the whole conversation again. Ask first.
         if !cacheConfirmed,
@@ -1669,7 +1683,7 @@ struct ChatView: View {
         }
         let proceed: @MainActor () -> Void = {
             guard model.selected?.id == chat.id, let current = model.selected else { return }
-            submit(from: current, cacheConfirmed: true)
+            submit(from: current, cacheConfirmed: true, updateAnswered: true)
         }
         model.cacheWarning = ChatCacheWarning(kind: .idle(idleMs: idleMs, startNew: startNew),
                                               tokens: tokens, proceed: proceed)

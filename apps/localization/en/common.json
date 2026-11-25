@@ -963,5 +963,17 @@
   "common.profile.open_hint": "Opens your profile",
   "common.profile.make_public": "Make public",
   "common.profile.publish_title": "Make your profile public?",
-  "common.profile.who_can_open": "Who can open your profile"
+  "common.profile.who_can_open": "Who can open your profile",
+  "common.agent_updates.prompt_title": "{0} has an update",
+  "common.agent_updates.prompt_subtitle": "Before this message goes",
+  "common.agent_updates.installed": "Installed",
+  "common.agent_updates.latest": "Latest",
+  "common.agent_updates.unknown_version": "Unknown",
+  "common.agent_updates.prompt_detail": "Update first and your message is sent as soon as it finishes. You can always update later from the agent picker.",
+  "common.agent_updates.prompt_updating": "Updating. Your message is sent when it finishes.",
+  "common.agent_updates.prompt_failed": "{0} could not update. Your message is still here.",
+  "common.agent_updates.update_and_send": "Update and send",
+  "common.agent_updates.skip_version": "Skip this version",
+  "common.agent_updates.send_anyway": "Send anyway",
+  "common.agent_updates.refresh_help": "Look for new agents, models and agent updates"
 }

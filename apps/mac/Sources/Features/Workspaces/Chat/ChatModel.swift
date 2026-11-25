@@ -2428,6 +2428,10 @@ final class ChatModel {
     /// the chat view to ask it. See `ChatPromptCacheRule`.
     var cacheWarning: ChatCacheWarning?
 
+    /// An agent update offered before a send, waiting for the chat view to
+    /// ask it. See `AgentUpdatePrompt`.
+    var agentUpdatePrompt: AgentUpdatePrompt?
+
     static var nowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
     private(set) var updatingAgentID: String?
