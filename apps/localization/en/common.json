@@ -878,7 +878,6 @@
   "common.chat.cache.switch_model": "Switch model",
   "common.chat.cache.dont_ask_again": "Don’t ask again",
   "common.agent_updates.title": "Agent updates",
-  "common.agent_updates.check": "Check for updates",
   "common.agent_updates.checking": "Checking…",
   "common.agent_updates.version": "Version {0}",
   "common.agent_updates.available": "{0} available",
@@ -975,5 +974,7 @@
   "common.agent_updates.update_and_send": "Update and send",
   "common.agent_updates.skip_version": "Skip this version",
   "common.agent_updates.send_anyway": "Send anyway",
-  "common.agent_updates.refresh_help": "Look for new agents, models and agent updates"
+  "common.agent_updates.refresh_help": "Look for new agents, models and agent updates",
+  "common.agent_updates.update_all": "Update all ({0})",
+  "common.agent_updates.check": "Check for updates"
 }

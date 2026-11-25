@@ -11,7 +11,7 @@ desktop is a review build. Newest first.
 
 - Claim your handle and choose who can open your profile from the app on Mac, iPhone, iPad and Android. Tap your name in Account to open your profile: your tokenstat.ai address, Private or Public, search engine listing, and View public profile, which opens your browser on Mac and stays in the app on phones and tablets. An account without a handle is offered one once after sign-in, with a live check while you type. Skipping it on one device answers it on all of them.
 
-- On Mac, Refresh in the agent picker also checks every agent for a newer version. When the agent a chat runs on is behind, sending a message offers Update and send, or Skip this version, which stays quiet until the next one. The picker still updates any agent by hand.
+- On Mac, Refresh in the agent picker also checks every agent for a newer version, and the setup page offers Update all for the agents that are behind. When the agent a chat runs on is behind, sending a message offers Update and send, or Skip this version, which stays quiet until the next one. The picker still updates any agent by hand.
 - On Mac, click your name on Home to open your profile.
 
 ### Fixed

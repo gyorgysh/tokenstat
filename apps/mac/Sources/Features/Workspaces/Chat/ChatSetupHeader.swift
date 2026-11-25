@@ -867,6 +867,7 @@ struct ChatAgentPanel: View {
     @State private var versions: [String: AgentUpdateRow] = [:]
     @State private var supportsUpdates = false
     @State private var checkingUpdates = false
+    @State private var updatingAll = false
     @State private var checkedUpdates = false
     @State private var updateNotes: [String: String] = [:]
 
@@ -921,6 +922,7 @@ struct ChatAgentPanel: View {
                 .disabled(updating || locked)
                 .task(id: model.peer ?? "local") {
                     canRefresh = await RemoteHostFeature.modelRefresh.isSupported(peer: model.peer)
+                    supportsUpdates = await RemoteHostFeature.agentUpdates.isSupported(peer: model.peer)
                     await model.reloadBackends(refreshModels: false)
                 }
             }
@@ -941,19 +943,7 @@ struct ChatAgentPanel: View {
                 }
                 Spacer(minLength: 0)
                 Button(refreshingAgents ? L10n.text("common.agent_updates.checking") : L10n.text("common.refresh"), .refresh) {
-                    guard !refreshingAgents else { return }
-                    refreshingAgents = true
-                    Task {
-                        // Agents and models, and whether each agent has a
-                        // newer version. The host keeps the answer, so the
-                        // rows and the composer mark it straight after.
-                        let peer = model.peer
-                        if await RemoteHostFeature.agentUpdates.isSupported(peer: peer) {
-                            _ = try? await Bridge.agentUpdates(check: true, peer: peer)
-                        }
-                        await model.reloadBackends(refreshModels: canRefresh)
-                        refreshingAgents = false
-                    }
+                    Task { await refreshAll() }
                 }
                 .help(L10n.text("common.agent_updates.refresh_help"))
                 .disabled(installing != nil || locked || refreshingAgents)
@@ -972,12 +962,11 @@ struct ChatAgentPanel: View {
                     Text(model.peer == nil ? L10n.text("apple.chatsetupheader.set_up_on_this_computer.ba4e1cd3") : L10n.text("apple.chatsetupheader.set_up_on_this_chat_s_remote_host.95b6115d"))
                         .font(Theme.callout.weight(.semibold))
                     Spacer(minLength: Theme.Space.s)
-                    if supportsUpdates {
-                        Button(checkingUpdates ? L10n.text("common.agent_updates.checking") : L10n.text("common.agent_updates.check"), .refresh) {
-                            Task { await loadVersions(check: true) }
-                        }
-                        .font(Theme.caption)
-                        .disabled(checkingUpdates || model.updatingAgentID != nil || installing != nil || locked)
+                    if supportsUpdates, !behind.isEmpty {
+                        Button(updateAllTitle, .download) { Task { await updateAll() } }
+                            .font(Theme.caption)
+                            .disabled(updatingAll || checkingUpdates || refreshingAgents
+                                      || model.updatingAgentID != nil || installing != nil || locked)
                     }
                 }
                 ForEach(model.backends.filter { $0.id != "sh" }) { backend in
@@ -1063,6 +1052,44 @@ struct ChatAgentPanel: View {
             && (row.updateAvailable == true || (checkedUpdates && !row.canCheck))
     }
 
+    /// Agents with a real newer version, and free to update now. Muse, with
+    /// nothing published to compare, is left to its own Update button.
+    private var behind: [AgentUpdateRow] {
+        model.backends.compactMap { backend in
+            guard backend.installed != false, let id = backend.launcherID, let row = versions[id],
+                  row.canUpdate, row.updateAvailable == true, !row.busy else { return nil }
+            return row
+        }
+    }
+
+    private var updateAllTitle: String {
+        updatingAll ? L10n.text("common.agent_updates.updating")
+            : L10n.text("common.agent_updates.update_all", "\(behind.count)")
+    }
+
+    /// One at a time: two installers at once can fight over the same package
+    /// manager, and the toast can only say one thing.
+    private func updateAll() async {
+        guard !updatingAll else { return }
+        updatingAll = true
+        defer { updatingAll = false }
+        for row in behind {
+            guard !Task.isCancelled else { return }
+            await update(row)
+        }
+    }
+
+    /// Agents, models and versions, all at once. The host keeps the version
+    /// answer, so the rows here, the picker and the composer mark it right
+    /// after.
+    private func refreshAll() async {
+        guard !refreshingAgents else { return }
+        refreshingAgents = true
+        defer { refreshingAgents = false }
+        if supportsUpdates { await loadVersions(check: true) }
+        await model.reloadBackends(refreshModels: canRefresh)
+    }
+
     private func loadVersions(check: Bool) async {
         let peer = model.peer
         if check { checkingUpdates = true }
@@ -1071,12 +1098,7 @@ struct ChatAgentPanel: View {
             let rows = try await Bridge.agentUpdates(check: check, peer: peer)
             guard model.peer == peer else { return }
             versions = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-            if check {
-                checkedUpdates = true
-                // The host kept this check, so the picker rows and the
-                // composer chip can mark what is behind right away.
-                await model.reloadBackends(refreshModels: false)
-            }
+            if check { checkedUpdates = true }
         } catch {
             guard model.peer == peer, check else { return }
             setupError = error.localizedDescription

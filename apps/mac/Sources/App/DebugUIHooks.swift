@@ -28,7 +28,9 @@ import AppKit
 /// - `ai.tokenstat.debug.appearance`: `dark`, `light` or `system`.
 /// - `ai.tokenstat.debug.key`: a named action, such as `sidebar` or
 ///   `inspector`, for the toggles the menu would otherwise post. Any other
-///   name is relayed in process for the screen on show to act on.
+///   name is relayed in process for the screen on show to act on. A chat
+///   takes `update-prompt` to show the send-time update prompt for an agent
+///   that is behind, with a send that does nothing.
 ///
 /// Release builds compile none of it.
 enum DebugUIHooks {
@@ -140,8 +142,24 @@ enum DebugUIHooks {
 
     @MainActor
     private static func capture(to path: String) {
-        guard let window = shellWindow,
-              let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage")
+        guard let window = shellWindow else { return }
+        // A sheet is a window of its own, so it is written beside the main
+        // picture as `<name>-sheet.png` when one is up.
+        write(window, to: path)
+        let url = URL(fileURLWithPath: path)
+        func beside(_ suffix: String) -> String {
+            url.deletingLastPathComponent()
+                .appendingPathComponent(url.deletingPathExtension().lastPathComponent + suffix + ".png").path
+        }
+        if let sheet = window.attachedSheet { write(sheet, to: beside("-sheet")) }
+        // Popovers and other panels are windows too: `-window-1.png` and on.
+        let others = NSApp.windows.filter { $0 !== window && $0 !== window.attachedSheet && $0.isVisible }
+        for (index, other) in others.enumerated() { write(other, to: beside("-window-\(index + 1)")) }
+    }
+
+    @MainActor
+    private static func write(_ window: NSWindow, to path: String) {
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage")
         else { return }
         let create = unsafeBitCast(symbol, to: CreateImage.self)
         // .optionIncludingWindow, then .boundsIgnoreFraming | .bestResolution.

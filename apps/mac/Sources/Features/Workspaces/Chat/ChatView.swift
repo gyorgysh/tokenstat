@@ -653,6 +653,15 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
             guard isActive, let command = note.object as? String else { return }
             if command == "clear-draft" { model.draft = ""; return }
+            if command == "update-prompt" {
+                // This chat's agent, shown as if a newer version were out.
+                if let chat = model.selected, var backend = model.backend(for: chat.backend) {
+                    backend.updateAvailable = true
+                    backend.latestVersion = backend.latestVersion.map { $0 + "-preview" } ?? "preview"
+                    model.agentUpdatePrompt = AgentUpdatePrompt(backend: backend) {}
+                }
+                return
+            }
             // `key earlier` presses Earlier messages. `key where:<label>`
             // logs the row at the top of the viewport and its offset.
             if command == "earlier" { window.requestArchivePage(); return }
