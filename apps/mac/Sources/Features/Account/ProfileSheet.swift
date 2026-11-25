@@ -439,8 +439,12 @@ struct HandleOffer: ViewModifier {
                 showing = true
             }
             // Closing it any way at all is an answer, including swiping it away.
-            .sheet(isPresented: $showing, onDismiss: { Task { await model.answerHandleOffer() } }) {
+            .sheet(isPresented: $showing, onDismiss: answer) {
                 ProfileSheet(purpose: .offer, model: model)
             }
+    }
+
+    private func answer() {
+        Task { await model.answerHandleOffer() }
     }
 }
