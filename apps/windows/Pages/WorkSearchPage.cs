@@ -20,7 +20,7 @@ namespace Tokenstat.Pages;
 /// recent queries for an empty field. Opening a hit returns to the folder
 /// it lives in: a conversation opens in Chat, anything else in Sessions.
 /// </summary>
-internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
+internal sealed partial class WorkSearchPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly StackPanel _inspector = new()
     {
@@ -31,9 +31,8 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
     {
         PlaceholderText = L10n.Text("windows.worksearchpage.search_work.cc46cedc"),
     };
-    private readonly StackPanel _filters = new()
+    private readonly FlowPanel _filters = new()
     {
-        Orientation = Orientation.Horizontal,
         Spacing = Theme.SpaceS,
     };
     private readonly StackPanel _results = new() { Spacing = Theme.SpaceS };
@@ -89,6 +88,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             ("Conversations", L10n.Text("windows.worksearchpage.conversations.1d432f58")),
             ("Folders", L10n.Text("windows.worksearchpage.folders.c4d6bb20")),
             ("Changes", L10n.Text("windows.worksearchpage.changes.bbd4b6a8")),
+            ("Saved", L10n.Text("windows.savedwork.title")),
         })
         {
             var local = name;
@@ -245,6 +245,12 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         _search?.Dispose();
         _search = null;
         var query = (_query.Text ?? "").Trim();
+        if (_filter == "Saved")
+        {
+            _search = new CancellationTokenSource();
+            await SearchSavedWorkAsync(query, offset: 0, _search.Token);
+            return;
+        }
         if (query.Length == 0)
         {
             _cursor = null;

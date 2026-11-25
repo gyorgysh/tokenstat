@@ -138,7 +138,7 @@ private struct AgentsArt: View {
 
 private struct HeatmapArt: View {
     var reduceMotion: Bool
-    @State private var phase: CGFloat = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     private let columns = 12
     private let rows = 7
@@ -146,42 +146,37 @@ private struct HeatmapArt: View {
     private let gap: CGFloat = 3
 
     var body: some View {
+        let playing = !reduceMotion && scenePhase == .active
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !playing)) { context in
+            let position = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 5.6) / 2.8
+            let phase = playing ? (1 - cos(position * .pi)) / 2 : 0.35
+            map(phase: phase)
+        }
+    }
+
+    private func map(phase: Double) -> some View {
         let step = cell + gap
-        HStack(alignment: .center, spacing: gap) {
+        return HStack(alignment: .center, spacing: gap) {
             ForEach(0..<columns, id: \.self) { col in
                 VStack(spacing: gap) {
                     ForEach(0..<rows, id: \.self) { row in
                         RoundedRectangle(cornerRadius: 2.4, style: .continuous)
-                            .fill(Theme.heat[level(col: col, row: row)])
+                            .fill(Theme.heat[level(col: col, row: row, phase: phase)])
                             .frame(width: cell, height: cell)
                     }
                 }
-                .offset(y: reduceMotion ? 0 : wave(col: col) * 3)
+                .offset(y: reduceMotion || scenePhase != .active ? 0 : CGFloat(sin(phase * .pi * 2 + Double(col) * 0.4)) * 3)
             }
         }
         .frame(width: CGFloat(columns) * step - gap, height: CGFloat(rows) * step - gap)
-        .onAppear { run() }
     }
 
-    private func level(col: Int, row: Int) -> Int {
-        let wave = sin(Double(col) * 0.55 + Double(row) * 0.28 + Double(phase) * .pi * 2)
+    private func level(col: Int, row: Int, phase: Double) -> Int {
+        let wave = sin(Double(col) * 0.55 + Double(row) * 0.28 + phase * .pi * 2)
         let scaled = (wave + 1) / 2
         return min(4, max(0, Int((scaled * 4.4).rounded(.down))))
     }
 
-    private func wave(col: Int) -> CGFloat {
-        CGFloat(sin(Double(phase) * .pi * 2 + Double(col) * 0.4))
-    }
-
-    private func run() {
-        guard !reduceMotion else {
-            phase = 0.35
-            return
-        }
-        withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) {
-            phase = 1
-        }
-    }
 }
 
 
@@ -339,6 +334,7 @@ private struct WorkspacesArt: View {
 
 private struct SessionsArt: View {
     var reduceMotion: Bool
+    @Environment(\.scenePhase) private var scenePhase
     @State private var lines = 0
     @State private var blink = false
 
@@ -380,23 +376,27 @@ private struct SessionsArt: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
         }
-        .onAppear { run() }
+        .task(id: !reduceMotion && scenePhase == .active) { await run() }
+        .clientArtLoop(enabled: !reduceMotion && lines == script.count, duration: 0.55,
+                       animation: .easeInOut(duration: 0.55)) { active in
+            blink = active
+        }
     }
 
-    private func run() {
-        if reduceMotion {
+    private func run() async {
+        if reduceMotion || scenePhase != .active {
             lines = script.count
-            blink = true
             return
         }
-        Task { @MainActor in
+        lines = 0
+        do {
             for step in 1...script.count {
-                try? await Task.sleep(for: .milliseconds(280))
+                try await Task.sleep(for: .milliseconds(280))
+                try Task.checkCancellation()
                 withAnimation(.easeOut(duration: 0.2)) { lines = step }
             }
-            withAnimation(.easeInOut(duration: 0.55).repeatForever()) {
-                blink = true
-            }
+        } catch {
+            return
         }
     }
 }
@@ -424,11 +424,8 @@ private struct OnTheGoArt: View {
                 tile(icon: "cloud", size: 40)
             }
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
-                pulse = 1
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.4, animation: .easeInOut(duration: 1.4)) { active in
+            pulse = active ? 1 : 0
         }
     }
 

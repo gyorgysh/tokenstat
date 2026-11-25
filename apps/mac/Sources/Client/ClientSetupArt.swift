@@ -74,11 +74,8 @@ private struct FindScene: View {
                 beam
             }
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
-                sweep = 1
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 2.1, animation: .easeInOut(duration: 2.1)) { active in
+            sweep = active ? 1 : 0
         }
     }
 
@@ -138,11 +135,8 @@ private struct UnlockScene: View {
             key
             lock
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                turned = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.2, animation: .easeInOut(duration: 1.2)) { active in
+            turned = active ? true : false
         }
     }
 
@@ -241,11 +235,8 @@ private struct IdentifyScene: View {
             badge
                 .offset(x: 26, y: 22)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-                drawn = 1
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.8, animation: .easeInOut(duration: 1.8)) { active in
+            drawn = active ? 1 : 0
         }
     }
 
@@ -313,11 +304,8 @@ private struct InspectScene: View {
                     }
                 }
             }
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
-                    checked = 1
-                }
+            .clientArtLoop(enabled: !reduceMotion, duration: 2.4, animation: .linear(duration: 2.4), autoreverses: false) { active in
+                checked = active ? 1 : 0
             }
     }
 
@@ -351,11 +339,8 @@ private struct InstallScene: View {
             }
             bar
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeIn(duration: 1.4).repeatForever(autoreverses: false)) {
-                phase = 1
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.4, animation: .easeIn(duration: 1.4), autoreverses: false) { active in
+            phase = active ? 1 : 0
         }
     }
 
@@ -398,6 +383,56 @@ private struct InstallScene: View {
             Capsule()
                 .fill(Ink.lead)
                 .frame(width: 74 * (reduceMotion ? 0.72 : phase), height: 4)
+        }
+    }
+}
+
+extension View {
+    func clientArtLoop(
+        enabled: Bool,
+        duration: Double,
+        animation: Animation?,
+        autoreverses: Bool = true,
+        setPhase: @escaping (Bool) -> Void
+    ) -> some View {
+        modifier(ClientArtLoop(enabled: enabled, duration: duration, animation: animation,
+                               autoreverses: autoreverses, setPhase: setPhase))
+    }
+}
+
+private struct ClientArtLoop: ViewModifier {
+    @Environment(\.scenePhase) private var scenePhase
+    var enabled: Bool
+    var duration: Double
+    var animation: Animation?
+    var autoreverses: Bool
+    var setPhase: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        let playing = enabled && scenePhase == .active
+        content.task(id: playing) {
+            guard !Task.isCancelled else { return }
+            withAnimation(nil) { setPhase(false) }
+            guard playing else { return }
+            let interval = Duration.seconds(duration)
+            do {
+                while !Task.isCancelled {
+                    withAnimation(animation) { setPhase(true) }
+                    try await Task.sleep(for: interval)
+                    try Task.checkCancellation()
+                    withAnimation(autoreverses ? animation : nil) { setPhase(false) }
+                    if autoreverses {
+                        try await Task.sleep(for: interval)
+                    } else {
+                        // Give SwiftUI a frame to present the starting pose.
+                        try await Task.sleep(for: .milliseconds(34))
+                    }
+                }
+            } catch is CancellationError {
+                // The view or scene stopped owning the animation.
+            } catch {
+                return
+            }
         }
     }
 }

@@ -36,6 +36,8 @@ desktop is a review build. Newest first.
 - On Windows, the focused screen viewer shares text copied on either computer while you control the remote screen.
 - On Windows, send a file to the connected computer from the screen viewer while control is enabled.
 - On Windows, change the SSH vault password, reset it with a recovery code, or replace the recovery code.
+- On Windows and Android, Keep offline saves a conversation’s text on this device. Search finds those copies under Saved work on Windows and in Search on Android.
+- On iPhone and iPad, empty-state and onboarding art no longer leave endless animations running after the screen is left.
 
 ### Changed
 

@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import ai.tokenstat.tokenstat.AppViewModel
@@ -44,6 +47,8 @@ import ai.tokenstat.tokenstat.ui.logic.PinnedWork
 import ai.tokenstat.tokenstat.ui.logic.RecentPlaces
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -55,9 +60,8 @@ import kotlinx.serialization.json.jsonPrimitive
 ///
 /// Screens and settings are searchable either way; folders come from pins,
 /// recent places, and one folder list per machine when search opens rather
-/// than once per keystroke. The saved-work cache has no Android bridge, so
-/// there is no saved conversation text: the notice says so instead of
-/// pretending the coverage is wider than it is.
+/// than once per keystroke. Saved conversation text is searched when the
+/// signed-in account has a local encryption key.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkSearchSheet(
@@ -68,12 +72,19 @@ fun WorkSearchSheet(
     onDismiss: () -> Unit,
 ) {
     val colors = LocalTsColors.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var preparing by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf(false) }
     var folders by remember { mutableStateOf(listOf<SearchFolder>()) }
     var unreachable by remember { mutableStateOf(0) }
+    var savedHits by remember { mutableStateOf<List<SavedWork.Copy>>(emptyList()) }
+    var savedPreparing by remember { mutableStateOf(false) }
+    var savedFailure by remember { mutableStateOf<String?>(null) }
+    var savedUnavailable by remember { mutableStateOf(false) }
+    var reading by remember { mutableStateOf<SavedWork.Copy?>(null) }
+    var removing by remember { mutableStateOf(false) }
 
     val machines = ((state.account?.get("machines") as? JsonArray).orEmpty())
         .mapNotNull { it as? JsonObject }
@@ -154,6 +165,48 @@ fun WorkSearchSheet(
     }
     LaunchedEffect(Unit) { learn() }
 
+    LaunchedEffect(query, state.account) {
+        savedHits = emptyList()
+        savedFailure = null
+        savedUnavailable = false
+        val store = SavedWork.open(model, context)
+        if (store == null) {
+            savedUnavailable = true
+            return@LaunchedEffect
+        }
+        delay(280)
+        savedPreparing = true
+        try {
+            val ids = store.ids()
+            if (ids.isEmpty()) return@LaunchedEffect
+            val reader = store.reader()
+                ?: run {
+                    savedFailure = L10n.text("android.savedwork.search_failed")
+                    return@LaunchedEffect
+                }
+            val terms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            val matches = ArrayList<SavedWork.Copy>()
+            for (id in ids) {
+                if (!store.isCurrent()) throw CancellationException()
+                val copy = runCatching { reader(id) }.getOrNull() ?: continue
+                if (terms.isNotEmpty() && !terms.all { term ->
+                    copy.title.contains(term, ignoreCase = true) || copy.text.contains(term, ignoreCase = true)
+                }) continue
+                matches.add(copy)
+                if (matches.size >= 40) break
+            }
+            if (store.isCurrent()) savedHits = matches
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (store.isCurrent()) {
+                savedFailure = error.message ?: L10n.text("android.savedwork.search_failed")
+            }
+        } finally {
+            savedPreparing = false
+        }
+    }
+
     // Full height: this is a search, so the keyboard takes the bottom half
     // the moment you type. Opening half way left three results visible.
     TsBottomSheet(
@@ -206,14 +259,32 @@ fun WorkSearchSheet(
                     }
                 }
             }
-            if (query.isNotBlank() && matches.isEmpty() && folderMatches.isEmpty() && !preparing) {
+            if (savedPreparing) {
+                Text(L10n.text("android.savedwork.preparing"), style = TsType.subheadline, color = colors.textSecondary)
+            }
+            savedFailure?.let { Banner(it, BannerSeverity.WARNING) }
+            if (savedHits.isNotEmpty()) {
+                SectionLabel(L10n.text("android.savedwork.title"))
+                savedHits.forEach { copy ->
+                    SavedWorkRow(copy) { reading = copy }
+                }
+            }
+            if (query.isNotBlank() && matches.isEmpty() && folderMatches.isEmpty() && savedHits.isEmpty() && !preparing && !savedPreparing) {
                 Text(L10n.text("android.worksearchsheet.nothing_found_for_0.5e80d678", "${query}"), style = TsType.subheadline, color = colors.textSecondary)
             }
-            Text(
-                L10n.text("android.worksearchsheet.saved_conversation_text_is_off_search_cove.38f2ad0a"),
-                style = TsType.caption,
-                color = colors.textSecondary,
-            )
+            if (savedUnavailable) {
+                Text(
+                    L10n.text("android.worksearchsheet.saved_conversation_text_is_off_search_cove.38f2ad0a"),
+                    style = TsType.caption,
+                    color = colors.textSecondary,
+                )
+            } else if (savedHits.isEmpty() && !savedPreparing && savedFailure == null && query.isBlank()) {
+                Text(
+                    L10n.text("android.savedwork.empty_help"),
+                    style = TsType.caption,
+                    color = colors.textSecondary,
+                )
+            }
             if (unreachable > 0) {
                 Text(
                     L10n.text("android.worksearchsheet.some_machines_could_not_be_reached_open_a.ce7df8b3"),
@@ -221,6 +292,57 @@ fun WorkSearchSheet(
                     color = colors.textSecondary,
                 )
             }
+        }
+    }
+
+    reading?.let { copy ->
+        if (removing) {
+            AlertDialog(
+                onDismissRequest = { removing = false },
+                title = { Text(L10n.text("android.savedwork.remove")) },
+                text = { Text(L10n.text("android.savedwork.remove_help")) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        scope.launch {
+                            try {
+                                val store = SavedWork.open(model, context) ?: return@launch
+                                store.remove(copy.id)
+                                if (store.isCurrent()) {
+                                    savedHits = savedHits.filterNot { it.id == copy.id }
+                                    reading = null
+                                    removing = false
+                                }
+                            } catch (error: Exception) {
+                                savedFailure = error.message ?: L10n.text("android.savedwork.search_failed")
+                                reading = null
+                                removing = false
+                            }
+                        }
+                    }) { Text(L10n.text("android.savedwork.remove")) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { removing = false }) { Text(L10n.text("common.cancel")) }
+                },
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { reading = null },
+                title = { Text(copy.title.ifBlank { L10n.text("android.savedwork.conversation") }) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        if (copy.partial) {
+                            Text(L10n.text("android.savedwork.partial"), style = TsType.caption, color = colors.textSecondary)
+                        }
+                        Text(copy.text, style = TsType.body, color = colors.textPrimary)
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { reading = null }) { Text(L10n.text("common.close")) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { removing = true }) { Text(L10n.text("android.savedwork.remove")) }
+                },
+            )
         }
     }
 }
@@ -233,6 +355,37 @@ private data class SearchFolder(
     val name: String,
     val path: String?,
 )
+
+@Composable
+private fun SavedWorkRow(copy: SavedWork.Copy, onClick: () -> Unit) {
+    val colors = LocalTsColors.current
+    val hit = copy.text.indexOf('\n').let { if (it < 0) 0 else (it + 1).coerceAtMost(copy.text.length) }
+    val start = (hit - 28).coerceAtLeast(0).let { if (it > 0 && copy.text[it].isLowSurrogate()) it - 1 else it }
+    val end = (start + 160).coerceAtMost(copy.text.length).let {
+        if (it < copy.text.length && copy.text[it].isLowSurrogate()) it - 1 else it
+    }
+    var excerpt = copy.text.substring(start, end).replace('\n', ' ')
+    if (start > 0) excerpt = "…$excerpt"
+    if (end < copy.text.length) excerpt += "…"
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+        Icon(ActionIcon.Save.vector, null, tint = colors.accent)
+        Column(Modifier.weight(1f)) {
+            Text(
+                copy.title.ifBlank { L10n.text("android.savedwork.conversation") },
+                style = TsType.body.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(excerpt, style = TsType.caption, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
+    }
+}
 
 @Composable
 private fun SearchPlaceRow(place: SearchPlace, onClick: () -> Unit) {

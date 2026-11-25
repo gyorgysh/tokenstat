@@ -306,6 +306,7 @@ fun ChatSection(
     val sending = openId?.let { it in sendingIds || it in preparingIds } == true
     var sendError by remember(projectOwner) { mutableStateOf<String?>(null) }
     var actionError by remember(projectOwner) { mutableStateOf<String?>(null) }
+    var savedNotice by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
     var eventsError by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
     var search by remember(projectOwner) { mutableStateOf("") }
     var searchVisible by remember(projectOwner) { mutableStateOf(false) }
@@ -549,6 +550,48 @@ fun ChatSection(
                         },
                         leadingIcon = { Icon(ActionIcon.Device.vector, null, tint = LocalTsColors.current.accent) },
                         onClick = { menu = false; showingHandoff = true },
+                    )
+                }
+                if (id == openId) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                L10n.text("android.savedwork.keep"),
+                                color = LocalTsColors.current.accent,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        },
+                        leadingIcon = { Icon(ActionIcon.Save.vector, null, tint = LocalTsColors.current.accent) },
+                        onClick = {
+                            menu = false
+                            scope.launch {
+                                if (!ownsProject() || openId != id) return@launch
+                                val store = ai.tokenstat.tokenstat.ui.search.SavedWork.open(model, context)
+                                    ?: run {
+                                        actionError = L10n.text("android.savedwork.no_account")
+                                        return@launch
+                                    }
+                                val built = coalesceTranscript(events, running = sending)
+                                val copy = ai.tokenstat.tokenstat.ui.search.SavedWork.transcript(built, hasEarlier)
+                                    ?: run {
+                                        actionError = L10n.text("android.savedwork.no_messages")
+                                        return@launch
+                                    }
+                                runCatching {
+                                    store.keep(
+                                        peer, workspace, id,
+                                        chat.str("title") ?: L10n.text("android.chatpullssections.chat.460b3a7d"),
+                                        copy.text, copy.partial,
+                                    )
+                                }.onSuccess {
+                                    if (ownsProject() && openId == id) savedNotice = L10n.text("android.savedwork.kept")
+                                }.onFailure {
+                                    if (ownsProject() && openId == id) {
+                                        actionError = it.message ?: L10n.text("android.savedwork.key_unavailable")
+                                    }
+                                }
+                            }
+                        },
                     )
                 }
                 HorizontalDivider()
@@ -2139,6 +2182,16 @@ fun ChatSection(
                 onDismissed = { model.dismissAgentUpdate() },
                 modifier = Modifier.align(Alignment.End).clickable { model.dismissAgentUpdate() },
                 warning = agentUpdate?.failed == true,
+            )
+            LaunchedEffect(savedNotice) {
+                if (savedNotice == null) return@LaunchedEffect
+                delay(4_000)
+                savedNotice = null
+            }
+            ai.tokenstat.tokenstat.ui.components.TransientToast(
+                message = savedNotice,
+                onDismissed = { savedNotice = null },
+                modifier = Modifier.align(Alignment.End).clickable { savedNotice = null },
             )
             if (sendError != null) {
                 // One baseline for every action: a bordered chip beside a

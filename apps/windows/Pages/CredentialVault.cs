@@ -25,6 +25,7 @@ internal static class CredentialVault
     public const string Scheme = "wincred:";
 
     private const string Prefix = "tokenstat/ssh/";
+    private const string SavedWorkPrefix = "tokenstat/saved-work/";
 
     private const uint Generic = 1;
 
@@ -107,7 +108,10 @@ internal static class CredentialVault
         }
     }
 
-    public static bool Save(string id, string secret)
+    public static bool Save(string id, string secret) => Save(Prefix, id, secret);
+    public static bool SaveWorkKey(string scope, string key) => Save(SavedWorkPrefix, scope, key);
+
+    private static bool Save(string prefix, string id, string secret)
     {
         if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(secret))
         {
@@ -122,7 +126,7 @@ internal static class CredentialVault
             {
                 Flags = 0,
                 Type = Generic,
-                TargetName = Prefix + id,
+                TargetName = prefix + id,
                 Comment = "",
                 LastWritten = 0,
                 CredentialBlobSize = (uint)bytes.Length,
@@ -148,7 +152,10 @@ internal static class CredentialVault
         }
     }
 
-    public static string? Load(string id)
+    public static string? Load(string id) => Load(Prefix, id);
+    public static string? LoadWorkKey(string scope) => Load(SavedWorkPrefix, scope);
+
+    private static string? Load(string prefix, string id)
     {
         if (string.IsNullOrEmpty(id))
         {
@@ -157,7 +164,7 @@ internal static class CredentialVault
         var held = IntPtr.Zero;
         try
         {
-            if (!CredReadW(Prefix + id, Generic, 0, out held) || held == IntPtr.Zero)
+            if (!CredReadW(prefix + id, Generic, 0, out held) || held == IntPtr.Zero)
             {
                 return null;
             }

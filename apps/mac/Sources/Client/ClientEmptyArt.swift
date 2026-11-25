@@ -193,11 +193,8 @@ private struct ServerScene: View {
             link
             rack
         }
-        .onAppear {
-            guard !reduceMotion, state != .waiting else { return }
-            withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
-                phase = 1
-            }
+        .clientArtLoop(enabled: !reduceMotion && state != .waiting, duration: 1.3, animation: .easeInOut(duration: 1.3)) { active in
+            phase = active ? 1 : 0
         }
     }
 
@@ -333,11 +330,8 @@ private struct MacDoorScene: View {
             Sparkle(size: 7)
                 .offset(x: 34, y: 16)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                lowered = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.1, animation: .easeInOut(duration: 1.1)) { active in
+            lowered = active ? true : false
         }
     }
 }
@@ -386,11 +380,8 @@ private struct CloudDoorScene: View {
             Sparkle(size: 7)
                 .offset(x: 34, y: 22)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                fall = 1
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.5, animation: .linear(duration: 1.5), autoreverses: false) { active in
+            fall = active ? 1 : 0
         }
     }
 
@@ -472,11 +463,8 @@ private struct RentScene: View {
             Sparkle(size: 6)
                 .offset(x: 36, y: 16)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                swayed = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.6, animation: .easeInOut(duration: 1.6)) { active in
+            swayed = active ? true : false
         }
     }
 }
@@ -520,11 +508,8 @@ private struct ByHandScene: View {
             Sparkle(size: 6)
                 .offset(x: 52, y: 28)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                on = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 0.6, animation: .easeInOut(duration: 0.6)) { active in
+            on = active ? true : false
         }
     }
 }
@@ -562,11 +547,8 @@ private struct FirstBarsScene: View {
             Sparkle(size: 6)
                 .offset(x: 36, y: 20)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
-                filling = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.4, animation: .easeInOut(duration: 1.4)) { active in
+            filling = active ? true : false
         }
     }
 }
@@ -613,11 +595,8 @@ private struct GetCountingScene: View {
             Sparkle(size: 6)
                 .offset(x: 40, y: 18)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                waiting = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.5, animation: .easeInOut(duration: 1.5)) { active in
+            waiting = active ? true : false
         }
     }
 }
@@ -660,11 +639,8 @@ private struct RemoteGateScene: View {
             Sparkle(size: 6)
                 .offset(x: 44, y: 20)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                closed = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.6, animation: .easeInOut(duration: 1.6)) { active in
+            closed = active ? true : false
         }
     }
 }
@@ -699,11 +675,8 @@ private struct SessionsScene: View {
             .padding(.horizontal, 14)
             .padding(.top, 15)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                on = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 0.6, animation: .easeInOut(duration: 0.6)) { active in
+            on = active ? true : false
         }
     }
 }
@@ -723,11 +696,8 @@ private struct TasksScene: View {
         }
         .padding(.horizontal, 12)
         .offset(x: reduceMotion || !nudged ? 0 : 3)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-                nudged = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.8, animation: .easeInOut(duration: 1.8)) { active in
+            nudged = active ? true : false
         }
     }
 
@@ -781,11 +751,8 @@ private struct NotesScene: View {
             .padding(.top, 24)
         }
         .frame(width: size.width, height: size.height)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                written = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.6, animation: .easeInOut(duration: 1.6)) { active in
+            written = active ? true : false
         }
     }
 
@@ -835,11 +802,8 @@ private struct WorkflowsScene: View {
             node(x: 112, y: 62, lead: false)
         }
         .frame(width: ClientEmptyArt.size.width, height: ClientEmptyArt.size.height)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
-                travelled = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.4, animation: .linear(duration: 1.4), autoreverses: false) { active in
+            travelled = active ? true : false
         }
     }
 
@@ -887,11 +851,8 @@ private struct AutomationsScene: View {
                 )
                 .frame(width: 86, height: 20)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
-                swept = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 4, animation: .linear(duration: 4), autoreverses: false) { active in
+            swept = active ? true : false
         }
     }
 }
@@ -987,11 +948,8 @@ private struct HistoryScene: View {
             }
             .padding(.top, 1)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
-                lit = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.35, animation: .easeInOut(duration: 1.35)) { active in
+            lit = active ? true : false
         }
     }
 }
@@ -1045,11 +1003,8 @@ private struct NotGitScene: View {
             }
             .frame(width: 44, height: 50)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                travelled = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.5, animation: .linear(duration: 1.5), autoreverses: false) { active in
+            travelled = active ? true : false
         }
     }
 
@@ -1117,6 +1072,7 @@ private struct FilesScene: View {
 /// no answer drawn, because there is not one.
 private struct WaitingScene: View {
     var reduceMotion: Bool
+    @Environment(\.scenePhase) private var scenePhase
     @State private var out = false
 
     var body: some View {
@@ -1132,19 +1088,15 @@ private struct WaitingScene: View {
                         .stroke(Ink.lead, style: Ink.style)
                         .frame(width: CGFloat(12 + index * 11), height: CGFloat(24 + index * 17))
                         .opacity(reduceMotion ? 0.75 - Double(index) * 0.22 : (out ? 0.12 : 0.9))
-                        .animation(
-                            reduceMotion
-                                ? nil
-                                : .easeInOut(duration: 1.5)
-                                    .repeatForever(autoreverses: true)
-                                    .delay(Double(index) * 0.18),
-                            value: out
-                        )
+                        .animation(reduceMotion || scenePhase != .active ? nil
+                                   : .easeInOut(duration: 1.5).delay(Double(index) * 0.18), value: out)
                 }
             }
             .frame(width: 38, height: 60)
         }
-        .onAppear { out = true }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.86, animation: nil) { active in
+            out = active
+        }
     }
 }
 
@@ -1162,11 +1114,8 @@ private struct RemoteReachScene: View {
             mac.offset(x: 28, y: -3)
             signal.offset(x: -2, y: 6)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.45).repeatForever(autoreverses: true)) {
-                sending = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.45, animation: .easeInOut(duration: 1.45)) { active in
+            sending = active ? true : false
         }
     }
 
@@ -1231,11 +1180,8 @@ private struct VaultScene: View {
                 .offset(y: reduceMotion || together ? 0 : 4)
                 .opacity(reduceMotion || together ? 1 : 0.65)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
-                together = true
-            }
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.7, animation: .easeInOut(duration: 1.7)) { active in
+            together = active ? true : false
         }
     }
 
@@ -1306,11 +1252,8 @@ private struct ScreenScene: View {
                     .offset(y: reduceMotion ? 28 : (scan ? 52 : 10))
             }
             .frame(width: 88, height: 58)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-                    scan = true
-                }
+            .clientArtLoop(enabled: !reduceMotion, duration: 1.8, animation: .easeInOut(duration: 1.8)) { active in
+                scan = active ? true : false
             }
     }
 }
@@ -1357,16 +1300,9 @@ private struct WorkspaceAccessScene: View {
                 .rotationEffect(.degrees(settled ? -18 : -34))
                 .offset(x: settled ? 24 : 38, y: settled ? 10 : -2)
                 .opacity(settled ? 1 : 0.5)
-                .animation(
-                    reduceMotion
-                        ? nil
-                        : .easeInOut(duration: 1.9).repeatForever(autoreverses: true),
-                    value: settled
-                )
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            settled = true
+        .clientArtLoop(enabled: !reduceMotion, duration: 1.9, animation: .easeInOut(duration: 1.9)) { active in
+            settled = active
         }
     }
 }

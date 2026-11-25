@@ -932,6 +932,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         chrome.Children.Add(DetailButton());
         if (!SharedSource) chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.handoff.title"), ActionIcon.Device,
             async (_, _) => await ShowHandoffAsync()));
+        if (!SharedSource) chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.savedwork.keep"), ActionIcon.Save,
+            async (_, _) => await KeepOfflineAsync()));
         _root.Children.Add(chrome);
         if (!SharedSource) _root.Children.Add(_handoffSlot);
 
