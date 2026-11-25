@@ -326,7 +326,7 @@ Console.WriteLine("PASS: locked-vault protection and signed-out local editing");
 
 namespace Tokenstat
 {
-    internal static class AppServices { public static FakeHost Host { get; } = new(); }
+    internal static class AppServices { public static FakeHost Host { get; } = new(); public static long AccountGeneration { get; set; } }
     internal sealed class FakeHost
     {
         public Func<string, JsonNode?, JsonNode> Handler = (_, _) => new JsonObject();
