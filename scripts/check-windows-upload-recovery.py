@@ -17,7 +17,7 @@ def method(signature):
 upload = method('    private async Task<JsonNode> UploadFileAsync(').replace('private async Task', 'public async Task', 1)
 upload = upload.replace('Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "file-transfers"', 'TestFiles.Root, "file-transfers"')
 prune = method('    private static void PruneUploadReceipts(')
-hash_file = method('    private static Task<long> ReadFileHashAsync(')
+hash_file = method('    internal static Task<long> ReadFileHashAsync(')
 code = r'''
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
