@@ -25,7 +25,11 @@ data class WatchingOwner(val scope: JsonObject, val receipt: String?) {
             val origin = ProjectOwner.canonicalOrigin(field("host")) ?: return null
             val identity = RecentPlaces.accountIdentity(field("handle"), field("accountId")) ?: return null
             return WatchingOwner(buildJsonObject {
-                put("kind", "account"); put("origin", origin); put("identity", identity)
+                // The host compares this with the account it is signed in to.
+                // What this device files under can be a handle the account has
+                // since left, and the id never moves.
+                val wire = field("accountId")?.takeIf { it.isNotBlank() } ?: identity
+                put("kind", "account"); put("origin", origin); put("identity", wire)
             }, field("accountSession"))
         }
     }

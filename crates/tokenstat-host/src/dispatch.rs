@@ -34,8 +34,8 @@ use crate::account_activity::FailureReason;
 #[cfg(feature = "local-host")]
 use crate::automations::Automation;
 use crate::dto::{
-    AccountBillingDto, AccountDto, AccountReportDto, BlockDto, BucketDto, CalendarDto,
-    DayDetailDto, DayPartDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto,
+    AccountBillingDto, AccountDto, AccountProfileDto, AccountReportDto, BlockDto, BucketDto,
+    CalendarDto, DayDetailDto, DayPartDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto,
     InsightsSnapshotDto, MachineDto, MachineUsageDto, QueryDto, ScanReportDto, SplitBucketDto,
     SyncResultDto, TotalsDto,
 };
@@ -855,6 +855,36 @@ fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
     })
 }
 
+/// A profile refusal keeps the reason the account named, prefixed so it can
+/// never be mistaken for one of this host's own codes.
+fn profile_error(error: tokenstat_sync::profile::ProfileError) -> DispatchError {
+    use tokenstat_sync::profile::ProfileError;
+    match error {
+        ProfileError::ProfileRefused { code, message } => {
+            DispatchError::new(format!("profile_{code}"), message)
+        }
+        ProfileError::Unsupported(message) => DispatchError::new("profile_unsupported", message),
+        other => other.to_string().into(),
+    }
+}
+
+/// Change the profile, then answer with a fresh account so the caller redraws
+/// without a second round trip. Reading through the snapshot also replaces the
+/// remembered status: scoped calls compare against the handle it holds, and a
+/// stale one would refuse the account that just claimed a name.
+fn profile_write(
+    write: impl FnOnce() -> Result<(), tokenstat_sync::profile::ProfileError>,
+) -> Result<Value, DispatchError> {
+    let owner = crate::account_session::AccountSnapshot::capture().envelope()?;
+    owner.ensure_current().envelope()?;
+    write().map_err(profile_error)?;
+    let status = owner.status(true).envelope()?;
+    owner.ensure_current().envelope()?;
+    let mut dto = serde_json::to_value(account_dto_from_status(status)).envelope()?;
+    dto["accountSession"] = json!(owner.id);
+    Ok(dto)
+}
+
 fn account_dto_from_status(s: tokenstat_sync::StatusResult) -> AccountDto {
     AccountDto {
         signed_in: true,
@@ -867,6 +897,8 @@ fn account_dto_from_status(s: tokenstat_sync::StatusResult) -> AccountDto {
             .and_then(|v| v.as_str())
             .filter(|v| !v.is_empty())
             .map(str::to_string),
+        profile_public: s.raw.get("profile_public").and_then(Value::as_bool),
+        profile: s.raw.get("profile").and_then(AccountProfileDto::from_value),
         tier: s.tier,
         last_sync_at: s.last_sync_at.clone().or_else(|| latest_sync(&s.machines)),
         this_machine_id: tokenstat_sync::config::ensure_machine_id().ok(),
@@ -1267,6 +1299,10 @@ fn owner_only_method(method: &str) -> bool {
                 | "account.deviceStart"
                 | "account.devicePoll"
                 | "account.cancelLogin"
+                | "account.checkHandle"
+                | "account.claimHandle"
+                | "account.skipHandle"
+                | "account.setVisibility"
                 | "account.renameMachine"
                 | "account.unlinkMachine"
                 | "account.registerMachine"
@@ -1683,6 +1719,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                         handle: None,
                         account_id: None,
                         display_name: None,
+                        profile_public: None,
+                        profile: None,
                         tier: None,
                         avatar: None,
                         last_sync_at: None,
@@ -1762,6 +1800,59 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             crate::account_activity::invalidate();
             let s = tokenstat_sync::sync_status(None).envelope()?;
             serde_json::to_value(account_dto_from_status(s)).envelope()
+        }
+
+        // Advice for a form while somebody types. The claim decides.
+        "account.checkHandle" => {
+            #[derive(Deserialize)]
+            struct CheckParams {
+                handle: String,
+            }
+            let p: CheckParams = serde_json::from_str(params.trim()).envelope()?;
+            let check = tokenstat_sync::profile::handles::check_handle(None, &p.handle)
+                .map_err(profile_error)?;
+            Ok(json!({
+                "handle": check.handle,
+                "available": check.available,
+                "reason": check.reason,
+                "message": check.message,
+            }))
+        }
+
+        "account.claimHandle" => {
+            #[derive(Deserialize)]
+            struct ClaimParams {
+                handle: String,
+            }
+            let p: ClaimParams = serde_json::from_str(params.trim()).envelope()?;
+            profile_write(|| tokenstat_sync::profile::handles::claim_handle(None, &p.handle))
+        }
+
+        // "Not now" to the one-time offer. Answered on the account, so no
+        // other device asks again.
+        "account.skipHandle" => {
+            profile_write(|| tokenstat_sync::profile::handles::skip_handle_offer(None))
+        }
+
+        // Publish or unpublish the profile page. Nothing else on the account
+        // changes, and going private keeps the handle.
+        "account.setVisibility" => {
+            #[derive(Deserialize)]
+            struct VisibilityParams {
+                public: Option<bool>,
+                indexable: Option<bool>,
+            }
+            let p: VisibilityParams = serde_json::from_str(params.trim()).envelope()?;
+            if p.public.is_none() && p.indexable.is_none() {
+                return Err(DispatchError::new("invalid", "nothing to change"));
+            }
+            profile_write(|| {
+                tokenstat_sync::profile::handles::set_profile_visibility(
+                    None,
+                    p.public,
+                    p.indexable,
+                )
+            })
         }
 
         // Begin a device authorization. Returns the code to show and the URL to
@@ -6606,6 +6697,69 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{method} returned non-JSON: {out} ({e})"));
             assert!(v["ok"].is_boolean(), "{method}: {out}");
         }
+    }
+
+    #[test]
+    fn profile_settings_come_from_the_account_or_not_at_all() {
+        let status = |raw: Value| {
+            account_dto_from_status(tokenstat_sync::profile::StatusResult {
+                host: "https://example.invalid".into(),
+                handle: None,
+                tier: None,
+                last_sync_at: None,
+                machines: Vec::new(),
+                schema_min_v: None,
+                schema_max_v: None,
+                schema_current: None,
+                account_id: None,
+                review_demo: false,
+                raw,
+            })
+        };
+        // An older account service still says whether the page is public.
+        let old = status(json!({"profile_public": true}));
+        assert_eq!(old.profile_public, Some(true));
+        assert!(old.profile.is_none());
+        assert!(status(json!({"profile": {}})).profile.is_none());
+
+        let dto = status(json!({"profile_public": false, "profile": {
+            "public": false, "indexable": false, "handle_change_days": 12, "handle_prompted": false
+        }}));
+        let wire = serde_json::to_value(&dto).unwrap();
+        assert_eq!(
+            wire["profile"],
+            json!({"public": false, "indexable": false, "handleChangeDays": 12, "handlePrompted": false})
+        );
+        // A server that does not track the offer never triggers it.
+        assert!(
+            status(json!({"profile": {"public": true}}))
+                .profile
+                .unwrap()
+                .handle_prompted
+        );
+    }
+
+    #[test]
+    fn profile_writes_are_local_only_and_refuse_empty_changes() {
+        for method in [
+            "account.checkHandle",
+            "account.claimHandle",
+            "account.skipHandle",
+            "account.setVisibility",
+        ] {
+            assert!(owner_only_method(method), "{method}");
+        }
+        let mut s = session();
+        let out = call(&mut s, "account.setVisibility", "{}");
+        let value: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["error"]["code"], "invalid", "{out}");
+        assert_eq!(
+            profile_error(tokenstat_sync::profile::ProfileError::ProfileRefused {
+                code: "taken".into(),
+                message: "Already taken.".into()
+            }),
+            DispatchError::new("profile_taken", "Already taken.")
+        );
     }
 
     #[test]

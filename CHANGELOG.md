@@ -7,6 +7,14 @@ desktop is a review build. Newest first.
 
 ## [1.27.0]
 
+### Added
+
+- Claim your handle and choose who can open your profile from the app on Mac, iPhone, iPad and Android. Tap your name in Account to open your profile: your tokenstat.ai address, Private or Public, search engine listing, and View public profile, which opens your browser on Mac and stays in the app on phones and tablets. An account without a handle is offered one once after sign-in, with a live check while you type. Skipping it on one device answers it on all of them.
+
+### Fixed
+
+- On Mac, iPhone, iPad and Android, drafts, pins and recent places on this device stay with your account when you claim or change your handle.
+
 ## [1.26.0] - 2026-11-25
 
 ### Added

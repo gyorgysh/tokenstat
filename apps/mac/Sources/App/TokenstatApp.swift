@@ -153,6 +153,9 @@ struct TokenstatApp: App {
         // something redraws it.
         AppFonts.register()
         Self.adoptPreferencesFromPreviousBundleID()
+        // After the preferences above are in place and before any screen asks
+        // whose work this is.
+        AccountIdentityPins.shared.activate()
         Self.excludeSecretsFromBackup()
         BridgeLaunch.begin()
         Task.detached(priority: .utility) { TokenstatAppShortcuts.updateAppShortcutParameters() }

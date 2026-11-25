@@ -317,47 +317,25 @@ private struct ClientAccountContent: View {
     }
 
     private func identity(_ account: Account) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .center, spacing: Theme.Space.m) {
-                Avatar(url: account.avatar, name: account.title, handle: account.handle, size: 72)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: Theme.Space.s) {
-                        Text(account.title ?? L10n.text("apple.clientaccountsheet.signed_in.ca566c89"))
-                            .font(ClientType.screenTitle)
-                            .lineLimit(2)
-                        if let tier = account.tier, !tier.isEmpty {
-                            TierMark(tier: tier, size: 18)
-                        }
-                    }
-                    if let handle = account.handle {
-                        Text("@\(handle)")
-                            .font(ClientType.body)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
+        ProfileNameButton(model: model, account: account) {
+            Avatar(url: account.avatar, name: account.title, handle: account.handle, size: 72)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: Theme.Space.s) {
+                    Text(account.title ?? L10n.text("apple.clientaccountsheet.signed_in.ca566c89"))
+                        .font(ClientType.screenTitle)
+                        .lineLimit(2)
                     if let tier = account.tier, !tier.isEmpty {
-                        Text(PlanName.title(tier) + L10n.text("apple.clientaccountsheet.plan.56aeaecb"))
-                            .font(ClientType.label)
-                            .foregroundStyle(.secondary)
+                        TierMark(tier: tier, size: 18)
                     }
                 }
-                Spacer(minLength: 0)
-            }
-
-            if let handle = account.handle {
-                Button {
-                    webURL = ClientWebPages.publicProfile(host: account.host, handle: handle)
-                } label: {
-                    ActionIcon.external.label(L10n.text("apple.clientaccountsheet.view_public_profile.9acb2dbb"))
-                        .font(ClientType.label.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .contentShape(.rect)
+                ProfileNameLine(account: account, font: ClientType.body)
+                if let tier = account.tier, !tier.isEmpty {
+                    Text(PlanName.title(tier) + L10n.text("apple.clientaccountsheet.plan.56aeaecb"))
+                        .font(ClientType.label)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.accent)
-                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+            .multilineTextAlignment(.leading)
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

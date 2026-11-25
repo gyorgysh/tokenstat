@@ -18,17 +18,15 @@ enum ClientSetupIdentity {
     }
 }
 
-/// The service origin and account handle are both required. A renamed account
-/// starts a fresh draft rather than guessing ownership. The device key also
-/// prevents a restored app backup from adopting another device's progress.
+/// The service origin and account identity are both required. The device key
+/// also prevents a restored app backup from adopting another device's progress.
 struct ClientSetupScope: Codable, Equatable {
     var origin: String
     var account: String
     var deviceKey: String
 
-    /// Whose setup this is. One rule for the whole app: the handle when the
-    /// account has claimed one, else the server's own id for it. A new
-    /// account has no handle, and it still gets setup. An empty answer
+    /// Whose setup this is. One rule for the whole app, and a new account
+    /// with no handle still gets setup. An empty answer
     /// means the draft goes unpersisted. The store is keyed by scope, and
     /// one account must never resume another's.
     static func accountIdentity(handle: String?, id: String?) -> String {

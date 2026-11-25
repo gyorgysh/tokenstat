@@ -152,14 +152,10 @@ object RecentPlaces {
         Kind.TERMINAL -> if (place.id.workspaceId == null) L10n.text("android.homelogic.terminal.e0926fda") else L10n.text("android.homelogic.terminal_in_0.9d87a81b", "${place.workspaceName}")
     }
 
-    /// The handle when there is one, else the account id. Port of
+    /// What this device files the account under. Port of
     /// `WorkReference.Scope.accountIdentity`: the display name is a label,
     /// not an identity, and must never scope the store.
-    fun accountIdentity(handle: String?, id: String?): String? {
-        if (!handle.isNullOrBlank()) return handle.trim()
-        if (!id.isNullOrBlank()) return id.trim()
-        return null
-    }
+    fun accountIdentity(handle: String?, id: String?): String? = AccountIdentityPins.identity(handle, id)
 }
 
 /// The work worth keeping: pinned folders and conversations, at most eight.

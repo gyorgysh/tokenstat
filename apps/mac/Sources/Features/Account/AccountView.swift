@@ -282,7 +282,7 @@ struct AccountView: View {
     #endif
 
     private func identity(_ account: Account) -> some View {
-        HStack(alignment: .center, spacing: Theme.Space.m) {
+        ProfileNameButton(model: model, account: account) {
             Avatar(url: account.avatar, name: account.title, handle: account.handle, size: 64)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -293,28 +293,10 @@ struct AccountView: View {
                         TierMark(tier: tier, size: 17)
                     }
                 }
-                if let handle = account.handle {
-                    Text("@\(handle)")
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
+                ProfileNameLine(account: account, font: Theme.callout)
                 Text(account.host)
                     .font(Theme.caption)
                     .foregroundStyle(.tertiary)
-            }
-
-            Spacer()
-
-            if let handle = account.handle, let url = URL(string: "\(account.host)/\(handle)") {
-                // The profile is a public page and this is the only place in
-                // the app that knows its address.
-                Link(destination: url) {
-                    ActionIcon.external.label(L10n.text("apple.accountview.view_profile.d4788f25"))
-                }
-                .buttonStyle(.plain)
-                .font(Theme.callout)
-                .foregroundStyle(Theme.accent)
             }
         }
         .padding(Theme.cardPadding)

@@ -10,19 +10,24 @@ struct WorkReference: Codable, Hashable, Sendable {
         let origin: String
         let identity: String
 
-        /// Whose account this names. The claimed handle when there is one,
-        /// else the server's own id for it. A new account has no handle,
-        /// and every function must still work for it, so the id is a full
-        /// identity here rather than a lesser fallback. Nil only when
-        /// neither answers, which is the unknown-account state.
+        /// Whose account this names. What this device already files the account
+        /// under (see `AccountIdentityPins`), else the claimed handle, else the
+        /// server's own id. A new account has no handle, and every function
+        /// must still work for it, so the id is a full identity here rather
+        /// than a lesser fallback. Nil only when neither answers, which is the
+        /// unknown-account state.
         static func accountIdentity(handle: String?, id: String?) -> String? {
-            if let handle = handle?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
-                return handle
-            }
-            if let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
-                return id
-            }
-            return nil
+            let handle = handle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let id = id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !id.isEmpty else { return handle.isEmpty ? nil : handle }
+            return AccountIdentityPins.shared.identity(handle: handle.isEmpty ? nil : handle, id: id)
+        }
+
+        /// The identity a host can check against the account it is signed in
+        /// to. What this device files under can be a handle the account has
+        /// since left, and the id never moves.
+        var wireIdentity: String {
+            AccountIdentityPins.shared.accountID(for: identity) ?? identity
         }
 
         /// An account scope. The handle parameter carries the stable
@@ -94,5 +99,52 @@ enum WorkReferenceKey {
 
     static func encode(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+    }
+}
+
+/// What this device files each account's work under, kept from the first time
+/// it saw the account.
+///
+/// Drafts, pins, reading places and saved work are keyed by an identity that
+/// used to be recomputed from the handle. Claiming a handle moved it from the
+/// server's id to the name, and changing one moved it again, and each time
+/// everything filed under the old one was left behind. The account's id does
+/// not move, so it is what finds the identity, and the identity stays put.
+///
+/// Off until `activate`, which the app does before anything asks. A process
+/// that never activates it keeps the plain rule.
+final class AccountIdentityPins: @unchecked Sendable {
+    static let shared = AccountIdentityPins()
+    private static let key = "account.identityPins.v1"
+
+    private let lock = NSLock()
+    private var defaults: UserDefaults?
+    private var pins: [String: String] = [:]
+
+    func activate(_ defaults: UserDefaults = .standard) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.defaults = defaults
+        pins = defaults.dictionary(forKey: Self.key) as? [String: String] ?? [:]
+    }
+
+    func identity(handle: String?, id: String) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let defaults else { return handle ?? id }
+        if let pinned = pins[id] { return pinned }
+        // A handle can be released and claimed by somebody else. Whoever was
+        // filed under it here first keeps it, and the newcomer gets their id,
+        // so one person's work never opens for another.
+        let identity = handle.flatMap { name in pins.values.contains(name) ? nil : name } ?? id
+        pins[id] = identity
+        defaults.set(pins, forKey: Self.key)
+        return identity
+    }
+
+    func accountID(for identity: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pins.first { $0.value == identity }?.key
     }
 }

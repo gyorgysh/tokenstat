@@ -1090,7 +1090,7 @@ extension Bridge {
         let heartbeat = method == "app.watching" || method == "app.stoppedWatching"
         if heartbeat, let scope {
             transportParams["_accountScope"] = ["kind": scope.kind.rawValue,
-                "origin": scope.origin, "identity": scope.identity]
+                "origin": scope.origin, "identity": scope.wireIdentity]
             if let accountSession { transportParams["_accountSession"] = accountSession }
         }
         let invalidates = owner != nil && ChatReadFlights.mutations.contains(method)
@@ -1812,6 +1812,28 @@ extension Bridge {
     /// than show a failure.
     static func account() async throws -> Account {
         try await background("account.status", as: Account.self)
+    }
+
+    /// Whether this account could claim a handle. Advice while somebody types.
+    static func checkHandle(_ handle: String) async throws -> HandleCheck {
+        try await background("account.checkHandle", ["handle": handle], as: HandleCheck.self)
+    }
+
+    static func claimHandle(_ handle: String) async throws -> Account {
+        try await background("account.claimHandle", ["handle": handle], as: Account.self)
+    }
+
+    /// Answer the one-time offer with "not now", for every device.
+    static func skipHandle() async throws -> Account {
+        try await background("account.skipHandle", as: Account.self)
+    }
+
+    /// Nil leaves that setting as it is.
+    static func setProfile(public isPublic: Bool?, indexable: Bool?) async throws -> Account {
+        var params: [String: Any] = [:]
+        if let isPublic { params["public"] = isPublic }
+        if let indexable { params["indexable"] = indexable }
+        return try await background("account.setVisibility", params, as: Account.self)
     }
 
     /// Bind a StoreKit transaction JWS to the signed-in account.
@@ -3368,7 +3390,7 @@ extension Bridge {
         let owner = try await captureVaultOwner(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
         let scope = owner.scope
         var arguments = params
-        arguments["_accountScope"] = ["kind": scope.kind.rawValue, "origin": scope.origin, "identity": scope.identity]
+        arguments["_accountScope"] = ["kind": scope.kind.rawValue, "origin": scope.origin, "identity": scope.wireIdentity]
         let result: Result<T, Error>
         do { result = .success(try await background(method, arguments, patience: patience, as: type)) }
         catch { result = .failure(error) }
@@ -3707,7 +3729,7 @@ extension Bridge {
         guard scope.kind == .account, !sessionID.isEmpty else { return }
         struct Locked: Codable, Sendable { var locked: Bool }
         _ = try? await background("ssh.vault.retire", [
-            "_accountScope": ["kind": scope.kind.rawValue, "origin": scope.origin, "identity": scope.identity],
+            "_accountScope": ["kind": scope.kind.rawValue, "origin": scope.origin, "identity": scope.wireIdentity],
             "_vaultSession": sessionID,
         ], patience: Patience.interactive, as: Locked.self)
     }
@@ -4191,7 +4213,7 @@ extension Bridge {
               case let .object(fields) = parameters else { throw CancellationError() }
         let encoded = try JSONEncoder().encode(JSONValue.object(fields))
         guard var arguments = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else { throw CancellationError() }
-        arguments["_accountScope"] = ["kind": owner.scope.kind.rawValue, "origin": owner.scope.origin, "identity": owner.scope.identity]
+        arguments["_accountScope"] = ["kind": owner.scope.kind.rawValue, "origin": owner.scope.origin, "identity": owner.scope.wireIdentity]
         arguments["_accountSession"] = owner.session
         let result: Result<JSONValue, Error>
         do { result = .success(try await background(method.rawValue, arguments, as: JSONValue.self)) }

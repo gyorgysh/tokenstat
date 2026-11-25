@@ -8,6 +8,8 @@ import android.os.Build
 import android.util.Log
 import ai.tokenstat.tokenstat.core.CoreClient
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
+import ai.tokenstat.tokenstat.ui.logic.AccountIdentityPins
+import androidx.core.content.edit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +20,13 @@ import kotlinx.serialization.json.put
 class TokenstatApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        // Before any screen or worker asks whose work this is.
+        val identities = getSharedPreferences("accountIdentities", MODE_PRIVATE)
+        AccountIdentityPins.activate(object : AccountIdentityPins.Store {
+            override fun read() = identities.all.mapNotNull { (id, value) -> (value as? String)?.let { id to it } }.toMap()
+            override fun write(pins: Map<String, String>) =
+                identities.edit { pins.forEach { (id, identity) -> putString(id, identity) } }
+        })
         CoreClient.initialize(
             dataDir = noBackupFilesDir.resolve("tokenstat"),
             cacheDir = cacheDir.resolve("tokenstat"),

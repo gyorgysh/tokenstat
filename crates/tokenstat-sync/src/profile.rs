@@ -25,6 +25,8 @@ use crate::host::{self, HostError};
 use crate::keychain::{self, KeychainError};
 use crate::schema;
 
+pub mod handles;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProfileError {
     #[error(transparent)]
@@ -71,6 +73,10 @@ pub enum ProfileError {
     /// match against prose the server can reword.
     #[error("this machine is not registered on the account")]
     MachineNotRegistered,
+    /// The account refused a handle or a visibility change for a reason it
+    /// named. Structured so a form can word it and mark the right field.
+    #[error("{message}")]
+    ProfileRefused { code: String, message: String },
     #[error("{0}")]
     Message(String),
 }

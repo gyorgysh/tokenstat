@@ -1397,6 +1397,30 @@ struct DevicePoll: Codable, Sendable, Hashable {
     var isConfirmed: Bool { state == "confirmed" }
 }
 
+/// The profile page's settings, as the account holds them.
+struct AccountProfile: Codable, Sendable, Hashable {
+    var isPublic: Bool
+    /// Whether search engines may list the page while it is public.
+    var indexable: Bool
+    /// Days until the handle may change. Zero when it may change today.
+    var handleChangeDays: Int
+    /// Whether the one-time offer was answered, on any device.
+    var handlePrompted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case isPublic = "public"
+        case indexable, handleChangeDays, handlePrompted
+    }
+}
+
+/// Whether a handle can be claimed, and why not when it cannot.
+struct HandleCheck: Codable, Sendable, Hashable {
+    var handle: String
+    var available: Bool
+    var reason: String?
+    var message: String
+}
+
 struct Account: Codable, Sendable, Hashable {
     var signedIn: Bool
     var host: String
@@ -1407,6 +1431,12 @@ struct Account: Codable, Sendable, Hashable {
     /// handle when claimed, else the server's id (`accountId`); this is
     /// only ever the label.
     var displayName: String?
+    /// Whether anyone can open the profile page. Nil from a server that does
+    /// not say, and then nothing here may claim either.
+    var profilePublic: Bool? = nil
+    /// Handle and visibility settings. Nil when the account service has no
+    /// routes behind them, so no control is offered that could only fail.
+    var profile: AccountProfile? = nil
     var tier: String?
     /// Profile picture URL, when the account has one.
     ///
@@ -1449,7 +1479,8 @@ struct Account: Codable, Sendable, Hashable {
     /// left it nil on every decode, so no row in the machine list was ever
     /// the one you are sitting at.
     enum CodingKeys: String, CodingKey {
-        case signedIn, host, handle, displayName, tier, avatar, lastSyncAt, accountSession
+        case signedIn, host, handle, displayName, profilePublic, profile
+        case tier, avatar, lastSyncAt, accountSession
         case thisMachineID = "thisMachineId"
         case accountId = "accountId"
         case machines, schemaCurrent

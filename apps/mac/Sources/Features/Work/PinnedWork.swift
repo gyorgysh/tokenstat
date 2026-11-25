@@ -146,9 +146,8 @@ final class PinnedWorkStore {
     }
 
     /// The account scope pins file under, from the same identity the
-    /// session scope uses: the handle when claimed, else the server's id.
-    /// An account that claims a handle later moves shelves once, from its
-    /// id to its handle; what was filed under the id stays behind.
+    /// session scope uses, which does not move when a handle is claimed or
+    /// changed (see `AccountIdentityPins`).
     nonisolated static func scope(host: String, handle: String?, id: String?) -> WorkReference.Scope? {
         guard !host.isEmpty,
               let identity = WorkReference.Scope.accountIdentity(handle: handle, id: id) else { return nil }

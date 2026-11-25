@@ -524,6 +524,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    data class HandleAnswer(val available: Boolean, val reason: String?, val message: String)
+
+    /// Whether this account could claim a handle. Advice while somebody types.
+    suspend fun checkHandle(handle: String): HandleAnswer {
+        val answer = CoreClient.call("account.checkHandle", buildJsonObject { put("handle", handle) }).jsonObject
+        return HandleAnswer(
+            available = answer["available"]?.jsonPrimitive?.booleanOrNull == true,
+            reason = (answer["reason"] as? JsonPrimitive)?.contentOrNull,
+            message = (answer["message"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+        )
+    }
+
+    suspend fun claimHandle(handle: String) =
+        changeProfile("account.claimHandle", buildJsonObject { put("handle", handle) })
+
+    /// Null leaves that setting as it is.
+    suspend fun setProfile(public: Boolean? = null, indexable: Boolean? = null) =
+        changeProfile("account.setVisibility", buildJsonObject {
+            public?.let { put("public", it) }
+            indexable?.let { put("indexable", it) }
+        })
+
+    /// The one-time offer closed. Remembered here first, so an account service
+    /// that cannot be reached does not turn "not now" into every launch.
+    fun answerHandleOffer() {
+        val account = state.value.account
+        ai.tokenstat.tokenstat.ui.account.HandleOffer.markAnswered(getApplication(), account)
+        if (ai.tokenstat.tokenstat.ui.account.AccountProfile.from(account)?.handle != null) return
+        viewModelScope.launch {
+            try { changeProfile("account.skipHandle", buildJsonObject {}) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { }
+        }
+    }
+
+    /// Change the profile and take the account the change answered with. A
+    /// status read already on its way would put the old answer back, so it
+    /// lands first.
+    private suspend fun changeProfile(method: String, params: JsonObject) {
+        refreshJob?.join()
+        applyAccount(CoreClient.call(method, params)).join()
+    }
+
     private fun syncWorkspaceAccount(account: JsonObject) {
         // Background host warmup uses HomeStores.pinIdentity as its owner.
         // Keep this lease in the same account scope or every secondary host

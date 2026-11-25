@@ -28,14 +28,10 @@ object SetupIdentity {
         return a == b
     }
 
-    /// Whose setup this is. The handle when the account has claimed one, else
-    /// the server's own id. An empty answer means the draft goes unpersisted:
+    /// Whose setup this is. An empty answer means the draft goes unpersisted:
     /// one account must never resume another's.
-    fun accountIdentity(handle: String?, id: String?): String {
-        if (!handle.isNullOrBlank()) return handle.trim()
-        if (!id.isNullOrBlank()) return id.trim()
-        return ""
-    }
+    fun accountIdentity(handle: String?, id: String?): String =
+        ai.tokenstat.tokenstat.ui.logic.AccountIdentityPins.identity(handle, id).orEmpty()
 }
 
 enum class SetupMilestone {

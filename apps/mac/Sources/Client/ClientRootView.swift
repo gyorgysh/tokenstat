@@ -104,10 +104,19 @@ struct ClientRootView: View {
     /// pitched the product it is already using.
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
     @State private var showingSetupTour = false
+    @State private var showingHandleOffer = false
+
+    private var canOfferHandle: Bool {
+        scenePhase == .active && account.signedIn && navigation.destination == .home
+            && !showingSetupTour && !showAccount && !store.showPaywall
+            && !navigation.showWorkSearch && navigation.presentedChat == nil
+            && !navigation.showingNewChat
+            && navigation.presentedTaskBoard == nil && savedAccess.reader == nil
+    }
 
     private var canRequestReview: Bool {
         scenePhase == .active && account.signedIn && navigation.destination == .home
-            && !showingSetupTour && !showAccount && !store.showPaywall
+            && !showingSetupTour && !showingHandleOffer && !showAccount && !store.showPaywall
             && !navigation.showWorkSearch && navigation.presentedChat == nil
             && navigation.presentedTaskBoard == nil && savedAccess.reader == nil
     }
@@ -506,6 +515,7 @@ struct ClientRootView: View {
                   SetupTourPreferences.shouldShow(signedIn: account.signedIn), !showAccount else { return }
             showingSetupTour = true
         }
+        .modifier(HandleOffer(model: account, ready: canOfferHandle, showing: $showingHandleOffer))
         .task(id: canRequestReview) {
             guard canRequestReview else { return }
             do { try await Task.sleep(for: .seconds(4)) } catch { return }

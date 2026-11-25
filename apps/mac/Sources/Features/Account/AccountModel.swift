@@ -673,6 +673,64 @@ final class AccountModel {
     }
 }
 
+// MARK: - Handle and profile
+
+extension AccountModel {
+    /// The one-time offer is still open: an account with no handle that nobody
+    /// has answered for, on this device or any other.
+    var handleOfferDue: Bool {
+        guard let account, account.signedIn, (account.handle ?? "").isEmpty,
+              account.profile?.handlePrompted == false else { return false }
+        return !UserDefaults.standard.bool(forKey: Self.offerKey(account))
+    }
+
+    /// True for the one window that gets to show it.
+    func beginHandleOffer() -> Bool {
+        guard handleOfferDue, !Self.offeringHandle else { return false }
+        Self.offeringHandle = true
+        return true
+    }
+
+    /// The offer closed. Remembered here first, so an account service that
+    /// cannot be reached does not turn "not now" into being asked every launch.
+    func answerHandleOffer() async {
+        Self.offeringHandle = false
+        guard let account, account.signedIn else { return }
+        UserDefaults.standard.set(true, forKey: Self.offerKey(account))
+        guard (account.handle ?? "").isEmpty else { return }
+        try? await adopt { try await Bridge.skipHandle() }
+    }
+
+    func claimHandle(_ handle: String) async throws {
+        try await adopt { try await Bridge.claimHandle(handle) }
+    }
+
+    func setProfile(public isPublic: Bool? = nil, indexable: Bool? = nil) async throws {
+        try await adopt { try await Bridge.setProfile(public: isPublic, indexable: indexable) }
+    }
+
+    /// Take the account a change answered with, unless the sign-in it belonged
+    /// to is gone. A status read that started before the change would put the
+    /// old answer back, so it is retired.
+    private func adopt(_ change: () async throws -> Account) async throws {
+        let generation = accountLoadGeneration
+        let scope = WorkSessionContext.shared.scope
+        let next = try await change()
+        guard signedIn, !isSigningOut, scope == WorkSessionContext.shared.scope,
+              generation == accountLoadGeneration || next.accountId == account?.accountId
+        else { throw CancellationError() }
+        accountLoadGeneration &+= 1
+        isLoading = false
+        account = next
+    }
+
+    private static var offeringHandle = false
+
+    private static func offerKey(_ account: Account) -> String {
+        "handle.offerAnswered.v1.\(account.host)|\(account.accountId ?? "")"
+    }
+}
+
 private func openInBrowser(_ raw: String) {
     guard let url = URL(string: raw) else { return }
     #if os(macOS)

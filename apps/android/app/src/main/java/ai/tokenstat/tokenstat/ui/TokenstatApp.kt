@@ -651,7 +651,27 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     // over it and after a short settle. `ReviewPrompt` decides whether it is
     // due. Leaving Home, or opening anything, cancels the wait.
     val askOwner = state.account?.get("machines") as? JsonArray
-    val canAsk = selected == Destination.Home && !accountOpen && !teamOpen && !wizardOpen && !searchOpen
+    var handleOfferOpen by rememberSaveable { mutableStateOf(false) }
+    val homeQuiet = selected == Destination.Home && !accountOpen && !teamOpen && !wizardOpen && !searchOpen
+    // A handle, offered once to an account that has none. Closing the sheet
+    // any way at all is an answer, for every device on the account.
+    val handleOfferDue = homeQuiet && !handleOfferOpen &&
+        ai.tokenstat.tokenstat.ui.account.HandleOffer.isDue(context, state.account)
+    LaunchedEffect(handleOfferDue) {
+        if (!handleOfferDue) return@LaunchedEffect
+        delay(1_800)
+        handleOfferOpen = true
+    }
+    if (handleOfferOpen) {
+        ai.tokenstat.tokenstat.ui.account.ProfileSheet(
+            purpose = ai.tokenstat.tokenstat.ui.account.ProfilePurpose.OFFER,
+            account = state.account,
+            model = model,
+            onOpen = { url -> runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) } },
+            onClose = { handleOfferOpen = false; model.answerHandleOffer() },
+        )
+    }
+    val canAsk = homeQuiet && !handleOfferOpen && !handleOfferDue
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(canAsk, askOwner?.size ?: 0) {
         if (!canAsk) return@LaunchedEffect
@@ -4797,7 +4817,7 @@ private fun AccountDialog(
             )
             when (pane) {
                 0 -> {
-                    AccountIdentityCard(state = state, onOpen = ::open)
+                    AccountIdentityCard(state = state, model = model, onOpen = ::open)
                     if (state.signedIn) {
                         TsCard(
                             title = L10n.text("common.teams.title"),
@@ -5385,58 +5405,64 @@ private fun JsonObject.bool(key: String): Boolean = (this[key] as? JsonPrimitive
 ///
 /// It was a bare row with a tier chip and a device count, which said less
 /// than the Apple sheet and said it in a shape that did not match anything
-/// else on the screen. The handle and the way to the public profile are the
-/// two things people actually come here for.
+/// else on the screen. Tapping it opens the profile window.
 @Composable
-private fun AccountIdentityCard(state: ClientState, onOpen: (String) -> Unit) {
+private fun AccountIdentityCard(state: ClientState, model: AppViewModel, onOpen: (String) -> Unit) {
     val colors = LocalTsColors.current
     val tier = (state.account?.string("tier") ?: "free").lowercase()
     val handle = state.account?.string("handle")?.ifBlank { null }
-    TsCard(Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                Avatar(
-                    state.account?.string("displayName") ?: handle ?: L10n.text("android.tokenstatapp.your_account.17a7e5cf"),
-                    size = 56,
-                    avatarUrl = state.account?.string("avatar"),
-                    signedIn = state.signedIn,
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                    ) {
-                        Text(
-                            state.account?.string("displayName") ?: handle ?: L10n.text("android.tokenstatapp.signed_in.ca566c89"),
-                            style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
-                            color = colors.textPrimary,
-                            maxLines = 2,
-                        )
-                        TierMark(tier, markSize = 18)
-                    }
-                    handle?.let {
-                        Text("@$it", style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
-                    }
+    val profile = ai.tokenstat.tokenstat.ui.account.AccountProfile.from(state.account)
+    val opens = profile?.visible == true
+    var showing by rememberSaveable { mutableStateOf(false) }
+    TsCard(
+        if (opens) {
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                .clickable(onClickLabel = L10n.text("common.profile.open_hint")) { showing = true }
+        } else {
+            Modifier.fillMaxWidth()
+        },
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            Avatar(
+                state.account?.string("displayName") ?: handle ?: L10n.text("android.tokenstatapp.your_account.17a7e5cf"),
+                size = 56,
+                avatarUrl = state.account?.string("avatar"),
+                signedIn = state.signedIn,
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
                     Text(
-                        ai.tokenstat.tokenstat.ui.marks.planTitle(tier) + L10n.text("android.tokenstatapp.plan.56aeaecb"),
-                        style = TextStyle(fontSize = 13.sp),
-                        color = colors.textSecondary,
+                        state.account?.string("displayName") ?: handle ?: L10n.text("android.tokenstatapp.signed_in.ca566c89"),
+                        style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
+                        color = colors.textPrimary,
+                        maxLines = 2,
                     )
+                    TierMark(tier, markSize = 18)
                 }
-            }
-            handle?.let {
-                val host = state.account?.string("host")?.ifBlank { null } ?: "https://tokenstat.ai"
-                TsAccentButton(
-                    label = L10n.text("android.tokenstatapp.view_public_profile.9acb2dbb"),
-                    icon = ActionIcon.External.vector,
-                    onClick = { onOpen("$host/$it?mobile=1") },
-                    modifier = Modifier.fillMaxWidth(),
+                ai.tokenstat.tokenstat.ui.account.ProfileNameLine(profile)
+                Text(
+                    ai.tokenstat.tokenstat.ui.marks.planTitle(tier) + L10n.text("android.tokenstatapp.plan.56aeaecb"),
+                    style = TextStyle(fontSize = 13.sp),
+                    color = colors.textSecondary,
                 )
             }
+            if (opens) Icon(ActionIcon.Disclosure.vector, null, tint = colors.accent)
         }
+    }
+    if (showing) {
+        ai.tokenstat.tokenstat.ui.account.ProfileSheet(
+            purpose = ai.tokenstat.tokenstat.ui.account.ProfilePurpose.SETTINGS,
+            account = state.account,
+            model = model,
+            onOpen = onOpen,
+            onClose = { showing = false },
+        )
     }
 }
 

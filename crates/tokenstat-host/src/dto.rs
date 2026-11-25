@@ -12,6 +12,7 @@
 //! user's locale.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokenstat_core::{
     BillingMode, Counters, DayPart, GroupBy, PricedBucket, Query, ScanReport, SplitBucket, Totals,
     UsageBlock, Warning,
@@ -343,6 +344,13 @@ pub struct AccountDto {
     /// the identifier and this is the label, and a UI that shows only the
     /// handle is showing a slug where a name belongs.
     pub display_name: Option<String>,
+    /// Whether anyone can open the profile page. Absent against a server old
+    /// enough not to say, and then no front end may claim either.
+    pub profile_public: Option<bool>,
+    /// What the profile controls draw. Absent when the account service does
+    /// not have the routes behind them, so a front end offers no control that
+    /// could only fail.
+    pub profile: Option<AccountProfileDto>,
     pub tier: Option<String>,
     /// Profile picture URL, when the account has one. Fetched by the front end
     /// rather than here: this crate has no business downloading images, and a
@@ -379,6 +387,38 @@ pub struct AccountDto {
     pub billing: Option<AccountBillingDto>,
     /// Optional server-owned relay ledger. Older servers omit it.
     pub relay_usage: Option<RelayUsageDto>,
+}
+
+/// Handle and visibility settings, as the account holds them.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountProfileDto {
+    pub public: bool,
+    /// Whether search engines may list the page while it is public.
+    pub indexable: bool,
+    /// Days until the handle may change. Zero when it may change today.
+    pub handle_change_days: u32,
+    /// Whether the one-time offer to claim a handle has been answered on any
+    /// device. Defaults to answered: an offer nobody can confirm was never
+    /// made must not be made twice.
+    pub handle_prompted: bool,
+}
+
+impl AccountProfileDto {
+    /// `None` unless the server sent the visibility this is built around.
+    pub fn from_value(raw: &Value) -> Option<Self> {
+        let flag = |name: &str| raw.get(name).and_then(Value::as_bool);
+        Some(Self {
+            public: flag("public")?,
+            indexable: flag("indexable").unwrap_or(true),
+            handle_change_days: raw
+                .get("handle_change_days")
+                .and_then(Value::as_u64)
+                .and_then(|days| u32::try_from(days).ok())
+                .unwrap_or(0),
+            handle_prompted: flag("handle_prompted").unwrap_or(true),
+        })
+    }
 }
 
 /// Account-wide relay counters, independent of device-local traffic.

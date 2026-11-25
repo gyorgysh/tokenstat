@@ -42,6 +42,14 @@ SKIP_STARTERS = (
 # Buttons whose whole surface is the label (rows, tiles, chips, links).
 # Snippet must uniquely identify that one button, not every Button in the file.
 ALLOWED = [
+    # The name in Account, a whole-surface row led by the person's picture.
+    ("Features/Account/ProfileSheet.swift", "Button { showing = true } label: {"),
+    # The handle's row in the profile window, led by its own ActionSeat.
+    ("Features/Account/ProfileSheet.swift", "Button(action: startEditing) {"),
+    # A choice in the profile window, a row led by its own ActionSeat.
+    ("Features/Account/ProfileSheet.swift", "Button { if !selected, !saving { select() } } label: {"),
+    # The address pill, which carries the copy glyph after the address.
+    ("Features/Account/ProfilePlate.swift", "Button(action: copy) {"),
     ("Features/Teams/TeamEditorSheet.swift", "Button(submitTitle, submitIcon, role:"),
     # A chat row in the sidebar, led by its agent's mark.
     ("App/RootView.swift", "HarnessMark(id: conversation.backend"),

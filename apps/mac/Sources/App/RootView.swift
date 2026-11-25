@@ -59,6 +59,7 @@ struct RootView: View {
     @State private var pullCounts = PullCountStore.shared
     @State private var machines = MachinesModel()
     @State private var showingSetupTour = false
+    @State private var showingHandleOffer = false
     /// The SSH library, owned by the shell rather than by a screen: the
     /// sidebar draws folders and a host count from it, and the content and
     /// inspector columns are two views over the same records.
@@ -847,6 +848,9 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .tokenstatOpenSetupTour)) { _ in
             showingSetupTour = true
         }
+        .modifier(HandleOffer(model: account,
+                              ready: route.isGlobal(.home) && account.signedIn && !showingSetupTour,
+                              showing: $showingHandleOffer))
         .gitSyncSheetHost()
         // A grant made here is what the phone is waiting on, so look again the
         // moment this window comes forward rather than on the next tick.
