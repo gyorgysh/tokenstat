@@ -522,6 +522,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             await WorkspaceDiff.ShowReviewAllAsync(this, reviewFiles, LoadOneDiffAsync);
         }));
         if (available.Count > 0) _root.Children.Add(selectionRow);
+        if (!string.IsNullOrEmpty(branch))
+        {
+            _root.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.autocommit.title"), ActionIcon.Commit, async (_, _) =>
+            {
+                await WorkspaceAutoCommit.ShowAsync(this, _id, folderName);
+                if (IsLoaded) await LoadAsync();
+            }));
+        }
 
         if (array is null || array.Count == 0)
         {

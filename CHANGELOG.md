@@ -27,6 +27,7 @@ desktop is a review build. Newest first.
 - On Android, Pull and Push can help you enable Git LFS on the connected computer before transferring large files.
 - On Windows, Pull and Push can help you enable Git LFS on the computer that holds the repository before transferring large files.
 - On Windows, create, edit, and set a project’s default persona from chat setup.
+- On Windows, Changes can start Auto commit with the agent and model you choose, and check the result if the start response is lost.
 
 ### Changed
 
