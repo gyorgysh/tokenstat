@@ -28,7 +28,7 @@ packages:
   # is enabled by the command-line build scripts and CI.
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
-    exactVersion: 1.99.3
+    exactVersion: 1.99.4
 
 settings:
   base:
