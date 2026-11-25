@@ -2726,6 +2726,9 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var runRevision: UInt64? = nil
     var runStartedAtMs: Int64? = nil
     var running: Bool
+    /// An approval or a question is open. Injected on `chat.list`, absent on
+    /// older hosts, where nothing is known rather than nothing waiting.
+    var waiting: Bool? = nil
     /// A note the host will hand to the next tool step. Injected on `chat.list`
     /// only, so a restart cannot send words the person no longer sees.
     var pendingSteer: String?
@@ -2771,7 +2774,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case personaID = "personaId"
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
-        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, runRevision, runStartedAtMs, pendingSteer, nativeSteer, nativeSteerAttachments
+        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, waiting, sendRevision, runRevision, runStartedAtMs, pendingSteer, nativeSteer, nativeSteerAttachments
         case branch, pull, pulls, routing, promptCache, continuedFrom
     }
 
@@ -2801,6 +2804,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         lastMessageAtMs = try c.decodeIfPresent(Int64.self, forKey: .lastMessageAtMs)
         lastMessageAuthor = try c.decodeIfPresent(String.self, forKey: .lastMessageAuthor)
         running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
+        waiting = try c.decodeIfPresent(Bool.self, forKey: .waiting)
         routing = try? c.decodeIfPresent(ChatRoutingState.self, forKey: .routing)
         pendingSteer = try c.decodeIfPresent(String.self, forKey: .pendingSteer)
         nativeSteer = try c.decodeIfPresent(Bool.self, forKey: .nativeSteer)

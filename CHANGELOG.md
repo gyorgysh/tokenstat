@@ -18,6 +18,7 @@ desktop is a review build. Newest first.
 
 ### Improved
 
+- On Mac, All repositories shows what each repository needs next: a chat waiting for you, failed checks, a review request, a pull request ready to merge, files not committed, or commits not pushed. Cards show 14 days of tokens with the days pull requests were opened, recent chats, and counts that open the page they count. Repositories you have not used lately shrink to one line. Press Space or Peek on a card to see its changed files, pull requests and which agents worked there, and use the arrow keys to move between cards. Tokens and pull requests are shown for repositories on this Mac.
 - On Mac, Changes in a pull request shows the file list beside the diff. Files, Git, History and the pull request tabs stay ready once opened, so switching back is immediate, and they show the shape of what is loading instead of a spinner.
 - On Mac, the pull request header uses the same small controls as the rest of the app, with Open on GitHub beside Refresh.
 

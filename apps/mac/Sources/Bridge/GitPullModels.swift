@@ -108,6 +108,18 @@ struct ChatPull: Codable, Sendable, Hashable, Identifiable {
         draft = pull.draft
     }
 
+    /// A listed pull request, as the page that opens it wants it.
+    init(_ pull: PullSummary, url: String, workspaceID: String) {
+        number = pull.number
+        title = pull.title
+        self.url = url
+        state = pull.state
+        draft = pull.draft
+        additions = pull.additions
+        deletions = pull.deletions
+        workspaceId = workspaceID
+    }
+
     var webURL: URL? {
         guard let value = URL(string: url), value.scheme?.lowercased() == "https", value.host != nil else { return nil }
         return value

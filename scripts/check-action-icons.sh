@@ -82,6 +82,12 @@ ALLOWED = [
     # The changes pill and the pull request chip are whole-surface labels: a
     # diff stat, and a state glyph with the pull request's number.
     ("Features/Workspaces/GitPullView.swift", "Button(action: review) {"),
+    # A repository card's rows. Each is led by its own mark: the agent, the
+    # diff stat, the file's counts, or the pull request's state drawing.
+    ("Features/Workspaces/RepositoryCard.swift", "actions.chat(chat.id, data.id)"),
+    ("Features/Workspaces/RepositoryCard.swift", "actions.section(section, data.id)"),
+    ("Features/Workspaces/RepositoryPeek.swift", "actions.file(file.path, folder.id)"),
+    ("Features/Workspaces/RepositoryPeek.swift", "actions.pull(pull.number, folder.id)"),
     # The branch chip/card and each branch are whole-surface controls. Their
     # labels already carry the branch/check glyph; another action glyph would
     # duplicate the mark instead of clarifying the action.
@@ -178,9 +184,6 @@ ALLOWED = [
     ("Client/ClientSecurityCard.swift", "UIPasteboard.general.string = key"),
     ("Client/ClientRecentChats.swift", "onChoose(folder)"),
     ("Client/ClientHomeMachinesSection.swift", "navigation.openDevice"),
-    # A folder card in the all-folders overview. The whole card is the label
-    # and it already carries the archive mark; a second glyph would duplicate it.
-    ("Features/Workspaces/WorkspacesOverviewView.swift", "onOpenFolder(folder.id)"),
     ("Client/ClientStates.swift", 'Button(showingDetail ?'),
     ("Client/ClientWorkspaceDetailView.swift", "openExisting(session)"),
     # A launcher destination tile. The browser glyph is inside the shared

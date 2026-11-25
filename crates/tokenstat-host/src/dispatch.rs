@@ -2270,6 +2270,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             let workspace = p.workspace_id.ok_or("chat.list needs a workspaceId")?;
             let mut value = serde_json::to_value(store.list(&workspace)).envelope()?;
             store.attach_pending_steers(&mut value);
+            store.attach_waiting(&mut value);
             store.attach_routing(&mut value);
             attach_branch_pulls(&mut value);
             crate::chat_pulls::attach(&mut value);

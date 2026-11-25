@@ -1007,8 +1007,8 @@ impl Store {
         rows
     }
 
-    /// All active chats, without the recent-list cap or transcript reads.
-    pub(crate) fn live_work(&self) -> Vec<(String, String, String, bool)> {
+    /// Conversations with an open approval or an unanswered question.
+    fn waiting_on_person(&self) -> HashSet<String> {
         let now = now_ms();
         let mut waiting: HashSet<String> = self
             .approvals
@@ -1026,6 +1026,30 @@ impl Store {
                 .filter(|(_, questions)| questions.values().any(|open| *open))
                 .map(|(id, _)| id.clone()),
         );
+        waiting
+    }
+
+    /// Say on each listed conversation whether it is waiting on a person, so
+    /// an overview needs no second read. Volatile, and never written to disk.
+    pub fn attach_waiting(&self, value: &mut Value) {
+        let Some(rows) = value.as_array_mut() else {
+            return;
+        };
+        let waiting = self.waiting_on_person();
+        for row in rows {
+            let is_waiting = row
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| waiting.contains(id));
+            if let Some(object) = row.as_object_mut() {
+                object.insert("waiting".into(), Value::Bool(is_waiting));
+            }
+        }
+    }
+
+    /// All active chats, without the recent-list cap or transcript reads.
+    pub(crate) fn live_work(&self) -> Vec<(String, String, String, bool)> {
+        let waiting = self.waiting_on_person();
         self.conversations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -14374,7 +14398,13 @@ mod tests {
             HashMap::from([("question".into(), true)]),
         );
         assert_eq!(store.work_overview()[0].3, "waiting");
+        let mut listed = json!([{ "id": "completed-overview" }, { "id": "other" }]);
+        store.attach_waiting(&mut listed);
+        assert_eq!(listed[0]["waiting"], true, "an open question is waiting");
+        assert_eq!(listed[1]["waiting"], false);
         store.question_attention.lock().unwrap().clear();
+        store.attach_waiting(&mut listed);
+        assert_eq!(listed[0]["waiting"], false);
         assert_eq!(
             store.work_overview()[0].3,
             "done",

@@ -7,34 +7,55 @@
 #if os(macOS)
 import SwiftUI
 
-/// Every registered folder on every machine, as cards.
+/// Every registered repository on every machine, by what it needs next.
 ///
-/// The first row under the Workspaces heading, where a growing folder list
-/// stays findable. One card carries what a scan looks for: folder, machine,
-/// branch, dirty files, running sessions. A card opens the folder in the
-/// existing workbench; nothing about the workbench changes.
+/// The sidebar already lists the folders. This page answers the other
+/// question: what is waiting on the person, what is moving, and what was left
+/// unfinished. Each card says one next step and every figure on it opens the
+/// page it counts.
 ///
-/// Only drawn facts. A machine that is asleep keeps its last known folders
-/// with quiet badges, and a missing badge means the host did not answer, not
-/// zero. See `docs/plan-remote-expansion-1.0.md` workstream F.
+/// Only drawn facts. A machine that is asleep keeps its last known folders,
+/// and a missing figure means the host did not answer, not zero.
 struct WorkspacesOverviewView: View {
+    @Bindable var model: RepositoryOverviewModel
     var folders: [WorkspaceFolder]
     var summaries: [String: WorkspaceSummary]
     var directoryPresentation: WorkspaceDirectoryPresentation = .empty
     var directoryError: String? = nil
+    var isFullScreen = false
+    /// The inspector is on screen. A card it is not showing is not marked.
+    var peekShown = false
     var onRetry: () -> Void = {}
+    var chatsIn: (String) -> [ChatConversation]
     /// Live local sessions per folder id. Remote counts ride the summaries.
     var sessionsIn: (String) -> Int
+    /// True only for a computer known to be away.
+    var isAsleep: (WorkspaceFolder) -> Bool = { _ in false }
     /// The teams a local folder is shared into, by organization name. Empty
     /// for a folder nobody else can see.
     var sharedWith: (WorkspaceFolder) -> [String] = { _ in [] }
-    var onOpenFolder: (String) -> Void
+    var refreshChats: (WorkspaceFolder) async -> Void
+    var actions: RepositoryActions
     var onAdd: () -> Void
+
+    private enum Order: String, CaseIterable { case needs, yours, name }
 
     @State private var scope: String?
     @State private var search = ""
-    @State private var alphabetical = false
-    @AppStorage("workspaces.gridLayout") private var gridLayout = false
+    @AppStorage("repositories.order") private var order: Order = .needs
+    @State private var held: [String] = []
+    @State private var settled = false
+    @State private var columns = 2
+    @State private var pointerOnCards = false
+    @State private var showsAllNeeds = false
+    @State private var pointer = ChatStartPointer()
+    @FocusState private var focused: String?
+    @Environment(\.scenePhase) private var scenePhase
+
+    private static let cardMinimum: CGFloat = 360
+    private static let gap: CGFloat = 14
+
+    // MARK: Scope
 
     private struct MachineScope: Hashable {
         var id: String?
@@ -42,39 +63,212 @@ struct WorkspacesOverviewView: View {
     }
 
     private var scopes: [MachineScope] {
-        var scopes = [MachineScope(id: nil, label: L10n.text("apple.workspacesoverviewview.all.a52ace42"))]
+        var scopes = [MachineScope(id: nil, label: L10n.text("apple.repositories.all_machines"))]
         if folders.contains(where: { !$0.isRemote }) {
             scopes.append(MachineScope(id: "local", label: L10n.text("apple.workspacesoverviewview.this_mac.79a4aefc")))
         }
         let remote = Dictionary(grouping: folders.filter(\.isRemote), by: \.machineID)
         for key in remote.keys.sorted(by: { ($0 ?? "") < ($1 ?? "") }) {
-            let label = remote[key]?.first?.machineLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-            scopes.append(MachineScope(
-                id: key ?? "remote",
-                label: (label?.isEmpty == false) ? label! : L10n.text("apple.workspacesoverviewview.remote_machine.d9dd1af3")
-            ))
+            scopes.append(MachineScope(id: key ?? "remote", label: remote[key]?.first.map(machine) ?? ""))
         }
         return scopes
     }
 
-    private var shown: [WorkspaceFolder] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let result = folders.filter { folder in
-            let matchesScope = scope == nil || (scope == "local" ? !folder.isRemote : folder.isRemote && (folder.machineID ?? "remote") == scope)
-            return matchesScope && (query.isEmpty || folder.name.localizedCaseInsensitiveContains(query)
-                || folder.path.localizedCaseInsensitiveContains(query)
-                || (folder.machineLabel?.localizedCaseInsensitiveContains(query) ?? false))
-        }
-        return alphabetical ? result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } : result
+    private func matches(_ folder: WorkspaceFolder, query: String) -> Bool {
+        guard scope == nil || (scope == "local" ? !folder.isRemote : folder.isRemote && (folder.machineID ?? "remote") == scope)
+        else { return false }
+        if query.isEmpty { return true }
+        return folder.name.localizedCaseInsensitiveContains(query)
+            || folder.path.localizedCaseInsensitiveContains(query)
+            || (folder.machineLabel?.localizedCaseInsensitiveContains(query) ?? false)
+            || chatsIn(folder.id).contains { $0.title.localizedCaseInsensitiveContains(query) }
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-        DetailChromeBar {
-            EmptyView()
+    private func machine(_ folder: WorkspaceFolder) -> String {
+        guard folder.isRemote else { return L10n.text("apple.workspacesoverviewview.this_mac.79a4aefc") }
+        let label = folder.machineLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (label?.isEmpty == false) ? label! : L10n.text("apple.workspacesoverviewview.remote_machine.d9dd1af3")
+    }
+
+    // MARK: Data
+
+    private func card(_ folder: WorkspaceFolder) -> RepositoryCardData {
+        let summary = summaries[folder.id]
+        let chats = chatsIn(folder.id)
+        let usage = model.usage[folder.id]
+        let pulls = model.pulls[folder.id]
+        let terminals = folder.isRemote ? (summary?.sessions ?? 0) : sessionsIn(folder.id)
+        let asleep = isAsleep(folder)
+        // What a sleeping computer was doing when it was last heard is not
+        // what it is doing now.
+        let waiting = asleep ? [] : chats.filter { $0.waiting == true }
+        let running = asleep ? [] : chats.filter { $0.running && $0.waiting != true }
+        let last = chats.map { $0.lastMessageAtMs ?? $0.updatedAtMs }.max()
+
+        var facts = RepositoryFacts()
+        facts.exists = folder.exists
+        facts.reachable = !asleep
+        facts.waitingChatIDs = waiting.map(\.id)
+        facts.runningChats = running.count
+        facts.liveTerminals = asleep ? 0 : terminals
+        facts.changedFiles = folder.changeCount
+        facts.unpushedCommits = Int(folder.git?.ahead ?? 0)
+        facts.behindCommits = Int(folder.git?.behind ?? 0)
+        facts.lastActivity = last.flatMap { $0 > 0 ? Date(timeIntervalSince1970: TimeInterval($0) / 1000) : nil }
+        facts.hasRecentUsage = (usage?.total ?? 0) > 0
+        facts.pulls = (pulls?.open ?? []).map { pull in
+            .init(number: pull.number, mine: pulls?.isMine(pull) ?? false, draft: pull.draft,
+                  failing: pull.checks == .failing, passing: pull.checks == .passing,
+                  review: pull.reviewDecision, reviewRequested: pulls?.requested.contains(pull.number) ?? false)
         }
-        // One row: find a folder, pick a machine, order, add. The summary
-        // tiles that stood here counted what the grid below already shows.
+
+        let rows = chats.sorted { a, b in
+            func rank(_ chat: ChatConversation) -> Int {
+                asleep ? 2 : chat.waiting == true ? 0 : chat.running ? 1 : 2
+            }
+            if rank(a) != rank(b) { return rank(a) < rank(b) }
+            return (a.lastMessageAtMs ?? a.updatedAtMs) > (b.lastMessageAtMs ?? b.updatedAtMs)
+        }
+        let branch = folder.git?.isRepo == true ? folder.git?.branch : nil
+        return RepositoryCardData(
+            id: folder.id, name: folder.name, path: folder.path, machine: machine(folder),
+            isRemote: folder.isRemote, symbol: folder.symbol,
+            branch: branch?.isEmpty == false ? branch : nil,
+            ahead: folder.git?.ahead ?? 0, behind: folder.git?.behind ?? 0,
+            teams: sharedWith(folder), facts: facts, step: RepositoryNextStep.next(facts),
+            workingAgent: running.first?.backend,
+            dayKeys: usage == nil ? [] : model.days, days: usage?.days ?? [], marks: pulls?.marks ?? [:],
+            // Every waiting or running chat, so the strip can name each one.
+            chats: Array(rows.prefix(max(3, waiting.count + running.count))).map {
+                .init(id: $0.id, title: $0.title, backend: $0.backend, at: $0.lastMessageAtMs ?? $0.updatedAtMs,
+                      running: !asleep && $0.running, waiting: !asleep && $0.waiting == true, pulls: $0.pulls)
+            },
+            added: folder.git?.added ?? 0, removed: folder.git?.removed ?? 0, changedFiles: folder.changeCount,
+            openPulls: pulls?.open.count,
+            chatCount: summary?.chats ?? chats.count, taskCount: summary?.tasks ?? 0, terminalCount: terminals,
+            isQuiet: RepositoryNextStep.isQuiet(facts))
+    }
+
+    /// In the order asked for, taken once and then held still.
+    private func sorted(_ cards: [RepositoryCardData]) -> [RepositoryCardData] {
+        switch order {
+        case .yours: return cards
+        case .name: return cards.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .needs:
+            let fresh = Self.ranked(cards)
+            guard settled else { return fresh }
+            let ids = RepositoryOrder.merge(held: held, current: fresh.map(\.id))
+            let byID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
+            return ids.compactMap { byID[$0] }
+        }
+    }
+
+    private static func ranked(_ cards: [RepositoryCardData]) -> [RepositoryCardData] {
+        cards.enumerated().sorted { a, b in
+            if a.element.step.rank != b.element.step.rank { return a.element.step.rank < b.element.step.rank }
+            let left = a.element.facts.lastActivity ?? .distantPast
+            let right = b.element.facts.lastActivity ?? .distantPast
+            return left == right ? a.offset < b.offset : left > right
+        }.map(\.element)
+    }
+
+    private func hold(_ cards: [RepositoryCardData]) {
+        held = Self.ranked(cards).map(\.id)
+        settled = true
+    }
+
+    // MARK: Body
+
+    var body: some View {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let all = folders.map(card)
+        let visible = Set(folders.filter { matches($0, query: query) }.map(\.id))
+        let shown = sorted(all).filter { visible.contains($0.id) }
+        // A search or a chosen order is a request to see them, not a summary.
+        let splits = order == .needs && query.isEmpty
+        let active = splits ? shown.filter { !$0.isQuiet } : shown
+        let quiet = splits ? shown.filter(\.isQuiet) : []
+
+        VStack(spacing: 0) {
+            DetailChromeBar { EmptyView() }
+            VStack(spacing: 0) {
+                tools
+                ThemeRule()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        if folders.isEmpty {
+                            if directoryPresentation == .empty {
+                                FirstProjectPrompt(onAdd: onAdd).frame(maxWidth: .infinity)
+                            } else {
+                                WorkspaceDirectoryPlaceholder(presentation: directoryPresentation,
+                                                              error: directoryError, retry: onRetry)
+                            }
+                        } else if shown.isEmpty {
+                            ContentUnavailableView.search(text: search)
+                        } else {
+                            if query.isEmpty {
+                                hero(shown)
+                                needsStrip(shown)
+                            }
+                            if !active.isEmpty { grid(active, titled: !quiet.isEmpty) }
+                            if !quiet.isEmpty { quietList(quiet) }
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 28)
+                    .padding(.bottom, 36)
+                    .frame(maxWidth: 1180, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .background {
+                // The new chat page's surface, held still: the same room, with
+                // the light on the headline instead of the composer.
+                ChatStartBackdrop(isFullScreen: isFullScreen, active: false, pointer: pointer,
+                                  focus: UnitPoint(x: 0.3, y: 0.08))
+            }
+        }
+        .onChange(of: folders.map(\.id)) { _, _ in
+            // The machine a filter named can leave while the filter stays.
+            // Fall back to all rather than an empty grid.
+            if let scope, !scopes.contains(where: { $0.id == scope }) { self.scope = nil }
+            if let peek = model.peekID, !folders.contains(where: { $0.id == peek }) { model.peekID = nil }
+        }
+        .onChange(of: order) { _, _ in hold(folders.map(card)) }
+        .task(id: scenePhase != .background) {
+            guard scenePhase != .background else { return }
+            await keepFresh()
+        }
+    }
+
+    /// Reads only, and only while the page is on screen. Local chat lists come
+    /// from the host's memory. Paired computers are asked once a minute, and
+    /// only those that already answered.
+    private func keepFresh() async {
+        await BridgeLaunch.wait()
+        var pass = 0
+        while !Task.isCancelled {
+            for folder in folders {
+                guard !Task.isCancelled else { return }
+                if folder.isRemote, pass % 6 != 0 || summaries[folder.id] == nil || isAsleep(folder) { continue }
+                await refreshChats(folder)
+            }
+            await model.loadUsage(folders)
+            if !settled, !folders.isEmpty, !Task.isCancelled { hold(folders.map(card)) }
+            await model.loadPulls(folders.filter { !card($0).isQuiet })
+            // The first answers about pull requests may reorder the page, but
+            // never under a pointer or a keyboard that is already using it.
+            if pass == 0, !Task.isCancelled, !folders.isEmpty, !pointerOnCards, focused == nil {
+                hold(folders.map(card))
+            }
+            pass += 1
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+        }
+    }
+
+    // MARK: Tools
+
+    private var tools: some View {
         HStack(spacing: Theme.Space.s) {
             SearchField(text: $search, prompt: L10n.text("apple.workspacesoverviewview.search_projects.9e079c7d"))
                 .frame(maxWidth: 300)
@@ -88,247 +282,286 @@ struct WorkspacesOverviewView: View {
                 .labelsHidden()
                 .fixedSize()
             }
-            Picker(L10n.text("apple.workspacesoverviewview.sort.bec69036"), selection: $alphabetical) {
-                Text(L10n.text("apple.workspacesoverviewview.your_order.f159e18f")).tag(false)
-                Text(L10n.text("apple.workspacesoverviewview.name_a_z.7ed96629")).tag(true)
+            Picker(L10n.text("apple.workspacesoverviewview.sort.bec69036"), selection: $order) {
+                Text(L10n.text("apple.repositories.order_needs")).tag(Order.needs)
+                Text(L10n.text("apple.workspacesoverviewview.your_order.f159e18f")).tag(Order.yours)
+                Text(L10n.text("apple.workspacesoverviewview.name_a_z.7ed96629")).tag(Order.name)
             }
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
             Spacer(minLength: Theme.Space.s)
-            ToolbarIconButton(systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
-                help: gridLayout ? L10n.text("apple.workspacesoverviewview.show_workspaces_as_a_list.deeb9b94") : L10n.text("apple.workspacesoverviewview.show_workspaces_as_cards.45515189")) { gridLayout.toggle() }
             Button(L10n.text("common.add_project"), .create) { onAdd() }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
-        ThemeRule()
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if folders.isEmpty {
-                    if directoryPresentation == .empty {
-                        emptyState
-                    } else {
-                        WorkspaceDirectoryPlaceholder(presentation: directoryPresentation,
-                            error: directoryError, retry: onRetry)
-                    }
-                } else if shown.isEmpty {
-                    ContentUnavailableView.search(text: search)
-                } else if !gridLayout {
-                    LazyVStack(spacing: 0) {
-                        ForEach(shown) { folder in
-                            folderRow(folder)
-                            ThemeRule()
-                        }
-                    }
-                } else {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 300), spacing: Theme.Space.m)],
-                        spacing: Theme.Space.m
-                    ) {
-                        ForEach(shown) { folder in
-                            folderCard(folder)
-                        }
-                    }
-                }
-            }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        }
-        .desktopPaneBackground()
-        .onChange(of: folders.map(\.id)) { _, _ in
-            // The machine a filter named can leave while the filter stays.
-            // Fall back to all rather than an empty grid.
-            if let scope, !scopes.contains(where: { $0.id == scope }) {
-                self.scope = nil
-            }
-        }
     }
 
-    private var summaryLine: String {
-        let remote = folders.filter(\.isRemote).count
-        switch (folders.count, remote) {
-        case (0, _): return L10n.text("apple.workspacesoverviewview.nothing_registered_yet.84c3bf04")
-        case let (all, 0): return L10n.text("apple.workspacesoverviewview.0_on_this_mac.bb17ca22", "\(all)")
-        case let (all, _) where all == remote: return L10n.text("apple.workspacesoverviewview.0_on_remote_machines.a32076a4", "\(all)")
-        case let (all, r): return L10n.text("apple.workspacesoverviewview.0_here_1_remote.fb100df4", "\(all - r)", "\(r)")
-        }
-    }
+    // MARK: Headline
 
-    private var emptyState: some View {
-        FirstProjectPrompt(onAdd: onAdd)
-            .frame(maxWidth: .infinity)
-    }
-
-    private func folderRow(_ folder: WorkspaceFolder) -> some View {
-        Button { onOpenFolder(folder.id) } label: {
-            HStack(spacing: Theme.Space.m) {
-                Image(systemName: "folder")
-                    .font(Theme.font(20)).foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: Theme.Space.s) {
-                        Text(folder.name).font(Theme.callout.weight(.semibold)).lineLimit(1)
-                        teamBadges(folder)
-                    }
-                    Text("\(machineLine(for: folder) ?? "") · \(folder.path)")
-                        .font(Theme.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                    if !folder.exists {
-                        Text(L10n.text("apple.workspacesoverviewview.folder_missing.f06c68a6")).font(Theme.caption).foregroundStyle(Theme.warning)
-                    } else if let activity = activityLine(for: folder) {
-                        Text(activity).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                Spacer(minLength: Theme.Space.s)
-                if let summary = summaries[folder.id] {
-                    Text((summary.tasks == 1 ? L10n.text("apple.workspacesoverviewview.0_task_1.d478181b.one", "\(summary.tasks)") : L10n.text("apple.workspacesoverviewview.0_task_1.d478181b.other", "\(summary.tasks)")))
-                        .font(Theme.caption).foregroundStyle(.secondary).fixedSize()
-                }
-                Image(systemName: "chevron.right")
-                    .font(Theme.font(11, weight: .medium)).foregroundStyle(.tertiary)
-            }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-        }
-        .buttonStyle(RowFeedbackStyle(bleed: 6, radius: 8))
-        .help(folder.path)
-    }
-
-    private func folderCard(_ folder: WorkspaceFolder) -> some View {
-        Button {
-            onOpenFolder(folder.id)
-        } label: {
-            Card(
-                title: folder.name,
-                subtitle: machineLine(for: folder),
-                mark: "mark_archive",
-                accessory: sharedWith(folder).isEmpty ? nil : AnyView(teamBadges(folder)),
-                fillsHeight: true
-            ) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(folder.path)
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1).truncationMode(.middle)
-                        .help(folder.path)
-                        .padding(.bottom, Theme.Space.s)
-                    if !folder.exists {
-                        Text(L10n.text("apple.workspacesoverviewview.folder_missing.f06c68a6"))
-                            .font(Theme.callout.weight(.medium))
-                            .foregroundStyle(Theme.warning)
-                    } else if let gitLine = gitLine(for: folder) {
-                        HStack(spacing: 5) {
-                            // The same glyph the sidebar rows use, for the
-                            // same reason: a bare branch reads as a count.
-                            if hasBranch(folder) {
-                                Image(systemName: "arrow.triangle.branch")
-                                    .font(Theme.mono(11, weight: .medium))
-                            }
-                            Text(gitLine)
-                                .lineLimit(1)
-                        }
-                        .font(Theme.mono(12))
-                        .foregroundStyle(.secondary)
-                    }
-                    if let activity = activityLine(for: folder) {
-                        Text(activity)
-                            .font(Theme.callout)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    if let summary = summaries[folder.id] {
-                        HStack(spacing: Theme.Space.m) {
-                            Label(L10n.text("apple.workspacesoverviewview.0_tasks.5076ea6e", "\(summary.tasks)"), systemImage: "checklist")
-                            if let notes = summary.notes {
-                                Label(L10n.text("apple.workspacesoverviewview.0_notes.8da860e0", "\(notes)"), systemImage: "note.text")
-                            }
-                        }
-                        .font(Theme.caption).foregroundStyle(.secondary)
-                        .padding(.top, Theme.Space.s)
-                    }
-                    ThemeRule().padding(.vertical, Theme.Space.s)
-                    HStack {
-                        if let changed = summaries[folder.id]?.changed {
-                            Text(changed == 0 ? L10n.text("apple.workspacesoverviewview.no_pending_changes.069d0076") : L10n.text("apple.workspacesoverviewview.0_changed_files.dd8411f2", "\(changed)"))
-                                .foregroundStyle(changed == 0 ? Theme.accent : Theme.secondary)
-                        }
-                        Spacer(minLength: 0)
-                        Label(L10n.text("apple.workspacesoverviewview.open_workspace.b3e34b18"), systemImage: "arrow.up.right")
-                            .foregroundStyle(Theme.accent)
-                    }.font(Theme.caption.weight(.medium))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(folder.name), \(machineLine(for: folder) ?? L10n.text("apple.workspacesoverviewview.folder.034a0062"))")
-    }
-
-    private func teamBadges(_ folder: WorkspaceFolder) -> some View {
-        TeamFolderBadges(names: sharedWith(folder))
-    }
-
-    private func machineLine(for folder: WorkspaceFolder) -> String? {
-        if folder.isRemote {
-            let label = folder.machineLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return (label?.isEmpty == false) ? label : L10n.text("apple.workspacesoverviewview.remote_machine.d9dd1af3")
-        }
-        return L10n.text("apple.workspacesoverviewview.this_mac.79a4aefc")
-    }
-
-    private func hasBranch(_ folder: WorkspaceFolder) -> Bool {
-        folder.git?.isRepo == true && folder.git?.branch?.isEmpty == false
-    }
-
-    private func gitLine(for folder: WorkspaceFolder) -> String? {
-        guard let git = folder.git, git.isRepo else { return nil }
-        var parts: [String] = []
-        if let branch = git.branch, !branch.isEmpty { parts.append(branch) }
-        if git.ahead > 0 { parts.append("⇡\(git.ahead)") }
-        if git.behind > 0 { parts.append("⇣\(git.behind)") }
-        if let stat = folder.diffStat { parts.append(stat) }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private func activityLine(for folder: WorkspaceFolder) -> String? {
-        let sessions = folder.isRemote
-            ? (summaries[folder.id]?.sessions ?? 0)
-            : sessionsIn(folder.id)
-        let chats = summaries[folder.id]?.chats
-        var parts: [String] = []
-        if sessions > 0 {
-            parts.append((sessions == 1 ? L10n.text("apple.workspacesoverviewview.0_session_1.aa4d5aa6.one", "\(sessions)") : L10n.text("apple.workspacesoverviewview.0_session_1.aa4d5aa6.other", "\(sessions)")))
-        }
-        if let chats, chats > 0 {
-            parts.append((chats == 1 ? L10n.text("apple.workspacesoverviewview.0_chat_1.2838f969.one", "\(chats)") : L10n.text("apple.workspacesoverviewview.0_chat_1.2838f969.other", "\(chats)")))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-}
-
-/// The inspector column while the overview is showing.
-///
-/// The column exists here, so it says what it is waiting for rather than
-/// standing blank: pick a card and this becomes that folder's inspector.
-struct WorkspacesOverviewPlaceholder: View {
-    var onClose: () -> Void
-    var body: some View {
-        VStack(spacing: 0) {
-            InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: L10n.text("apple.workspacesoverviewview.project.98595978"), symbol: "folder")
+    private func hero(_ cards: [RepositoryCardData]) -> some View {
+        let owed = cards.reduce(0) { $0 + RepositoryNextStep.owed($1.facts).count }
+        let working = cards.reduce(0) { $0 + $1.facts.runningChats }
+        let unfinished = cards.filter { $0.facts.reachable && ($0.facts.changedFiles > 0 || $0.facts.unpushedCommits > 0) }.count
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .bottom, spacing: 32) {
+                headline(owed: owed, working: working, unfinished: unfinished).fixedSize()
                 Spacer(minLength: 0)
+                figures(cards)
             }
-            InspectorEmptyState(mark: "mark_archive", title: L10n.text("apple.workspacesoverviewview.pick_a_folder.2226bfe1"), subtitle: L10n.text("apple.workspacesoverviewview.open_a_workspace_to_see_its_details_and_to.63f8fdb0"))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: 16) {
+                headline(owed: owed, working: working, unfinished: unfinished)
+                figures(cards)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The joined shell draws the canvas, so the title row sits on the
-        // same glass as the toolbar beside it instead of a white block.
-        .desktopPaneBackground()
+    }
+
+    private func headline(owed: Int, working: Int, unfinished: Int) -> some View {
+        let title: String
+        if owed > 0 {
+            title = owed == 1 ? L10n.text("apple.repositories.headline_needs.one") : L10n.text("apple.repositories.headline_needs.other", "\(owed)")
+        } else if working > 0 {
+            title = working == 1 ? L10n.text("apple.repositories.headline_working.one") : L10n.text("apple.repositories.headline_working.other", "\(working)")
+        } else {
+            title = L10n.text("apple.repositories.headline_clear")
+        }
+        var lines: [String] = []
+        if owed > 0, working > 0 {
+            lines.append(working == 1 ? L10n.text("apple.repositories.sub_working.one") : L10n.text("apple.repositories.sub_working.other", "\(working)"))
+        }
+        if unfinished > 0 {
+            lines.append(unfinished == 1 ? L10n.text("apple.repositories.sub_unfinished.one") : L10n.text("apple.repositories.sub_unfinished.other", "\(unfinished)"))
+        }
+        if lines.isEmpty { lines.append(L10n.text("apple.repositories.sub_clear")) }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(Theme.largeTitle).accessibilityAddTraits(.isHeader)
+            Text(lines.joined(separator: " ")).font(Theme.body).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private func figures(_ cards: [RepositoryCardData]) -> some View {
+        let usage = cards.compactMap { model.usage[$0.id] }
+        let week = usage.reduce(UInt64(0)) { $0.saturatingAdd($1.week) }
+        if week > 0 {
+            let today = usage.reduce(UInt64(0)) { $0.saturatingAdd($1.today) }
+            let value = usage.compactMap(\.weekValue).reduce(Int64(0), +)
+            HStack(alignment: .top, spacing: 28) {
+                figure(L10n.text("apple.repositories.tokens_today"), formatTokens(today))
+                figure(L10n.text("apple.repositories.tokens_week"), formatTokens(week))
+                if value > 0 {
+                    // List-rate value, never a bill. See `Bucket.value`.
+                    figure(L10n.text("apple.repositories.week_list_rates"), formatSpend(UInt64(value)))
+                }
+            }
+            .fixedSize()
+        }
+    }
+
+    private func figure(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(Theme.font(10.5, weight: .semibold)).textCase(.uppercase).tracking(0.4)
+                .foregroundStyle(.secondary)
+            Text(value).font(Theme.font(17, weight: .semibold)).monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Needs you
+
+    private struct Need: Identifiable {
+        var card: RepositoryCardData
+        var step: RepositoryNextStep
+        var id: String { "\(card.id)|\(step)" }
+    }
+
+    private static func needs(in cards: [RepositoryCardData]) -> [Need] {
+        var needs: [Need] = []
+        for card in cards {
+            for step in RepositoryNextStep.owed(card.facts) { needs.append(Need(card: card, step: step)) }
+        }
+        // Most pressing first across repositories, steady among equals.
+        let ranked = needs.enumerated().sorted { (a: (offset: Int, element: Need), b: (offset: Int, element: Need)) -> Bool in
+            let left = a.element.step.rank, right = b.element.step.rank
+            return left == right ? a.offset < b.offset : left < right
+        }
+        return ranked.map(\.element)
+    }
+
+    @ViewBuilder private func needsStrip(_ cards: [RepositoryCardData]) -> some View {
+        let needs = Self.needs(in: cards)
+        if !needs.isEmpty {
+            let visible = showsAllNeeds ? needs : Array(needs.prefix(6))
+            VStack(alignment: .leading, spacing: 12) {
+                eyebrow(L10n.text("apple.repositories.needs_you"), count: needs.count)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                    ForEach(visible) { need in needCard(need) }
+                }
+                if needs.count > visible.count {
+                    Button(L10n.text("apple.repositories.show_more", "\(needs.count - visible.count)"), .more) { showsAllNeeds = true }
+                        .buttonStyle(QuietLinkStyle())
+                        .font(Theme.callout)
+                }
+            }
+        }
+    }
+
+    private func needCard(_ need: Need) -> some View {
+        let step = RepositoryStepPresentation(need.step, data: need.card)
+        let detail = detail(need)
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Image(systemName: step.symbol).font(Theme.font(13, weight: .semibold))
+                    .foregroundStyle(step.tint).frame(width: 16).accessibilityHidden(true)
+                Text(step.text).font(Theme.callout.weight(.semibold)).lineLimit(1).help(step.text)
+                Spacer(minLength: 4)
+                if let age = detail.age {
+                    Text(age).font(Theme.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                }
+            }
+            Text(detail.title).font(Theme.callout).foregroundStyle(.secondary).lineLimit(1).help(detail.title)
+            HStack(spacing: 8) {
+                Text(need.card.name).font(Theme.subheadline.weight(.semibold)).lineLimit(1)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Theme.accentSoft, in: Capsule())
+                Spacer(minLength: 4)
+                if let action = step.action {
+                    Button(action.label, action.icon) { actions.perform(need.step, in: need.card) }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(step.text), \(need.card.name)")
+    }
+
+    private func detail(_ need: Need) -> (title: String, age: String?) {
+        switch need.step {
+        case let .waiting(id):
+            guard let chat = need.card.chats.first(where: { $0.id == id }) else { return (need.card.name, nil) }
+            return (chat.title, chat.at > 0 ? CompactAge.text(ms: chat.at) : nil)
+        case let .checksFailed(number), let .changesRequested(number),
+             let .reviewRequested(number), let .readyToMerge(number):
+            guard let pull = model.pulls[need.card.id]?.open.first(where: { $0.number == number }) else { return ("#\(number)", nil) }
+            return (pull.title, pull.updatedDate.map { CompactAge.text($0) })
+        default: return (need.card.name, nil)
+        }
+    }
+
+    // MARK: Cards
+
+    private func eyebrow(_ title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(title).font(Theme.font(10.5, weight: .semibold)).textCase(.uppercase).tracking(0.4)
+                .foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+            Text("\(count)").font(Theme.subheadline).foregroundStyle(.tertiary).monospacedDigit()
+        }
+    }
+
+    private func grid(_ cards: [RepositoryCardData], titled: Bool) -> some View {
+        let ids = cards.map(\.id)
+        let rows = stride(from: 0, to: cards.count, by: columns).map { Array(cards[$0..<min($0 + columns, cards.count)]) }
+        return VStack(alignment: .leading, spacing: 12) {
+            if titled { eyebrow(L10n.text("apple.repositories.active"), count: cards.count) }
+            // A grid rather than a lazy one: cards in a row share a height,
+            // and nobody has enough repositories in use for that to cost.
+            Grid(alignment: .topLeading, horizontalSpacing: Self.gap, verticalSpacing: Self.gap) {
+                ForEach(rows, id: \.first?.id) { row in
+                    GridRow {
+                        ForEach(row) { data in
+                            RepositoryCard(data: data, isSelected: peekShown && model.peekID == data.id,
+                                           isFocused: focused == data.id, actions: actions)
+                                .equatable()
+                                .focusable()
+                                .focusEffectDisabled()
+                                .focused($focused, equals: data.id)
+                                .onTapGesture {
+                                    focused = data.id
+                                    if peekShown, model.peekID != nil { model.peekID = data.id }
+                                }
+                                .onKeyPress { press in handle(press, data: data, ids: ids) }
+                        }
+                        ForEach(0..<(columns - row.count), id: \.self) { _ in
+                            Color.clear.gridCellUnsizedAxes(.vertical)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onHover { pointerOnCards = $0 }
+        .onGeometryChange(for: Int.self) { proxy in
+            max(1, min(3, Int((proxy.size.width + Self.gap) / (Self.cardMinimum + Self.gap))))
+        } action: { columns = $0 }
+    }
+
+    private func handle(_ press: KeyPress, data: RepositoryCardData, ids: [String]) -> KeyPress.Result {
+        guard press.modifiers.isSubset(of: [.numericPad, .function]) else { return .ignored }
+        switch press.key {
+        case .space: actions.peek(data.id); return .handled
+        case .return: actions.open(data.id); return .handled
+        case .leftArrow: return move(-1, from: data.id, ids: ids)
+        case .rightArrow: return move(1, from: data.id, ids: ids)
+        case .upArrow: return move(-columns, from: data.id, ids: ids)
+        case .downArrow: return move(columns, from: data.id, ids: ids)
+        default: return .ignored
+        }
+    }
+
+    private func move(_ delta: Int, from id: String, ids: [String]) -> KeyPress.Result {
+        guard let index = ids.firstIndex(of: id),
+              let next = RepositoryOrder.move(from: index, by: delta, count: ids.count) else { return .ignored }
+        focused = ids[next]
+        // A peek that is open follows the cards, the way Quick Look does.
+        if peekShown, model.peekID != nil { model.peekID = ids[next] }
+        return .handled
+    }
+
+    private func quietList(_ cards: [RepositoryCardData]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                eyebrow(L10n.text("apple.repositories.quiet"), count: cards.count)
+                Text(L10n.text("apple.repositories.quiet_note")).font(Theme.subheadline).foregroundStyle(.tertiary)
+            }
+            .padding(.bottom, 4)
+            ForEach(cards) { data in
+                Button { actions.open(data.id) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: data.symbol).font(Theme.font(13)).foregroundStyle(.secondary)
+                            .frame(width: 18).accessibilityHidden(true)
+                        Text(data.name).font(Theme.callout.weight(.semibold)).lineLimit(1)
+                        TeamFolderBadges(names: data.teams)
+                        Text(data.machine).font(Theme.subheadline).foregroundStyle(.tertiary).lineLimit(1)
+                        Spacer(minLength: 8)
+                        if let line = quietLine(data) {
+                            Text(line).font(Theme.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                        }
+                        RowChevron()
+                    }
+                    .frame(minHeight: 40)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(RowFeedbackStyle(bleed: 10, radius: 8))
+                .help(data.path)
+                if data.id != cards.last?.id { ThemeRule().padding(.horizontal, 10) }
+            }
+        }
+    }
+
+    private func quietLine(_ data: RepositoryCardData) -> String? {
+        var parts: [String] = []
+        if case .asleep = data.step { parts.append(L10n.text("apple.repositories.step_asleep")) }
+        if data.chatCount > 0 {
+            parts.append(data.chatCount == 1 ? L10n.text("apple.workspacesoverviewview.0_chat_1.2838f969.one", "1")
+                : L10n.text("apple.workspacesoverviewview.0_chat_1.2838f969.other", "\(data.chatCount)"))
+        }
+        if let last = data.facts.lastActivity { parts.append(CompactAge.ago(last)) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
-
 #endif

@@ -79,6 +79,9 @@ struct RootView: View {
     @State private var workflows = WorkflowsModel()
     @State private var todo = TodoModel()
     @State private var chat = ChatModel()
+    #if os(macOS)
+    @State private var repositoryOverview = RepositoryOverviewModel()
+    #endif
     @State private var appUpdate = AppUpdateModel()
     @State private var connectivity = ConnectivityModel()
     /// The service and the tunnel, alongside the internet. See
@@ -1983,7 +1986,10 @@ struct RootView: View {
             case .global(.account), .global(.newChat), .global(.team):
                 EmptyView()
             case .workspacesOverview:
-                WorkspacesOverviewPlaceholder(onClose: { closeInspector() })
+                RepositoryPeek(model: repositoryOverview,
+                               folders: workspaces.folders.filter { !$0.isGeneral },
+                               actions: repositoryActions,
+                               onClose: { closeInspector() })
             }
         }
     }
@@ -3849,14 +3855,23 @@ struct RootView: View {
             AccountView(model: account)
         case .workspacesOverview:
             WorkspacesOverviewView(
+                model: repositoryOverview,
                 folders: workspaces.folders.filter { !$0.isGeneral },
                 summaries: workspaces.summaries,
                 directoryPresentation: workspaces.directoryPresentation,
                 directoryError: workspaces.directoryError,
+                isFullScreen: isFullScreen,
+                peekShown: showsInspector || isOverlayVisible,
                 onRetry: { Task { await workspaces.loadLocal() } },
+                chatsIn: { id in chat.sidebarChats(in: id).filter { !chat.isUntouched($0, in: id) } },
                 sessionsIn: { id in terminals.sessions(in: id).filter(\.alive).count },
+                isAsleep: { folder in
+                    folder.isRemote
+                        && account.account?.machines.first { $0.publicIdentity == folder.machineID }?.online == false
+                },
                 sharedWith: { teams.sharedOrganizations(reported: $0.teamOrganizations, workspace: $0.id, isRemote: $0.isRemote) },
-                onOpenFolder: { selectWorkspace($0) },
+                refreshChats: { await chat.warmWorkspacePreviews($0.id, includeMessages: false) },
+                actions: repositoryActions,
                 onAdd: { workspaces.requestAdd() }
             )
         case let .ssh(section):
@@ -4644,6 +4659,52 @@ struct RootView: View {
     /// through `openSection(.sessions)` used to call `showTerminal` first, so
     /// a second click on the same folder while Sessions was already the route
     /// could leave the terminal in front and only light the Sessions row.
+    #if os(macOS)
+    /// Where the repositories page and its peek lead, through the same
+    /// functions the sidebar rows use.
+    private var repositoryActions: RepositoryActions {
+        RepositoryActions(
+            open: { selectWorkspace($0) },
+            section: { section, id in openSection(section, in: id) },
+            newChat: { id in startNewChat(in: workspaces.folders.first { $0.id == id }) },
+            chat: { chatID, id in
+                chat.reveal(id: chatID, in: id)
+                setHistoryExpanded(id, true)
+                openSection(.chat, in: id)
+            },
+            pull: { number, id in
+                guard let folder = workspaces.folders.first(where: { $0.id == id }),
+                      let pulls = repositoryOverview.pulls[id],
+                      let pull = pulls.open.first(where: { $0.number == number }) else {
+                    openSection(.pulls, in: id)
+                    return
+                }
+                let route = Bridge.chatRoute(workspaceID: id, peer: nil)
+                openPull(ChatPull(pull, url: pulls.webBase.map { "\($0)/pull/\(number)" } ?? "",
+                                  workspaceID: route.workspaceID), from: folder, in: .here)
+            },
+            file: { path, id in
+                openSection(.changes, in: id) {
+                    workspaces.focusWorkingTree(in: id, path: path)
+                }
+            },
+            peek: { id in
+                if repositoryOverview.peekID == id, showsInspector || isOverlayVisible {
+                    repositoryOverview.peekID = nil
+                    closeInspector()
+                    return
+                }
+                repositoryOverview.peekID = id
+                isInspectorPresented = true
+                if !inspectorFits {
+                    isOverlayVisible = true
+                    overlayHeldByPress = true
+                }
+            }
+        )
+    }
+    #endif
+
     private func selectWorkspace(_ id: String, revealInSidebar: Bool = true) {
         navigate(to: .workspace(id: id, section: .sessions)) {
             workspaces.selectedID = id
