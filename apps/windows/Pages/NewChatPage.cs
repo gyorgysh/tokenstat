@@ -210,6 +210,7 @@ internal sealed class NewChatPage : Page
         Content = root;
         AppServices.AccountChanged += AccountRetired;
         _draft.TextChanged += (_, _) => { RememberDraft(); RefreshActions(); };
+        ChatClipboard.Wire(_draft, PasteAttachmentsAsync, Notice);
         _draft.PreviewKeyDown += (_, args) => {
             if (args.Key != VirtualKey.Enter || InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down) || !_submit.IsEnabled) return;
             args.Handled = true; _ = SubmitAsync();
@@ -536,22 +537,40 @@ internal sealed class NewChatPage : Page
         finally { _pickingFiles = false; RefreshActions(); }
     }
 
-    private async Task StageFilesAsync(IEnumerable<string> paths, string? repository, long generation, long lifetime)
+    private Task PasteAttachmentsAsync(DataPackageView data)
+    {
+        var repository = _draftRepository; var generation = _draftGeneration; var lifetime = _lifetime;
+        if (!OwnsFiles(repository, generation, lifetime)) return Task.CompletedTask;
+        if (_pickingFiles || _stagingFiles)
+        {
+            Notice(L10n.Text("common.chat_files_busy"));
+            return Task.CompletedTask;
+        }
+        return StageFilesAsync(() => ChatClipboard.ReadAsync(data), repository, generation, lifetime);
+    }
+
+    private Task StageFilesAsync(IEnumerable<string> paths, string? repository, long generation, long lifetime) =>
+        StageFilesAsync(() => Task.FromResult(ChatClipboard.FromPaths(paths)), repository, generation, lifetime);
+
+    private async Task StageFilesAsync(Func<Task<IEnumerable<CaptureChatFile>>> readSources,
+        string? repository, long generation, long lifetime)
     {
         if (_stagingFiles || !OwnsFiles(repository, generation, lifetime)) return;
         using var cancellation = new CancellationTokenSource();
         _stagingCancellation = cancellation; _stagingFiles = true; RefreshActions();
+        bool Current() => OwnsFiles(repository, generation, lifetime) && !cancellation.IsCancellationRequested;
         try {
-            foreach (var path in paths) {
-                if (!OwnsFiles(repository, generation, lifetime)) return;
-                if (_files.Count >= NewChatFile.MaximumCount) { Notice(L10n.Text("common.chat_files_busy")); break; }
-                var selected = await NewChatFile.CaptureAsync(path, cancellation.Token);
-                selected = selected.RetainIfOwned(OwnsFiles(repository, generation, lifetime));
+            foreach (var capture in await readSources())
+            {
+                if (!Current()) return;
+                if (_files.Count >= NewChatFile.MaximumCount) { Notice(L10n.Text("common.chat_files_busy")); return; }
+                var selected = await capture(cancellation.Token);
+                selected = selected.RetainIfOwned(Current());
                 if (selected is null) return;
                 _files.Add(selected); RenderFiles(); RememberDraft();
             }
         } catch (OperationCanceledException) { }
-        catch (Exception error) { if (OwnsFiles(repository, generation, lifetime)) Notice(error.Message); }
+        catch (Exception error) { if (Current()) Notice(error.Message); }
         finally {
             if (ReferenceEquals(_stagingCancellation, cancellation)) _stagingCancellation = null;
             _stagingFiles = false; RefreshActions();

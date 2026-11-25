@@ -25,11 +25,26 @@ internal sealed record NewChatFile(string Path, string Name, long Size, DateTime
         var source = new FileInfo(System.IO.Path.GetFullPath(path));
         if (!source.Exists || source.Length is <= 0 or > MaximumBytes) throw new IOException("Invalid attachment file");
         var expectedSize = source.Length; var modified = source.LastWriteTimeUtc;
+        await using var input = new FileStream(source.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return await CaptureAsync(input, source.Name, expectedSize, cancellation, () => {
+            source.Refresh();
+            return source.Exists && source.Length == expectedSize && source.LastWriteTimeUtc == modified;
+        }).ConfigureAwait(false);
+    }
+
+    internal static Task<NewChatFile> CaptureAsync(Stream input, string name, CancellationToken cancellation) =>
+        CaptureAsync(input, name, input.Length, cancellation, () => true);
+
+    private static async Task<NewChatFile> CaptureAsync(Stream input, string name, long expectedSize, CancellationToken cancellation, Func<bool> sourceIsCurrent)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        if (expectedSize is <= 0 or > MaximumBytes) throw new IOException("Invalid attachment file");
+        if (string.IsNullOrEmpty(name) || name is "." or ".." || System.IO.Path.GetFileName(name) != name)
+            throw new IOException("Invalid attachment name");
         var folder = System.IO.Path.Combine(StagingRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
-        var copy = System.IO.Path.Combine(folder, source.Name);
+        var copy = System.IO.Path.Combine(folder, name);
         try {
-            await using (var input = new FileStream(source.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
             await using (var output = new FileStream(copy, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan)) {
                 var buffer = new byte[128 * 1024]; long copied = 0;
                 while (true) {
@@ -43,10 +58,9 @@ internal sealed record NewChatFile(string Path, string Name, long Size, DateTime
                 await output.FlushAsync(cancellation).ConfigureAwait(false);
             }
             cancellation.ThrowIfCancellationRequested();
-            source.Refresh();
-            if (!source.Exists || source.Length != expectedSize || source.LastWriteTimeUtc != modified) throw new IOException("The attachment changed while reading");
+            if (!sourceIsCurrent()) throw new IOException("The attachment changed while reading");
             var owned = new FileInfo(copy);
-            return new NewChatFile(copy, source.Name, owned.Length, owned.LastWriteTimeUtc);
+            return new NewChatFile(copy, name, owned.Length, owned.LastWriteTimeUtc);
         } catch {
             try { File.Delete(copy); Directory.Delete(folder); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             throw;

@@ -18,9 +18,23 @@ internal sealed class ChatOutbox(string directory)
 
     public List<QueuedChatMessage> Read(string key) => Update(key, _ => { });
 
-    public List<QueuedChatMessage> Update(string key, Action<List<QueuedChatMessage>> change)
+    public void Remove(string key)
+    {
+        ValidateKey(key);
+        var path = Path.Combine(directory, key + ".json");
+        if (!File.Exists(path)) return;
+        using var gate = new FileStream(Path.Combine(directory, key + ".lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        File.Delete(path);
+    }
+
+    private static void ValidateKey(string key)
     {
         if (key.Length != 64 || key.Any(c => !Uri.IsHexDigit(c))) throw new ArgumentException(L10n.Text("windows.chatoutbox.invalid_outbox_scope.a185ee16"));
+    }
+
+    public List<QueuedChatMessage> Update(string key, Action<List<QueuedChatMessage>> change)
+    {
+        ValidateKey(key);
         Directory.CreateDirectory(directory);
         using var gate = new FileStream(Path.Combine(directory, key + ".lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         var path = Path.Combine(directory, key + ".json");

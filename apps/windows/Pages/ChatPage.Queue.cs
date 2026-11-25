@@ -12,14 +12,16 @@ internal sealed partial class ChatPage
     private string? _outboxKey;
     private readonly HashSet<string> _authorizedQueue = [];
 
-    private async Task<string> OutboxKeyAsync(string chat)
+    private async Task<string> OutboxKeyAsync(string chat) => ChatOutbox.Key(await OutboxAccountAsync(), _workspaceId, chat);
+
+    private static async Task<string> OutboxAccountAsync()
     {
         var status = await AppServices.Host.CallAsync("account.status");
         var account = status["account"] ?? status;
         var identity = Format.Flag(account, "signedIn")
             ? Format.Text(account, "accountId", Format.Text(account, "handle")) : "local";
         if (identity.Length == 0) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.sign_in_again_before_queuing_messages.622d70dc"));
-        return ChatOutbox.Key(Format.Text(account, "host") + ":" + identity, _workspaceId, chat);
+        return Format.Text(account, "host") + ":" + identity;
     }
 
     private UIElement PendingMessages()

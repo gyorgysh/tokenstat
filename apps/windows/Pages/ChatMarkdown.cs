@@ -27,7 +27,7 @@ namespace Tokenstat.Pages;
 /// does not make requests. Code blocks are drawn by the caller so they keep
 /// the chat's own copy menu and horizontal scrolling.
 /// </summary>
-internal sealed class ChatMarkdown(bool allowDesktopActions)
+internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? openWebLink)
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .DisableHtml()
@@ -39,8 +39,9 @@ internal sealed class ChatMarkdown(bool allowDesktopActions)
 
     private const double BodySize = 14;
 
-    public static UIElement Create(string text, Func<string, UIElement> codeBlock, bool allowDesktopActions = true) =>
-        new ChatMarkdown(allowDesktopActions).Render(text, codeBlock);
+    public static UIElement Create(string text, Func<string, UIElement> codeBlock, bool allowDesktopActions = true,
+        Func<Uri, Task>? openWebLink = null) =>
+        new ChatMarkdown(allowDesktopActions, openWebLink).Render(text, codeBlock);
 
     private UIElement Render(string text, Func<string, UIElement> codeBlock)
     {
@@ -269,6 +270,12 @@ internal sealed class ChatMarkdown(bool allowDesktopActions)
 
     private Hyperlink Anchor(Uri uri)
     {
+        if (openWebLink is not null && uri.Scheme is ("http" or "https"))
+        {
+            var link = new Hyperlink();
+            link.Click += async (_, _) => await openWebLink(uri);
+            return link;
+        }
         if (!allowDesktopActions || Tokenstat.Navigation.DesktopOpenRequest.Parse(uri.AbsoluteUri) is not { } request)
             return new Hyperlink { NavigateUri = uri };
         var anchor = new Hyperlink();

@@ -14,6 +14,10 @@ desktop is a review build. Newest first.
 - On Android and Windows, choose Auto, Light, Dark or OLED and a color theme under Appearance, in Account → This device on Android and Account → This PC on Windows.
 - On Android, Continue on another device in the chat menu shares your place, and your unsent text if you choose. A chat shared from another device offers to continue from it.
 - On Android, SSH lists the servers you trust. Forget one to be asked again on the next connection.
+- On Windows, paste a screenshot or copied file into a chat composer with Ctrl+V to attach it.
+- On Windows, the chat list’s More menu can delete a project’s private chats after you confirm. Their local drafts and queued messages are removed too.
+- On Windows, choose where web links from chat open. Open them beside the chat in tokenstat or in your browser, and change the default in Account → This PC.
+- On Windows, create a folder on the selected computer while adding a remote project.
 
 ### Changed
 

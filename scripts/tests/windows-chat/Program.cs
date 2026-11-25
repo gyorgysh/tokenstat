@@ -97,6 +97,15 @@ try {
     Check(selected.IsCurrent() && selected.Size == 3 && selected.Path != Path.GetFullPath(stagedPath)
         && selected.Name == Path.GetFileName(stagedPath) && File.ReadAllBytes(selected.Path).SequenceEqual(new byte[] { 1, 2, 3 }),
         "landing attachment selection makes an owned private copy before any conversation exists");
+    using (var clipboardBytes = new MemoryStream([4, 5, 6]))
+    {
+        var pasted = await NewChatFile.CaptureAsync(clipboardBytes, "clipboard-image.png", CancellationToken.None);
+        Check(pasted.IsCurrent() && pasted.Name == "clipboard-image.png"
+            && File.ReadAllBytes(pasted.Path).SequenceEqual(new byte[] { 4, 5, 6 }),
+            "a clipboard stream becomes a named, owned attachment with the same bytes");
+        Check(pasted.RetainIfOwned(false) is null && !File.Exists(pasted.Path),
+            "a clipboard attachment is discarded if its draft loses ownership");
+    }
     var landingDrafts = new NewChatDraftStore();
     var firstDraft = new NewChatDraft("unbound prompt", [selected], new NewChatSetup("codex", "model", "high", "plan", "bypass", true));
     Check(new NewChatDraftStore().Select("first-repo", new NewChatDraft("", [], firstDraft.Setup)).Setup == firstDraft.Setup,

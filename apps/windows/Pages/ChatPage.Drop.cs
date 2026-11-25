@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
 
 namespace Tokenstat.Pages;
 
@@ -52,46 +51,68 @@ internal sealed partial class ChatPage
             if (!Supported(args.DataView)) return;
             args.Handled = true;
             if (!AcceptsChatDrop()) return;
-            var chat = _openId; var generation = _openGeneration; var account = AppServices.AccountGeneration;
-            bool Current() => IsLoaded && !_opening && _openId == chat && _openGeneration == generation && account == AppServices.AccountGeneration;
-            using var cancellation = new CancellationTokenSource();
-            _dropImport = cancellation;
             var deferral = args.GetDeferral();
-            _queueing = true; RebuildAttachStrip(); RebuildComposerActions();
-            try
-            {
-                if (args.DataView.Contains(StandardDataFormats.StorageItems))
-                {
-                    var items = await args.DataView.GetStorageItemsAsync();
-                    if (!Current()) return;
-                    var files = items.OfType<StorageFile>().ToArray();
-                    if (files.Length == 0) { Banner(L10n.Text("windows.chatpage.drop_files_not_folders")); return; }
-                    await StageDroppedFilesAsync(files.Select(file => file.Path), Current, cancellation.Token);
-                }
-                else
-                {
-                    var text = args.DataView.Contains(StandardDataFormats.WebLink)
-                        ? (await args.DataView.GetWebLinkAsync()).AbsoluteUri : await args.DataView.GetTextAsync();
-                    if (Current() && !string.IsNullOrEmpty(text))
-                        _draft.Text += (_draft.Text.Length == 0 || _draft.Text.EndsWith('\n') ? "" : "\n") + text;
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception error) { if (Current()) Banner(error.Message); }
-            finally
-            {
-                try
-                {
-                    if (ReferenceEquals(_dropImport, cancellation))
-                    {
-                        _dropImport = null; _queueing = false;
-                        if (Current()) RememberDraft();
-                        if (IsLoaded) { RebuildAttachStrip(); RebuildComposerActions(); }
-                    }
-                }
-                finally { deferral.Complete(); }
-            }
+            try { await ImportChatDataAsync(args.DataView, fromClipboard: false); }
+            finally { deferral.Complete(); }
         };
+    }
+
+    private Task PasteChatAttachmentsAsync(DataPackageView data) => ImportChatDataAsync(data, fromClipboard: true);
+
+    private async Task ImportChatDataAsync(DataPackageView data, bool fromClipboard)
+    {
+        if (SharedSource) return;
+        if (!AcceptsChatDrop())
+        {
+            if (fromClipboard && IsLoaded && !_opening && _openId is not null) Banner(L10n.Text("common.chat_files_busy"));
+            return;
+        }
+        var chat = _openId; var generation = _openGeneration; var account = AppServices.AccountGeneration;
+        using var cancellation = new CancellationTokenSource();
+        bool Current() => IsLoaded && !_opening && _openId == chat && _openGeneration == generation
+            && account == AppServices.AccountGeneration && !cancellation.IsCancellationRequested;
+        _dropImport = cancellation;
+        _queueing = true; RebuildAttachStrip(); RebuildComposerActions();
+        try
+        {
+            if (fromClipboard)
+            {
+                foreach (var capture in await ChatClipboard.ReadAsync(data))
+                {
+                    if (!Current()) return;
+                    if (_attachments.Count >= NewChatFile.MaximumCount) { Banner(L10n.Text("common.chat_files_busy")); return; }
+                    var file = await capture(cancellation.Token);
+                    if (file.RetainIfOwned(Current()) is not { } staged) return;
+                    _attachments.Add(new StagedFile("local-" + Guid.NewGuid().ToString("N"), staged.Name, staged));
+                    RememberDraft(); RebuildAttachStrip();
+                }
+            }
+            else if (data.Contains(StandardDataFormats.StorageItems))
+            {
+                var paths = await ChatClipboard.FilePathsAsync(data);
+                if (!Current()) return;
+                if (paths.Length == 0) { Banner(L10n.Text("windows.chatpage.drop_files_not_folders")); return; }
+                await StageDroppedFilesAsync(paths, Current, cancellation.Token);
+            }
+            else
+            {
+                var text = data.Contains(StandardDataFormats.WebLink)
+                    ? (await data.GetWebLinkAsync()).AbsoluteUri : await data.GetTextAsync();
+                if (Current() && !string.IsNullOrEmpty(text))
+                    _draft.Text += (_draft.Text.Length == 0 || _draft.Text.EndsWith('\n') ? "" : "\n") + text;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { if (Current()) Banner(error.Message); }
+        finally
+        {
+            if (ReferenceEquals(_dropImport, cancellation))
+            {
+                _dropImport = null; _queueing = false;
+                if (Current()) RememberDraft();
+                if (IsLoaded) { RebuildAttachStrip(); RebuildComposerActions(); }
+            }
+        }
     }
 
     private async Task StageDroppedFilesAsync(IEnumerable<string> paths, Func<bool> current, CancellationToken cancellation)

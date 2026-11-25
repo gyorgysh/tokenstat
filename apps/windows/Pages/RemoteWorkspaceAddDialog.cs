@@ -28,10 +28,16 @@ internal sealed class RemoteWorkspaceAddDialog
     private readonly TextBlock _path = new() { FontFamily = Fonts.Mono, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private readonly StackPanel _folders = new() { Spacing = 4 };
     private readonly StackPanel _roots = new() { Spacing = 4 };
+    private readonly Button _newFolder = new() { Content = L10n.Text("windows.remoteworkspaceadddialog.new_folder") };
+    private readonly StackPanel _folderEditor = new() { Spacing = Theme.SpaceS, Visibility = Visibility.Collapsed };
+    private readonly TextBox _folderName = new() { Header = L10n.Text("windows.remoteworkspaceadddialog.folder_name") };
+    private readonly Button _createFolder = new() { Content = L10n.Text("windows.remoteworkspaceadddialog.create_folder") };
+    private readonly Button _cancelFolder = new() { Content = L10n.Text("common.cancel") };
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap };
     private readonly ProgressRing _progress = new() { Width = 20, Height = 20, IsActive = false, Visibility = Visibility.Collapsed };
     private readonly List<(string Key, string Label)> _peers = new();
     private readonly CancellationTokenSource _closed = new();
+    private readonly long _account = AppServices.AccountGeneration;
     private string? _currentPath;
     private string? _added;
     private int _generation;
@@ -60,6 +66,14 @@ internal sealed class RemoteWorkspaceAddDialog
         body.Children.Add(_roots);
         body.Children.Add(_path);
         body.Children.Add(new ScrollViewer { Content = _folders, Height = 190 });
+        body.Children.Add(_newFolder);
+        _folderEditor.Children.Add(_folderName);
+        _folderEditor.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS,
+            Children = { _createFolder, _cancelFolder },
+        });
+        body.Children.Add(_folderEditor);
         body.Children.Add(_progress);
         body.Children.Add(_notice);
         var retry = ActionIconGlyph.Button(L10n.Text("windows.remoteworkspaceadddialog.reload_folders.e9d554ab"), ActionIcon.Refresh, async (_, _) =>
@@ -77,6 +91,15 @@ internal sealed class RemoteWorkspaceAddDialog
             UpdateActions();
         };
         _url.TextChanged += (_, _) => UpdateActions();
+        _newFolder.Click += (_, _) =>
+        {
+            _folderEditor.Visibility = Visibility.Visible;
+            UpdateActions();
+            _folderName.Focus(FocusState.Programmatic);
+        };
+        _folderName.TextChanged += (_, _) => UpdateActions();
+        _createFolder.Click += async (_, _) => await CreateFolderAsync();
+        _cancelFolder.Click += (_, _) => { CloseFolderEditor(); UpdateActions(); _newFolder.Focus(FocusState.Programmatic); };
         _dialog.PrimaryButtonClick += async (_, args) =>
         {
             args.Cancel = true;
@@ -84,6 +107,7 @@ internal sealed class RemoteWorkspaceAddDialog
         };
         _dialog.Closed += (_, _) => _closed.Cancel();
         _dialog.Opened += async (_, _) => await LoadPeersAsync();
+        UpdateActions();
     }
 
     public static async Task<string?> ShowAsync(UIElement owner)
@@ -103,10 +127,17 @@ internal sealed class RemoteWorkspaceAddDialog
 
     private void UpdateActions()
     {
-        _dialog.PrimaryButtonText = _working ? (Clone ? L10n.Text("windows.remoteworkspaceadddialog.cloning.2c3cf7cb") : L10n.Text("windows.remoteworkspaceadddialog.registering.6bf4d89b"))
+        var naming = _folderEditor.Visibility == Visibility.Visible;
+        var canCreate = !_working && !_browsing && _cloneSession is null && Peer is not null && !string.IsNullOrEmpty(_currentPath);
+        _dialog.PrimaryButtonText = _working && !naming ? (Clone ? L10n.Text("windows.remoteworkspaceadddialog.cloning.2c3cf7cb") : L10n.Text("windows.remoteworkspaceadddialog.registering.6bf4d89b"))
             : _cloneSession is not null ? L10n.Text("windows.remoteworkspaceadddialog.check_clone.8fb17b7e") : Clone ? L10n.Text("windows.remoteworkspaceadddialog.clone_here.d17ed090") : L10n.Text("windows.remoteworkspaceadddialog.register_this_folder.e273b524");
-        _dialog.IsPrimaryButtonEnabled = !_working && !_browsing && Peer is not null
+        _dialog.IsPrimaryButtonEnabled = !naming && !_working && !_browsing && Peer is not null
             && !string.IsNullOrEmpty(_currentPath) && (!Clone || !string.IsNullOrWhiteSpace(_url.Text));
+        _newFolder.Visibility = naming ? Visibility.Collapsed : Visibility.Visible;
+        _newFolder.IsEnabled = canCreate;
+        _folderName.IsEnabled = canCreate;
+        _createFolder.IsEnabled = canCreate && !string.IsNullOrWhiteSpace(_folderName.Text);
+        _cancelFolder.IsEnabled = !_working;
         _machine.IsEnabled = !_working && _cloneSession is null;
         _route.IsEnabled = !_working && _cloneSession is null;
         _url.IsEnabled = !_working && _cloneSession is null;
@@ -172,6 +203,7 @@ internal sealed class RemoteWorkspaceAddDialog
         var generation = ++_generation;
         _browsing = true;
         _currentPath = null;
+        CloseFolderEditor();
         _path.Text = "";
         _folders.Children.Clear();
         _roots.Children.Clear();
@@ -227,6 +259,44 @@ internal sealed class RemoteWorkspaceAddDialog
                 UpdateActions();
             }
         }
+    }
+
+    private void CloseFolderEditor()
+    {
+        _folderEditor.Visibility = Visibility.Collapsed;
+        _folderName.Text = "";
+    }
+
+    private async Task CreateFolderAsync()
+    {
+        if (!_createFolder.IsEnabled || Peer is not { } peer || _currentPath is not { } parent
+            || _closed.IsCancellationRequested || _account != AppServices.AccountGeneration) return;
+        var name = _folderName.Text.Trim();
+        if (name is "." or ".." || name.IndexOfAny(['/', '\\', '\0']) >= 0)
+        {
+            _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.folder_name_invalid");
+            return;
+        }
+        _working = true;
+        _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.creating_folder");
+        UpdateActions();
+        string? created = null;
+        try
+        {
+            var path = parent.TrimEnd('/') + "/" + name;
+            var result = await RemoteWorkspaces.CallOnPeerAsync(peer, "fs.mkdir", new JsonObject { ["path"] = path });
+            created = Format.Text(result, "path", path);
+        }
+        catch (Exception ex)
+        {
+            if (!_closed.IsCancellationRequested) _notice.Text = FriendlyError.Display(ex.Message);
+        }
+        finally
+        {
+            _working = false;
+            UpdateActions();
+        }
+        if (created is not null && _account == AppServices.AccountGeneration) await BrowseAsync(created);
     }
 
     private async Task AddAsync()

@@ -160,6 +160,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (Format.Flag(_openChat, "nativeSteer") && SteerKnownAvailable() != _composerSteering) RebuildComposerActions();
         };
         _draft.PreviewKeyDown += DraftOnPreviewKeyDown;
+        ChatClipboard.Wire(_draft, PasteChatAttachmentsAsync, Banner);
         PreviewKeyDown += PageOnPreviewKeyDown;
         _titleBox.LostFocus += async (_, _) =>
         {
@@ -607,8 +608,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(titles);
         var create = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await BeginNewChatAsync());
         AutomationProperties.SetAutomationId(create, "chat.list.create");
-        Grid.SetColumn(create, 2);
-        row.Children.Add(create);
+        var menu = new MenuFlyout();
+        ContextMenus.AddAsync(menu, L10n.Text("windows.chatpage.delete_all_chats"), ConfirmDeleteAllAsync,
+            () => _listReady && _openId is null && !_deletingAllChats && _chats.Any(chat => chat is not null && !ChatLocalSharingModel.Paused(chat)));
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS,
+            Children = { create, ActionIconGlyph.MoreButton(L10n.Text("windows.chatpage.chat_actions"), menu) },
+        };
+        Grid.SetColumn(actions, 2);
+        row.Children.Add(actions);
         return row;
     }
 
@@ -1641,7 +1650,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return bubble;
     }
 
-    private static UIElement AssistantBubble(string text) => new Border
+    private UIElement AssistantBubble(string text) => new Border
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
         Background = Theme.PanelBrush,
@@ -1649,10 +1658,22 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(16),
         Padding = new Thickness(Theme.SpaceM),
-        Child = AssistantBody(text),
+        Child = ChatMarkdown.Create(text, CodeBlock, openWebLink: OpenChatLinkAsync),
     };
 
-    private static UIElement AssistantBody(string text) => ChatMarkdown.Create(text, CodeBlock);
+    private bool _chatLinkOpening;
+
+    private async Task OpenChatLinkAsync(Uri url)
+    {
+        if (_chatLinkOpening || !IsLoaded) return;
+        _chatLinkOpening = true;
+        var generation = _openGeneration;
+        var account = AppServices.AccountGeneration;
+        bool Current() => IsLoaded && generation == _openGeneration && account == AppServices.AccountGeneration;
+        try { await ChatLinkOpener.OpenAsync(this, url, Current); }
+        catch (Exception error) { if (Current()) Banner(FriendlyError.Display(error.Message)); }
+        finally { _chatLinkOpening = false; }
+    }
 
     private static UIElement CodeBlock(string code)
     {

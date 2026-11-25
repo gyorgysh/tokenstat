@@ -253,6 +253,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         content.Children.Add(await LocalModelsCardAsync());
         content.Children.Add(NotificationsCard());
         content.Children.Add(AppearanceSettings.Card());
+        content.Children.Add(ChatLinkOpener.SettingsCard());
         content.Children.Add(UpdateCard());
     }
 

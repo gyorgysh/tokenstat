@@ -84,6 +84,10 @@ try
     try { outbox.Update(key, rows => { for (var i = 0; i < 21; i++) rows.Add(new QueuedChatMessage(i.ToString(), "x", [], 0)); }); }
     catch (IOException) { }
     Check(reopened.Read(key).Count == 1, "Capacity rejection must not replace pending messages");
+    outbox.Remove(key);
+    outbox.Remove(key);
+    Check(!File.Exists(Path.Combine(outboxDirectory, key + ".json")) && reopened.Read(recoveryKey).Count == 2,
+        "Removing a chat outbox is idempotent and preserves other conversations");
     Console.WriteLine("PASS: durable chat queue isolates owners, preserves order and uncertain delivery, and advances accepted context only");
 }
 finally { Directory.Delete(outboxDirectory, recursive: true); }
