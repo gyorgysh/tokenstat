@@ -5,15 +5,18 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
-## [1.26.0]
+## [1.26.0] - 2026-11-25
 
 ### Added
 
-- On Android, Rate tokenstat in Legal opens a sheet where you can rate on Google Play, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
-- Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Hover or click the mark on Mac and Windows, tap it on Android, or open the chat menu on iPhone and iPad. Opening one asks whether to view it in tokenstat or in the browser. Tick Remember my choice to stop being asked, and change it in Account → GitHub pull requests on Mac and Windows, Account → This device on phones and tablets. Update the computer to 1.26.0 to see more than the branch's own.
+- Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Find the mark on the chat on Mac, Windows and Android, or in the chat menu on iPhone and iPad. Opening one asks whether to view it in tokenstat or in the browser. Tick Remember my choice to stop being asked, and change it later in Account → GitHub pull requests on desktop or Account → This device on phones and tablets. Update the computer to 1.26.0 to see more than the branch's own.
+- On Windows and Android, Keep offline saves a conversation's text on this device. Search finds those copies under Saved work on Windows and in Search on Android.
 - On Android and Windows, choose Auto, Light, Dark or OLED and a color theme under Appearance, in Account → This device on Android and Account → This PC on Windows.
+- On Android and Windows, Pull and Push can help you enable Git LFS on the connected computer before transferring large files.
+- On Android, Rate tokenstat in Legal opens a sheet where you can rate on Google Play, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
 - On Android, Continue on another device in the chat menu shares your place, and your unsent text and attachments if you choose. A chat shared from another device offers to continue from it.
 - On Android, SSH lists the servers you trust. Forget one to be asked again on the next connection.
+- On Android, paste images from the keyboard or clipboard into either chat composer to attach them.
 - On Windows, paste a screenshot or copied file into a chat composer with Ctrl+V to attach it.
 - On Windows, the chat list’s More menu can delete a project’s private chats after you confirm. Their local drafts and queued messages are removed too.
 - On Windows, choose where web links from chat open. Open them beside the chat in tokenstat or in your browser, and change the default in Account → This PC.
@@ -23,9 +26,6 @@ desktop is a review build. Newest first.
 - On Windows, import, replace, and remove custom theme files under Account → This PC → Appearance.
 - On Windows, see each computer’s usage at API list prices in Account → Devices.
 - On Windows, reorder saved SSH hosts by dragging or using Move up and Move down in the host menu.
-- On Android, paste images from the keyboard or clipboard into either chat composer to attach them.
-- On Android, Pull and Push can help you enable Git LFS on the connected computer before transferring large files.
-- On Windows, Pull and Push can help you enable Git LFS on the computer that holds the repository before transferring large files.
 - On Windows, create, edit, and set a project’s default persona from chat setup.
 - On Windows, Changes can start Auto commit with the agent and model you choose, and check the result if the start response is lost.
 - Windows can import DigitalOcean Droplets and AWS EC2 instances as SSH servers.
@@ -36,22 +36,18 @@ desktop is a review build. Newest first.
 - On Windows, the focused screen viewer shares text copied on either computer while you control the remote screen.
 - On Windows, send a file to the connected computer from the screen viewer while control is enabled.
 - On Windows, change the SSH vault password, reset it with a recovery code, or replace the recovery code.
-- On Windows and Android, Keep offline saves a conversation’s text on this device. Search finds those copies under Saved work on Windows and in Search on Android.
 - On iPhone and iPad, empty-state and onboarding art no longer leave endless animations running after the screen is left.
-- Antigravity plan limits still prefer the running app. When it is closed, tokenstat runs `agy -p /usage --output-format json` and maps the same group windows `/usage` shows, so agy keeps the login.
-- Muse subscription limits prefer `muse usage --json` (Everyday and weekly windows) so Muse itself reads the login. The older account endpoint stays as a fallback when the CLI is missing.
 
 ### Changed
 
 - Android chats open with much more history and load earlier messages on their own as you scroll back, keeping the line you were reading in place. How much history a page holds follows the phone, so older and entry-level phones load smaller pages.
-
-### Improved
-
 - On Windows, chats open with more history, load earlier messages on their own as you scroll back, and keep the line you were reading in place.
 - On Windows, new words in a streaming reply fade in while you follow the chat. Turn it off under Chat detail. Windows animation settings also apply.
 - On Mac, All repositories shows what each repository needs next: a chat waiting for you, failed checks, a review request, a pull request ready to merge, files not committed, or commits not pushed. Cards show 14 days of tokens with the days pull requests were opened, recent chats, and counts that open the page they count. Repositories you have not used lately shrink to one line. Press Space or Peek on a card to see its changed files, pull requests and which agents worked there, and use the arrow keys to move between cards. Tokens and pull requests are shown for repositories on this Mac.
 - On Mac, Changes in a pull request shows the file list beside the diff. Files, Git, History and the pull request tabs stay ready once opened, so switching back is immediate, and they show the shape of what is loading instead of a spinner.
 - On Mac, the pull request header uses the same small controls as the rest of the app, with Open on GitHub beside Refresh.
+- Antigravity plan limits still prefer the running app. When it is closed, tokenstat runs `agy -p /usage --output-format json` and maps the same group windows `/usage` shows, so agy keeps the login.
+- Muse subscription limits prefer `muse usage --json` (Everyday and weekly windows) so Muse itself reads the login. The older account endpoint stays as a fallback when the CLI is missing.
 
 ### Fixed
 
