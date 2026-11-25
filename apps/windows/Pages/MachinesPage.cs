@@ -23,7 +23,7 @@ namespace Tokenstat.Pages;
 /// came here to do: decide about a machine that is knocking, then read this
 /// PC's own two words to compare with the other end, then add something new.
 /// </summary>
-internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest, IToolbarItems
+internal sealed partial class MachinesPage : Page, IInspectorContent, IInspectorRequest, IToolbarItems
 {
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _inspectorRoot = new()
@@ -1753,6 +1753,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                         actions.Children.Add(Buttons.Primary(
                             L10n.Text("common.connect"), ActionIcon.Connect, async (_, _) =>
                                 await ConnectPeerAsync(peerKey, name, MachineOnline(machine))));
+                        AddApprovalCodeAction(actions, machine, peer, name);
                     }
                     actions.Children.Add(ActionIconGlyph.Button(
                         L10n.Text("windows.machinespage.revoke.87e6d00b"), ActionIcon.Revoke, async (_, _) =>
@@ -1810,7 +1811,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
 
     private async Task ConnectPeerAsync(string peerKey, string name, bool? online)
     {
+        var account = AppServices.AccountGeneration;
         var result = await RemoteWorkspaces.ConnectAsync(peerKey, name, TunnelOn(), online);
+        if (!IsLoaded || account != AppServices.AccountGeneration) return;
         if (result.IsNotice || result.Connected)
         {
             _notice = result.Message;
@@ -2166,6 +2169,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 actions.Children.Add(Buttons.Primary(
                     L10n.Text("common.connect"), ActionIcon.Connect, async (_, _) =>
                         await ConnectPeerAsync(linkedKey, name, MachineOnline(machine))));
+                AddApprovalCodeAction(actions, machine, linked, name);
             }
             actions.Children.Add(AutoConnectRow(linked, machine));
         }

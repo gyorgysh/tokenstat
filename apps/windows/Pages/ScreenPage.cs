@@ -14,6 +14,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.Media.Core;
 using Windows.Storage.Streams;
 using Windows.UI;
@@ -32,6 +33,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _peer;
     private readonly string _name;
+    private readonly long _accountGeneration = AppServices.AccountGeneration;
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -103,6 +105,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     private bool _closed;
     private bool _started;
     private bool _changingControl;
+    private bool? _screenAccessControl;
+    private bool _screenAccessBusy;
     private bool _reconnecting;
     private int _reconnects;
     private DateTime _connectedSince;
@@ -315,7 +319,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _ => L10n.Text("windows.screenpage.automatic.d461a493"),
     };
 
-    private async Task StartAsync()
+    private async Task StartAsync(bool? requestedControl = null)
     {
         if (_closed || _started) return;
         _started = true;
@@ -360,12 +364,14 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             return;
         }
 
+        var control = requestedControl ?? _control;
         try
         {
-            await OpenAsync(_control);
+            await OpenAsync(control);
         }
         catch (Exception ex)
         {
+            OfferScreenAccess(ex.Message, control);
             Banner(ex.Message);
             Caption(ex.Message);
             return;
@@ -417,6 +423,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _hostSessionId = Format.Text(opened, "sessionId");
         _transport = Format.Transport(Format.Text(opened, "transport", "relay"));
         _control = control;
+        ClearScreenAccessPrompt();
         _connectedSince = DateTime.UtcNow;
         _streamingSince = null;
         RefreshControlChip();
@@ -769,6 +776,12 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
+            if (OfferScreenAccess(ex.Message, _control))
+            {
+                Banner(FriendlyError.Display(ex.Message));
+                Caption(FriendlyError.Display(ex.Message));
+                return;
+            }
             await ReconnectCoreAsync(ex.Message);
             return;
         }
@@ -785,6 +798,61 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             || value.Contains("permission") || value.Contains("not been allowed")
             || value.Contains("does not have screen access") || value.Contains("legend plan")
             || value.Contains("no display") || value.Contains("videotoolbox");
+    }
+
+    private bool OfferScreenAccess(string error, bool control)
+    {
+        if (_closed || !(error.Contains("not been allowed to view the screen", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("does not have screen access", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("does not have the requested screen permission", StringComparison.OrdinalIgnoreCase))) return false;
+        _screenAccessControl = control;
+        RefreshControlChip();
+        return true;
+    }
+
+    private void ClearScreenAccessPrompt()
+    {
+        if (_screenAccessControl is null) return;
+        _screenAccessControl = null;
+        _status.Children.Clear();
+    }
+
+    private async Task HandleScreenAccessAsync(bool retry)
+    {
+        if (_screenAccessBusy || _closed || _accountGeneration != AppServices.AccountGeneration
+            || _screenAccessControl is not { } control) return;
+        _screenAccessBusy = true;
+        RefreshControlChip();
+        try
+        {
+            if (retry)
+            {
+                if (control && !string.IsNullOrEmpty(_sessionId)) await SetControlAsync(true);
+                else
+                {
+                    _started = false;
+                    await StartAsync(control);
+                }
+                return;
+            }
+            var answer = await RemoteWorkspaces.CallOnPeerAsync(_peer, "screen.access.ask", new JsonObject { ["control"] = control });
+            if (_closed || _accountGeneration != AppServices.AccountGeneration) return;
+            var granted = Format.Flag(answer, "granted");
+            if (!granted && !Format.Flag(answer, "pending"))
+                throw new InvalidOperationException(L10n.Text("windows.screenpage.access_request_failed"));
+            _status.Children.Clear();
+            _status.Children.Add(Chrome.Banner(granted ? L10n.Text("windows.screenpage.access_already_granted")
+                : L10n.Text("windows.screenpage.access_requested", _name), Theme.Accent, Symbol.View));
+        }
+        catch (Exception error)
+        {
+            if (!_closed && _accountGeneration == AppServices.AccountGeneration) Banner(FriendlyError.Display(error.Message));
+        }
+        finally
+        {
+            _screenAccessBusy = false;
+            if (!_closed && _accountGeneration == AppServices.AccountGeneration) RefreshControlChip();
+        }
     }
 
     private async Task CloseViewerAsync()
@@ -1025,13 +1093,19 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 if (_closed || session != _hostSessionId || string.IsNullOrEmpty(_sessionId)) return;
                 _capability = capability;
                 _control = wanted;
+                ClearScreenAccessPrompt();
                 RefreshControlChip();
                 UpdateHeartbeat();
                 Caption(wanted ? L10n.Text("windows.screenpage.controlling_0.711cd5d9", $"{_name}") : _name);
                 return;
             }
-            catch
+            catch (Exception ex)
             {
+                if (wanted && OfferScreenAccess(ex.Message, control: true))
+                {
+                    Banner(FriendlyError.Display(ex.Message));
+                    return;
+                }
             }
         }
         await CloseViewerAsync();
@@ -1042,6 +1116,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
+            OfferScreenAccess(ex.Message, wanted);
             Banner(ex.Message);
             Caption(ex.Message);
             _control = false;
@@ -1121,8 +1196,18 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             _controlSlot.Children.Clear();
             var toggle = Chrome.ToggleChip(L10n.Text("windows.screenpage.control.32d7e820"), _control, SetControlAsync);
-            toggle.IsEnabled = !_closed && !_reconnecting && !_changingControl && !string.IsNullOrEmpty(_sessionId);
+            toggle.IsEnabled = !_closed && !_reconnecting && !_changingControl && !_screenAccessBusy && !string.IsNullOrEmpty(_sessionId);
             _controlSlot.Children.Add(toggle);
+            if (_screenAccessControl is { } control)
+            {
+                var ask = ActionIconGlyph.Button(control ? L10n.Text("windows.screenpage.request_control") : L10n.Text("windows.screenpage.request_view"),
+                    ActionIcon.Approve, async (_, _) => await HandleScreenAccessAsync(retry: false));
+                var retry = ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh,
+                    async (_, _) => await HandleScreenAccessAsync(retry: true));
+                ask.IsEnabled = retry.IsEnabled = !_closed && !_reconnecting && !_changingControl && !_screenAccessBusy;
+                _controlSlot.Children.Add(ask);
+                _controlSlot.Children.Add(retry);
+            }
             RenderInspector();
         }
         if (DispatcherQueue.HasThreadAccess)

@@ -18,6 +18,8 @@ desktop is a review build. Newest first.
 - On Windows, the chat list’s More menu can delete a project’s private chats after you confirm. Their local drafts and queued messages are removed too.
 - On Windows, choose where web links from chat open. Open them beside the chat in tokenstat or in your browser, and change the default in Account → This PC.
 - On Windows, create a folder on the selected computer while adding a remote project.
+- On Windows, enter a paired computer’s approval code from Devices to open its projects.
+- On Windows, request viewing or control access when a paired computer blocks the screen viewer.
 
 ### Changed
 
