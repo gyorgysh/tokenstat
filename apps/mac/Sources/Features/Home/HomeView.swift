@@ -490,43 +490,51 @@ struct HomeView: View {
         Skeleton.Bar(width: width, height: height, phase: phase)
     }
 
+    @ViewBuilder
     private var profileIdentity: some View {
-        HStack(alignment: .center, spacing: Theme.Space.m) {
-            Avatar(
-                url: account.account?.avatar,
-                name: account.account?.title,
-                handle: account.account?.handle,
-                size: 52
-            )
+        // Signed in, the name opens the profile window, the same one as in
+        // Account.
+        if account.signedIn, let signed = account.account {
+            ProfileNameButton(model: account, account: signed, fills: false) { identityContent }
+        } else {
+            HStack(alignment: .center, spacing: Theme.Space.m) { identityContent }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: Theme.Space.s) {
-                    Text(greetingTitle)
-                        .font(Theme.font(20, weight: .semibold))
-                    if let tier = account.account?.tier, !tier.isEmpty {
-                        // The glyph the profile page uses, not the written
-                        // pill. Beside a 20pt name a crown reads as a mark on
-                        // the person; a word in a capsule reads as a label
-                        // stuck to them.
-                        TierMark(tier: tier, size: 16)
-                    }
+    @ViewBuilder
+    private var identityContent: some View {
+        Avatar(
+            url: account.account?.avatar,
+            name: account.account?.title,
+            handle: account.account?.handle,
+            size: 52
+        )
+
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: Theme.Space.s) {
+                Text(greetingTitle)
+                    .font(Theme.font(20, weight: .semibold))
+                if let tier = account.account?.tier, !tier.isEmpty {
+                    // The glyph the profile page uses, not the written
+                    // pill. Beside a 20pt name a crown reads as a mark on
+                    // the person; a word in a capsule reads as a label
+                    // stuck to them.
+                    TierMark(tier: tier, size: 16)
                 }
-                // The handle, and nothing else. The privacy sentence that was
-                // here is on the Account screen where someone reading about
-                // privacy would go looking for it, and repeating it on the
-                // screen you see every single launch turns a real guarantee
-                // into a slogan.
-                if let handle = account.account?.handle,
-                   handle != account.account?.title
-                {
-                    Text("@\(handle)")
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                } else if !account.signedIn {
-                    Text(L10n.text("apple.homeview.working_locally.da99af57"))
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                }
+            }
+            // The handle, and nothing else. The privacy sentence that was
+            // here is on the Account screen where someone reading about
+            // privacy would go looking for it, and repeating it on the
+            // screen you see every single launch turns a real guarantee
+            // into a slogan.
+            if let signed = account.account, signed.signedIn,
+               signed.handle == nil || signed.handle != signed.title
+            {
+                ProfileNameLine(account: signed, font: Theme.callout)
+            } else if !account.signedIn {
+                Text(L10n.text("apple.homeview.working_locally.da99af57"))
+                    .font(Theme.callout)
+                    .foregroundStyle(.secondary)
             }
         }
     }

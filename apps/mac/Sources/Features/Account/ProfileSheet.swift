@@ -360,6 +360,9 @@ private struct ProfileCardSurface: ViewModifier {
 struct ProfileNameButton<Label: View>: View {
     let model: AccountModel
     let account: Account
+    /// Takes the row's width and ends in a chevron, as in Account. Off where
+    /// the name shares a row with other things, as on Home.
+    var fills = true
     @ViewBuilder let label: () -> Label
 
     @State private var showing = false
@@ -371,18 +374,23 @@ struct ProfileNameButton<Label: View>: View {
             Button { showing = true } label: {
                 HStack(spacing: Theme.Space.m) {
                     label()
-                    Spacer(minLength: 0)
-                    RowChevron()
+                    if fills {
+                        Spacer(minLength: 0)
+                        RowChevron()
+                    }
                 }
-                .padding(.vertical, Theme.Space.s)
+                .padding(.vertical, fills ? Theme.Space.s : 4)
                 .contentShape(.rect)
             }
             .buttonStyle(RowFeedbackStyle(bleed: Theme.Space.s, radius: 12))
+            .help(L10n.text("common.profile.open_hint"))
             .accessibilityHint(L10n.text("common.profile.open_hint"))
             .accessibilityIdentifier("account.profile")
             .sheet(isPresented: $showing) { ProfileSheet(purpose: .settings, model: model) }
-        } else {
+        } else if fills {
             label().frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: Theme.Space.m) { label() }
         }
     }
 }
