@@ -7,8 +7,8 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'apps/windows/Pages/ChatPage.Files.cs').read_text()
-if '    private static Task<long> ReadFileHashAsync(' in source:
-    start = source.index('    private static Task<long> ReadFileHashAsync(')
+if '    internal static Task<long> ReadFileHashAsync(' in source:
+    start = source.index('    internal static Task<long> ReadFileHashAsync(')
     end, depth = source.index('{', start) + 1, 1
     while depth:
         depth += (source[end] == '{') - (source[end] == '}'); end += 1

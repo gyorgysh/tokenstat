@@ -29,7 +29,7 @@ internal sealed partial class ChatPage
     }
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> FileClaims = new();
 
-    private static Task<long> ReadFileHashAsync(Stream stream, IncrementalHash hasher, long expectedSize, CancellationToken cancellation)
+    internal static Task<long> ReadFileHashAsync(Stream stream, IncrementalHash hasher, long expectedSize, CancellationToken cancellation)
     {
         // Cached reads can complete synchronously. Keep the whole pass off
         // the UI thread, including reads and hashing of resumed downloads.

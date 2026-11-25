@@ -16,7 +16,7 @@ using WinRT.Interop;
 
 namespace Tokenstat.Pages;
 
-internal sealed record NewChatRepository(string Id, string Name, string Machine, string Path, bool IsLocal)
+internal sealed record NewChatRepository(string Id, string Name, string Machine, string Path, bool IsLocal, bool IsGeneral = false)
 {
     public override string ToString() => Name + " · " + Machine;
 }
@@ -27,7 +27,7 @@ internal sealed record NewChatRepository(string Id, string Name, string Machine,
 /// then one card holding the repository choice above the ordinary composer,
 /// whose agent field is the same control a running chat uses.
 /// </summary>
-internal sealed class NewChatPage : Page
+internal sealed partial class NewChatPage : Page
 {
     private readonly long _account = AppServices.AccountGeneration;
     private readonly Func<IReadOnlyList<NewChatRepository>> _repositories;
@@ -167,6 +167,9 @@ internal sealed class NewChatPage : Page
         _card.Child = composer;
         StartCard(_card);
         content.Children.Add(_card);
+        BuildGlance();
+        _glance.Visibility = Visibility.Collapsed;
+        content.Children.Add(_glance);
 
         _addButton = Buttons.Primary(Copy("add_repository"), ActionIcon.Create, async (_, _) => await AddAsync(), small: true);
         _addButton.HorizontalAlignment = HorizontalAlignment.Left;
@@ -220,7 +223,7 @@ internal sealed class NewChatPage : Page
             RemoteWorkspaces.Changed -= RepositoriesChanged; RemoteWorkspaces.Changed += RepositoriesChanged;
             RefreshRepositories();
         };
-        Unloaded += (_, _) => { RememberDraft(); _lifetime++; _stagingCancellation?.Cancel(); RemoteWorkspaces.Changed -= RepositoriesChanged; _catalogRevision++; if (!_handoff) _request++; };
+        Unloaded += (_, _) => { RememberDraft(); RetireGlance(); _lifetime++; _stagingCancellation?.Cancel(); RemoteWorkspaces.Changed -= RepositoriesChanged; _catalogRevision++; if (!_handoff) _request++; };
     }
 
     private static void StartCard(Border card)
@@ -329,6 +332,7 @@ internal sealed class NewChatPage : Page
         var value = _selected is null ? Copy("choose_repository") : _selected.Name + " · " + _selected.Machine;
         AutomationProperties.SetName(_repositoryButton, Copy("repository") + ", " + value);
         ToolTipService.SetToolTip(_repositoryButton, _selected?.Path ?? Copy("choose_repository"));
+        _ = RefreshGlanceAsync();
     }
 
     private JsonNode? CurrentBackend()
@@ -339,6 +343,7 @@ internal sealed class NewChatPage : Page
 
     private void RenderAgent()
     {
+        RenderGlanceLimits();
         var locked = _sending || _account != AppServices.AccountGeneration || _available.Length == 0;
         _agentSlot.Child = ChatAgentPicker.Build(new ChatAgentPickerSource(
             Chat: () => _setup,

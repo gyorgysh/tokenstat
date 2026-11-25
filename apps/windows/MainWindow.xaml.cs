@@ -2887,10 +2887,10 @@ public sealed partial class MainWindow : Window
 
     private IReadOnlyList<NewChatRepository> NewChatRepositories() => _localFolders
         .Where(folder => Format.Text(folder, "id").Length > 0)
-        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), GeneralFolder.IsGeneral(folder) ? L10n.Text("common.new_chat.no_repository_help") : Format.Text(folder, "path"), IsLocal: true))
+        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), GeneralFolder.IsGeneral(folder) ? L10n.Text("common.new_chat.no_repository_help") : Format.Text(folder, "path"), IsLocal: true, IsGeneral: GeneralFolder.IsGeneral(folder)))
         .Concat(RemoteWorkspaces.CachedFolders()
             .Where(folder => RemoteWorkspaces.IsConnected(folder.PeerKey))
-            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.IsGeneral ? L10n.Text("common.new_chat.no_repository_help") : folder.Path, IsLocal: false))).ToArray();
+            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.IsGeneral ? L10n.Text("common.new_chat.no_repository_help") : folder.Path, IsLocal: false, IsGeneral: folder.IsGeneral))).ToArray();
 
     private void OpenNewChat(string? repository = null)
     {

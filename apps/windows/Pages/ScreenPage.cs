@@ -29,7 +29,7 @@ namespace Tokenstat.Pages;
 /// choice ride screen.viewer.input with the same event shapes the Apple
 /// capture side applies. Audio has no pipeline in this cut and is skipped.
 /// </summary>
-internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
+internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _peer;
     private readonly string _name;
@@ -149,6 +149,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         controls.Children.Add(_controlSlot);
         controls.Children.Add(_qualitySlot);
         controls.Children.Add(_displaySlot);
+        controls.Children.Add(_screenFiles);
+        BuildScreenFileControls();
 
         _caption.Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
         _stage.Children.Add(_picture);
@@ -423,6 +425,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _hostSessionId = Format.Text(opened, "sessionId");
         _transport = Format.Transport(Format.Text(opened, "transport", "relay"));
         _control = control;
+        UpdateScreenClipboard();
         ClearScreenAccessPrompt();
         _connectedSince = DateTime.UtcNow;
         _streamingSince = null;
@@ -559,9 +562,13 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             return;
         }
+        if (Format.Text(metadata, "type") == "clipboard" && metadata is JsonObject clipboard)
+        {
+            ApplyScreenClipboard(clipboard);
+            return;
+        }
         if (Format.Text(metadata, "type") != "displays")
         {
-            // Clipboard notes have no pipeline in this cut.
             return;
         }
         var displays = new List<ScreenDisplay>();
@@ -861,6 +868,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _poll = null;
         var id = _sessionId;
         _sessionId = null;
+        UpdateScreenClipboard();
         if (string.IsNullOrEmpty(id))
         {
             return;
@@ -890,6 +898,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     {
         if (_closed) return;
         _closed = true;
+        _screenFileTransfer?.Cancel();
         _heartbeat?.Stop();
         _heartbeat = null;
         ResetDecoderOnUi();
@@ -1044,7 +1053,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         await _inputGate.WaitAsync();
         try
         {
-            if (_closed || id != _sessionId) return;
+            if (_closed || id != _sessionId || (kind == "clipboard" && !ScreenClipboardCurrent(id))) return;
             await AppServices.Host.CallAsync("screen.viewer.input", new JsonObject
             { ["id"] = id, ["data"] = data });
         }
@@ -1093,6 +1102,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 if (_closed || session != _hostSessionId || string.IsNullOrEmpty(_sessionId)) return;
                 _capability = capability;
                 _control = wanted;
+                UpdateScreenClipboard();
                 ClearScreenAccessPrompt();
                 RefreshControlChip();
                 UpdateHeartbeat();
@@ -1208,6 +1218,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 _controlSlot.Children.Add(ask);
                 _controlSlot.Children.Add(retry);
             }
+            RefreshScreenFileControls();
             RenderInspector();
         }
         if (DispatcherQueue.HasThreadAccess)

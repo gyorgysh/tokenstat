@@ -19,7 +19,7 @@ using Windows.UI;
 
 namespace Tokenstat.Pages;
 
-internal sealed class SshPage : Page, IToolbarItems
+internal sealed partial class SshPage : Page, IToolbarItems
 {
     private readonly StackPanel _listRoot = new() { Spacing = Theme.SpaceL };
     private readonly ScrollViewer _listView;
@@ -283,6 +283,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 await LoadSessionsAsync();
                 await LoadFoldersAsync();
                 await LoadConfigAsync();
+                AddCloudImport();
                 break;
         }
         _listRoot.Children.Remove(skeleton);

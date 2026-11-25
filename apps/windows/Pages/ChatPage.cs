@@ -891,7 +891,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             else _draft.Text = ChatDraftStore.Shared.Read(identity.Result);
             _savedDraft = (identity.Result, _draft.Text);
             _opening = false;
+            _handoffSlot.Content = null;
             PaintConversation();
+            _ = RefreshHandoffOfferAsync(id, generation);
             _ = RefreshWorkspaceGitAsync();
             CheckSelectedSignIn();
             StartPoll();
@@ -922,12 +924,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Detach(_composerActions);
         Detach(_titleBox);
         Detach(_gitStrip);
+        Detach(_handoffSlot);
         _root.Children.Clear();
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
         if (!SharedSource) chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await ConfirmDeleteAsync()));
         chrome.Children.Add(DetailButton());
+        if (!SharedSource) chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.handoff.title"), ActionIcon.Device,
+            async (_, _) => await ShowHandoffAsync()));
         _root.Children.Add(chrome);
+        if (!SharedSource) _root.Children.Add(_handoffSlot);
 
         if (_titleBox.FocusState == FocusState.Unfocused)
         {
@@ -2795,6 +2801,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var questions = new Dictionary<string, int>();
         var text = new StringBuilder();
         var textId = "";
+        long? textSequence = null;
         var thinking = new StringBuilder();
         var thinkingId = "";
         var attachmentTurn = "prefix";
@@ -2804,10 +2811,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var body = ChatQuestionText.Strip(text.ToString(), streaming: _running).Trim();
             if (body.Length > 0)
             {
-                items.Add(new DisplayItem { Id = textId, Kind = ItemKind.Assistant, Text = body });
+                items.Add(new DisplayItem { Id = textId, Kind = ItemKind.Assistant, Text = body, SourceSequence = textSequence });
             }
             text.Clear();
             textId = "";
+            textSequence = null;
         }
 
         void FlushThinking()
@@ -2824,6 +2832,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         foreach (var row in events)
         {
             if (row is null) continue;
+            long? sequence = long.TryParse(Format.Text(row, "seq"), out var parsed) && parsed >= 0 ? parsed : null;
             var kind = Format.Text(row, "kind");
             if (kind == "handoff")
             {
@@ -2852,6 +2861,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 {
                     Id = "user-" + Format.Long(row, "atMs") + "-" + items.Count,
                     Kind = ItemKind.User,
+                    SourceSequence = sequence,
                     IsSteer = Format.Flag(row, "steer"),
                     Text = Format.Text(row, "text"),
                 });
@@ -2940,7 +2950,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     break;
                 case "text":
                     FlushThinking();
-                    if (text.Length == 0) textId = "text-" + Format.Long(row, "atMs") + "-" + items.Count;
+                    if (text.Length == 0)
+                    {
+                        textId = "text-" + Format.Long(row, "atMs") + "-" + items.Count;
+                        textSequence = sequence;
+                    }
                     text.Append(Format.Text(ev, "delta"));
                     break;
                 case "thinking":

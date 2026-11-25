@@ -33,6 +33,7 @@ internal sealed partial class ChatPage
     {
         public string Id;
         public ItemKind Kind;
+        public long? SourceSequence;
         public string Text;
         public string Verb;
         public string Target;

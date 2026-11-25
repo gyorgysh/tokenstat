@@ -7,7 +7,7 @@ using Tokenstat.Design;
 namespace Tokenstat.Pages;
 
 /// <summary>The account vault uses the same envelopes as Mac and Android.</summary>
-internal static class SshVault
+internal static partial class SshVault
 {
     public static async Task<UIElement> CardAsync(UIElement owner, Func<Task> reload)
     {
@@ -55,6 +55,7 @@ internal static class SshVault
                         catch (Exception ex) { body.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important)); }
                     }));
                 }
+                if (created) AddPasswordManagement(body, owner, scope, locked, reload);
             }
         }
         catch (Exception ex) { body.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important)); }
@@ -89,17 +90,19 @@ internal static class SshVault
         password.Password = "";
         if (result is null) return;
         var recovery = Format.Text(result, "recovery");
-        if (recovery.Length > 0)
-            await Chrome.ShowDialog(owner, new ContentDialog
-            {
-                Title = L10n.Text("windows.sshvault.save_your_recovery_code.1060e6a8"), CloseButtonText = L10n.Text("common.done"),
-                Content = new TextBlock { Text = L10n.Text("windows.sshvault.keep_this_code_somewhere_safe_it_can_reset.f28683b9", $"{recovery}"),
-                    IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap },
-            });
+        if (recovery.Length > 0) await ShowRecoveryCodeAsync(owner, recovery);
         try { await SshVaultSync.SyncAsync(scope); }
         catch (Exception ex)
         {
             await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("windows.sshvault.vault_sync.65415a6c"), Content = FriendlyError.Display(ex.Message), CloseButtonText = L10n.Text("common.close") });
         }
     }
+
+    private static Task<ContentDialogResult> ShowRecoveryCodeAsync(UIElement owner, string code) =>
+        Chrome.ShowDialog(owner, new ContentDialog
+        {
+            Title = L10n.Text("windows.sshvault.save_your_recovery_code.1060e6a8"), CloseButtonText = L10n.Text("common.done"),
+            Content = new TextBlock { Text = L10n.Text("windows.sshvault.keep_this_code_somewhere_safe_it_can_reset.f28683b9", code),
+                IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap },
+        });
 }

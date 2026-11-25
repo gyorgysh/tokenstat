@@ -198,11 +198,17 @@ internal static class SshVaultSync
                 try { await PushAsync(kind, saved, scope); }
                 catch (Exception ex) { throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.saved_on_this_pc_but_vault_sync_failed_0.894e1add", $"{ex.Message}")); }
             }
-            if (synced && method == "ssh.host.reorder" && saved["changed"] is JsonArray changed)
+            var changedHosts = method switch
+            {
+                "ssh.host.reorder" => saved["changed"] as JsonArray,
+                "ssh.provider.digitalOcean.import" or "ssh.provider.aws.import" => saved["hosts"] as JsonArray,
+                _ => null,
+            };
+            if (synced && changedHosts is not null)
             {
                 try
                 {
-                    foreach (var host in changed.OfType<JsonObject>()) await PushAsync("host", host, scope);
+                    foreach (var host in changedHosts.OfType<JsonObject>()) await PushAsync("host", host, scope);
                 }
                 catch (Exception ex) { throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.saved_on_this_pc_but_vault_sync_failed_0.894e1add", ex.Message)); }
             }

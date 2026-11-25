@@ -28,6 +28,12 @@ desktop is a review build. Newest first.
 - On Windows, Pull and Push can help you enable Git LFS on the computer that holds the repository before transferring large files.
 - On Windows, create, edit, and set a project’s default persona from chat setup.
 - On Windows, Changes can start Auto commit with the agent and model you choose, and check the result if the start response is lost.
+- Windows can import DigitalOcean Droplets and AWS EC2 instances as SSH servers.
+- On Windows, Continue on another device shares your reading position and can include your unsent draft and attachments.
+- On Windows, the new chat page shows the selected repository’s branch, seven days of usage at API list prices, and agent plan limits.
+- On Windows, the focused screen viewer shares text copied on either computer while you control the remote screen.
+- On Windows, send a file to the connected computer from the screen viewer while control is enabled.
+- On Windows, change the SSH vault password, reset it with a recovery code, or replace the recovery code.
 
 ### Changed
 

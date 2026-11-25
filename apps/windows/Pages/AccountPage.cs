@@ -867,7 +867,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         return parts.Count == 0 ? L10n.Text("windows.accountpage.no_windows_reported.6e652c80") : string.Join(" · ", parts);
     }
 
-    private static double WindowPercent(JsonNode window)
+    internal static double WindowPercent(JsonNode window)
     {
         try
         {
@@ -1868,7 +1868,7 @@ internal sealed class AccountPage : Page, IToolbarItems
     /// The archive stores source ids like `claude_code`. These are shown to
     /// people, so they get the same spelling tokenstat.ai uses.
     /// </summary>
-    private static string HarnessName(string id)
+    internal static string HarnessName(string id)
     {
         if (id == "opencode2")
         {
@@ -1902,7 +1902,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         };
     }
 
-    private static string HarnessCanonicalId(string id)
+    internal static string HarnessCanonicalId(string id)
     {
         if (id == "agy")
         {
