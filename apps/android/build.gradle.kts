@@ -4,6 +4,7 @@ buildscript {
         // Current plugins still pull vulnerable build-only libraries. Keep
         // their compatible patches until upstream raises these requirements.
         resolutionStrategy.force(
+            "com.google.guava:guava:33.7.2-jre", // CVE-2026-102554
             "org.apache.commons:commons-lang3:3.21.0",
             "org.bouncycastle:bcpkix-jdk18on:1.86",
             "org.bouncycastle:bcprov-jdk18on:1.86",

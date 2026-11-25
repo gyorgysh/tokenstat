@@ -150,6 +150,9 @@ androidComponents {
 
 dependencies {
     constraints {
+        implementation("com.google.guava:guava:33.7.2-android") {
+            because("AppFunctions pulls in a Guava version affected by CVE-2026-102554.")
+        }
         for (module in listOf("datastore", "datastore-core", "datastore-preferences", "datastore-preferences-core")) {
             implementation("androidx.datastore:$module:1.2.1") {
                 because("The native shared counter needs 16 KB RELRO alignment.")
