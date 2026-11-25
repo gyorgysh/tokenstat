@@ -19,9 +19,6 @@
 //! parses the answer.
 
 use std::fs;
-use std::io::Read;
-use std::path::Path;
-use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -37,7 +34,6 @@ const LOAD_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeA
 const MODELS_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 const META_QUOTA: &str = "antigravity.quota_json";
 const CLI_TIMEOUT: Duration = Duration::from_secs(45);
-const CLI_MAX_BYTES: u64 = 256 * 1024;
 
 /// One model's remaining plan quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -140,47 +136,29 @@ pub fn limits() -> ProviderLimits {
 }
 
 fn cli_usage() -> Option<ProviderLimits> {
-    let program = agy_program()?;
-    let mut command = Command::new(&program);
-    command
-        .args([
+    let program = crate::vendor_cli::program("agy", AGY_DIRS)?;
+    let raw = crate::vendor_cli::run(
+        &program,
+        &[
             "-p",
             "/usage",
             "--output-format",
             "json",
             "--print-timeout",
             "30s",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env("PATH", agy_search_path());
-    if let Some(home) = directories::BaseDirs::new() {
-        command.current_dir(home.home_dir());
-    }
-    let mut child = command.spawn().ok()?;
-    let stdout = child.stdout.take()?;
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut raw = String::new();
-        let _ = stdout.take(CLI_MAX_BYTES + 1).read_to_string(&mut raw);
-        let _ = sender.send(raw);
-    });
-    let raw = match receiver.recv_timeout(CLI_TIMEOUT) {
-        Ok(raw) => raw,
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-    };
-    let status = child.wait().ok()?;
-    if !status.success() || raw.len() as u64 > CLI_MAX_BYTES || raw.trim().is_empty() {
-        return None;
-    }
+        ],
+        AGY_DIRS,
+        CLI_TIMEOUT,
+    )?;
     let value: Value = serde_json::from_str(raw.trim()).ok()?;
     cli_usage_reading(&value)
 }
+
+/// Where agy's Windows installer puts it, beside the shared defaults.
+#[cfg(windows)]
+const AGY_DIRS: &[&str] = &["AppData/Local/Programs/agy"];
+#[cfg(not(windows))]
+const AGY_DIRS: &[&str] = &[];
 
 fn cli_usage_reading(value: &Value) -> Option<ProviderLimits> {
     if value.get("status").and_then(Value::as_str) != Some("SUCCESS") {
@@ -203,63 +181,6 @@ fn cli_usage_reading(value: &Value) -> Option<ProviderLimits> {
         note: None,
         stale: false,
     })
-}
-
-fn agy_program() -> Option<String> {
-    let path = agy_search_path();
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join("agy");
-        if is_executable(&candidate) {
-            return Some(candidate.display().to_string());
-        }
-        #[cfg(windows)]
-        {
-            for ext in ["cmd", "bat", "exe"] {
-                let with_ext = candidate.with_extension(ext);
-                if is_executable(&with_ext) {
-                    return Some(with_ext.display().to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-fn agy_search_path() -> String {
-    let mut dirs = Vec::new();
-    if let Some(home) = directories::BaseDirs::new() {
-        dirs.push(home.home_dir().join(".local").join("bin"));
-        #[cfg(windows)]
-        dirs.push(home.data_local_dir().join("Programs").join("agy"));
-    }
-    if let Ok(existing) = std::env::var("PATH") {
-        for part in std::env::split_paths(&existing) {
-            if !dirs.iter().any(|known| known == &part) {
-                dirs.push(part);
-            }
-        }
-    }
-    std::env::join_paths(dirs)
-        .ok()
-        .and_then(|value| value.into_string().ok())
-        .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default())
-}
-
-fn is_executable(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        path.metadata()
-            .map(|meta| meta.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
 }
 
 /// Sync IDE session cache (when the app is open), ingest cached events, and

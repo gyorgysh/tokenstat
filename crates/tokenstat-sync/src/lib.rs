@@ -54,6 +54,7 @@ pub mod snapshot;
 pub mod teams;
 pub mod update;
 pub mod vault;
+mod vendor_cli;
 
 use std::time::Duration;
 

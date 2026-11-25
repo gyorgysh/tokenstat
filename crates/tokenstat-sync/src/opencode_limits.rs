@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! OpenCode Go/Zen subscription quota.
+//!
+//! Asked of OpenCode first: `opencode api --standalone GET
+//! /api/experimental/usage/limits` answers from OpenCode's own login, on a
+//! private server that exits with the call. A stored API key against the Go
+//! usage endpoint is the fallback, for an OpenCode without that route or an
+//! account it has no reading for.
 
 use std::time::Duration;
 
@@ -27,8 +33,77 @@ struct UsageWindowResponse {
     reset_in_sec: Option<i64>,
 }
 
-/// Read OpenCode Go/Zen's vendor-reported dollar quota windows.
+/// Read OpenCode Go/Zen's vendor-reported quota windows.
 pub fn fetch() -> ProviderLimits {
+    if let Some(reading) = cli_usage() {
+        return reading;
+    }
+    key_usage()
+}
+
+/// A cold start of OpenCode's private server plus one request.
+const CLI_TIMEOUT: Duration = Duration::from_secs(20);
+/// Where OpenCode's installer puts it, beside the shared defaults.
+const OPENCODE_DIRS: &[&str] = &[".opencode/bin"];
+
+fn cli_usage() -> Option<ProviderLimits> {
+    let program = crate::vendor_cli::program("opencode", OPENCODE_DIRS)?;
+    let raw = crate::vendor_cli::run(
+        &program,
+        &[
+            "api",
+            "--standalone",
+            "GET",
+            "/api/experimental/usage/limits",
+        ],
+        OPENCODE_DIRS,
+        CLI_TIMEOUT,
+    )?;
+    cli_reading(&serde_json::from_str(raw.trim()).ok()?, now_ms())
+}
+
+/// The Go plan's three meters, from OpenCode's `UsageLimits.Info`. `data` is
+/// null for an account OpenCode has no reading for, and that is not a
+/// reading: the key path gets its turn.
+fn cli_reading(value: &serde_json::Value, observed_at_ms: i64) -> Option<ProviderLimits> {
+    let go = value.get("data")?.get("go")?;
+    let windows = [
+        ("5-hour", "rolling"),
+        ("weekly", "weekly"),
+        ("monthly", "monthly"),
+    ]
+    .into_iter()
+    .filter_map(|(label, key)| {
+        let meter = go.get(key)?;
+        let percent = meter.get("percent")?.as_f64()?;
+        if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
+            return None;
+        }
+        Some(UsageWindow {
+            label: label.to_string(),
+            scope: None,
+            percent,
+            resets_at_ms: meter
+                .get("resetsAt")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|ms| ms.is_finite() && *ms > 0.0)
+                .map(|ms| ms as i64),
+            severity: LimitSeverity::from_percent(percent),
+        })
+    })
+    .collect::<Vec<_>>();
+    (!windows.is_empty()).then(|| ProviderLimits {
+        source: "opencode".to_string(),
+        plan: Some("Go".to_string()),
+        windows,
+        observed_at_ms,
+        note: None,
+        stale: false,
+    })
+}
+
+/// The stored API key against OpenCode's Go usage endpoint.
+fn key_usage() -> ProviderLimits {
     let Some(token) = auth_token() else {
         return ProviderLimits::unavailable(
             "opencode",
@@ -164,6 +239,34 @@ fn unavailable(note: String) -> ProviderLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cli_answer_reads_the_go_meters_and_a_null_is_no_reading() {
+        let answer = serde_json::json!({"location": {"directory": "/home"}, "data": {
+            "workspace": {"id": "w", "usageURL": "u"}, "budgets": [],
+            "go": {
+                "rolling": {"percent": 42, "limited": false, "resetsAt": 1_800_000_000_000_i64},
+                "weekly": {"percent": 12.5, "limited": false, "resetsAt": 1_800_000_100_000_i64},
+                "monthly": {"percent": 140, "limited": true, "resetsAt": 1_800_000_200_000_i64}
+            }
+        }});
+        let reading = cli_reading(&answer, 7).unwrap();
+        assert_eq!(reading.source, "opencode");
+        assert_eq!(reading.observed_at_ms, 7);
+        // An impossible figure is dropped, not clamped.
+        assert_eq!(
+            reading
+                .windows
+                .iter()
+                .map(|w| (w.label.as_str(), w.percent))
+                .collect::<Vec<_>>(),
+            [("5-hour", 42.0), ("weekly", 12.5)]
+        );
+        assert_eq!(reading.windows[0].resets_at_ms, Some(1_800_000_000_000));
+        assert!(cli_reading(&serde_json::json!({"location": {}, "data": null}), 7).is_none());
+        let no_go = serde_json::json!({"data": {"workspace": {}, "budgets": []}});
+        assert!(cli_reading(&no_go, 7).is_none());
+    }
 
     #[test]
     fn response_fields_match_the_opencode_endpoint() {

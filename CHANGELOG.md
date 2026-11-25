@@ -13,6 +13,7 @@ desktop is a review build. Newest first.
 
 - On Mac, Refresh in the agent picker also checks every agent for a newer version, and the setup page offers Update all for the agents that are behind. When the agent a chat runs on is behind, sending a message offers Update and send, or Skip this version, which stays quiet until the next one. The picker still updates any agent by hand.
 - On Mac, click your name on Home to open your profile.
+- OpenCode Go limits are asked of OpenCode itself first, through its own login. A stored API key is only the fallback.
 
 ### Fixed
 
