@@ -5672,6 +5672,7 @@
   "apple.chatlinks.title": "Open this link",
   "apple.chatlinks.subtitle": "Choose where to open the web page.",
   "apple.chatlinks.explanation": "tokenstat opens the page beside your conversation. Your default browser opens it in its own window. You can change this choice in Settings → Chat browser.",
+  "apple.pulls.open_remember_help": "You can change it in Account → GitHub pull requests.",
   "apple.chatlinks.remember": "Don’t ask again",
   "apple.chatlinks.system": "Default browser",
   "apple.chatlinks.tokenstat": "Open in tokenstat",

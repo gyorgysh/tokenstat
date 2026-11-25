@@ -261,6 +261,7 @@ private struct ClientAccountContent: View {
             await model.loadTraffic()
         }
         LaunchSettings()
+        PullOpenPicker()
         ChatCacheSettings()
         SavedWorkSettings()
     }

@@ -71,7 +71,6 @@ struct ChatDetailSettings: View {
     /// the open-all and fold-all action, which means nothing in Settings.
     var model: ChatModel?
     @State private var preference = ChatDetailPreference.shared
-    @State private var pullOpening = PullOpenPreference.shared
     @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
 
     var body: some View {
@@ -132,26 +131,6 @@ struct ChatDetailSettings: View {
         .accessibilityLabel(L10n.text("apple.chatdetail.title"))
     }
 
-    private var pullPicker: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(L10n.text("common.pulls.open_in"))
-                .padding(.top, Theme.Space.xs)
-            #if os(macOS)
-            SegmentedCapsulePicker(
-                options: PullOpenPreference.Choice.allCases.map {
-                    (value: $0, label: PullOpenPreference.label($0), symbol: "")
-                },
-                selection: $pullOpening.choice
-            )
-            #else
-            SegmentedTabs(options: PullOpenPreference.Choice.allCases, selection: $pullOpening.choice,
-                          title: PullOpenPreference.label, comfortable: true)
-            #endif
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L10n.text("common.pulls.open_in"))
-    }
-
     private var details: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(ChatDetailPreference.explanation(preference.level))
@@ -166,7 +145,6 @@ struct ChatDetailSettings: View {
             Text(L10n.text("common.chat.smooth_streaming_help"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
-            if model == nil { pullPicker }
             if let model, preference.level != .detailed {
                 Button(
                     model.anyGroupOpen ? L10n.text("apple.chatdetail.collapse_steps") : L10n.text("apple.chatdetail.expand_steps"),

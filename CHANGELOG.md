@@ -10,7 +10,7 @@ desktop is a review build. Newest first.
 ### Added
 
 - On Android, Rate tokenstat in Legal opens a sheet where you can rate on Google Play, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
-- Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Hover or click the mark on Mac, tap it on Android, or open the chat menu on iPhone and iPad. The first one you open asks whether to view it in tokenstat or in the browser and remembers your answer, which you can change in settings. On Windows, hover the mark for the list. Update the computer to 1.26.0 to see more than the branch's own.
+- Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Hover or click the mark on Mac, tap it on Android, or open the chat menu on iPhone and iPad. Opening one asks whether to view it in tokenstat or in the browser. Tick Remember my choice to stop being asked, and change it in Account → GitHub pull requests on Mac, Account → This device on phones and tablets. On Windows, hover the mark for the list. Update the computer to 1.26.0 to see more than the branch's own.
 
 ### Changed
 
@@ -19,7 +19,7 @@ desktop is a review build. Newest first.
 ### Improved
 
 - On Mac, Changes in a pull request shows the file list beside the diff. Files, Git, History and the pull request tabs stay ready once opened, so switching back is immediate, and they show the shape of what is loading instead of a spinner.
-- On Mac, the pull request header uses the same small buttons as the rest of the app.
+- On Mac, the pull request header uses the same small controls as the rest of the app, with Open on GitHub beside Refresh.
 
 ### Fixed
 

@@ -521,12 +521,17 @@ struct RootView: View {
             case "history": workspaces.inspectorTab = .history
             default: workspaces.inspectorTab = .files
             }
-        case "pull":
-            // `pull:<folder>:<number>`, as a chat's mark opens it.
+        case "pull", "askpull":
+            // `pull:<folder>:<number>` opens the page. `askpull` follows the
+            // setting, as a chat's mark does.
             guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0"), parts.count > 2,
                   let number = UInt32(parts[2]),
                   let pull = chat.sidebarChats(in: folder.id).lazy.flatMap(\.pulls).first(where: { $0.number == number }) else { return }
-            openPull(pull, from: folder, in: .here)
+            if parts[0] == "pull" {
+                openPull(pull, from: folder, in: .here)
+            } else {
+                openPull(pull, from: folder)
+            }
         case "review":
             // `review:<folder>:<n>`, the nth changed file, as its row opens it.
             guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0"), let files = folder.git?.files else { return }
@@ -3428,8 +3433,8 @@ struct RootView: View {
         SidebarPreferences.shared.projectsSort = sort
     }
 
-    /// Open a chat's pull request where this person wants them, asking the
-    /// first time. One whose repository is not a folder here only has the
+    /// Open a chat's pull request where this person wants them, asking
+    /// until an answer is kept. One whose repository is not a folder here only has the
     /// browser.
     private func openPull(_ pull: ChatPull, from folder: WorkspaceFolder) {
         guard pullFolder(pull, from: folder) != nil else {

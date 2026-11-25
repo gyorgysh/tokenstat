@@ -833,6 +833,10 @@ struct AccountView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                #if os(macOS)
+                ThemeRule()
+                PullOpenPicker()
+                #endif
             }
         }
         .confirmationDialog(

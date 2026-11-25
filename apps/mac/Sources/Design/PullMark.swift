@@ -127,39 +127,64 @@ struct ChatPullSummaryLine: View {
     }
 }
 
-/// Asked the first time a pull request is opened. The answer is kept.
+/// Asked when a pull request is opened. The answer is kept only when the
+/// person says so.
 struct PullOpenSheet: View {
     let pull: ChatPull
     let choose: (PullOpenPreference.Choice) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var remember = false
 
     var body: some View {
         ThemedSheet(title: L10n.text("common.pulls.open_title"),
-                    subtitle: L10n.text("common.pulls.open_remember"), icon: .merge,
+                    subtitle: L10n.text("common.pulls.open_subtitle"), icon: .merge,
                     onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text(pull.title)
                     .font(Theme.callout.weight(.medium))
                     .lineLimit(2)
                 ChatPullSummaryLine(pull: pull)
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle(L10n.text("common.pulls.open_remember"), isOn: $remember)
+                        .toggleStyle(.brandCheckbox)
+                        .font(Theme.callout)
+                    Text(rememberHelp)
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 26)
+                }
+                .padding(.top, Theme.Space.s)
             }
         } actions: {
+            #if os(macOS)
+            Spacer(minLength: 0)
+            #endif
             Button(L10n.text("common.pulls.open_browser"), .external) { pick(.browser) }
+                .buttonStyle(SecondaryButtonStyle())
             Button(L10n.text("common.pulls.view_here"), .source) { pick(.here) }
                 .buttonStyle(AccentButtonStyle())
                 .keyboardShortcut(.defaultAction)
         }
         #if os(macOS)
-        .modalFrame(width: 460, height: 230)
+        .modalFrame(width: 460, height: 324)
         #else
         .presentationDetents([.medium])
+        #endif
+    }
+
+    /// The setting sits in a different place on each.
+    private var rememberHelp: String {
+        #if os(macOS)
+        L10n.text("apple.pulls.open_remember_help")
+        #else
+        L10n.text("common.pulls.open_remember_help")
         #endif
     }
 
     private func pick(_ choice: PullOpenPreference.Choice) {
         // The presenter moves on from here. Dismissing as well would race it
         // when the next thing is another sheet.
-        PullOpenPreference.shared.choice = choice
+        if remember { PullOpenPreference.shared.choice = choice }
         choose(choice)
     }
 }
@@ -252,3 +277,38 @@ struct ClientPullSheet: View {
     }
 }
 #endif
+
+/// Where a chat's pull request opens, in both Apple settings surfaces.
+struct PullOpenPicker: View {
+    @State private var preference = PullOpenPreference.shared
+
+    var body: some View {
+        #if os(macOS)
+        HStack(spacing: Theme.Space.m) {
+            Text(L10n.text("common.pulls.open_in"))
+                .font(Theme.callout)
+            Spacer(minLength: Theme.Space.s)
+            SegmentedCapsulePicker(
+                options: PullOpenPreference.Choice.allCases.map {
+                    (value: $0, label: PullOpenPreference.label($0), symbol: "")
+                },
+                selection: $preference.choice
+            )
+            .fixedSize()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L10n.text("common.pulls.open_in"))
+        #else
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ClientSectionTitle(title: L10n.text("common.pulls.open_in"), mark: "mark_chat")
+            SegmentedTabs(options: PullOpenPreference.Choice.allCases, selection: $preference.choice,
+                          title: PullOpenPreference.label, comfortable: true)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L10n.text("common.pulls.open_in"))
+        #endif
+    }
+}

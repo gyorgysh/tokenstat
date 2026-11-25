@@ -21,6 +21,9 @@ struct PullDetailView: View {
     /// Which of the page's own tabs is behind Changes.
     @State private var pageTab: PullDetailTab = .conversation
     @State private var visitedChanges = false
+    /// The project's tabs take the bar's spare width first, so a button that
+    /// measured itself would keep its name and push the last control out.
+    @State private var hasRoomForLabels = true
     #endif
 
     var body: some View {
@@ -55,6 +58,9 @@ struct PullDetailView: View {
             #endif
         }
         .desktopPaneBackground()
+        #if os(macOS)
+        .onGeometryChange(for: Bool.self) { $0.size.width >= 600 } action: { hasRoomForLabels = $0 }
+        #endif
         .task(id: summary.number) {
             #if os(macOS)
             if model.tab == .changes { visitedChanges = true } else { pageTab = model.tab }
@@ -192,9 +198,9 @@ struct PullDetailView: View {
     private var detailActions: some View {
         if let raw = model.detail?.url, let url = URL(string: raw) {
             #if os(macOS)
-            // The bar's own size, like the toggles beside it.
-            ToolbarIconButton(systemImage: ActionIcon.external.symbol,
-                              help: L10n.text("apple.pulldetailview.open_on_github.03f69885")) { openURL(url) }
+            // Named like the tabs across the bar. An arrow alone did not say
+            // where it leads.
+            githubButton(url, showsLabel: hasRoomForLabels)
             #else
             Button { openURL(url) } label: { ActionIcon.external.label(L10n.text("apple.pulldetailview.open_on_github.03f69885")) }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
@@ -202,6 +208,18 @@ struct PullDetailView: View {
         }
         refreshButton
     }
+
+    #if os(macOS)
+    private func githubButton(_ url: URL, showsLabel: Bool) -> some View {
+        ChromeTabButton(
+            tab: ChromeTab(id: "github", label: L10n.text("apple.pulldetailview.open_on_github.03f69885"),
+                           symbol: ActionIcon.external.symbol),
+            isSelected: false,
+            showsLabel: showsLabel
+        ) { openURL(url) }
+        .fixedSize()
+    }
+    #endif
 
     private var refreshButton: some View {
         ToolbarIconButton(systemImage: "arrow.clockwise", help: L10n.text("apple.pulldetailview.refresh_pull_request.fc146ac9"), isBusy: model.loading) {

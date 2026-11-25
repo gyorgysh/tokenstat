@@ -919,7 +919,9 @@
   "common.pulls.open_in": "Open pull requests in",
   "common.pulls.open_in_ask": "Ask",
   "common.pulls.open_in_browser": "Browser",
-  "common.pulls.open_remember": "Your choice is remembered. You can change it in settings.",
+  "common.pulls.open_remember": "Remember my choice",
+  "common.pulls.open_remember_help": "You can change it in Account → This device.",
+  "common.pulls.open_subtitle": "Choose where to open it.",
   "common.pulls.open_title": "Open pull request",
   "common.pulls.view_here": "View in tokenstat"
 }

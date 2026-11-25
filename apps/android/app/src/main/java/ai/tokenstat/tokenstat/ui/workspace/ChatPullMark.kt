@@ -3,6 +3,7 @@ package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
+import ai.tokenstat.tokenstat.ui.components.BrandCheckbox
 import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
 import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsProminentButton
@@ -245,14 +246,16 @@ private fun PullSummaryLine(pull: JsonObject) {
     }
 }
 
-/// Asked the first time a pull request is opened. The answer is kept.
+/// Asked when a pull request is opened. The answer is kept only when the
+/// person says so.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PullOpenSheet(request: PullOpener.Request) {
     val colors = LocalTsColors.current
     val context = LocalContext.current
+    var keep by remember(request) { mutableStateOf(false) }
     fun pick(choice: PullOpenChoice) {
-        PullOpenChoice.write(context, choice)
+        if (keep) PullOpenChoice.write(context, choice)
         PullOpener.asking = null
         if (choice == PullOpenChoice.Here) PullOpener.request = request else browse(context, request.pull)
     }
@@ -267,11 +270,14 @@ private fun PullOpenSheet(request: PullOpener.Request) {
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
                 PullSummaryLine(request.pull)
             }
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                BrandCheckbox(keep, { keep = !keep }, L10n.text("common.pulls.open_remember"))
+                Text(L10n.text("common.pulls.open_remember_help"), style = TsType.caption, color = colors.textSecondary)
+            }
             TsProminentButton(L10n.text("common.pulls.view_here"), onClick = { pick(PullOpenChoice.Here) },
                 icon = ActionIcon.Merge.vector, modifier = Modifier.fillMaxWidth())
             TsSecondaryButton(L10n.text("common.pulls.open_browser"), onClick = { pick(PullOpenChoice.Browser) },
                 icon = ActionIcon.External.vector, modifier = Modifier.fillMaxWidth())
-            Text(L10n.text("common.pulls.open_remember"), style = TsType.caption, color = colors.textSecondary)
         }
     }
 }
