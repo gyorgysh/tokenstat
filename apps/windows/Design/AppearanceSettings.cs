@@ -4,10 +4,13 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
+using Windows.Storage;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 
 namespace Tokenstat.Design;
 
-/// <summary>Mode and the built-in themes, as one card. Mirrors the Mac AppearancePicker.</summary>
+/// <summary>Mode and themes, as one card. Mirrors the Mac AppearancePicker.</summary>
 internal static class AppearanceSettings
 {
     public static UIElement Card()
@@ -44,6 +47,63 @@ internal static class AppearanceSettings
             grid.Children.Add(swatch);
         }
         body.Children.Add(grid);
+        foreach (var palette in appearance.Custom)
+        {
+            var row = new Grid { ColumnSpacing = Theme.SpaceS };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(Swatch(palette, body));
+            var remove = ActionIconGlyph.Button(L10n.Text("windows.appearance.remove_theme", palette.Name), ActionIcon.Delete, (_, _) =>
+            {
+                appearance.RemoveTheme(palette.Id);
+                Build(body);
+            });
+            remove.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(remove, 1);
+            row.Children.Add(remove);
+            body.Children.Add(row);
+        }
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed,
+            Foreground = Theme.Brush(static () => Theme.Danger) };
+        var import = ActionIconGlyph.Button(L10n.Text("windows.appearance.import_theme"), ActionIcon.Upload,
+            async (sender, _) => await ImportAsync(body, (Button)sender, error));
+        body.Children.Add(import);
+        body.Children.Add(error);
+    }
+
+    private static async Task ImportAsync(StackPanel body, Button button, TextBlock error)
+    {
+        if (App.CurrentWindow is not { } window) return;
+        button.IsEnabled = false;
+        error.Visibility = Visibility.Collapsed;
+        try
+        {
+            var picker = new FileOpenPicker();
+            picker.FileTypeFilter.Add(".json");
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+            if (await picker.PickSingleFileAsync() is not { } file) return;
+            using Stream stream = await file.OpenStreamForReadAsync();
+            var buffer = new byte[AppAppearance.MaximumImportBytes + 1];
+            var size = await stream.ReadAtLeastAsync(buffer, buffer.Length, false);
+            AppAppearance.Shared.ImportTheme(buffer.AsSpan(0, size));
+            Build(body);
+        }
+        catch (Exception exception) when (exception is AppearanceImportException or System.Text.Json.JsonException
+            or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
+        {
+            error.Text = (exception as AppearanceImportException)?.Error switch
+            {
+                AppearanceImportError.Size => L10n.Text("windows.appearance.theme_size"),
+                AppearanceImportError.Version => L10n.Text("windows.appearance.theme_version"),
+                AppearanceImportError.Name => L10n.Text("windows.appearance.theme_name"),
+                AppearanceImportError.Color => L10n.Text("windows.appearance.theme_color"),
+                AppearanceImportError.Contrast => L10n.Text("windows.appearance.theme_contrast"),
+                AppearanceImportError.Limit => L10n.Text("windows.appearance.theme_limit"),
+                _ => L10n.Text("windows.appearance.theme_json"),
+            };
+            error.Visibility = Visibility.Visible;
+        }
+        finally { button.IsEnabled = true; }
     }
 
     private static Button Swatch(AppearancePalette palette, StackPanel body)
@@ -69,7 +129,7 @@ internal static class AppearanceSettings
                 },
             },
         });
-        stack.Children.Add(new TextBlock { Text = name, FontSize = 12 });
+        stack.Children.Add(new TextBlock { Text = name, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis });
         var button = new Button
         {
             Content = stack,

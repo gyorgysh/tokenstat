@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.components.TsBottomSheet
 import ai.tokenstat.tokenstat.ui.theme.onAccent
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import androidx.lifecycle.repeatOnLifecycle
@@ -53,6 +54,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -89,7 +92,6 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -185,6 +187,7 @@ import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.logic.ChatCacheRules
 import ai.tokenstat.tokenstat.ui.logic.ChatCommandRules
+import ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions
 import ai.tokenstat.tokenstat.ui.logic.ChatDelivery
 import ai.tokenstat.tokenstat.ui.logic.ChatSeat
 import ai.tokenstat.tokenstat.ui.logic.ChatHint
@@ -210,6 +213,7 @@ import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -1955,12 +1959,21 @@ fun ChatSection(
                 }
                 if (showingHandoff) {
                     val conversation = openId.orEmpty()
+                    val handoffOwner = projectOwner?.conversation(conversation)
+                    fun ownsHandoff() = ownsProject() && openId == conversation && handoffOwner != null
+                    suspend fun handoffCall(method: String, params: JsonObject): JsonElement {
+                        val cancel = method == "chat.fileUploadCancel"
+                        check(if (cancel) ownsProject() else ownsHandoff()) { L10n.text("android.handoff.draft_changed") }
+                        val result = model.workspaceSection(peer, method, params)
+                        if (!cancel) check(ownsHandoff()) { L10n.text("android.handoff.draft_changed") }
+                        return result
+                    }
                     WorkHandoffSheet(
                         title = openChat?.str("title").orEmpty(),
                         draft = draft,
-                        fileCount = staged.size,
+                        files = staged,
                         deviceName = android.os.Build.MODEL.ifBlank { L10n.text("android.handoff.this_phone") },
-                        call = { method, params -> model.workspaceSection(peer, method, params) },
+                        call = ::handoffCall,
                         workspace = workspace,
                         conversation = conversation,
                         anchor = {
@@ -1970,8 +1983,23 @@ fun ChatSection(
                                 atEnd = atBottom,
                             )
                         },
-                        onUseDraft = { text ->
-                            if (ownsProject() && openId == conversation) draft = text
+                        onPrepareFiles = { files ->
+                            val owner = handoffOwner ?: error(L10n.text("android.handoff.draft_changed"))
+                            files.map { file ->
+                                check(ownsHandoff()) { L10n.text("android.handoff.draft_changed") }
+                                uploadChatFile(file, conversation, owner, ::handoffCall,
+                                    confirm = { remaining -> confirmFileRelay(file.name, file.bytes.toLong(), remaining) },
+                                    progress = {}).str("id") ?: error(L10n.text("android.handoff.files_unavailable"))
+                            }.distinct()
+                        },
+                        onUseDraft = { shared ->
+                            val owner = handoffOwner ?: error(L10n.text("android.handoff.draft_changed"))
+                            val expected = model.chatComposers.capture(owner)
+                            val files = readSharedHandoffFiles(::handoffCall, workspace, conversation, owner, shared.attachmentIds)
+                            check(ownsHandoff() && model.chatComposers.capture(owner) == expected) { L10n.text("android.handoff.draft_changed") }
+                            check(model.chatComposers.update(owner, ChatComposerSessions.Snapshot(shared.text, files))) {
+                                model.chatComposers.failure.value?.message ?: L10n.text("android.handoff.draft_changed")
+                            }
                             showingHandoff = false
                         },
                         onContinueReading = { place ->
@@ -2242,12 +2270,15 @@ fun ChatSection(
                 },
                 draft = draft,
                 onDraft = { draft = it },
+                draftOwner = composerKey,
+                readDraft = { draft },
                 hint = if (noteForStep && openChat?.bol("nativeSteer") == true) L10n.text("common.chat.steer_placeholder") else ChatHint.hint(folderName, sending || runningTurn, note = noteForStep),
                 sending = sending,
                 parking = parkingSteer,
                 sendLabel = if (noteForStep && openChat?.bol("nativeSteer") == true) L10n.text("common.chat.steer") else if (noteForStep) L10n.text("android.chatpullssections.add_a_note_for_the_next_step.4778177a") else L10n.text("android.chatpullssections.send.f6f4688f"),
                 staged = staged,
                 onPick = attachmentInputs.pick,
+                onPasteImages = attachmentInputs.paste,
                 attachmentEnabled = !attachmentInputs.reading, submitEnabled = !attachmentInputs.reading,
                 onRemove = { staged = staged - it },
                 onSend = { scope.launch { send(draft) } },
@@ -3168,7 +3199,7 @@ private fun PullFilterSheet(
         selectedContainerColor = colors.accent.copy(alpha = 0.18f),
         selectedLabelColor = colors.accent,
     )
-    ModalBottomSheet(
+    TsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.panel,
@@ -3518,7 +3549,10 @@ data class StagedAttachment(
     val mediaType: String?,
     val bytes: Int,
     val filePath: String? = null,
+    val hostFile: StagedHostFile? = null,
 )
+
+data class StagedHostFile(val id: String, val owner: String)
 
 /// What reading a picked file produced. A failure carries a sentence rather
 /// than an exception: the composer shows it and the person picks again.
@@ -3714,8 +3748,19 @@ internal fun ChatComposer(
     fieldModifier: Modifier = Modifier,
     sendModifier: Modifier = Modifier,
     compactKeyboard: Boolean = compactChatKeyboard(),
+    draftOwner: String? = null,
+    readDraft: (() -> String)? = null,
+    onPasteImages: ((List<android.net.Uri>, () -> Unit) -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
+    val editorInput = rememberChatComposerInput(draftOwner, draft, readDraft, onDraft)
+    val editor = editorInput.editor
+    val visibleDraft = editor.text.toString()
+    fun publishDraft() = editorInput.publish(readDraft ?: { draft }, onDraft, readDraft != null)
+    fun replaceDraft(text: String) {
+        editor.setTextAndPlaceCursorAtEnd(text)
+        publishDraft()
+    }
     // The value is "standard", not "ask": the host only treats "standard"
     // as ask-with-approvals, and anything else that is not "bypass" runs
     // without the approval plumbing. The label stays Ask.
@@ -3727,7 +3772,7 @@ internal fun ChatComposer(
     // say so rather than accepting a press it will reject. `sending` alone
     // was this screen's own flag and went false long before the turn did.
     val locked = sending || chat?.bol("running") == true
-    val canSend = submitEnabled && !parking && (allowEmpty || draft.isNotBlank() || staged.isNotEmpty())
+    val canSend = submitEnabled && !parking && (allowEmpty || visibleDraft.isNotBlank() || staged.isNotEmpty())
     // An agent that can only run on Bypass is put on it, the way the Apple
     // header enforces it on appear and on every change of agent.
     LaunchedEffect(bypassOnly, autonomy, locked) {
@@ -3757,8 +3802,8 @@ internal fun ChatComposer(
     val focus = LocalFocusManager.current
     // Dictation reads and writes the draft as it is now, not as it was when
     // the mic was pressed.
-    val currentDraft by rememberUpdatedState(draft)
-    val currentOnDraft by rememberUpdatedState(onDraft)
+    val currentEditor by rememberUpdatedState(editor)
+    val currentReplace by rememberUpdatedState(::replaceDraft)
     val dictation = rememberChatDictation(blocked = sending)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val scrollExtras = compactKeyboard && constraints.hasBoundedHeight
@@ -3769,7 +3814,7 @@ internal fun ChatComposer(
                     modifier = if (scrollExtras) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier,
                     verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    ChatCommandMenu(draft, onDraft)
+                    ChatCommandMenu(visibleDraft, ::replaceDraft)
                     // Nothing can be sent right now, so the offer is to keep it. The
                     // twin of the button `ClientChatComposer` shows over a saved copy.
                     if (offline) {
@@ -3777,8 +3822,8 @@ internal fun ChatComposer(
                             label = L10n.text("android.chatpullssections.send_when_connected.c2aae57a"),
                             icon = ActionIcon.Scheduled.vector,
                             small = true,
-                            enabled = draft.isNotBlank(),
-                            onClick = onQueueWhenConnected,
+                            enabled = visibleDraft.isNotBlank(),
+                            onClick = { if (publishDraft()) onQueueWhenConnected() },
                         )
                     }
                     if (!compactKeyboard) ChatComposerToolbar(backends, chat, locked, expanded, onAgent, onSetup,
@@ -3817,18 +3862,19 @@ internal fun ChatComposer(
                     }
                 }
                 val input: @Composable (Modifier) -> Unit = { inputModifier ->
+                    val receive = if (!sending && attachmentEnabled && onPasteImages != null)
+                        Modifier.chatImagePaste(onPasteImages) else Modifier
                     BasicTextField(
-                        value = draft,
-                        onValueChange = onDraft,
+                        state = editor,
                         modifier = inputModifier.heightIn(min = if (expandedField) 180.dp else 48.dp)
-                            .padding(horizontal = Space.xs, vertical = Space.s).then(fieldModifier)
+                            .padding(horizontal = Space.xs, vertical = Space.s).then(fieldModifier).then(receive)
                             .focusRequester(inputFocus).onFocusChanged { inputFocused = it.isFocused },
                         textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
                         cursorBrush = SolidColor(colors.accent),
-                        maxLines = if (expandedField) 18 else if (compactKeyboard) 2 else 5,
-                        decorationBox = { innerTextField ->
+                        lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expandedField) 18 else if (compactKeyboard) 2 else 5),
+                        decorator = { innerTextField ->
                             Box {
-                                if (draft.isEmpty()) Text(
+                                if (visibleDraft.isEmpty()) Text(
                                     hint,
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = colors.textTertiary,
@@ -3887,7 +3933,7 @@ internal fun ChatComposer(
                         }
                     }
                     if (expandedField) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
-                    ChatDictationButton(dictation, read = { currentDraft }, write = { currentOnDraft(it) }, enabled = !sending)
+                    ChatDictationButton(dictation, read = { currentEditor.text.toString() }, write = { currentReplace(it) }, enabled = !sending)
                     // Stop lives in the row above, as on the iPhone. A landscape
                     // keyboard hides that row, so it stays here then.
                     if (locked && compactKeyboard) {
@@ -3916,7 +3962,7 @@ internal fun ChatComposer(
                                     keyboard?.hide()
                                     focus.clearFocus()
                                     expanded = false
-                                    onSend()
+                                    if (publishDraft()) onSend()
                                 }
                                 .then(sendModifier)
                                 .semantics { contentDescription = sendLabel },

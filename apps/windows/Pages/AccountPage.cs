@@ -471,6 +471,9 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         var body = new StackPanel { Spacing = Theme.SpaceS };
         var thisId = Format.Text(account, "thisMachineId");
+        var usageRows = new List<(string Id, TextBlock Amount)>();
+        var usageSlot = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(usageSlot);
         foreach (var machine in machines!.OfType<JsonNode>())
         {
             var id = Format.Text(machine, "id");
@@ -478,8 +481,15 @@ internal sealed class AccountPage : Page, IToolbarItems
             {
                 id = Format.Text(machine, "machineID");
             }
-            body.Children.Add(MachineRow(machine, id, id == thisId));
+            TextBlock? amount = null;
+            if (id.Length > 0 && Format.Text(machine, "kind") != "client")
+            {
+                amount = new TextBlock { FontSize = 12, Opacity = 0.74, Visibility = Visibility.Collapsed };
+                usageRows.Add((id, amount));
+            }
+            body.Children.Add(MachineRow(machine, id, id == thisId, amount));
         }
+        if (usageRows.Count > 0) BuildDeviceUsage(usageSlot, Format.Text(account, "tier"), usageRows);
         body.Children.Add(new TextBlock
         {
             Text = L10n.Text("windows.accountpage.rename_reach_or_remove_a_device_on_the_dev.09b11869"),
@@ -490,7 +500,53 @@ internal sealed class AccountPage : Page, IToolbarItems
         return Chrome.Card(L10n.Text("common.devices"), body, subtitle);
     }
 
-    private static UIElement MachineRow(JsonNode machine, string id, bool isThis)
+    private static void BuildDeviceUsage(StackPanel slot, string tier, IReadOnlyList<(string Id, TextBlock Amount)> rows)
+    {
+        var account = AppServices.AccountGeneration;
+        var days = tier.ToLowerInvariant() switch { "legend" or "patron" => 3650, "supporter" => 365, _ => 30 };
+        var title = days switch
+        {
+            3650 => L10n.Text("windows.accountpage.device_usage_all_time"),
+            365 => L10n.Text("windows.accountpage.device_usage_year"),
+            _ => L10n.Text("windows.accountpage.device_usage_month"),
+        };
+        var message = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.74, Visibility = Visibility.Collapsed };
+        var button = ActionIconGlyph.Button(L10n.Text("windows.accountpage.show_device_usage"), ActionIcon.Refresh, async (sender, args) =>
+        {
+            if (account != AppServices.AccountGeneration || sender is not Button load) return;
+            load.IsEnabled = false;
+            message.Text = L10n.Text("common.loading");
+            message.Visibility = Visibility.Visible;
+            try
+            {
+                var ids = new JsonArray(rows.Select(row => row.Id).Distinct(StringComparer.Ordinal).Take(64)
+                    .Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+                var answer = await AppServices.Host.CallAsync("account.machineUsage", new JsonObject { ["machines"] = ids, ["days"] = days });
+                if (!slot.IsLoaded || account != AppServices.AccountGeneration) return;
+                var list = Format.Items(answer) ?? throw new InvalidDataException(L10n.Text("windows.accountpage.device_usage_unavailable"));
+                var usage = list.OfType<JsonObject>().Select(record => (Id: Format.Text(record, "machine"), Data: record["valueMicros"] as JsonValue))
+                    .Where(record => record.Id.Length > 0 && record.Data is not null && record.Data.TryGetValue<long>(out _))
+                    .ToLookup(record => record.Id, StringComparer.Ordinal);
+                foreach (var (id, amount) in rows)
+                {
+                    amount.Text = usage[id].FirstOrDefault().Data is { } value
+                        ? Format.ListRate(value.GetValue<long>()) : L10n.Text("windows.accountpage.device_usage_unavailable");
+                    amount.Visibility = Visibility.Visible;
+                }
+                message.Text = title;
+                load.Visibility = Visibility.Collapsed;
+            }
+            catch (Exception error)
+            {
+                if (slot.IsLoaded && account == AppServices.AccountGeneration) message.Text = FriendlyError.Display(error.Message);
+            }
+            finally { load.IsEnabled = true; }
+        });
+        slot.Children.Add(button);
+        slot.Children.Add(message);
+    }
+
+    private static UIElement MachineRow(JsonNode machine, string id, bool isThis, TextBlock? usage)
     {
         var row = new Grid();
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -560,6 +616,7 @@ internal sealed class AccountPage : Page, IToolbarItems
                 IsTextSelectionEnabled = true,
             });
         }
+        if (usage is not null) left.Children.Add(usage);
         row.Children.Add(left);
         var seen = Format.Text(machine, "lastSyncAt");
         var stamp = string.IsNullOrEmpty(seen)

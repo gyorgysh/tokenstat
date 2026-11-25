@@ -20,14 +20,15 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal sealed class WorkspacePushSession
 {
-    private static readonly Dictionary<string, WorkspacePushSession> Sessions = new();
+    private static readonly Dictionary<(long Account, string Workspace), WorkspacePushSession> Sessions = new();
 
     public static WorkspacePushSession For(string workspaceId)
     {
-        if (!Sessions.TryGetValue(workspaceId, out var session))
+        var scope = (AppServices.AccountGeneration, workspaceId);
+        if (!Sessions.TryGetValue(scope, out var session))
         {
             session = new WorkspacePushSession();
-            Sessions[workspaceId] = session;
+            Sessions[scope] = session;
         }
         return session;
     }
@@ -68,6 +69,7 @@ internal sealed class WorkspacePushSession
         !Working
         && SubmittedOperationId is null
         && Review is not null
+        && WorkspaceGitLfs.Read(Review)?.Ready != false
         && !UpToDate
         && (Outgoing is null || Outgoing > 0);
 
@@ -140,6 +142,17 @@ internal sealed class WorkspacePushSession
         {
             Working = false;
         }
+    }
+
+    public async Task SetupLfsAsync(string workspaceId, Func<bool> current)
+    {
+        if (Working || SubmittedOperationId is not null || !current() || WorkspaceGitLfs.Read(Review) is not { CanSetup: true } lfs) return;
+        Working = true;
+        Error = null;
+        try { await lfs.SetupAsync(workspaceId); }
+        catch (Exception exception) { Error = FriendlyError.Display(exception.Message); return; }
+        finally { Working = false; }
+        if (current()) await PrepareAsync(workspaceId);
     }
 
     public async Task CheckOutcomeAsync(string workspaceId)
@@ -271,13 +284,17 @@ internal static class WorkspacePushDialog
 {
     public static async Task ShowAsync(UIElement owner, string workspaceId, string folderName)
     {
+        var account = AppServices.AccountGeneration;
+        bool Current() => owner.XamlRoot is not null && account == AppServices.AccountGeneration;
         var session = WorkspacePushSession.For(workspaceId);
         await session.PrepareAsync(workspaceId);
-        while (true)
+        while (Current())
         {
             var submitted = session.SubmittedOperationId is not null;
             var succeeded = session.OutcomeState == "succeeded";
-            var done = !submitted && (succeeded || (session.Review is not null && session.IsDone));
+            var lfs = submitted ? null : WorkspaceGitLfs.Read(session.Review);
+            var done = !submitted && (succeeded || (session.Review is not null && session.IsDone && lfs?.Ready != false));
+            var canSetup = !session.Working && lfs?.CanSetup == true;
             string primary;
             if (submitted)
             {
@@ -286,6 +303,10 @@ internal static class WorkspacePushDialog
             else if (done)
             {
                 primary = L10n.Text("common.done");
+            }
+            else if (lfs?.Ready == false)
+            {
+                primary = canSetup ? lfs.SetupLabel : L10n.Text("windows.workspacepush.check_branch.8128e71f");
             }
             else if (session.Review is null)
             {
@@ -298,23 +319,27 @@ internal static class WorkspacePushDialog
             var dialog = new ContentDialog
             {
                 Title = L10n.Text("windows.workspacepush.push_branch.97deb7c0"),
-                Content = BuildBody(folderName, session),
+                Content = BuildBody(folderName, session, lfs),
                 PrimaryButtonText = primary,
-                CloseButtonText = (succeeded || session.IsDone) && !submitted ? null : L10n.Text("common.close"),
-                DefaultButton = ContentDialogButton.Primary,
+                CloseButtonText = done ? null : L10n.Text("common.close"),
+                DefaultButton = canSetup ? ContentDialogButton.Close : ContentDialogButton.Primary,
+                IsPrimaryButtonEnabled = !session.Working,
             };
             if (submitted && session.CanRetry)
             {
                 dialog.SecondaryButtonText = L10n.Text("windows.workspacepush.retry_same_push.d4ab8f02");
             }
+            else if (canSetup) dialog.SecondaryButtonText = L10n.Text("windows.workspacepush.check_branch.8128e71f");
             var result = await Chrome.ShowDialog(owner, dialog);
+            if (!Current()) return;
             if (result == ContentDialogResult.None)
             {
                 return;
             }
             if (result == ContentDialogResult.Secondary)
             {
-                await session.RetryAsync(workspaceId);
+                if (canSetup) await session.PrepareAsync(workspaceId);
+                else await session.RetryAsync(workspaceId);
                 continue;
             }
             if (result != ContentDialogResult.Primary)
@@ -330,7 +355,12 @@ internal static class WorkspacePushDialog
                 await session.CheckOutcomeAsync(workspaceId);
                 continue;
             }
-            if (session.Review is null)
+            if (canSetup)
+            {
+                await session.SetupLfsAsync(workspaceId, Current);
+                continue;
+            }
+            if (session.Review is null || lfs?.Ready == false)
             {
                 await session.PrepareAsync(workspaceId);
                 continue;
@@ -339,7 +369,7 @@ internal static class WorkspacePushDialog
         }
     }
 
-    private static UIElement BuildBody(string folderName, WorkspacePushSession session)
+    private static UIElement BuildBody(string folderName, WorkspacePushSession session, WorkspaceGitLfs? lfs)
     {
         var stack = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 420 };
         if (!string.IsNullOrEmpty(folderName))
@@ -438,6 +468,7 @@ internal static class WorkspacePushDialog
             stack.Children.Add(Chrome.Banner(
                 session.OutcomeMessage, ok ? Theme.Success : Theme.Danger, Symbol.Important));
         }
+        if (lfs is not null) stack.Children.Add(lfs.Card());
         if (!string.IsNullOrEmpty(session.Error))
         {
             stack.Children.Add(Chrome.Banner(session.Error, Theme.Danger, Symbol.Important));

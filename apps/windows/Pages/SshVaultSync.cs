@@ -148,12 +148,18 @@ internal static class SshVaultSync
 
     // Mirror edits before the next pull can bring an old record back. A
     // configured, locked vault must be unlocked before editing synced data.
-    public static async Task<JsonNode> WriteAsync(string method, JsonObject parameters)
+    public static async Task<JsonNode> WriteAsync(string method, JsonObject parameters, long? expectedAccount = null)
     {
+        void CheckAccount()
+        {
+            if (expectedAccount is { } account && account != AppServices.AccountGeneration) throw new OperationCanceledException();
+        }
         await Gate.WaitAsync();
         try
         {
+            CheckAccount();
             var account = await AppServices.Host.CallAsync("account.status");
+            CheckAccount();
             if (!Format.Flag(account, "signedIn"))
                 return await AppServices.Host.CallAsync(method, parameters);
             var scope = SshVaultScope.From(account)
@@ -177,6 +183,7 @@ internal static class SshVaultSync
                         || (pair.Key.StartsWith("host:") && Format.Text(pair.Value, "folderId") == id))
                         moved.Add(pair.Key);
             }
+            CheckAccount();
             var saved = await AppServices.Host.CallAsync(method, parameters);
             if (synced && method == "ssh.folder.delete")
             {
@@ -190,6 +197,14 @@ internal static class SshVaultSync
             {
                 try { await PushAsync(kind, saved, scope); }
                 catch (Exception ex) { throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.saved_on_this_pc_but_vault_sync_failed_0.894e1add", $"{ex.Message}")); }
+            }
+            if (synced && method == "ssh.host.reorder" && saved["changed"] is JsonArray changed)
+            {
+                try
+                {
+                    foreach (var host in changed.OfType<JsonObject>()) await PushAsync("host", host, scope);
+                }
+                catch (Exception ex) { throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.saved_on_this_pc_but_vault_sync_failed_0.894e1add", ex.Message)); }
             }
             return saved;
         }

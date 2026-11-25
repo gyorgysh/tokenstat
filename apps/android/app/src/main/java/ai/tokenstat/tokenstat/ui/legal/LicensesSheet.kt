@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.legal
 
+import ai.tokenstat.tokenstat.ui.components.TsBottomSheet
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import androidx.compose.foundation.layout.Arrangement
@@ -14,7 +15,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -86,7 +86,7 @@ fun LicensesSheet(onDismiss: () -> Unit) {
         }
         loadFailed = text == null
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.background) {
+    TsBottomSheet(onDismissRequest = onDismiss, containerColor = colors.background) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),

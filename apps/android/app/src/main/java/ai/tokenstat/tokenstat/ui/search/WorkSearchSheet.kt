@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.search
 
+import ai.tokenstat.tokenstat.ui.components.TsBottomSheet
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -15,7 +16,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -156,7 +156,7 @@ fun WorkSearchSheet(
 
     // Full height: this is a search, so the keyboard takes the bottom half
     // the moment you type. Opening half way left three results visible.
-    ModalBottomSheet(
+    TsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.background,

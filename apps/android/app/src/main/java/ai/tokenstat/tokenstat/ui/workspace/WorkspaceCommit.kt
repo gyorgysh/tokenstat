@@ -372,6 +372,7 @@ internal fun PushSheet(
     var outcome by remember { mutableStateOf<JsonObject?>(null) }
     var canRetry by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
+    var settingUpLfs by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun prepare() {
@@ -401,6 +402,7 @@ internal fun PushSheet(
     suspend fun send(retry: Boolean) {
         if (working || !supportsReviewedPush || (retry && !canRetry) || (operationId != null && !retry)) return
         val frozen = review ?: return
+        if (!retry && frozen.gitLfsStatus()?.ready == false) return
         val opId = operationId ?: run {
             val fresh = java.util.UUID.randomUUID().toString()
             operationId = fresh
@@ -495,16 +497,37 @@ internal fun PushSheet(
         }
     }
 
+    suspend fun setupLfs(status: GitLfsStatus) {
+        if (working || operationId != null || status.ready || (!status.installed && !status.canInstall)) return
+        working = true
+        settingUpLfs = true
+        error = null
+        try {
+            setupGitLfs(request, workspace, status)
+            review = null
+        } catch (failure: Exception) {
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            error = TunnelCopy.display(failure.message ?: L10n.text("android.gitlfs.failed"), hostLabel)
+            return
+        } finally {
+            settingUpLfs = false
+            working = false
+        }
+        prepare()
+    }
+
     LaunchedEffect(supportsReviewedPush) { prepare() }
 
     val shown = review ?: outcome?.get("review") as? JsonObject
     val outcomeState = outcome?.str("state")
     val submitted = operationId != null
+    val lfs = if (submitted) null else review.gitLfsStatus()
 
     TsModalScreen(
         title = L10n.text("android.workspacecommit.push_branch.97deb7c0"),
         subtitle = listOfNotNull(folderName.takeIf { it.isNotBlank() }, hostLabel.takeIf { it.isNotBlank() }).joinToString(" · "),
         onDismiss = onDismiss,
+        dismissEnabled = !settingUpLfs,
         footer = {
             if (!supportsReviewedPush) {
                 TsAccentButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
@@ -527,6 +550,8 @@ internal fun PushSheet(
                 )
             } else if (outcomeState == "succeeded" || shown?.let { it.str("remoteHead") == it.str("head") } == true || shown?.get("outgoing")?.jsonPrimitive?.contentOrNull == "0") {
                 TsAccentButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
+            } else if (lfs?.ready == false) {
+                // The setup card offers the actions until a new review clears the block.
             } else if (review != null) {
                 TsAccentButton(
                     label = if (review!!.str("remoteHead") == null) L10n.text("android.workspacecommit.publish_branch.e1f5968c") else L10n.text("android.workspacecommit.push_branch.97deb7c0"),
@@ -580,13 +605,20 @@ internal fun PushSheet(
                 }
             }
         }
+        if (lfs != null) {
+            GitLfsSetupCard(lfs, working, onSetup = { scope.launch { setupLfs(lfs) } }, onCheck = { scope.launch { prepare() } })
+        }
         outcome?.str("message")?.let {
             Banner(it, if (outcomeState == "succeeded") BannerSeverity.SUCCESS else BannerSeverity.DANGER)
         }
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         if (working) {
             Text(
-                if (submitted) L10n.text("android.workspacecommit.checking_push.00fa6ce0") else L10n.text("android.workspacecommit.checking_the_branch.3733503a"),
+                when {
+                    settingUpLfs -> L10n.text("android.gitlfs.setting_up")
+                    submitted -> L10n.text("android.workspacecommit.checking_push.00fa6ce0")
+                    else -> L10n.text("android.workspacecommit.checking_the_branch.3733503a")
+                },
                 style = TextStyle(fontSize = 14.sp),
                 color = LocalTsColors.current.textSecondary,
             )

@@ -111,6 +111,7 @@ internal fun PullSheet(
     var outcome by remember { mutableStateOf<JsonObject?>(null) }
     var working by remember { mutableStateOf(false) }
     var pulling by remember { mutableStateOf(false) }
+    var settingUpLfs by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun check() {
@@ -135,7 +136,7 @@ internal fun PullSheet(
     }
 
     suspend fun pull(reviewed: JsonObject) {
-        if (working || outcome != null) return
+        if (working || outcome != null || reviewed.gitLfsStatus()?.ready == false) return
         working = true
         pulling = true
         error = null
@@ -161,23 +162,43 @@ internal fun PullSheet(
         }
     }
 
+    suspend fun setupLfs(status: GitLfsStatus) {
+        if (working || status.ready || (!status.installed && !status.canInstall)) return
+        working = true
+        settingUpLfs = true
+        error = null
+        try {
+            setupGitLfs(request, workspace, status)
+        } catch (failure: Exception) {
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            error = TunnelCopy.display(failure.message ?: L10n.text("android.gitlfs.failed"), hostLabel)
+            return
+        } finally {
+            settingUpLfs = false
+            working = false
+        }
+        check()
+    }
+
     LaunchedEffect(Unit) { check() }
 
     val state = review?.str("state")
     val incoming = review?.count("incoming") ?: 0L
     val outgoing = review?.count("outgoing") ?: 0L
     val pulled = outcome?.bol("ok") == true
+    val lfs = review.gitLfsStatus()
 
     TsModalScreen(
         title = L10n.text("android.gitpull.title"),
         subtitle = listOfNotNull(folderName.takeIf { it.isNotBlank() }, hostLabel.takeIf { it.isNotBlank() }).joinToString(" · "),
         onDismiss = onDismiss,
-        dismissEnabled = !pulling,
+        dismissEnabled = !pulling && !settingUpLfs,
         footer = {
             val reviewed = review
             when {
                 pulled || state == "upToDate" ->
                     TsAccentButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
+                lfs?.ready == false -> Unit
                 reviewed != null && state == "fastForward" && outcome == null ->
                     TsAccentButton(
                         label = if (incoming == 1L) L10n.text("android.gitpull.pull_commits.one", "1") else L10n.text("android.gitpull.pull_commits.other", "$incoming"),
@@ -214,10 +235,17 @@ internal fun PullSheet(
                 }
             }
         }
+        if (lfs != null && outcome == null) {
+            GitLfsSetupCard(lfs, working, onSetup = { scope.launch { setupLfs(lfs) } }, onCheck = { scope.launch { check() } })
+        }
         outcome?.str("message")?.let { Banner(it, if (pulled) BannerSeverity.SUCCESS else BannerSeverity.DANGER) }
         error?.let { Banner(it, BannerSeverity.DANGER) }
         if (working) {
-            Text(if (pulling) L10n.text("android.gitpull.pulling") else L10n.text("android.gitpull.checking"), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+            Text(when {
+                settingUpLfs -> L10n.text("android.gitlfs.setting_up")
+                pulling -> L10n.text("android.gitpull.pulling")
+                else -> L10n.text("android.gitpull.checking")
+            }, style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
         }
         Text(L10n.text("android.gitpull.help"), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
     }

@@ -14,8 +14,10 @@ namespace Tokenstat.Pages;
 internal static class ChatDetailPreference
 {
     private static ChatDetail? _level;
+    private static bool? _smoothStreaming;
 
     private static string FilePath => InAppData("chat-detail-level.txt");
+    private static string StreamingPath => InAppData("chat-smooth-streaming.txt");
 
     /// <summary>
     /// Where the level lived while "minimal" meant a line per step and
@@ -43,6 +45,28 @@ internal static class ChatDetailPreference
             {
                 // Remembering is a courtesy. This session keeps the choice.
             }
+        }
+    }
+
+    public static bool SmoothStreaming
+    {
+        get
+        {
+            if (_smoothStreaming is { } enabled) return enabled;
+            try { return (_smoothStreaming = !File.Exists(StreamingPath) || File.ReadAllText(StreamingPath).Trim() != "off").Value; }
+            catch (IOException) { return true; }
+            catch (UnauthorizedAccessException) { return true; }
+        }
+        set
+        {
+            _smoothStreaming = value;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(StreamingPath)!);
+                File.WriteAllText(StreamingPath, value ? "on" : "off");
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 

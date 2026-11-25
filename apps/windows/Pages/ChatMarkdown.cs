@@ -14,6 +14,8 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
@@ -27,7 +29,7 @@ namespace Tokenstat.Pages;
 /// does not make requests. Code blocks are drawn by the caller so they keep
 /// the chat's own copy menu and horizontal scrolling.
 /// </summary>
-internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? openWebLink)
+internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? openWebLink, int fadeFrom)
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .DisableHtml()
@@ -38,10 +40,11 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? op
         .Build();
 
     private const double BodySize = 14;
+    private SolidColorBrush? _arrivalBrush;
 
     public static UIElement Create(string text, Func<string, UIElement> codeBlock, bool allowDesktopActions = true,
-        Func<Uri, Task>? openWebLink = null) =>
-        new ChatMarkdown(allowDesktopActions, openWebLink).Render(text, codeBlock);
+        Func<Uri, Task>? openWebLink = null, int fadeFrom = -1) =>
+        new ChatMarkdown(allowDesktopActions, openWebLink, fadeFrom).Render(text, codeBlock);
 
     private UIElement Render(string text, Func<string, UIElement> codeBlock)
     {
@@ -55,7 +58,42 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? op
             return Plain(text);
         }
         var body = Blocks(document, codeBlock);
+        if (_arrivalBrush is { } brush) FadeArrivals(body, brush);
         return body.Children.Count == 0 ? Plain(text) : body;
+    }
+
+    private static void FadeArrivals(FrameworkElement body, SolidColorBrush brush)
+    {
+        var fade = new DoubleAnimation
+        {
+            From = 0.3,
+            To = 1,
+            Duration = TimeSpan.FromMilliseconds(220),
+            EnableDependentAnimation = true,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(fade, brush);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        var animation = new Storyboard();
+        animation.Children.Add(fade);
+        void Start(object sender, RoutedEventArgs args)
+        {
+            body.Loaded -= Start;
+            if (Motion.AnimationsEnabled())
+            {
+                body.Unloaded += Stop;
+                animation.Completed += Complete;
+                animation.Begin();
+            }
+        }
+        void Stop(object sender, RoutedEventArgs args) => Complete(sender, args);
+        void Complete(object? sender, object args)
+        {
+            body.Unloaded -= Stop;
+            animation.Completed -= Complete;
+            animation.Stop();
+        }
+        body.Loaded += Start;
     }
 
     private TextBlock Plain(string text) => new()
@@ -203,14 +241,14 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? op
         };
     }
 
-    private void Append(ContainerInline container, InlineCollection output)
+    private void Append(ContainerInline container, InlineCollection output, bool allowFade = true)
     {
         foreach (var inline in container)
         {
             switch (inline)
             {
                 case LiteralInline literal:
-                    output.Add(new Run { Text = literal.Content.ToString() });
+                    AppendLiteral(literal, output, allowFade);
                     break;
                 case HtmlEntityInline entity:
                     output.Add(new Run { Text = entity.Transcoded.ToString() });
@@ -228,19 +266,19 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? op
                     Span span = emphasis.DelimiterChar == '~'
                         ? new Span { TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough }
                         : emphasis.DelimiterCount >= 2 ? new Bold() : new Italic();
-                    Append(emphasis, span.Inlines);
+                    Append(emphasis, span.Inlines, allowFade);
                     output.Add(span);
                     break;
                 case LinkInline link:
                     if (!link.IsImage && Link(link.Url) is { } uri)
                     {
                         var anchor = Anchor(uri);
-                        Append(link, anchor.Inlines);
+                        Append(link, anchor.Inlines, allowFade: false);
                         output.Add(anchor);
                     }
                     else
                     {
-                        Append(link, output);
+                        Append(link, output, allowFade);
                     }
                     break;
                 case AutolinkInline link:
@@ -256,10 +294,33 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? op
                     }
                     break;
                 case ContainerInline nested:
-                    Append(nested, output);
+                    Append(nested, output, allowFade);
                     break;
             }
         }
+    }
+
+    private void AppendLiteral(LiteralInline literal, InlineCollection output, bool allowFade)
+    {
+        var value = literal.Content.ToString();
+        if (!allowFade || fadeFrom < 0 || literal.Span.End < fadeFrom || value.Length == 0)
+        {
+            output.Add(new Run { Text = value });
+            return;
+        }
+        var split = Math.Max(0, fadeFrom - literal.Span.Start);
+        if (split > 0 && literal.Span.Length != value.Length) split = value.Length;
+        // A token can extend a word. Keep the complete word together so
+        // splitting a run never divides a grapheme or changes its shaping.
+        while (split > 0 && split < value.Length && !char.IsWhiteSpace(value[split - 1])) split++;
+        if (split >= value.Length)
+        {
+            output.Add(new Run { Text = value });
+            return;
+        }
+        if (split > 0) output.Add(new Run { Text = value[..split] });
+        _arrivalBrush ??= new SolidColorBrush(Theme.IsDark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
+        output.Add(new Run { Text = value[split..], Foreground = _arrivalBrush });
     }
 
     private Uri? Link(string? value)

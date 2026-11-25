@@ -406,6 +406,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             ChatDetail.Detailed => L10n.Text("common.chat.detail.detailed_help"),
             _ => L10n.Text("common.chat.detail.standard_help"),
         }));
+        detailControls.Children.Add(Chrome.SettingSwitch(L10n.Text("common.chat.smooth_streaming"), ChatDetailPreference.SmoothStreaming,
+            enabled =>
+            {
+                ChatDetailPreference.SmoothStreaming = enabled;
+                if (!enabled) RebuildTranscript(full: true);
+                return Task.CompletedTask;
+            }));
+        detailControls.Children.Add(Muted(L10n.Text("common.chat.smooth_streaming_help")));
         var stepsOpen = AnyGroupOpen();
         detailControls.Children.Add(ActionIconGlyph.Button(L10n.Text(stepsOpen ? "windows.chatdetail.collapse_steps" : "windows.chatdetail.expand_steps"), ActionIcon.Visibility, (_, _) => SetAllGroups(!stepsOpen)));
         _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatdetail.title"), "chat-detail", DetailChoices(), detailControls));
@@ -976,6 +984,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(Labeled(L10n.Text("windows.chatpage.persona.31bdeef9"), PersonaPicker(Format.Text(chat, "personaId"), running)));
         }
+        body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.personaeditor.title"), ActionIcon.Edit,
+            async (_, _) => await OpenPersonaEditorAsync()));
         var models = backend?["models"] as JsonArray;
         if (models is { Count: > 0 })
         {
@@ -1306,6 +1316,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _ => item.Id,
     });
 
+    private (int Generation, string Id, string Text)? _previousLiveReply;
+
     private void RebuildTranscript(bool full = false)
     {
         if (full)
@@ -1317,6 +1329,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var raw = Coalesce(_events);
         var busy = Busy(raw);
         var items = ChatImageGallery.Compose(ChatDetailFold.Fold(raw, ChatDetailPreference.Level, _running, IsGroupOpen));
+        DisplayItem? liveReply = busy && !_opening ? items.LastOrDefault(item => item.Kind is ItemKind.User or ItemKind.Assistant) : null;
+        var fadeFrom = -1;
+        if (liveReply is { Kind: ItemKind.Assistant } latest)
+        {
+            if (!full && _followEnd && _sliceOlder == 0 && _previousLiveReply is { } prior && prior.Generation == _openGeneration
+                && prior.Id == latest.Id && latest.Text.Length > prior.Text.Length && latest.Text.StartsWith(prior.Text, StringComparison.Ordinal)
+                && ChatDetailPreference.SmoothStreaming && Motion.AnimationsEnabled())
+                fadeFrom = prior.Text.Length;
+            _previousLiveReply = (_openGeneration, latest.Id, latest.Text);
+        }
+        else _previousLiveReply = null;
         // Reused count cards resolve their review at click time. A late patch
         // can change without changing the card's file names or line counts.
         _turnReviews.Clear();
@@ -1356,6 +1379,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var item = items[start + i];
             var key = ItemContentKey(item);
             var index = prefix + i;
+            var fading = item.Id == liveReply?.Id ? fadeFrom : -1;
 
             if (index < _transcript.Children.Count)
             {
@@ -1364,14 +1388,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 {
                     continue;
                 }
-                var updated = Render(item);
+                var updated = Render(item, fading);
                 if (updated is FrameworkElement fe) fe.Tag = key;
                 _transcript.Children.RemoveAt(index);
                 _transcript.Children.Insert(index, updated);
             }
             else
             {
-                var created = Render(item);
+                var created = Render(item, fading);
                 if (created is FrameworkElement fe) fe.Tag = key;
                 _transcript.Children.Add(created);
             }
@@ -1418,14 +1442,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         UpdateFollowPill();
     }
 
-    private UIElement Render(DisplayItem item)
+    private UIElement Render(DisplayItem item, int fadeFrom)
     {
         UIElement view = item.Kind switch
         {
         ItemKind.Tool or ItemKind.Edit when item.Plain == PlainStep.Detail => PlainStepDetail(item),
         ItemKind.Tool or ItemKind.Edit when item.Plain == PlainStep.Line => PlainStepRow(item),
         ItemKind.User => UserBubble(item.Text, item.IsSteer),
-        ItemKind.Assistant => AssistantBubble(item.Text),
+        ItemKind.Assistant => AssistantBubble(item.Text, fadeFrom),
         ItemKind.Thinking => ThinkingRow(item.Text),
         ItemKind.Tool => ToolRow(item),
         ItemKind.Edit => EditRow(item),
@@ -1650,7 +1674,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return bubble;
     }
 
-    private UIElement AssistantBubble(string text) => new Border
+    private UIElement AssistantBubble(string text, int fadeFrom) => new Border
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
         Background = Theme.PanelBrush,
@@ -1658,7 +1682,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(16),
         Padding = new Thickness(Theme.SpaceM),
-        Child = ChatMarkdown.Create(text, CodeBlock, openWebLink: OpenChatLinkAsync),
+        Child = ChatMarkdown.Create(text, CodeBlock, openWebLink: OpenChatLinkAsync, fadeFrom: fadeFrom),
     };
 
     private bool _chatLinkOpening;
@@ -2626,6 +2650,24 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             RefreshCatalogPresentation();
         }
         catch (Exception ex) { if (generation == _openGeneration) Banner(ex.Message); }
+    }
+
+    private bool _personaEditorOpen;
+
+    private async Task OpenPersonaEditorAsync()
+    {
+        if (_personaEditorOpen || _opening) return;
+        var generation = _openGeneration;
+        var account = AppServices.AccountGeneration;
+        bool Current() => IsLoaded && generation == _openGeneration && account == AppServices.AccountGeneration;
+        _personaEditorOpen = true;
+        try
+        {
+            if (await PersonaEditor.ShowAsync(this, _workspaceId, _backends, CallChatAsync, Current) && Current())
+                await RefreshPersonaCatalogAsync(generation);
+        }
+        catch (Exception error) { if (Current()) Banner(FriendlyError.Display(error.Message)); }
+        finally { _personaEditorOpen = false; }
     }
 
     private void RefreshCatalogPresentation()

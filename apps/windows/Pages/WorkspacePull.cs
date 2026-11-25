@@ -22,6 +22,8 @@ internal static class WorkspacePullDialog
 {
     public static async Task ShowAsync(UIElement owner, string workspaceId, string folderName)
     {
+        var account = AppServices.AccountGeneration;
+        bool Current() => owner.XamlRoot is not null && account == AppServices.AccountGeneration;
         try
         {
             var spoken = await RemoteWorkspaces.CallWorkspaceAsync(workspaceId, "protocol");
@@ -68,29 +70,48 @@ internal static class WorkspacePullDialog
         }
 
         await CheckAsync();
-        while (true)
+        while (Current())
         {
             var state = Format.Text(review, "state");
             var pulled = Format.Flag(outcome, "ok");
-            var done = pulled || state == "upToDate";
-            var canPull = review is not null && outcome is null && state == "fastForward";
+            var lfs = outcome is null ? WorkspaceGitLfs.Read(review) : null;
+            var done = pulled || (state == "upToDate" && lfs?.Ready != false);
+            var canPull = review is not null && outcome is null && state == "fastForward" && lfs?.Ready != false;
+            var canSetup = lfs?.CanSetup == true;
             var incoming = Count(review, "incoming");
             var dialog = new ContentDialog
             {
                 Title = L10n.Text("windows.gitpull.title"),
-                Content = Body(folderName, review, outcome, error),
+                Content = Body(folderName, review, outcome, error, lfs),
                 PrimaryButtonText = done
                     ? L10n.Text("common.done")
-                    : canPull
+                    : canSetup ? lfs!.SetupLabel : canPull
                         ? (incoming == 1 ? L10n.Text("windows.gitpull.pull_commits.one", "1") : L10n.Text("windows.gitpull.pull_commits.other", $"{incoming}"))
                         : L10n.Text("windows.gitpull.check_again"),
                 CloseButtonText = done ? null : L10n.Text("common.close"),
-                DefaultButton = ContentDialogButton.Primary,
+                SecondaryButtonText = canSetup ? L10n.Text("windows.gitpull.check_again") : null,
+                DefaultButton = canSetup ? ContentDialogButton.Close : ContentDialogButton.Primary,
             };
             var result = await Chrome.ShowDialog(owner, dialog);
+            if (!Current()) return;
+            if (result == ContentDialogResult.Secondary && canSetup)
+            {
+                await CheckAsync();
+                continue;
+            }
             if (result != ContentDialogResult.Primary || done)
             {
                 return;
+            }
+            if (canSetup)
+            {
+                try
+                {
+                    await lfs!.SetupAsync(workspaceId);
+                    if (Current()) await CheckAsync();
+                }
+                catch (Exception exception) { error = FriendlyError.Display(exception.Message); }
+                continue;
             }
             if (!canPull)
             {
@@ -116,7 +137,7 @@ internal static class WorkspacePullDialog
     private static ulong Count(JsonNode? review, string key) =>
         ulong.TryParse(Format.Text(review, key), out var value) ? value : 0;
 
-    private static UIElement Body(string folderName, JsonNode? review, JsonNode? outcome, string? error)
+    private static UIElement Body(string folderName, JsonNode? review, JsonNode? outcome, string? error, WorkspaceGitLfs? lfs)
     {
         var stack = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 420 };
         if (!string.IsNullOrEmpty(folderName))
@@ -159,6 +180,7 @@ internal static class WorkspacePullDialog
         {
             stack.Children.Add(Chrome.Banner(error, Theme.Danger, Symbol.Important));
         }
+        if (lfs is not null) stack.Children.Add(lfs.Card());
         stack.Children.Add(Text(L10n.Text("windows.gitpull.help"), 0.7, 12));
         return stack;
     }

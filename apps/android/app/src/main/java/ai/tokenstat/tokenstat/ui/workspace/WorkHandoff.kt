@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.components.TsBottomSheet
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
@@ -26,7 +27,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -55,6 +55,31 @@ import kotlinx.serialization.json.put
 
 /// Text shared on purpose, with the host's names for any files. Never a send.
 internal data class HandoffDraft(val text: String, val attachmentIds: List<String> = emptyList())
+
+internal suspend fun readSharedHandoffFiles(
+    call: suspend (String, JsonObject) -> JsonElement,
+    workspace: String,
+    conversation: String,
+    owner: String,
+    ids: List<String>,
+): List<StagedAttachment> {
+    val unavailable = L10n.text("android.handoff.files_unavailable")
+    require(ids.size <= 20 && ids.distinct().size == ids.size) { unavailable }
+    val answer = gitFormRequest(call, "work.continuity.attachments", buildJsonObject {
+        put("workspaceId", workspace)
+        put("conversationId", conversation)
+        put("attachmentIds", buildJsonArray { ids.forEach { add(JsonPrimitive(it)) } })
+    }) as? JsonArray ?: error(unavailable)
+    check(answer.size == ids.size) { unavailable }
+    return answer.mapIndexed { index, row ->
+        val file = row as? JsonObject ?: error(unavailable)
+        val id = ids[index]
+        val name = file.word("name")?.takeIf { it.isNotBlank() } ?: error(unavailable)
+        val size = (file["size"] as? JsonPrimitive)?.longOrNull ?: error(unavailable)
+        check(file.word("id") == id && size in 0..FILE_MAX.toLong()) { unavailable }
+        StagedAttachment(name, "", file.word("mediaType"), size.toInt(), hostFile = StagedHostFile(id, owner))
+    }
+}
 
 /// A row and how far down it the reader was, in basis points.
 internal data class HandoffAnchor(val eventId: String, val fraction: Int, val followsLatest: Boolean)
@@ -188,13 +213,14 @@ internal fun WorkHandoffOffer(record: WorkHandoff, onOpen: () -> Unit, onDismiss
 internal fun WorkHandoffSheet(
     title: String,
     draft: String,
-    fileCount: Int,
+    files: List<StagedAttachment>,
     deviceName: String,
     call: suspend (String, JsonObject) -> JsonElement,
     workspace: String,
     conversation: String,
     anchor: () -> HandoffAnchor?,
-    onUseDraft: (String) -> Unit,
+    onPrepareFiles: suspend (List<StagedAttachment>) -> List<String>,
+    onUseDraft: suspend (HandoffDraft) -> Unit,
     onContinueReading: (HandoffAnchor) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -207,6 +233,7 @@ internal fun WorkHandoffSheet(
     var loaded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var includeDraft by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
 
     suspend fun load() {
         phase = HandoffPhase.Loading
@@ -249,9 +276,35 @@ internal fun WorkHandoffSheet(
     fun request(text: HandoffDraft?, place: HandoffAnchor?) =
         HandoffRequest(UUID.randomUUID().toString(), shared?.revision ?: 0, deviceName, text, place)
 
+    suspend fun share() {
+        if (phase == HandoffPhase.Loading || phase == HandoffPhase.Sharing || importing) return
+        val place = anchor()
+        phase = HandoffPhase.Sharing
+        error = null
+        try {
+            val prepared = if (includeDraft && (draft.isNotEmpty() || files.isNotEmpty())) HandoffDraft(draft, onPrepareFiles(files)) else null
+            pending = request(prepared, place)
+            send()
+        } catch (cancelled: CancellationException) { throw cancelled } catch (failure: Exception) {
+            error = failure.message ?: L10n.text("android.handoff.files_unavailable")
+            phase = HandoffPhase.Failed
+        }
+    }
+
+    suspend fun use(draft: HandoffDraft) {
+        if (importing || phase == HandoffPhase.Loading || phase == HandoffPhase.Sharing) return
+        importing = true
+        error = null
+        try {
+            onUseDraft(draft)
+        } catch (cancelled: CancellationException) { throw cancelled } catch (failure: Exception) {
+            error = failure.message ?: L10n.text("android.handoff.files_unavailable")
+        } finally { importing = false }
+    }
+
     LaunchedEffect(Unit) { load() }
-    val busy = phase == HandoffPhase.Loading || phase == HandoffPhase.Sharing
-    ModalBottomSheet(
+    val busy = phase == HandoffPhase.Loading || phase == HandoffPhase.Sharing || importing
+    TsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.background,
@@ -268,7 +321,7 @@ internal fun WorkHandoffSheet(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     CircularProgressIndicator(color = colors.accent)
                     Text(
-                        if (phase == HandoffPhase.Loading) L10n.text("android.handoff.checking") else L10n.text("android.handoff.sharing"),
+                        if (phase == HandoffPhase.Sharing) L10n.text("android.handoff.sharing") else L10n.text("android.handoff.checking"),
                         style = TsType.body,
                         color = colors.textSecondary,
                     )
@@ -276,7 +329,7 @@ internal fun WorkHandoffSheet(
             }
             error?.let { message ->
                 Banner(message, BannerSeverity.WARNING)
-                TsSecondaryButton(
+                if (pending != null || !loaded) TsSecondaryButton(
                     label = L10n.text("android.handoff.try_again"),
                     icon = ActionIcon.Refresh.vector,
                     onClick = { scope.launch { if (pending != null) send() else load() } },
@@ -298,16 +351,18 @@ internal fun WorkHandoffSheet(
                         record.draft?.let { value ->
                             DraftText(L10n.text("android.handoff.shared_draft"), value.text)
                             if (value.attachmentIds.isNotEmpty()) {
-                                Text(L10n.text("android.handoff.files_stay"), style = TsType.caption, color = colors.textSecondary)
+                                Text(handoffFileCount(value.attachmentIds.size), style = TsType.caption, color = colors.textSecondary)
                             }
-                            if (draft.isNotEmpty()) {
+                            if (draft.isNotEmpty() || files.isNotEmpty()) {
                                 DraftText(L10n.text("android.handoff.on_this_device"), draft)
+                                if (files.isNotEmpty()) Text(handoffFileCount(files.size), style = TsType.caption, color = colors.textSecondary)
                                 Text(L10n.text("android.handoff.replaces"), style = TsType.caption, color = colors.textSecondary)
                             }
                             TsAccentButton(
                                 label = L10n.text("android.handoff.use_this"),
                                 icon = ActionIcon.Restore.vector,
-                                onClick = { if (!busy) onUseDraft(value.text) },
+                                enabled = !busy,
+                                onClick = { scope.launch { use(value) } },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -347,19 +402,16 @@ internal fun WorkHandoffSheet(
                     Text(L10n.text("android.handoff.ready_help"), style = TsType.body, color = colors.textSecondary)
                 }
                 loaded && pending == null && !busy -> {
-                    if (draft.isNotEmpty()) {
+                    if (draft.isNotEmpty() || files.isNotEmpty()) {
                         BrandCheckbox(includeDraft, { includeDraft = !includeDraft }, L10n.text("android.handoff.include_draft"))
-                        if (includeDraft && fileCount > 0) {
-                            Text(L10n.text("android.handoff.files_not_shared"), style = TsType.caption, color = colors.textSecondary)
+                        if (includeDraft && files.isNotEmpty()) {
+                            Text(handoffFileCount(files.size), style = TsType.caption, color = colors.textSecondary)
                         }
                     }
                     TsAccentButton(
                         label = L10n.text("android.handoff.share_place"),
                         icon = ActionIcon.Upload.vector,
-                        onClick = {
-                            pending = request(if (includeDraft) HandoffDraft(draft) else null, anchor())
-                            scope.launch { send() }
-                        },
+                        onClick = { scope.launch { share() } },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -368,6 +420,9 @@ internal fun WorkHandoffSheet(
         }
     }
 }
+
+private fun handoffFileCount(count: Int): String = if (count == 1) L10n.text("android.handoff.files.one", "$count")
+    else L10n.text("android.handoff.files.other", "$count")
 
 @Composable
 private fun DraftText(title: String, text: String) {

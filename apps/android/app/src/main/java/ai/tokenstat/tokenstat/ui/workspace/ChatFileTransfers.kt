@@ -32,6 +32,10 @@ internal suspend fun uploadChatFile(
     confirm: suspend (Long?) -> Boolean,
     progress: suspend (Float) -> Unit,
 ): JsonObject {
+    attachment.hostFile?.let { file ->
+        check(file.owner == owner) { L10n.text("android.handoff.files_unavailable") }
+        return buildJsonObject { put("id", file.id); put("name", attachment.name) }
+    }
     suspend fun legacy(encoded: String): JsonObject {
         var relay = false
         suspend fun send() = call("chat.attach", buildJsonObject {

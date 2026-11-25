@@ -23,6 +23,29 @@ try
     Check(relaunched is { IsOled: true, IsThemed: true, Dark: true } && relaunched.Palette.Id == "ember", "A launch keeps the mode and the theme");
     relaunched.Choose("gone");
     Check(!relaunched.IsThemed, "A theme this build does not know is the Default one");
+    var themeFile = """
+        {
+          "version": 1, "name": "  Workshop  ",
+          "light": { "background": "#FFFFFF", "sidebar": "#EFEFEF", "panel": "#FFFFFF",
+                     "border": "#CCCCCC", "accent": "#123456", "secondary": "#532B61", "selection": "#EEEEFF" },
+          "dark": { "background": "#000000", "sidebar": "#151515", "panel": "#212121",
+                    "border": "#393939", "accent": "#C0FFFF", "secondary": "#F4C1FF", "selection": "#001133" }
+        }
+        """;
+    relaunched.ImportTheme(System.Text.Encoding.UTF8.GetBytes(themeFile));
+    var customId = relaunched.Palette.Id;
+    Check(relaunched.Palette.Name == "Workshop" && relaunched.Palette.Dark.Accent == 0xC0FFFF
+        && new AppAppearance(look).Palette == relaunched.Palette, "Imported themes are selected, normalized and kept across launches");
+    var replacement = themeFile.Replace("Workshop", "workshop").Replace("#C0FFFF", "#FFFFFF");
+    relaunched.ImportTheme(System.Text.Encoding.UTF8.GetBytes(replacement));
+    Check(relaunched.Custom.Count == 1 && relaunched.Palette.Id == customId && relaunched.Palette.Dark.Accent == 0xFFFFFF,
+        "A case-insensitive re-import replaces the palette in place");
+    var invalid = System.Text.Encoding.UTF8.GetBytes(themeFile.Replace("#C0FFFF", "#000000"));
+    try { relaunched.ImportTheme(invalid); throw new Exception("Low-contrast accent should be refused"); }
+    catch (AppearanceImportException error) when (error.Error == AppearanceImportError.Contrast) { }
+    Check(relaunched.Palette.Id == customId && relaunched.Palette.Dark.Accent == 0xFFFFFF, "A failed import preserves the active palette");
+    relaunched.RemoveTheme(customId);
+    Check(new AppAppearance(look) is { IsThemed: false, Custom.Count: 0 }, "Removing the active theme restores Default on the next launch");
     File.WriteAllText(look, "{");
     Check(new AppAppearance(look).Mode == AppearanceMode.Auto, "A damaged file only costs the remembered look");
     await BoundedHostSweepTests.RunAsync();

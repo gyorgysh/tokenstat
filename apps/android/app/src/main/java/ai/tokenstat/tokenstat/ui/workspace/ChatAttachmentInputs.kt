@@ -28,6 +28,7 @@ internal data class ChatAttachmentInputs(
     val targeted: Boolean,
     val drops: Modifier,
     val pick: () -> Unit,
+    val paste: (List<Uri>, () -> Unit) -> Unit,
 )
 
 /** Keep picker, drop permissions and imports in one bounded composition. Besides
@@ -95,7 +96,9 @@ internal fun rememberChatAttachmentInputs(
     }
     val drops = chatAttachmentDrops(lease, owner != null && ownsOwner() && enabled && !reading,
         ::importFiles, { targeted = it })
-    return ChatAttachmentInputs(reading, targeted, drops) {
-        reportError(null); pickerLease = lease; picker.launch(arrayOf("*/*"))
-    }
+    return ChatAttachmentInputs(
+        reading, targeted, drops,
+        pick = { reportError(null); pickerLease = lease; picker.launch(arrayOf("*/*")) },
+        paste = { uris, release -> importFiles(lease, uris, release) },
+    )
 }

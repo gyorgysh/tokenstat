@@ -4772,7 +4772,7 @@ private fun AccountDialog(
     // behind these tabs are long: relay usage alone is a card with a progress
     // bar, five rows and a disclosure. Opening halfway put every one of them
     // in the bottom third and made the sheet a scroll inside a scroll.
-    ModalBottomSheet(
+    ai.tokenstat.tokenstat.ui.components.TsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.background,

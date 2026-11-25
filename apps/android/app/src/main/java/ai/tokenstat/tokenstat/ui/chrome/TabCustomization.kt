@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.chrome
 
+import ai.tokenstat.tokenstat.ui.components.TsBottomSheet
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import android.content.Context
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -246,7 +246,7 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
             ): Offset = if (dragging != null) available else Offset.Zero
         }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.background) {
+    TsBottomSheet(onDismissRequest = onDismiss, containerColor = colors.background) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),

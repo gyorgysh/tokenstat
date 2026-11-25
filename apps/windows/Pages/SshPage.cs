@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
 using Tokenstat.Navigation;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using Windows.UI;
 
@@ -36,6 +37,7 @@ internal sealed class SshPage : Page, IToolbarItems
     private SSHSection _section;
     internal SSHSection CurrentSection => _section;
     private bool _loading;
+    private bool _reorderingHosts;
     private bool _reloadRequested;
     private readonly Border _stripHost = new();
     private readonly Border _bodyHost = new();
@@ -325,7 +327,13 @@ internal sealed class SshPage : Page, IToolbarItems
         else
         {
             var list = new StackPanel { Spacing = Theme.SpaceS };
-            foreach (var host in array)
+            var hosts = array.OfType<JsonObject>().Where(host => Format.Text(host, "id").Length > 0)
+                .OrderBy(host => Format.Long(host, "sort")).ToArray();
+            var order = hosts.Select(host => Format.Text(host, "id")).ToArray();
+            var account = AppServices.AccountGeneration;
+            const string reorderFormat = "tokenstat.ssh-host-reorder";
+            string? dragged = null;
+            foreach (var host in hosts)
             {
                 var label = ServerLauncher.Name(host!);
                 var keyHint = HostKeyId(host);
@@ -349,7 +357,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 ToolTipService.SetToolTip(open, label);
                 var record = host;
                 open.Click += async (_, _) => await ConnectAsync(record);
-                var row = new Grid();
+                var row = new Grid { Background = Theme.ClearBrush };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 Grid.SetColumn(open, 0);
@@ -371,12 +379,89 @@ internal sealed class SshPage : Page, IToolbarItems
                 ContextMenus.AddButtons(menu, tools);
                 ContextMenus.AddAsync(menu, Format.Flag(record, "favorite") ? L10n.Text("windows.sshpage.remove_from_favourites.a5bdeced") : L10n.Text("windows.sshpage.add_to_favourites.9e619bff"), async () =>
                     await SaveLibraryFlagAsync("ssh.host.save", record, "favorite", !Format.Flag(record, "favorite")));
+                var id = Format.Text(host, "id");
+                var position = Array.IndexOf(order, id);
+                bool CanReorder() => list.IsLoaded && account == AppServices.AccountGeneration && !_reorderingHosts;
+                if (order.Length > 1)
+                {
+                    var grip = new Border
+                    {
+                        Width = 28,
+                        Height = 32,
+                        Background = Theme.ClearBrush,
+                        Child = ActionIcon.More.Mark(16),
+                        CanDrag = true,
+                    };
+                    ToolTipService.SetToolTip(grip, L10n.Text("windows.sshpage.drag_to_reorder_host"));
+                    tools.Children.Insert(0, grip);
+                    grip.DragStarting += (_, args) =>
+                    {
+                        if (!CanReorder()) { args.Cancel = true; return; }
+                        dragged = id;
+                        args.Data.SetData(reorderFormat, "host");
+                        args.Data.RequestedOperation = DataPackageOperation.Move;
+                    };
+                    grip.DropCompleted += (_, _) => dragged = null;
+                    row.AllowDrop = true;
+                    row.DragOver += (_, args) =>
+                    {
+                        if (!args.DataView.Contains(reorderFormat)) return;
+                        args.Handled = true;
+                        if (!CanReorder() || dragged is null || dragged == id) return;
+                        args.AcceptedOperation = DataPackageOperation.Move;
+                        row.Background = Theme.AccentSoftBrush;
+                        args.DragUIOverride.Caption = args.GetPosition(row).Y < row.ActualHeight / 2
+                            ? L10n.Text("windows.sshpage.move_before_host", label) : L10n.Text("windows.sshpage.move_after_host", label);
+                    };
+                    row.DragLeave += (_, _) => row.Background = Theme.ClearBrush;
+                    row.Drop += async (_, args) =>
+                    {
+                        row.Background = Theme.ClearBrush;
+                        if (!args.DataView.Contains(reorderFormat)) return;
+                        args.Handled = true;
+                        if (!CanReorder() || dragged is not { } source || source == id) return;
+                        args.AcceptedOperation = DataPackageOperation.Move;
+                        await ReorderHostsAsync(order, source, id, args.GetPosition(row).Y >= row.ActualHeight / 2, account);
+                    };
+                    ContextMenus.AddAsync(menu, L10n.Text("windows.sshpage.move_host_up"),
+                        () => ReorderHostsAsync(order, id, order[position - 1], false, account), () => position > 0 && CanReorder());
+                    ContextMenus.AddAsync(menu, L10n.Text("windows.sshpage.move_host_down"),
+                        () => ReorderHostsAsync(order, id, order[position + 1], true, account), () => position + 1 < order.Length && CanReorder());
+                }
                 list.Children.Add(row);
             }
             _listRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.hosts.bba9af13"), list));
         }
         _listRoot.Children.Add(ActionIconGlyph.Button(
             L10n.Text("windows.sshpage.add_host.7da3f6f4"), ActionIcon.Create, async (_, _) => await EditHostAsync(null)));
+    }
+
+    private async Task ReorderHostsAsync(string[] expected, string source, string target, bool after, long account)
+    {
+        if (_reorderingHosts || account != AppServices.AccountGeneration) return;
+        var order = expected.Where(id => id != source).ToList();
+        var at = order.IndexOf(target);
+        if (at < 0) return;
+        order.Insert(at + (after ? 1 : 0), source);
+        if (order.SequenceEqual(expected)) return;
+        _reorderingHosts = true;
+        string? warning = null;
+        try
+        {
+            await SshVaultSync.WriteAsync("ssh.host.reorder", new JsonObject
+            {
+                ["expected"] = new JsonArray(expected.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
+                ["order"] = new JsonArray(order.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
+            }, account);
+        }
+        catch (Exception error) { warning = FriendlyError.Display(error.Message); }
+        finally { _reorderingHosts = false; }
+        if (IsLoaded && _section == SSHSection.Hosts && account == AppServices.AccountGeneration)
+        {
+            await LoadAsync();
+            if (warning is not null && IsLoaded && _section == SSHSection.Hosts && account == AppServices.AccountGeneration)
+                _listRoot.Children.Insert(0, Chrome.Banner(warning, Theme.Danger, Symbol.Important));
+        }
     }
 
     /// <summary>

@@ -315,8 +315,10 @@ fun NewChatScreen(
                             Text(newChatCopy("empty"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         }
                         if (effectivePeer != null) ChatComposer(chat = setup?.chat(), draft = draft, onDraft = onDraft, hint = newChatCopy("prompt"), sending = false,
+                            draftOwner = accountOwner, readDraft = { model.chatComposers.snapshot(accountOwner).text },
                             sendLabel = newChatCopy(if (draft.isBlank() && staged.isEmpty()) "open_chat" else "send"), staged = staged,
                             onPick = { pickerLease = inputLease; picker.launch(arrayOf("*/*")) },
+                            onPasteImages = { uris, release -> importFiles(inputLease, uris, release) },
                             onRemove = { attachment -> if (owns(accountOwner)) { val snapshot = model.chatComposers.snapshot(accountOwner); model.chatComposers.update(accountOwner, snapshot.copy(attachments = snapshot.attachments - attachment)) } },
                             onSend = onSend, onStop = {}, onChange = { field, value -> setup = setup?.changed(field, value, backends); onSetup(setup) },
                             backends = backends, onAgent = { agentMenu = true }, onSetup = { setupMenu = true },

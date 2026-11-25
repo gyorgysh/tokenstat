@@ -597,6 +597,53 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(moved).map_err(|e| e.to_string())
         }
 
+        // A flat client can rearrange its list without moving records between
+        // folders. Check the displayed order before assigning all positions.
+        "ssh.host.reorder" => {
+            #[derive(Deserialize)]
+            struct ReorderParams {
+                expected: Vec<String>,
+                order: Vec<String>,
+            }
+            let p: ReorderParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let mut current: Vec<_> = store.hosts.iter().collect();
+            current.sort_by_key(|host| host.sort);
+            let ids: Vec<_> = current.iter().map(|host| host.id.as_str()).collect();
+            if !ids
+                .iter()
+                .copied()
+                .eq(p.expected.iter().map(String::as_str))
+            {
+                return Err("Saved hosts changed. Review the current order and try again.".into());
+            }
+            let positions: std::collections::HashMap<_, _> = p
+                .order
+                .iter()
+                .enumerate()
+                .map(|(index, id)| (id.as_str(), index as u32))
+                .collect();
+            if p.order.len() != ids.len()
+                || positions.len() != ids.len()
+                || !ids.iter().all(|id| positions.contains_key(id))
+            {
+                return Err("The new order must include every saved host once.".into());
+            }
+            let mut changed = Vec::new();
+            let now = now_ms();
+            for host in &mut store.hosts {
+                let sort = positions[host.id.as_str()];
+                if host.sort != sort {
+                    host.sort = sort;
+                    host.updated_ms = now.max(host.updated_ms.saturating_add(1));
+                    changed.push(host.clone());
+                }
+            }
+            if !changed.is_empty() {
+                save_to(path, &store)?;
+            }
+            Ok(json!({ "changed": changed }))
+        }
+
         // Which servers this machine has decided to trust, and how to take it
         // back. Kept as a view over the host records rather than as a second
         // file, so there is one place a fingerprint can live.
@@ -1042,6 +1089,54 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0]["hostname"], "one.example");
         assert_eq!(found[0]["username"], "root");
+    }
+
+    #[test]
+    fn host_reorder_preserves_folders_and_rejects_stale_or_invalid_orders() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("connections.json");
+        let original = Store {
+            hosts: vec![
+                SshHost {
+                    id: "a".into(),
+                    folder_id: Some("folder".into()),
+                    updated_ms: 10,
+                    ..Default::default()
+                },
+                SshHost {
+                    id: "b".into(),
+                    sort: 0,
+                    ..Default::default()
+                },
+                SshHost {
+                    id: "c".into(),
+                    sort: 1,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        save_to(&path, &original).unwrap();
+        let reorder = |expected, order| {
+            call_at(
+                &path,
+                "ssh.host.reorder",
+                &json!({ "expected": expected, "order": order }).to_string(),
+            )
+        };
+        assert!(reorder(["a", "b", "c"], ["c", "a", "a"]).is_err());
+        assert_eq!(load_from(&path).unwrap().hosts, original.hosts);
+        let result = reorder(["a", "b", "c"], ["c", "a", "b"]).unwrap();
+        assert_eq!(result["changed"].as_array().unwrap().len(), 3);
+        let current = load_from(&path).unwrap().hosts;
+        assert_eq!(
+            current.iter().map(|host| host.sort).collect::<Vec<_>>(),
+            [1, 2, 0]
+        );
+        assert_eq!(current[0].folder_id.as_deref(), Some("folder"));
+        assert!(current[0].updated_ms > original.hosts[0].updated_ms);
+        assert!(reorder(["a", "b", "c"], ["b", "a", "c"]).is_err());
+        assert_eq!(load_from(&path).unwrap().hosts, current);
     }
 
     #[test]

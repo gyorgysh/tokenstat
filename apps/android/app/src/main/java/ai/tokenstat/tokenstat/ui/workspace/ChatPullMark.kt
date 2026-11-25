@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.components.TsBottomSheet
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.BrandCheckbox
@@ -29,7 +30,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -259,7 +259,7 @@ private fun PullOpenSheet(request: PullOpener.Request) {
         PullOpener.asking = null
         if (choice == PullOpenChoice.Here) PullOpener.request = request else browse(context, request.pull)
     }
-    ModalBottomSheet(onDismissRequest = { PullOpener.asking = null }, containerColor = colors.background) {
+    TsBottomSheet(onDismissRequest = { PullOpener.asking = null }, containerColor = colors.background) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),

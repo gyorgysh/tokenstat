@@ -12,7 +12,7 @@ desktop is a review build. Newest first.
 - On Android, Rate tokenstat in Legal opens a sheet where you can rate on Google Play, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
 - Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Hover or click the mark on Mac and Windows, tap it on Android, or open the chat menu on iPhone and iPad. Opening one asks whether to view it in tokenstat or in the browser. Tick Remember my choice to stop being asked, and change it in Account → GitHub pull requests on Mac and Windows, Account → This device on phones and tablets. Update the computer to 1.26.0 to see more than the branch's own.
 - On Android and Windows, choose Auto, Light, Dark or OLED and a color theme under Appearance, in Account → This device on Android and Account → This PC on Windows.
-- On Android, Continue on another device in the chat menu shares your place, and your unsent text if you choose. A chat shared from another device offers to continue from it.
+- On Android, Continue on another device in the chat menu shares your place, and your unsent text and attachments if you choose. A chat shared from another device offers to continue from it.
 - On Android, SSH lists the servers you trust. Forget one to be asked again on the next connection.
 - On Windows, paste a screenshot or copied file into a chat composer with Ctrl+V to attach it.
 - On Windows, the chat list’s More menu can delete a project’s private chats after you confirm. Their local drafts and queued messages are removed too.
@@ -20,6 +20,13 @@ desktop is a review build. Newest first.
 - On Windows, create a folder on the selected computer while adding a remote project.
 - On Windows, enter a paired computer’s approval code from Devices to open its projects.
 - On Windows, request viewing or control access when a paired computer blocks the screen viewer.
+- On Windows, import, replace, and remove custom theme files under Account → This PC → Appearance.
+- On Windows, see each computer’s usage at API list prices in Account → Devices.
+- On Windows, reorder saved SSH hosts by dragging or using Move up and Move down in the host menu.
+- On Android, paste images from the keyboard or clipboard into either chat composer to attach them.
+- On Android, Pull and Push can help you enable Git LFS on the connected computer before transferring large files.
+- On Windows, Pull and Push can help you enable Git LFS on the computer that holds the repository before transferring large files.
+- On Windows, create, edit, and set a project’s default persona from chat setup.
 
 ### Changed
 
@@ -28,6 +35,7 @@ desktop is a review build. Newest first.
 ### Improved
 
 - On Windows, chats open with more history, load earlier messages on their own as you scroll back, and keep the line you were reading in place.
+- On Windows, new words in a streaming reply fade in while you follow the chat. Turn it off under Chat detail. Windows animation settings also apply.
 - On Mac, All repositories shows what each repository needs next: a chat waiting for you, failed checks, a review request, a pull request ready to merge, files not committed, or commits not pushed. Cards show 14 days of tokens with the days pull requests were opened, recent chats, and counts that open the page they count. Repositories you have not used lately shrink to one line. Press Space or Peek on a card to see its changed files, pull requests and which agents worked there, and use the arrow keys to move between cards. Tokens and pull requests are shown for repositories on this Mac.
 - On Mac, Changes in a pull request shows the file list beside the diff. Files, Git, History and the pull request tabs stay ready once opened, so switching back is immediate, and they show the shape of what is loading instead of a spinner.
 - On Mac, the pull request header uses the same small controls as the rest of the app, with Open on GitHub beside Refresh.
@@ -38,6 +46,7 @@ desktop is a review build. Newest first.
 - On Mac, loading placeholders no longer leave a hidden animation running that slowed the app until it was restarted.
 - On Windows, opening Changes on a large pull request no longer draws every line at once. A file list sits beside the diff.
 - On Android and Windows, unsent chat text survives closing the app.
+- On Android, sheet status and navigation icons follow the appearance selected in tokenstat.
 
 ## [1.25.0] - 2026-11-24
 
@@ -126,7 +135,7 @@ desktop is a review build. Newest first.
 ### Changed
 
 - Handoffs between agents show as a banner with the new agent's name and what it was told. Windows shows handoffs for the first time.
-- Find Pin and Continue on another device in the chat toolbar on Mac and at the top of the chat menu on iPhone, iPad and Android.
+- Find Pin and Continue on another device in the chat toolbar on Mac and at the top of the chat menu on iPhone and iPad. On Android, Pin appears at the top of the chat menu.
 
 ### Improved
 
