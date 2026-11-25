@@ -158,7 +158,15 @@ internal sealed partial class NewChatPage : Page
         utility.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         utility.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         utility.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-        utility.Children.Add(Group(_attach, _fast));
+        var dictate = Buttons.ToolbarIcon(ActionIcon.Dictate, L10n.Text("windows.dictation.title"), async (_, _) =>
+        {
+            var generation = _draftGeneration;
+            var repository = _draftRepository;
+            var lifetime = _lifetime;
+            await ComposerDictation.DictateAsync(_draft, () => OwnsFiles(repository, generation, lifetime));
+        });
+        dictate.Width = dictate.Height = 28;
+        utility.Children.Add(Group(_attach, dictate, _fast));
         var setup = Group(_agentSlot, _setupButton); setup.Spacing = Theme.SpaceXs; Grid.SetColumn(setup, 1); utility.Children.Add(setup);
         var actions = Group(_copyProgress, _cancelStaging, _submit); Grid.SetColumn(actions, 2); utility.Children.Add(actions);
 

@@ -2005,6 +2005,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         attach.IsEnabled = !_queueing && !_sending && !_pickingAttachment && _fileTransfer is null && _dropImport is null;
         var attachmentTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         attachmentTools.Children.Add(attach);
+        if (!SharedSource && _openId is { } dictationChat)
+        {
+            var generation = _openGeneration;
+            var account = AppServices.AccountGeneration;
+            attachmentTools.Children.Add(ComposerDictation.Button(_draft, () => IsLoaded && OpenChatIs(dictationChat)
+                && generation == _openGeneration && account == AppServices.AccountGeneration && !_sending && !_queueing));
+        }
         attachmentTools.Children.Add(FastModeButton());
         var options = CompactSetup();
         Grid.SetColumn((FrameworkElement)options, 1);

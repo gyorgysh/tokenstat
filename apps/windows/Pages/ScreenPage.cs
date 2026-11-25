@@ -27,7 +27,7 @@ namespace Tokenstat.Pages;
 /// decoder runs, and plain JPEG stills from older hosts blit to an image.
 /// Pointer and keyboard input, the control toggle, quality, and display
 /// choice ride screen.viewer.input with the same event shapes the Apple
-/// capture side applies. Audio has no pipeline in this cut and is skipped.
+/// capture side applies. Audio has a separate bounded playback stream.
 /// </summary>
 internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItems
 {
@@ -149,6 +149,7 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         controls.Children.Add(_controlSlot);
         controls.Children.Add(_qualitySlot);
         controls.Children.Add(_displaySlot);
+        controls.Children.Add(_audioSlot);
         controls.Children.Add(_screenFiles);
         BuildScreenFileControls();
 
@@ -493,6 +494,7 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
             var error = Format.Text(chunk, "error");
             if (!string.IsNullOrEmpty(error))
             {
+                await CloseViewerAsync();
                 Banner(error);
                 Caption(error);
                 return;
@@ -502,6 +504,7 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
                 var reason = string.IsNullOrEmpty(error) ? L10n.Text("windows.screenpage.that_computer_stopped_sharing.6289600c") : error;
                 if (Actionable(reason))
                 {
+                    await CloseViewerAsync();
                     Banner(reason);
                     Caption(reason);
                 }
@@ -513,6 +516,7 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
             }
             _dropped = Format.Long(chunk, "dropped");
             HandleMetadata(Format.Text(chunk, "metadata"));
+            PlayScreenAudio(Format.Text(chunk, "audio"));
             var encoded = Format.Text(chunk, "frame");
             if (!string.IsNullOrEmpty(encoded))
             {
@@ -868,6 +872,8 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         _poll = null;
         var id = _sessionId;
         _sessionId = null;
+        ResetScreenAudio();
+        RefreshScreenAudio();
         UpdateScreenClipboard();
         if (string.IsNullOrEmpty(id))
         {
@@ -1219,6 +1225,7 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
                 _controlSlot.Children.Add(retry);
             }
             RefreshScreenFileControls();
+            RefreshScreenAudio();
             RenderInspector();
         }
         if (DispatcherQueue.HasThreadAccess)
