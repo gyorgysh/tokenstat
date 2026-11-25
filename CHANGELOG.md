@@ -38,6 +38,8 @@ desktop is a review build. Newest first.
 - On Windows, change the SSH vault password, reset it with a recovery code, or replace the recovery code.
 - On Windows and Android, Keep offline saves a conversation’s text on this device. Search finds those copies under Saved work on Windows and in Search on Android.
 - On iPhone and iPad, empty-state and onboarding art no longer leave endless animations running after the screen is left.
+- Antigravity plan limits still prefer the running app. When it is closed, tokenstat runs `agy -p /usage --output-format json` and maps the same group windows `/usage` shows, so agy keeps the login.
+- Muse subscription limits prefer `muse usage --json` (Everyday and weekly windows) so Muse itself reads the login. The older account endpoint stays as a fallback when the CLI is missing.
 
 ### Changed
 

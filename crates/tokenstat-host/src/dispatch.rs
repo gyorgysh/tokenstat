@@ -4791,7 +4791,7 @@ fn fetch_usage_limits(_force: bool) -> Value {
             let opencode =
                 (!skipped("opencode")).then(|| scope.spawn(tokenstat_sync::opencode_limits::fetch));
             let antigravity = (!skipped("antigravity"))
-                .then(|| scope.spawn(tokenstat_sync::antigravity_ide::limits));
+                .then(|| scope.spawn(tokenstat_sync::antigravity::limits));
             let mut out = Vec::new();
             if !skipped("codex") {
                 out.push(crate::codex_usage::read(_force));

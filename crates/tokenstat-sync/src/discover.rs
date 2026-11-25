@@ -245,9 +245,15 @@ fn now_secs() -> i64 {
 fn antigravity_token() -> Option<String> {
     // Prefer a still-valid OAuth access token the Gemini / Antigravity tools
     // already wrote, then the macOS keychain item.
-    if let Some(t) = gemini_oauth_access_token() {
-        return Some(t);
-    }
+    gemini_oauth_access_token().or_else(antigravity_keychain_access_token)
+}
+
+/// Antigravity's own keychain login, without the Gemini `oauth_creds.json` file.
+///
+/// A Gemini CLI refresh can succeed while Cloud Code quota still returns 403.
+/// Callers that already tried the file should fall through here rather than
+/// treating that refusal as the final answer.
+pub fn antigravity_keychain_access_token() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         keychain_password("gemini", "antigravity")

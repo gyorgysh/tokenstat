@@ -63,6 +63,10 @@ pub struct IdeSyncReport {
 }
 
 /// Read per-model quota windows from the running Antigravity IDE language server.
+///
+/// Keyless: the hub file and process CSRF are enough. Prefer this over any
+/// Cloud Code call that needs a login. Callers that also try the network should
+/// use [`crate::antigravity::limits`].
 pub fn limits() -> ProviderLimits {
     let connections = match detect_connections() {
         Ok(connections) => connections,
@@ -157,7 +161,11 @@ pub fn limits() -> ProviderLimits {
 /// Protobuf JSON leaves out a zero, so a bucket without `remainingFraction`
 /// is spent, not unknown. A disabled bucket is left out: it is not what
 /// limits the account while it is switched off.
-fn quota_summary_windows(response: &Value) -> Vec<UsageWindow> {
+///
+/// Accepts the IDE Connect envelope (`{ "response": { "groups": … } }`), the
+/// bare Cloud Code JSON body, or `agy -p /usage --output-format json`'s
+/// `command.data` (snake_case `name` / `remaining_fraction` / `reset_time`).
+pub(crate) fn quota_summary_windows(response: &Value) -> Vec<UsageWindow> {
     let root = response.get("response").unwrap_or(response);
     let Some(groups) = root.get("groups").and_then(Value::as_array) else {
         return Vec::new();
@@ -166,6 +174,7 @@ fn quota_summary_windows(response: &Value) -> Vec<UsageWindow> {
     for group in groups {
         let name = group
             .get("displayName")
+            .or_else(|| group.get("name"))
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|name| !name.is_empty())
@@ -184,12 +193,14 @@ fn quota_summary_windows(response: &Value) -> Vec<UsageWindow> {
             };
             let remaining = bucket
                 .get("remainingFraction")
+                .or_else(|| bucket.get("remaining_fraction"))
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0)
                 .clamp(0.0, 1.0);
             let percent = (1.0 - remaining) * 100.0;
             let resets_at_ms = bucket
                 .get("resetTime")
+                .or_else(|| bucket.get("reset_time"))
                 .and_then(Value::as_str)
                 .and_then(|raw| raw.parse::<jiff::Timestamp>().ok())
                 .map(|timestamp| timestamp.as_millisecond());

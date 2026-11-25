@@ -7,14 +7,17 @@
 
 //! Muse's own subscription windows, read without starting a model turn.
 //!
-//! A fresh `muse serve` has no `usage/read` observation until a turn runs.
-//! The CLI's account-key request supplies the same quota snapshot without
-//! inference. Read its existing OAuth credential, call only Meta's fixed
-//! origin, and discard the returned key. Never replace the CLI's credentials
-//! or renew its OAuth login. API-key-only accounts cannot read this endpoint.
+//! Prefer `muse usage --json`: the CLI already holds the login (file or
+//! keychain) and returns the same Everyday / weekly snapshot shown by `/usage`.
+//! That keeps keychain access inside Muse. Only when the CLI is missing or
+//! silent do we call Meta's account endpoint with a local OAuth credential
+//! (file first, keychain only when `auth.json` says so). Never replace Muse's
+//! credentials or renew its OAuth login. API-key-only accounts cannot read
+//! the account endpoint.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -24,6 +27,7 @@ use zeroize::{Zeroize, Zeroizing};
 // This account route is outside /v1, unlike Muse's model API.
 const ACCOUNT_URL: &str = "https://api.meta.ai/muse-code/key";
 const MAX_BYTES: u64 = 128 * 1024;
+const CLI_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Deserialize)]
 struct StoredAuth {
@@ -80,8 +84,134 @@ struct Window {
     resets_at: Option<i64>,
 }
 
-/// Fetch the vendor-reported subscription quota using Muse's existing login.
+/// `muse usage --json` schema (v1): camelCase, resets already in milliseconds.
+#[derive(Deserialize)]
+struct CliUsage {
+    #[serde(default)]
+    allowance: Option<CliAllowance>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    hint: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CliAllowance {
+    #[serde(default)]
+    tier: Option<String>,
+    #[serde(default)]
+    window: Option<CliWindow>,
+    #[serde(default)]
+    weekly: Option<CliWindow>,
+    #[serde(default, rename = "asOfMs")]
+    as_of_ms: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct CliWindow {
+    #[serde(rename = "usedPercent")]
+    used_percent: f64,
+    #[serde(default, rename = "resetsAtMs")]
+    resets_at_ms: Option<i64>,
+}
+
+/// Fetch the vendor-reported subscription quota using Muse's own tools.
 pub fn fetch() -> ProviderLimits {
+    if let Some(limits) = cli_usage() {
+        return limits;
+    }
+    account_usage()
+}
+
+fn cli_usage() -> Option<ProviderLimits> {
+    let program = muse_program()?;
+    let mut command = Command::new(&program);
+    command
+        .args(["usage", "--json"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env("PATH", muse_search_path());
+    if let Some(home) = directories::BaseDirs::new() {
+        command.current_dir(home.home_dir());
+    }
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut raw = Zeroizing::new(String::new());
+        let _ = stdout.take(MAX_BYTES + 1).read_to_string(&mut raw);
+        let _ = sender.send(raw);
+    });
+    let raw = match receiver.recv_timeout(CLI_TIMEOUT) {
+        Ok(raw) => raw,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    };
+    let status = child.wait().ok()?;
+    if !status.success() || raw.len() as u64 > MAX_BYTES || raw.trim().is_empty() {
+        return None;
+    }
+    let parsed: CliUsage = serde_json::from_str(&raw).ok()?;
+    Some(cli_reading(parsed))
+}
+
+fn cli_reading(usage: CliUsage) -> ProviderLimits {
+    let Some(allowance) = usage.allowance else {
+        let note = usage
+            .hint
+            .or(usage.reason)
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or_else(|| {
+                "Muse reported no subscription usage windows for this account.".into()
+            });
+        return unavailable(note);
+    };
+    let observed_at_ms = allowance.as_of_ms.unwrap_or_else(now_ms);
+    let mut windows = Vec::new();
+    // Everyday's rolling window is the same 5-hour gauge Home already knows.
+    if let Some(window) = allowance.window.and_then(|w| w.reading("5-hour".into())) {
+        windows.push(window);
+    }
+    if let Some(window) = allowance.weekly.and_then(|w| w.reading("weekly".into())) {
+        windows.push(window);
+    }
+    if windows.is_empty() {
+        return unavailable("Muse reported no valid subscription usage windows for this account.");
+    }
+    ProviderLimits {
+        source: "muse".into(),
+        plan: allowance
+            .tier
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty() && name.len() <= 160),
+        windows,
+        observed_at_ms,
+        note: None,
+        stale: false,
+    }
+}
+
+impl CliWindow {
+    fn reading(self, label: String) -> Option<UsageWindow> {
+        if !self.used_percent.is_finite() || self.used_percent < 0.0 {
+            return None;
+        }
+        let percent = self.used_percent.min(100.0);
+        Some(UsageWindow {
+            label,
+            scope: None,
+            percent,
+            resets_at_ms: self.resets_at_ms.filter(|ms| *ms > 0),
+            severity: LimitSeverity::from_percent(percent),
+        })
+    }
+}
+
+fn account_usage() -> ProviderLimits {
     let token = match stored_token() {
         Ok(token) => token,
         Err(note) => return unavailable(note),
@@ -196,6 +326,63 @@ impl Window {
     }
 }
 
+fn muse_program() -> Option<String> {
+    let path = muse_search_path();
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join("muse");
+        if is_executable(&candidate) {
+            return Some(candidate.display().to_string());
+        }
+        #[cfg(windows)]
+        {
+            for ext in ["cmd", "bat", "exe"] {
+                let with_ext = candidate.with_extension(ext);
+                if is_executable(&with_ext) {
+                    return Some(with_ext.display().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn muse_search_path() -> String {
+    let mut dirs = Vec::new();
+    if let Some(home) = directories::BaseDirs::new() {
+        dirs.push(home.home_dir().join(".local").join("bin"));
+        #[cfg(windows)]
+        dirs.push(home.data_local_dir().join("Programs").join("muse"));
+    }
+    if let Ok(existing) = std::env::var("PATH") {
+        for part in std::env::split_paths(&existing) {
+            if !dirs.iter().any(|known| known == &part) {
+                dirs.push(part);
+            }
+        }
+    }
+    std::env::join_paths(dirs)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default())
+}
+
+fn is_executable(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata()
+            .map(|meta| meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
 fn config_path() -> Option<PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -241,9 +428,12 @@ fn stored_token() -> Result<Zeroizing<String>, &'static str> {
         return Err("Muse subscription limits require an OAuth login, rather than an API key.");
     }
     // Muse's file expiry is epoch seconds. Never rotate its refresh token.
-    if provider
-        .expires_at
-        .is_some_and(|seconds| seconds <= now_ms() / 1000 + 60)
+    // Keychain-backed logins often omit expires_at from auth.json; the
+    // keychain secret itself carries the live access token.
+    if provider.storage.as_deref() != Some("keychain")
+        && provider
+            .expires_at
+            .is_some_and(|seconds| seconds <= now_ms() / 1000 + 60)
     {
         return Err("The stored Muse login has expired. Sign in again with Muse to refresh it.");
     }
@@ -309,6 +499,24 @@ mod tests {
         assert!(!serialized.contains("must-not-be-saved"));
         assert!(!serialized.contains("private@example.com"));
         assert!(!serialized.contains("27681393394859588"));
+    }
+
+    #[test]
+    fn cli_usage_json_maps_everyday_windows() {
+        let limits = cli_reading(
+            serde_json::from_str(
+                r#"{"schemaVersion":1,"allowance":{"tier":"Muse Code Everyday Usage","window":{"usedPercent":3,"resetsAtMs":1795645853000},"weekly":{"usedPercent":1,"resetsAtMs":1795996800000},"asOfMs":1795629921492,"source":"mint"},"reason":null,"hint":null}"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(limits.plan.as_deref(), Some("Muse Code Everyday Usage"));
+        assert_eq!(limits.observed_at_ms, 1_795_629_921_492);
+        assert_eq!(limits.windows.len(), 2);
+        assert_eq!(limits.windows[0].label, "5-hour");
+        assert_eq!(limits.windows[0].percent, 3.0);
+        assert_eq!(limits.windows[0].resets_at_ms, Some(1_795_645_853_000));
+        assert_eq!(limits.windows[1].label, "weekly");
+        assert_eq!(limits.windows[1].percent, 1.0);
     }
 
     #[test]
