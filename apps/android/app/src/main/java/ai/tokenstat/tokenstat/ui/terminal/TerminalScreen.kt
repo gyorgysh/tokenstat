@@ -15,7 +15,6 @@ import android.content.Context
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -121,7 +120,7 @@ fun TerminalScreen(
     val names = remember(context) { TerminalNames(context) }
     val openingOwner = remember(peer, workspaceId) { ProjectOwner.from(model.state.value.account, peer, workspaceId) }
     val nameOwner = openingOwner?.takeIf { it == ProjectOwner.from(client.account, peer, workspaceId) }
-    val dark = isSystemInDarkTheme()
+    val dark = LocalTsColors.current.isDark
     val bridge = remember {
         TerminalBridge().also {
             it.onCopy = { text -> copyToClipboard(context, text) }
@@ -510,7 +509,7 @@ fun SshTerminalScreen(
     BackHandler { onClose() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val dark = isSystemInDarkTheme()
+    val dark = LocalTsColors.current.isDark
     val bridge = remember {
         TerminalBridge().also {
             it.onCopy = { text -> copyToClipboard(context, text) }

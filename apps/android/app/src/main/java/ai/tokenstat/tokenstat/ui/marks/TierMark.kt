@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import androidx.compose.foundation.Canvas
@@ -40,10 +41,10 @@ fun tierKind(tier: String): TierKind = when (tier.lowercase()) {
 fun TierMark(tier: String, markSize: Int = 15) {
     val kind = tierKind(tier)
     if (kind == TierKind.None) return
-    // Fixed pair, not the adaptive tokens: Apple fills from these two hexes.
-    val fill = remember {
-        Brush.verticalGradient(listOf(Color(0xFF8B5CF6), Color(0xFFC026D3)))
-    }
+    // The theme's accent into its secondary, so the badge belongs to the
+    // interface around it.
+    val colors = LocalTsColors.current
+    val fill = remember(colors) { Brush.verticalGradient(listOf(colors.accent, colors.secondary)) }
     Canvas(
         Modifier
             .size(markSize.dp)

@@ -35,6 +35,8 @@
     <Compile Include="../../../apps/windows/Pages/ChatFastMode.cs" Link="ChatFastMode.cs" />
     <Compile Include="../../../apps/windows/Pages/MuseToolPresentation.cs" Link="MuseToolPresentation.cs" />
     <Compile Include="../../../apps/windows/Pages/DiffTextChunks.cs" Link="DiffTextChunks.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatDraftStore.cs" Link="ChatDraftStore.cs" />
+    <Compile Include="../../../apps/windows/Pages/PullOpenPreference.cs" Link="PullOpenPreference.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatHistoryBuffer.cs" Link="ChatHistoryBuffer.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatSteerOverlay.cs" Link="ChatSteerOverlay.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatSignInChecks.cs" Link="ChatSignInChecks.cs" />

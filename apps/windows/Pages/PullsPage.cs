@@ -46,6 +46,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     private string _source = "";
     private int _listCount;
     private long? _openNumber;
+    private long? _revealNumber;
     private JsonNode? _detail;
 
     public PullsPage(string workspaceId)
@@ -66,11 +67,31 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             Content = _root,
         };
         RenderInspector();
-        Loaded += async (_, _) => await LoadAsync();
+        Loaded += async (_, _) =>
+        {
+            if (_revealNumber is { } number)
+            {
+                _revealNumber = null;
+                await ShowDetailAsync(number);
+                if (_folderName.Length == 0 && IsLoaded)
+                {
+                    _folderName = await FolderNameAsync();
+                    RaiseToolbarChanged();
+                }
+            }
+            else await LoadAsync();
+        };
         Unloaded += (_, _) => { ++_loadGeneration; _loginPoll?.Cancel(); };
     }
 
     public event Action? ToolbarChanged;
+
+    /// <summary>Show one pull request, now or as soon as the page is on screen.</summary>
+    public void Reveal(long number)
+    {
+        if (IsLoaded) _ = ShowDetailAsync(number);
+        else _revealNumber = number;
+    }
 
     /// <summary>
     /// The folder these pull requests belong to.
@@ -967,35 +988,28 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             {
                 ["workspaceId"] = _workspaceId, ["number"] = number,
             });
-            var files = response as JsonArray;
-            var stack = new StackPanel { Spacing = Theme.SpaceM, Padding = new Thickness(0, Theme.SpaceM, 0, Theme.SpaceM) };
-            foreach (var file in files ?? new JsonArray())
-            {
-                if (file is null) continue;
-                var lines = new StackPanel { Spacing = 0 };
-                foreach (var hunk in file["hunks"] as JsonArray ?? new JsonArray())
-                {
-                    if (hunk is null) continue;
-                    lines.Children.Add(DiffLine(Format.Text(hunk, "header"), Theme.AccentSoft));
-                    foreach (var line in hunk["lines"] as JsonArray ?? new JsonArray())
-                    {
-                        if (line is null) continue;
-                        var kind = Format.Text(line, "kind", "context");
-                        var prefix = kind == "added" ? "+" : kind == "removed" ? "−" : " ";
-                        var tint = kind == "added" ? Theme.AccentSoft
-                            : kind == "removed" ? ColorFrom(Theme.Danger, 24)
-                            : Theme.Panel;
-                        lines.Children.Add(DiffLine(prefix + Format.Text(line, "text"), tint));
-                    }
-                }
-                stack.Children.Add(Chrome.Card(Format.Text(file, "path"), lines));
-            }
-            if (stack.Children.Count == 0)
-            {
-                stack.Children.Add(Chrome.Empty(L10n.Text("windows.pullspage.no_text_changes.08722a9e"), L10n.Text("windows.pullspage.this_pull_request_has_no_line_by_line_diff.680bf131"), ActionIcon.Compare));
-            }
+            if (!IsLoaded) return;
+            var files = (response as JsonArray ?? new JsonArray())
+                .OfType<JsonObject>().Where(file => Format.Text(file, "path").Length > 0).ToList();
             holder.Children.Clear();
-            holder.Children.Add(new ScrollViewer { MaxHeight = 620, Content = stack });
+            if (files.Count == 0)
+            {
+                holder.Children.Add(Chrome.Empty(L10n.Text("windows.pullspage.no_text_changes.08722a9e"), L10n.Text("windows.pullspage.this_pull_request_has_no_line_by_line_diff.680bf131"), ActionIcon.Compare));
+                return;
+            }
+            // Only the chosen file is drawn. A large pull request has tens of
+            // thousands of lines, and drawing them all at once froze the page.
+            var current = new ContentControl
+            {
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Top,
+                Padding = new Thickness(Theme.SpaceM),
+            };
+            void Select(string path) => current.Content =
+                WorkspaceDiff.FullFile(files.FirstOrDefault(file => Format.Text(file, "path") == path));
+            var paths = files.Select(file => Format.Text(file, "path")).ToList();
+            Select(paths[0]);
+            holder.Children.Add(new WorkspaceReviewBrowser(paths, paths[0], current, Select) { Height = 620 });
         }
         catch (Exception ex)
         {
@@ -1003,19 +1017,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             holder.Children.Add(Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
         }
     }
-
-    private static UIElement DiffLine(string text, Windows.UI.Color background) => new Border
-    {
-        Background = Theme.Brush(background),
-        Padding = new Thickness(10, 3, 10, 3),
-        Child = new TextBlock
-        {
-            Text = text,
-            FontFamily = Fonts.Mono,
-            FontSize = 12,
-            IsTextSelectionEnabled = true,
-        },
-    };
 
     private static UIElement Checks(JsonNode detail)
     {
@@ -1146,9 +1147,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         : state == "merged" ? Theme.Secondary
         : state == "closed" ? Theme.Danger
         : Theme.Accent;
-
-    private static Windows.UI.Color ColorFrom(Windows.UI.Color tint, byte alpha) =>
-        Windows.UI.Color.FromArgb(alpha, tint.R, tint.G, tint.B);
 
     private static string SourceLabel(string source) => source switch
     {

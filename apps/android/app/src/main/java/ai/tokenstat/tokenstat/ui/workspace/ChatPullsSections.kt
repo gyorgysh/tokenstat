@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import androidx.lifecycle.repeatOnLifecycle
 
@@ -316,6 +317,10 @@ fun ChatSection(
     var showingUsage by remember(projectOwner, openId) { mutableStateOf(false) }
     var activitySection by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
     var showingSetup by remember(projectOwner) { mutableStateOf(false) }
+    var showingHandoff by remember(projectOwner, openId) { mutableStateOf(false) }
+    var handoffOffer by remember(projectOwner, openId) { mutableStateOf<WorkHandoff?>(null) }
+    // A place another device shared, until the rows it names are on screen.
+    var sharedPlace by remember(projectOwner, openId) { mutableStateOf<HandoffAnchor?>(null) }
     // Agent, model and effort, one tap from the composer the way the iPhone
     // reaches them. The list lives here rather than in the sheet, because the
     // composer's summary line reads it too.
@@ -529,6 +534,19 @@ fun ChatSection(
                         }
                     },
                 )
+                if (id == openId && HostContracts.supportsHandoff(protocol)) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                L10n.text("android.handoff.title"),
+                                color = LocalTsColors.current.accent,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        },
+                        leadingIcon = { Icon(ActionIcon.Device.vector, null, tint = LocalTsColors.current.accent) },
+                        onClick = { menu = false; showingHandoff = true },
+                    )
+                }
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text(L10n.text("common.rename")) }, enabled = !chat.bol("running"), onClick = { menu = false; pendingRename = chat })
                 if (HostContracts.supportsChatFork(protocol)) {
@@ -735,6 +753,22 @@ fun ChatSection(
         key.split('\u0000').takeIf { it.size == 3 && it[0] == peer && it[1] == workspace }?.get(2)
     }.distinct()
 
+    LaunchedEffect(projectOwner, openId, protocol) {
+        val id = openId ?: return@LaunchedEffect
+        if (!HostContracts.supportsHandoff(protocol)) return@LaunchedEffect
+        // Only the conversation in front asks, once, and only offers. The
+        // authenticated identity, not a name, says whether it came from here.
+        try {
+            val answer = model.workspaceSection(peer, "work.continuity.get", buildJsonObject {
+                put("workspaceId", workspace); put("conversationId", id)
+            })
+            val record = parseHandoff((answer as? JsonObject)?.get("handoff")) ?: return@LaunchedEffect
+            val mine = model.machineIdentity().str("key") ?: return@LaunchedEffect
+            if (ownsProject() && openId == id && record.deviceId != mine) handoffOffer = record
+        } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {
+            // An offer is a courtesy. The sheet says what went wrong when asked.
+        }
+    }
     LaunchedEffect(projectOwner, legacyReviewId) {
         val id = legacyReviewId ?: return@LaunchedEffect
         runCatching { outbox.items(legacyOutboxKey(id)) }
@@ -1753,6 +1787,13 @@ fun ChatSection(
                     onDismiss = { actionError = null },
                 )
             }
+            handoffOffer?.let { record ->
+                WorkHandoffOffer(
+                    record = record,
+                    onOpen = { handoffOffer = null; showingHandoff = true },
+                    onDismiss = { handoffOffer = null },
+                )
+            }
             composerFailure?.takeIf { it.owner == composerKey }?.let {
                 StickyErrorCard(message = it.message, onDismiss = { model.chatComposers.dismissFailure() })
             }
@@ -1880,6 +1921,65 @@ fun ChatSection(
                     ) {
                         scrollToEnd()
                     }
+                }
+                LaunchedEffect(sharedPlace, builtFrom, shownRows, hasEarlier, loadingEarlier, earlierPending) {
+                    val place = sharedPlace ?: return@LaunchedEffect
+                    if (builtFrom !== events || loadingEarlier || earlierPending) return@LaunchedEffect
+                    if (place.followsLatest) {
+                        sharedPlace = null
+                        pinToLatest()
+                        return@LaunchedEffect
+                    }
+                    val row = anchorRow(place.eventId, shownRows.map { it.id })
+                    when {
+                        row != null -> {
+                            sharedPlace = null
+                            follow.stopFollowing()
+                            readerLeftEnd = true
+                            val item = row + if (hasEarlier) 1 else 0
+                            autoScrolling = true
+                            try {
+                                listState.scrollToItem(item)
+                                val size = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == item }?.size ?: 0
+                                listState.scrollToItem(item, (size.toLong() * place.fraction / 10_000).toInt())
+                            } finally {
+                                autoScrolling = false
+                            }
+                        }
+                        hasEarlier -> openId?.let { id -> scope.launch { loadEarlier(id) } }
+                        else -> {
+                            sharedPlace = null
+                            actionError = L10n.text("android.handoff.place_gone")
+                        }
+                    }
+                }
+                if (showingHandoff) {
+                    val conversation = openId.orEmpty()
+                    WorkHandoffSheet(
+                        title = openChat?.str("title").orEmpty(),
+                        draft = draft,
+                        fileCount = staged.size,
+                        deviceName = android.os.Build.MODEL.ifBlank { L10n.text("android.handoff.this_phone") },
+                        call = { method, params -> model.workspaceSection(peer, method, params) },
+                        workspace = workspace,
+                        conversation = conversation,
+                        anchor = {
+                            shareAnchor(
+                                listState.layoutInfo.visibleItemsInfo.map { RowSpan(it.key, it.offset, it.size) },
+                                shownRows.map { it.id },
+                                atEnd = atBottom,
+                            )
+                        },
+                        onUseDraft = { text ->
+                            if (ownsProject() && openId == conversation) draft = text
+                            showingHandoff = false
+                        },
+                        onContinueReading = { place ->
+                            showingHandoff = false
+                            if (openId == conversation) sharedPlace = place
+                        },
+                        onDismiss = { showingHandoff = false },
+                    )
                 }
                 // Earlier pages load on their own as the reader nears the top,
                 // the way the Apple clients do. The button stays for a page
@@ -3823,7 +3923,7 @@ internal fun ChatComposer(
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(Modifier.size(40.dp).clip(CircleShape).background(colors.accent), contentAlignment = Alignment.Center) {
-                                Icon(ActionIcon.Send.vector, null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(20.dp))
+                                Icon(ActionIcon.Send.vector, null, tint = colors.onAccent, modifier = Modifier.size(20.dp))
                             }
                         }
                     }

@@ -496,7 +496,7 @@ fun fallbackLevel(value: Long, scale: HeatFallbackScale): Int {
 /// four active steps stay the brand's own, so a busy week on the phone is
 /// the same colour as a busy week on the site.
 fun phoneHeat(colors: TsColors): List<Color> =
-    colors.heat.toMutableList().also {
+    if (colors.ownsHeat) colors.heat else colors.heat.toMutableList().also {
         it[0] = if (colors.isDark) Color(0xFF221E36) else Color(0xFFDEDAEA)
     }
 

@@ -1,5 +1,12 @@
 {
   "common.account": "Account",
+  "common.appearance.auto": "Auto",
+  "common.appearance.dark": "Dark",
+  "common.appearance.default_theme": "Default",
+  "common.appearance.light": "Light",
+  "common.appearance.oled": "OLED",
+  "common.appearance.selected": "Selected",
+  "common.appearance.title": "Appearance",
   "common.app_version_build": "Version {0} · Build {1}",
   "common.active": "Active",
   "common.add": "Add",

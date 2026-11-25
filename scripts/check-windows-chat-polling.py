@@ -35,6 +35,7 @@ class Dispatcher {
 class Check {
     readonly ChatHistoryBuffer _history = new();
     string? _openId = "chat";
+    const int OpenPageEvents = 1200;
     int _historyGeneration => _history.Generation;
     ulong _offset => _history.Offset;
     string? _tailCursor => _history.TailCursor;

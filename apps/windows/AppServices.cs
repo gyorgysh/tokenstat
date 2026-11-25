@@ -71,6 +71,9 @@ internal static class AppServices
     /// </summary>
     public static Action<string, WorkspaceSection>? OpenWorkspace { get; set; }
 
+    /// <summary>Open one pull request on a project's own page, by number.</summary>
+    public static Action<string, long>? OpenPull { get; set; }
+
     /// <summary>
     /// Open a conversation from Home's Continue list. Workspace id, then the
     /// conversation id. Set from MainWindow, like the Mac opening the recent

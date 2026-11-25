@@ -26,6 +26,8 @@ object HostContracts {
     const val CHAT_REMOVE_ALL_MIN_PROTOCOL = 26
     fun supportsChatFork(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_FORK_MIN_PROTOCOL
     /// Version 54 adds `chat.continueInNew` and the prompt cache record.
+    const val HANDOFF_MIN_PROTOCOL = 12
+    fun supportsHandoff(protocol: Long?): Boolean = protocol != null && protocol >= HANDOFF_MIN_PROTOCOL
     const val CHAT_CONTINUE_MIN_PROTOCOL = 54
     fun supportsChatContinue(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_CONTINUE_MIN_PROTOCOL
     /// Version 55 adds `launcher.updates` and `launcher.update`.

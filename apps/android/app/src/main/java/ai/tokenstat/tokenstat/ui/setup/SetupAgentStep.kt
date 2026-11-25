@@ -19,7 +19,6 @@ import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -92,7 +91,7 @@ fun SetupAgentStep(
 ) {
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
-    val dark = isSystemInDarkTheme()
+    val dark = colors.isDark
     val machines = remember(state.account) { setupMachines(state.account) }
     val peer = connect.expectedPeer ?: machines.singleOrNull()?.setupPeer()
     val hostLabel = machines.find { it.setupPeer() == peer }?.setupHostLabel()

@@ -309,8 +309,10 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(_paneResize, 1);
         Grid.SetColumn(_paneResize, 1);
         RootGrid.Children.Add(_paneResize);
+        RootGrid.RequestedTheme = RequestedAppearance();
         ApplyChromeColors();
         RootGrid.ActualThemeChanged += (_, _) => ApplyChromeColors();
+        AppAppearance.Shared.Changed += () => DispatcherQueue.TryEnqueue(ApplyAppearance);
         _contentHost.SizeChanged += (_, _) => SyncInspectorFit();
         _inspectorHost.WidthChanged += SyncInspectorFit;
         // Keep the titlebar split on the pane edge when the pane collapses to
@@ -380,6 +382,15 @@ public sealed partial class MainWindow : Window
             DispatcherQueue.TryEnqueue(() =>
             {
                 NavigateTo("ws:" + workspaceId + ":" + section);
+            });
+        };
+        AppServices.OpenPull = (workspaceId, number) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                NavigateTo("ws:" + workspaceId + ":" + WorkspaceSection.Pulls);
+                var workbench = WorkspaceTabs(workspaceId);
+                workbench.WhenLoaded(() => { if (workbench.ActivePage is PullsPage page) page.Reveal(number); });
             });
         };
         AppServices.OpenConversation = (workspaceId, chatId) =>
@@ -2787,6 +2798,26 @@ public sealed partial class MainWindow : Window
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint value, int size);
 
+    private static ElementTheme RequestedAppearance() => AppAppearance.Shared.Dark switch
+    {
+        true => ElementTheme.Dark,
+        false => ElementTheme.Light,
+        _ => ElementTheme.Default,
+    };
+
+    /// <summary>
+    /// A new mode or theme. The other theme first, because native controls
+    /// read their accent again only when the theme changes.
+    /// </summary>
+    private void ApplyAppearance()
+    {
+        Theme.RefreshAccentResources();
+        RootGrid.RequestedTheme = RootGrid.ActualTheme == ElementTheme.Dark ? ElementTheme.Light : ElementTheme.Dark;
+        RootGrid.RequestedTheme = RequestedAppearance();
+        Theme.Recolor();
+        ApplyChromeColors();
+    }
+
     /// <summary>
     /// Repaint every flat surface from the theme tokens. Runs once at launch
     /// and again whenever the system theme changes, so the window frame never
@@ -2795,7 +2826,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void ApplyChromeColors()
     {
-        Theme.WindowTheme = RootGrid.ActualTheme;
+        // A chosen side is known before the tree is. Only Auto has to ask it.
+        Theme.WindowTheme = RequestedAppearance() is var chosen and not ElementTheme.Default ? chosen : RootGrid.ActualTheme;
         Theme.InstallControlResources();
         _chromeBackground.Color = Theme.Background;
         _chromeSidebar.Color = Theme.Sidebar;

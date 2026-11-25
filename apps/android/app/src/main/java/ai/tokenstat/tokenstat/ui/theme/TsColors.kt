@@ -8,8 +8,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 /// Shared visual constants, transcribed from the Apple client's
 /// `Sources/Design/Theme.swift`. The brand colours follow tokenstat.ai's
@@ -49,14 +51,17 @@ data class TsColors(
     val textPrimary: Color,
     val textSecondary: Color,
     val textTertiary: Color,
+    /// The logo draws in the brand's own colours on the Default theme only.
+    /// Beside an orange or teal interface the violet mark reads as a sticker.
+    val showsBrandColors: Boolean = true,
+    /// This theme brings its own activity ramp, whose quiet step reads on any
+    /// ground.
+    val ownsHeat: Boolean = false,
 ) {
     fun heat(level: Int): Color = heat[level.coerceIn(0, heat.lastIndex)]
 }
 
 private fun hex(value: Long): Color = Color(0xFF000000L or value)
-
-private fun hexWithAlpha(alpha: Float, value: Long): Color =
-    Color(((alpha * 255).toInt() shl 24) or value.toInt())
 
 val LightColors: TsColors = TsColors(
     isDark = false,
@@ -129,7 +134,11 @@ val DarkColors: TsColors = TsColors(
 val LocalTsColors = staticCompositionLocalOf { DarkColors }
 
 /// The accent tinted at card strength; success is deliberately the accent.
-val TsColors.rowSelected: Color get() = hexWithAlpha(0.18f, if (isDark) 0x8B5CF6 else 0x6A3DFF)
+val TsColors.rowSelected: Color get() = accent.copy(alpha = 0.18f)
+
+/// Text and glyphs on an accent fill. White on the brand violet, near black on
+/// the pale accents the other themes use in the dark.
+val TsColors.onAccent: Color get() = if (accent.luminance() > 0.35f) Color(0xFF111114) else Color.White
 
 /// Highlight kind, mirroring the core table the Apple client reads. A kind
 /// this build does not know decodes as Unknown and renders as plain text.
@@ -171,19 +180,24 @@ fun TsColors.syntax(kind: SyntaxKind): Color = when (kind) {
 fun TsColors.shadow(opacity: Float): Color = Color.Black.copy(alpha = if (isDark) opacity else opacity * 0.35f)
 
 @Composable
-fun rememberTsColors(): TsColors = if (isSystemInDarkTheme()) DarkColors else LightColors
+fun rememberTsColors(): TsColors {
+    val systemDark = isSystemInDarkTheme()
+    val mode = AppAppearance.mode
+    val palette = AppAppearance.paletteId
+    return remember(systemDark, mode, palette) { AppAppearance.colors(mode, palette, systemDark) }
+}
 
 /// Material widgets that have not been restyled still read this scheme, so
 /// light paper cannot sit under a forced `darkColorScheme`.
 fun TsColors.toColorScheme(): ColorScheme {
-    val onAccent = Color.White
+    val onAccent = onAccent
     // Every floating surface reads the container roles: dialogs use High,
     // menus use Container. Leaving them at Material's defaults painted all
     // thirty-odd dialogs and every menu neutral grey in dark mode, while
     // light mode hid it. Highest stays default on purpose: it feeds the
     // switch and progress tracks, which read fine grey on a card and would
     // blend into one in panel.
-    return if (isDark) {
+    val scheme = if (isDark) {
         darkColorScheme(
             primary = accent,
             onPrimary = onAccent,
@@ -201,7 +215,7 @@ fun TsColors.toColorScheme(): ColorScheme {
             surfaceContainerHigh = panel,
             outline = border,
             error = danger,
-            onError = onAccent,
+            onError = Color.White,
             tertiary = secondary,
             onTertiary = onAccent,
         )
@@ -223,11 +237,14 @@ fun TsColors.toColorScheme(): ColorScheme {
             surfaceContainerHigh = panel,
             outline = border,
             error = danger,
-            onError = onAccent,
+            onError = Color.White,
             tertiary = secondary,
             onTertiary = onAccent,
         )
     }
+    // Material's own tracks and chips are violet, the brand's and no other
+    // theme's.
+    return if (showsBrandColors) scheme else scheme.copy(secondaryContainer = border, onSecondaryContainer = textPrimary)
 }
 
 @Composable

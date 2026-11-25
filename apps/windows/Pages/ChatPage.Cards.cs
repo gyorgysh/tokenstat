@@ -76,7 +76,59 @@ internal sealed partial class ChatPage
         _followPillHost.Visibility = Visibility.Collapsed;
     }
 
-    private void OnTranscriptViewChanged()
+    private List<string> _drawnRows = [];
+    private int _drawnPrefix;
+    private bool _moving, _earlierFailed;
+    /// <summary>How near an edge, in points, before the next rows come in.</summary>
+    private const double EdgeDistance = 400;
+
+    /// <summary>
+    /// Older rows come in as the reader nears the top, and newer ones as they
+    /// come back down. Only once the scroll has come to rest, so moving the
+    /// window never fights a hand or a wheel.
+    /// </summary>
+    private void MoveWindowAtEdge()
+    {
+        if (_scroll is null || _moving || _followEnd || _historyLoading || _scroll.ScrollableHeight <= 0) return;
+        if (_scroll.VerticalOffset < EdgeDistance && _drawnPrefix > 0 && !_earlierFailed) _ = RevealEarlierAsync();
+        else if (_sliceOlder > 0 && _scroll.ScrollableHeight - _scroll.VerticalOffset < EdgeDistance)
+            Move(() => _sliceOlder = Math.Max(0, _sliceOlder - SliceStep));
+    }
+
+    /// <summary>Redraw another part of the conversation with the reader's line where it was.</summary>
+    private void Move(Action change)
+    {
+        if (_scroll is not { } scroll) return;
+        _moving = true;
+        try
+        {
+            var before = _drawnRows;
+            double Top(int row) => _transcript.Children[_drawnPrefix + row] is FrameworkElement view
+                ? view.TransformToVisual(scroll).TransformPoint(new Windows.Foundation.Point(0, 0)).Y : 0;
+            int first = -1, last = -1;
+            var tops = new Dictionary<string, double>();
+            for (var i = 0; i < before.Count && _drawnPrefix + i < _transcript.Children.Count; i++)
+            {
+                var top = Top(i);
+                tops[before[i]] = top;
+                if (top > scroll.ViewportHeight) break;
+                var height = (_transcript.Children[_drawnPrefix + i] as FrameworkElement)?.ActualHeight ?? 0;
+                if (top + height <= 0) continue;
+                if (first < 0) first = i;
+                last = i;
+            }
+            change();
+            RebuildTranscript(full: true);
+            if (first < 0 || AnchorRow(before, first, last, _drawnRows.ToHashSet()) is not { } anchor
+                || !tops.TryGetValue(anchor, out var wanted)) return;
+            scroll.UpdateLayout();
+            var moved = Top(_drawnRows.IndexOf(anchor)) - wanted;
+            if (Math.Abs(moved) > 0.5) scroll.ChangeView(null, scroll.VerticalOffset + moved, null, true);
+        }
+        finally { _moving = false; }
+    }
+
+    private void OnTranscriptViewChanged(bool settled = true)
     {
         if (_scroll is null || _openId is null) return;
         var fromBottom = _scroll.ScrollableHeight - _scroll.VerticalOffset;
@@ -103,6 +155,7 @@ internal sealed partial class ChatPage
             _followEnd = true;
         }
         UpdateFollowPill();
+        if (settled) MoveWindowAtEdge();
     }
 
     /// <summary>
@@ -142,6 +195,7 @@ internal sealed partial class ChatPage
         if (_history.ApplyPage(page, replace))
         {
             _historyLoading = false;
+            _earlierFailed = false;
             _sliceOlder = 0;
         }
     }
@@ -159,22 +213,22 @@ internal sealed partial class ChatPage
             try
             {
                 var page = await CallChatAsync("chat.eventPage", new JsonObject
-                    { ["id"] = id, ["cursor"] = _historyCursor, ["limit"] = 300, ["stablePositions"] = true });
+                    { ["id"] = id, ["cursor"] = _historyCursor, ["limit"] = EarlierPageEvents, ["stablePositions"] = true });
                 if (_openId != id || generation != _openGeneration || historyGeneration != _historyGeneration || !IsLoaded) return;
                 ApplyHistoryPage(page, replace: false);
                 count = ChatDetailFold.Fold(Coalesce(_events), ChatDetailPreference.Level, _running, IsGroupOpen).Count;
             }
             catch (Exception error)
             {
+                _earlierFailed = true;
                 if (_openId == id && generation == _openGeneration) Banner(error.Message);
             }
             finally { if (generation == _openGeneration) _historyLoading = false; }
         }
         if (_openId != id || generation != _openGeneration) return;
-        _sliceOlder = SliceClamp(_sliceOlder + SliceStep, count);
         _followEnd = false;
         _followPaused = false;
-        RebuildTranscript(full: true);
+        Move(() => _sliceOlder = SliceClamp(_sliceOlder + SliceStep, count));
         UpdateFollowPill();
     }
 
@@ -223,7 +277,7 @@ internal sealed partial class ChatPage
         var button = Buttons.Secondary(
             _historyLoading ? L10n.Text("windows.chatpage_cards.loading_earlier_messages.b8507b92") : hidden > 0 ? L10n.Text("windows.chatpage_cards.show_0_earlier_messages.2e5e4ab9", $"{hidden}") : L10n.Text("windows.chatpage_cards.load_earlier_messages.33fd46b9"),
             ActionIcon.History,
-            async (_, _) => await RevealEarlierAsync(),
+            async (_, _) => { _earlierFailed = false; await RevealEarlierAsync(); },
             small: true);
         button.IsEnabled = !_historyLoading;
         button.HorizontalAlignment = HorizontalAlignment.Center;

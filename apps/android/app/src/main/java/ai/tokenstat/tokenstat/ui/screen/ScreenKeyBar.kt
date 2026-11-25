@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.screen
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
@@ -180,7 +181,7 @@ private fun ScreenKeyCap(
             Icon(
                 icon,
                 if (iconOnly) label else null,
-                tint = if (active) Color.White else colors.textPrimary,
+                tint = if (active) colors.onAccent else colors.textPrimary,
                 modifier = Modifier.size(if (iconOnly) 20.dp else 16.dp),
             )
         }
@@ -188,7 +189,7 @@ private fun ScreenKeyCap(
             Text(
                 label,
                 style = TsType.callout.copy(fontWeight = FontWeight.Medium),
-                color = if (active) Color.White else colors.textPrimary,
+                color = if (active) colors.onAccent else colors.textPrimary,
                 maxLines = 1,
             )
         }

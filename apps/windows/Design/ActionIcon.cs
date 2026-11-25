@@ -301,8 +301,7 @@ internal static class ActionIconGlyph
     {
         var button = Button(title, icon, click);
         button.Background = Theme.AccentBrush;
-        button.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-            Microsoft.UI.Colors.White);
+        button.Foreground = Theme.OnAccentBrush;
         button.BorderBrush = Theme.AccentBrush;
         return button;
     }

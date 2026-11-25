@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat
 
-import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -20,6 +19,7 @@ import ai.tokenstat.tokenstat.notifications.NotificationOpen
 import ai.tokenstat.tokenstat.notifications.VisibleChat
 import ai.tokenstat.tokenstat.ui.TokenstatApp
 import ai.tokenstat.tokenstat.ui.logic.SplashHold
+import ai.tokenstat.tokenstat.ui.theme.AppAppearance
 
 class MainActivity : ComponentActivity() {
     private val model: AppViewModel by viewModels()
@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val launchedAt = SystemClock.uptimeMillis()
         super.onCreate(savedInstanceState)
+        AppAppearance.load(this)
         // Back to the app theme for the content. The manifest holds the
         // launch theme so the system draws the animated bars before the
         // first frame; without that wiring this is a harmless no-op.
@@ -38,11 +39,6 @@ class MainActivity : ComponentActivity() {
             // Android 15 already makes the bars transparent. The Activity
             // helper in our AndroidX version still calls deprecated color setters.
             WindowCompat.setDecorFitsSystemWindows(window, false)
-            val lightBars = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES
-            WindowCompat.getInsetsController(window, window.decorView).apply {
-                isAppearanceLightStatusBars = lightBars
-                isAppearanceLightNavigationBars = lightBars
-            }
         } else {
             enableEdgeToEdge()
         }
@@ -120,6 +116,7 @@ class MainActivity : ComponentActivity() {
         // again. Without this a backgrounded app would keep swallowing the
         // finished-turn banner for whatever was last open.
         VisibleChat.hidden()
+        model.chatDrafts.flush()
     }
 
     override fun onResume() {

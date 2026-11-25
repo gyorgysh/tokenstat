@@ -255,7 +255,7 @@ private fun SessionsSection(
     val pins = remember(context) { ai.tokenstat.tokenstat.ui.home.HomeStores(context) }
     val pinIdentity = ai.tokenstat.tokenstat.ui.home.HomeStores.pinIdentity(client.account)
     var renaming by remember(owner) { mutableStateOf<JsonObject?>(null) }
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    val dark = ai.tokenstat.tokenstat.ui.theme.LocalTsColors.current.isDark
     val prefs = remember(peer, workspace) {
         context.getSharedPreferences("tokenstat.launcher.v1", android.content.Context.MODE_PRIVATE)
     }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.toggleable
@@ -73,7 +74,7 @@ fun BrandCheckbox(
                 Icon(
                     Icons.Filled.Check,
                     null,
-                    tint = Color.White,
+                    tint = colors.onAccent,
                     modifier = Modifier.size(11.dp),
                 )
             }
@@ -104,7 +105,7 @@ fun BrandCheckDisc(on: Boolean, modifier: Modifier = Modifier) {
             Icon(
                 Icons.Filled.Check,
                 null,
-                tint = Color.White,
+                tint = colors.onAccent,
                 modifier = Modifier.size(12.dp),
             )
         }
@@ -130,7 +131,7 @@ fun TsBrandSwitch(
         modifier = modifier,
         enabled = enabled,
         colors = SwitchDefaults.colors(
-            checkedThumbColor = Color.White,
+            checkedThumbColor = colors.onAccent,
             checkedTrackColor = colors.accent,
             checkedBorderColor = colors.accent,
             uncheckedThumbColor = colors.controlGlyph,

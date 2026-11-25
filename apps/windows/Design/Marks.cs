@@ -59,6 +59,14 @@ internal static class Marks
         };
     }
 
+    /// <summary>The bars in one text colour, for a theme that is not the brand's own.</summary>
+    private static Color BarColor(Color brand, int index)
+    {
+        if (Theme.ShowsBrandColors) return brand;
+        var text = Theme.DefaultText;
+        return Color.FromArgb(index switch { 0 => (byte)102, 1 => (byte)173, _ => (byte)255 }, text.R, text.G, text.B);
+    }
+
     /// <summary>
     /// The tokenstat mark: three ascending bars on a shared baseline.
     /// Bars 12 wide on a 15 pitch, sharing a baseline, from the website's
@@ -83,13 +91,14 @@ internal static class Marks
         var bars = new List<Rectangle>();
         for (int i = 0; i < 3; i++)
         {
+            var (fill, index) = (fills[i], i);
             var bar = new Rectangle
             {
                 Width = 12 * unit,
                 Height = heights[i] * unit,
                 RadiusX = 3.5 * unit,
                 RadiusY = 3.5 * unit,
-                Fill = Theme.Brush(fills[i]),
+                Fill = Theme.Brush(() => BarColor(fill, index)),
                 RenderTransform = new ScaleTransform { ScaleY = moves ? 0.35 : 1 },
                 RenderTransformOrigin = new Point(0.5, 1.0),
             };
@@ -192,7 +201,8 @@ internal static class Marks
             FontFamily = Fonts.Interface,
             FontSize = size * 0.88,
             FontWeight = FontWeights.Bold,
-            Foreground = Theme.AccentBrush,
+            Foreground = Theme.Brush(static () => Theme.ShowsBrandColors ? Theme.Accent
+                : Color.FromArgb(153, Theme.DefaultText.R, Theme.DefaultText.G, Theme.DefaultText.B)),
             VerticalAlignment = VerticalAlignment.Center,
         });
         row.Children.Add(word);
@@ -379,8 +389,8 @@ internal static class Marks
                 EndPoint = new Point(0.5, 1),
                 GradientStops =
                 {
-                    new GradientStop { Color = Theme.Hex(0x8B5CF6u), Offset = 0 },
-                    new GradientStop { Color = Theme.Hex(0xC026D3u), Offset = 1 },
+                    new GradientStop { Color = Theme.ShowsBrandColors ? Theme.Hex(0x8B5CF6u) : Theme.Accent, Offset = 0 },
+                    new GradientStop { Color = Theme.ShowsBrandColors ? Theme.Hex(0xC026D3u) : Theme.Secondary, Offset = 1 },
                 },
             },
             Width = size,

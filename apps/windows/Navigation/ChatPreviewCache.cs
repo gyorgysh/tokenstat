@@ -70,7 +70,7 @@ internal static class ChatPreviewCache
         var generation = Store.Generation;
         try
         {
-            var args = new JsonObject { ["id"] = chat, ["limit"] = 160, ["stablePositions"] = true };
+            var args = new JsonObject { ["id"] = chat, ["limit"] = Pages.ChatPage.OpenPageEvents, ["stablePositions"] = true };
             var chunk = RemoteWorkspaces.TrySplit(workspace, out var peer, out _)
                 ? await RemoteWorkspaces.CallOnPeerAsync(peer, "chat.eventPage", args)
                 : await AppServices.Host.CallAsync("chat.eventPage", args);

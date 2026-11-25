@@ -30,7 +30,7 @@ internal static class Buttons
         var button = Capsule(
             title, icon, click, small,
             Theme.AccentBrush,
-            new SolidColorBrush(Microsoft.UI.Colors.White),
+            Theme.OnAccentBrush,
             Theme.AccentBrush);
         button.BorderThickness = new Thickness(0);
         return button;

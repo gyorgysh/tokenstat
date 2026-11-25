@@ -9,11 +9,13 @@ import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
 /// Unsent writing survives leaving a screen, for the life of the ViewModel.
+/// Its text also survives the app being closed, when `saved` keeps it.
 /// Capacity refuses a new edit visibly; it never evicts somebody's writing.
 class ChatComposerSessions<A>(
     private val attachmentCost: (A) -> Long,
     private val capacity: Int = 64,
     private val byteLimit: Long = 64L * 1024 * 1024,
+    private val saved: ChatDraftFiles? = null,
 ) {
     data class Snapshot<A>(val text: String = "", val attachments: List<A> = emptyList()) {
         val empty: Boolean get() = text.isEmpty() && attachments.isEmpty()
@@ -27,9 +29,24 @@ class ChatComposerSessions<A>(
     private val mutableFailure = MutableStateFlow<Failure?>(null)
     val failure = mutableFailure.asStateFlow()
 
-    fun snapshot(owner: String?): Snapshot<A> = owner?.let { sessions[it] } ?: Snapshot()
+    private val restored = mutableSetOf<String>()
+
+    fun snapshot(owner: String?): Snapshot<A> {
+        if (owner.isNullOrBlank()) return Snapshot()
+        sessions[owner]?.let { return it }
+        if (saved != null && restored.add(owner)) {
+            val text = saved.read(owner)
+            if (text.isNotEmpty()) {
+                versions[owner] = mutableRevision.value + 1
+                return Snapshot<A>(text).also { sessions[owner] = it }
+            }
+        }
+        return Snapshot()
+    }
     fun capture(owner: String?) = Capture(owner, snapshot(owner), versions[owner] ?: 0)
-    fun hasWriting(owner: String?): Boolean = !snapshot(owner).empty
+    /// Asked for every row of a list, so it never reads a file.
+    fun hasWriting(owner: String?): Boolean = !owner.isNullOrBlank() &&
+        (sessions[owner]?.empty == false || (owner !in restored && saved?.has(owner) == true))
     fun dismissFailure() { mutableFailure.value = null }
 
     fun update(owner: String?, next: Snapshot<A>): Boolean {
@@ -45,6 +62,10 @@ class ChatComposerSessions<A>(
         if (reason != null) {
             mutableFailure.value = Failure(owner, reason)
             return false
+        }
+        if (owner != null) {
+            restored.add(owner)
+            saved?.write(owner, next.text)
         }
         if (next.empty) {
             sessions.remove(owner)

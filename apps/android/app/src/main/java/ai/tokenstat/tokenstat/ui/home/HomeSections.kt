@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.home
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import android.content.Context
@@ -811,13 +812,13 @@ private fun GettingStartedRow(step: GettingStartedStep, isLast: Boolean) {
                         Icons.Default.Check,
                         contentDescription = null,
                         modifier = Modifier.size(12.dp),
-                        tint = androidx.compose.ui.graphics.Color.White,
+                        tint = colors.onAccent,
                     )
                     else -> Text(
                         step.number.toString(),
                         style = TsType.mono(11, FontWeight.Bold),
                         color = if (step.state == GettingStartedState.NOW) {
-                            androidx.compose.ui.graphics.Color.White
+                            colors.onAccent
                         } else {
                             colors.textSecondary
                         },

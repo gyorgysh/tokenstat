@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.setup
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import ai.tokenstat.tokenstat.AppViewModel
@@ -789,7 +790,7 @@ private fun SetupAgentChoice(id: String, name: String, detail: String, selected:
             colors = CheckboxDefaults.colors(
                 checkedColor = colors.accent,
                 uncheckedColor = colors.textTertiary,
-                checkmarkColor = androidx.compose.ui.graphics.Color.White,
+                checkmarkColor = colors.onAccent,
             ),
         )
     }

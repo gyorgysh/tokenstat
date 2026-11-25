@@ -5,6 +5,8 @@ using Tokenstat.Pages;
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
 ChatUsageTests.Run();
+ChatDraftTests.Run();
+ChatWindowTests.Run();
 var avatarCache = new HistoryAvatarCache();
 var avatarKey = new HistoryAvatarCache.Key(1, "peer:folder", "commit-a");
 var avatarCalls = 0;

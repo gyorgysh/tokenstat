@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import androidx.compose.animation.AnimatedContent
@@ -613,12 +614,12 @@ private fun TsPickerSectionTab(
                     contentAlignment = Alignment.Center,
                 ) {
                     if (answered) {
-                        Icon(ActionIcon.Done.vector, null, tint = Color.White, modifier = Modifier.size(10.dp))
+                        Icon(ActionIcon.Done.vector, null, tint = colors.onAccent, modifier = Modifier.size(10.dp))
                     } else {
                         Text(
                             "$step",
                             style = TsType.caption2.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
-                            color = if (lit) Color.White else colors.textSecondary,
+                            color = if (lit) colors.onAccent else colors.textSecondary,
                         )
                     }
                 }

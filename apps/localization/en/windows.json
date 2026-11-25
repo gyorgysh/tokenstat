@@ -1326,6 +1326,7 @@
   "windows.pullcreate.step_publish": "3. Publish your branch",
   "windows.pullcreate.title": "Pull request title",
   "windows.pullcreate.update_host": "Update tokenstat on this computer to create pull requests (host version 28 or later).",
+  "windows.pulls.open_remember_help": "You can change it in Account → GitHub pull requests.",
   "windows.pullspage.0_1_2_3_4_files.5fc1c874": "{0}  →  {1}    +{2}  −{3}  ·  {4} files",
   "windows.pullspage.0_1_2_files_3_comments.d4b8ddd5": "+{0}   −{1}   {2} files   {3} comments",
   "windows.pullspage.0_1_listed.6a7bf1bb": "{0} {1} listed.",

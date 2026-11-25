@@ -118,7 +118,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_opening || _openId is null || _outboxKey is not string owner) return;
         if (_draft.Text.Length == 0 && _attachments.Count == 0) _drafts.Remove(owner);
         else _drafts[owner] = (_draft.Text, _attachments.ToArray());
+        _draftSave.Stop();
+        if (_savedDraft == (owner, _draft.Text)) return;
+        _savedDraft = (owner, _draft.Text);
+        ChatDraftStore.Shared.Write(owner, _draft.Text);
     }
+
+    private (string Owner, string Text) _savedDraft = ("", "");
+    private readonly DispatcherTimer _draftSave = new() { Interval = TimeSpan.FromMilliseconds(600) };
     private JsonNode? _openChat;
 
     /// <summary>
@@ -144,7 +151,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _pendingReveal = chatId;
         }
         _draft.PlaceholderText = L10n.Text("windows.chatpage.ask_about_this_folder.33b8b41b");
+        // A pause in the typing, rather than a write for every key.
+        _draftSave.Tick += (_, _) => RememberDraft();
         _draft.TextChanged += (_, _) => {
+            _draftSave.Stop();
+            if (!_opening && _openId is not null) _draftSave.Start();
             _commandIndex = 0; _commandsDismissed = false; RenderCommandMenu();
             if (Format.Flag(_openChat, "nativeSteer") && SteerKnownAvailable() != _composerSteering) RebuildComposerActions();
         };
@@ -168,7 +179,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = _root,
         };
-        _scroll.ViewChanged += (_, _) => OnTranscriptViewChanged();
+        _scroll.ViewChanged += (_, e) => OnTranscriptViewChanged(settled: !e.IsIntermediate);
         // Growth is not a scroll: a reply streaming in below the fold, or the
         // composer taking height from the viewport, moves no offset and raises
         // no ViewChanged. Pin again once layout has the new size.
@@ -842,7 +853,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var identity = OutboxKeyAsync(id);
             var preview = ChatPreviewCache.Take(_workspaceId, id);
             var events = preview is null ? CallChatAsync("chat.eventPage", new JsonObject
-                { ["id"] = id, ["limit"] = 160, ["stablePositions"] = true }) : Task.FromResult(preview);
+                { ["id"] = id, ["limit"] = OpenPageEvents, ["stablePositions"] = true }) : Task.FromResult(preview);
             var approvals = CallChatAsync("chat.approvals", new JsonObject { ["id"] = id });
             await Task.WhenAll(catalog, identity, events, approvals);
             if (_openId != id || generation != _openGeneration || !IsLoaded) return;
@@ -860,7 +871,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 _draft.Text = draft.Text;
                 _attachments.AddRange(draft.Attachments);
             }
-            else _draft.Text = "";
+            else _draft.Text = ChatDraftStore.Shared.Read(identity.Result);
+            _savedDraft = (identity.Result, _draft.Text);
             _opening = false;
             PaintConversation();
             _ = RefreshWorkspaceGitAsync();
@@ -1387,6 +1399,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _transcript.Children.RemoveAt(_transcript.Children.Count - 1);
         }
+        _drawnRows = items.Skip(start).Take(visible).Select(item => item.Id).ToList();
+        _drawnPrefix = prefix;
 
         if (_followEnd && _sliceOlder == 0)
         {
@@ -2463,7 +2477,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 if (Format.Flag(chunk, "reset"))
                 {
                     var reset = await CallChatAsync("chat.eventPage", new JsonObject
-                        { ["id"] = chatId, ["limit"] = 160, ["stablePositions"] = true });
+                        { ["id"] = chatId, ["limit"] = OpenPageEvents, ["stablePositions"] = true });
                     if (token.IsCancellationRequested || _openId != chatId) return;
                     if (historyGeneration != _historyGeneration) continue;
                     ApplyHistoryPage(reset, replace: true);

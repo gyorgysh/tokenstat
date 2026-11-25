@@ -69,8 +69,35 @@ internal static class Theme
         foreach (var key in new[] { "SubtleFillColorTransparentBrush", "NavigationViewItemBackground",
             "ListViewItemBackground", "ComboBoxItemBackground", "AppBarButtonBackground", "HyperlinkButtonBackground" })
             resources[key] = ClearBrush;
+        RefreshAccentResources();
         resources["TextControlBorderBrushFocused"] = AccentBrush;
         resources["TabViewBackground"] = TabStripBrush;
+    }
+
+    /// <summary>Focus rings, checks and selection take these from the platform.</summary>
+    public static void RefreshAccentResources()
+    {
+        if (Application.Current is null) return;
+        var resources = Application.Current.Resources;
+        if (ShowsBrandColors)
+        {
+            resources["SystemAccentColor"] = Hex(0x6A3DFF);
+            resources["SystemAccentColorLight1"] = Hex(0x8B5CF6);
+            resources["SystemAccentColorLight2"] = Hex(0xA78BFA);
+            resources["SystemAccentColorLight3"] = Hex(0xC4B5FD);
+            resources["SystemAccentColorDark1"] = Hex(0x5930DC);
+            resources["SystemAccentColorDark2"] = Hex(0x4724B8);
+            resources["SystemAccentColorDark3"] = Hex(0x351A8D);
+            return;
+        }
+        // The dark side draws with the light steps and the light side with
+        // the dark ones, so each gets the accent that reads on it.
+        var palette = AppAppearance.Shared.Palette;
+        resources["SystemAccentColor"] = Accent;
+        foreach (var key in new[] { "SystemAccentColorLight1", "SystemAccentColorLight2", "SystemAccentColorLight3" })
+            resources[key] = Hex(palette.Dark.Accent);
+        foreach (var key in new[] { "SystemAccentColorDark1", "SystemAccentColorDark2", "SystemAccentColorDark3" })
+            resources[key] = Hex(palette.Light.Accent);
     }
 
     // RequestedTheme is the app preference; ActualTheme follows system
@@ -92,23 +119,62 @@ internal static class Theme
             _windowTheme = value;
             // Called by the window's ActualThemeChanged handler on the UI
             // thread. Recolor in place so controls retain drafts and focus.
-            for (var index = LiveBrushes.Count - 1; index >= 0; index--)
-            {
-                if (LiveBrushes[index].TryGetTarget(out var brush))
-                {
-                    if (BrushColors.TryGetValue(brush, out var color))
-                    {
-                        brush.Color = color();
-                    }
-                }
-                else
-                {
-                    LiveBrushes.RemoveAt(index);
-                }
-            }
-            _brushesSincePrune = 0;
+            Recolor();
         }
     }
+
+    /// <summary>Repaint every live brush, after the window or the chosen theme changes.</summary>
+    public static void Recolor()
+    {
+        for (var index = LiveBrushes.Count - 1; index >= 0; index--)
+        {
+            if (LiveBrushes[index].TryGetTarget(out var brush))
+            {
+                if (BrushColors.TryGetValue(brush, out var color))
+                {
+                    brush.Color = color();
+                }
+            }
+            else
+            {
+                LiveBrushes.RemoveAt(index);
+            }
+        }
+        _brushesSincePrune = 0;
+    }
+
+    /// <summary>
+    /// The chosen theme's colour, or the brand's own on the Default theme,
+    /// whose values here are the website's and stay exact.
+    /// </summary>
+    private static Color Themed(Func<AppearanceColors, uint> key, uint light, uint dark, bool blackInOled = false)
+    {
+        var appearance = AppAppearance.Shared;
+        if (blackInOled && appearance.IsOled) return Hex(0x000000);
+        if (!appearance.IsThemed) return Hex(IsDark ? dark : light);
+        return Hex(key(IsDark ? appearance.Palette.Dark : appearance.Palette.Light));
+    }
+
+    /// <summary>The logo keeps the brand's colours on the Default theme only.</summary>
+    public static bool ShowsBrandColors => !AppAppearance.Shared.IsThemed;
+
+    /// <summary>Text and glyphs on an accent fill: white on the violet, near black on a pale accent.</summary>
+    public static Color OnAccent
+    {
+        get
+        {
+            static double Channel(byte value)
+            {
+                var part = value / 255.0;
+                return part <= 0.04045 ? part / 12.92 : Math.Pow((part + 0.055) / 1.055, 2.4);
+            }
+            var accent = Accent;
+            var luminance = 0.2126 * Channel(accent.R) + 0.7152 * Channel(accent.G) + 0.0722 * Channel(accent.B);
+            return luminance > 0.35 ? Hex(0x111114) : Hex(0xFFFFFF);
+        }
+    }
+
+    public static SolidColorBrush OnAccentBrush => Brush(static () => OnAccent);
 
     public static bool IsDark => WindowTheme switch
     {
@@ -117,26 +183,25 @@ internal static class Theme
         _ => Application.Current?.RequestedTheme == ApplicationTheme.Dark,
     };
 
-    public static Color Accent => Hex(IsDark ? 0x8B5CF6u : 0x6A3DFFu);
-    public static Color Secondary => Hex(IsDark ? 0xE879F9u : 0xC026D3u);
+    public static Color Accent => Themed(static side => side.Accent, 0x6A3DFF, 0x8B5CF6);
+    public static Color Secondary => Themed(static side => side.Secondary, 0xC026D3, 0xE879F9);
     // A pull request's state, in the colours every forge uses for it.
     public static Color PullOpen => Hex(IsDark ? 0x3FB950u : 0x1A7F37u);
     public static Color PullMerged => Hex(IsDark ? 0xA371F7u : 0x8250DFu);
     public static Color PullClosed => Hex(IsDark ? 0xF85149u : 0xCF222Eu);
-    public static Color Background => Hex(IsDark ? 0x08070Du : 0xFBFBFDu);
-    public static Color Sidebar => Hex(IsDark ? 0x12101Du : 0xF3F2F8u);
-    public static Color Panel => IsDark ? Hex(0x100E1Au) : Color.FromArgb(255, 255, 255, 255);
+    public static Color Background => Themed(static side => side.Background, 0xFBFBFD, 0x08070D, blackInOled: true);
+    public static Color Sidebar => Themed(static side => side.Sidebar, 0xF3F2F8, 0x12101D, blackInOled: true);
+    /// <summary>A card on OLED is a step off black, which is how depth works where there is no light.</summary>
+    public static Color Panel => AppAppearance.Shared.IsOled ? Hex(0x0C0C0F) : Themed(static side => side.Panel, 0xFFFFFF, 0x100E1A);
     /// <summary>Behind a tab strip. A step darker than the pane under it, so the strip reads as chrome.</summary>
-    public static Color TabStrip => Hex(IsDark ? 0x08070Du : 0xF3F2F8u);
-    public static Color Border => Hex(IsDark ? 0x211D33u : 0xE7E7EEu);
-    public static Color RowHighlight => Hex(IsDark ? 0x1B1430u : 0xF0ECFFu);
+    public static Color TabStrip => Themed(static side => side.Sidebar, 0xF3F2F8, 0x08070D, blackInOled: true);
+    public static Color Border => AppAppearance.Shared.IsOled ? Color.FromArgb(15, 255, 255, 255) : Themed(static side => side.Border, 0xE7E7EE, 0x211D33);
+    public static Color RowHighlight => AccentSoft;
     /// <summary>The row that is actually selected. Tinted with the accent at 18 percent opacity, matching the Mac rowSelected.</summary>
-    public static Color RowSelected => IsDark
-        ? Color.FromArgb(46, 0x8B, 0x5C, 0xF6)
-        : Color.FromArgb(46, 0x6A, 0x3D, 0xFF);
+    public static Color RowSelected => Color.FromArgb(46, Accent.R, Accent.G, Accent.B);
     /// <summary>A selected row nested inside a selected one. Neutral, not tinted, matching the Mac rowSelectedNested.</summary>
-    public static Color RowSelectedNested => Hex(IsDark ? 0x26213Du : 0xE8E7F0u);
-    public static Color AccentSoft => Hex(IsDark ? 0x1B1430u : 0xF0ECFFu);
+    public static Color RowSelectedNested => Themed(static side => side.Selection, 0xE8E7F0, 0x26213D);
+    public static Color AccentSoft => Themed(static side => side.Selection, 0xF0ECFF, 0x1B1430);
     /// <summary>Quiet circular seat behind a small chrome glyph. Black at 6 percent in light mode, white at 9 percent in dark mode, matching the Mac controlSeat.</summary>
     public static Color ControlSeat => IsDark
         ? Color.FromArgb(23, 255, 255, 255)
@@ -183,9 +248,23 @@ internal static class Theme
         Hex(0xE879F9),
     ];
 
+    /// <summary>
+    /// The ramp in use. A chosen theme and OLED bring their own, whose quiet
+    /// step is the border tone: on black a black cell would vanish.
+    /// </summary>
+    public static Color[] HeatRamp
+    {
+        get
+        {
+            if (ShowsBrandColors && !AppAppearance.Shared.IsOled) return IsDark ? HeatDark : Heat;
+            static Color Fade(Color color, double alpha) => Color.FromArgb((byte)(alpha * 255), color.R, color.G, color.B);
+            return [Border, Fade(Accent, 0.38), Fade(Accent, 0.7), Accent, Secondary];
+        }
+    }
+
     public static Color HeatLevel(int level)
     {
-        var ramp = IsDark ? HeatDark : Heat;
+        var ramp = HeatRamp;
         var i = Math.Clamp(level, 0, ramp.Length - 1);
         return ramp[i];
     }

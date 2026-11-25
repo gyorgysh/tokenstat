@@ -10,6 +10,21 @@ Directory.CreateDirectory(directory);
 try
 {
     DesktopOpenRequestTests.Run();
+    var look = Path.Combine(directory, "look", "appearance.json");
+    var appearance = new AppAppearance(look);
+    Check(appearance is { Mode: AppearanceMode.Auto, IsThemed: false, Dark: null }, "A new install follows the system in the brand's colours");
+    var looks = 0;
+    appearance.Changed += () => looks++;
+    appearance.Choose(AppearanceMode.Oled);
+    appearance.Choose("ember");
+    appearance.Choose("ember");
+    Check(looks == 2, "Choosing what is already chosen repaints nothing");
+    var relaunched = new AppAppearance(look);
+    Check(relaunched is { IsOled: true, IsThemed: true, Dark: true } && relaunched.Palette.Id == "ember", "A launch keeps the mode and the theme");
+    relaunched.Choose("gone");
+    Check(!relaunched.IsThemed, "A theme this build does not know is the Default one");
+    File.WriteAllText(look, "{");
+    Check(new AppAppearance(look).Mode == AppearanceMode.Auto, "A damaged file only costs the remembered look");
     await BoundedHostSweepTests.RunAsync();
     var fresh = new DesktopWorkbenchState();
     fresh.Open(DesktopWorkbenchTool.Browser);

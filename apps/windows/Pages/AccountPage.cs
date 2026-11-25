@@ -252,6 +252,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         content.Children.Add(await LocalTrafficCardAsync());
         content.Children.Add(await LocalModelsCardAsync());
         content.Children.Add(NotificationsCard());
+        content.Children.Add(AppearanceSettings.Card());
         content.Children.Add(UpdateCard());
     }
 
@@ -1581,6 +1582,7 @@ internal sealed class AccountPage : Page, IToolbarItems
                     }
                 }));
             }
+            body.Children.Add(PullOpener.Picker());
             return Chrome.Card(
                 L10n.Text("windows.accountpage.github_pull_requests.0973f247"),
                 body,

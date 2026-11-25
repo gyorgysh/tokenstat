@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Color
@@ -383,7 +384,7 @@ internal fun TranscriptHandoffBanner(to: String, brief: String) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
             Box(Modifier.size(34.dp).background(gradient, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Sync, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Sync, null, tint = colors.onAccent, modifier = Modifier.size(18.dp))
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(

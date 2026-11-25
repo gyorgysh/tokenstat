@@ -4,6 +4,7 @@
   <ItemGroup>
     <Compile Include="../../../apps/windows/Navigation/DesktopOpenRequest.cs" Link="DesktopOpenRequest.cs" />
     <Content Include="../desktop-actions.json" Link="desktop-actions.json" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="../../../apps/windows/Design/AppAppearance.cs" Link="AppAppearance.cs" />
     <Compile Include="../../../apps/windows/Pages/DesktopWorkbenchState.cs" Link="DesktopWorkbenchState.cs" />
     <Compile Include="../../../apps/windows/Navigation/RemoteWorkspaceParameters.cs" Link="RemoteWorkspaceParameters.cs" />
     <Compile Include="../../../apps/windows/Navigation/BoundedHostSweep.cs" Link="BoundedHostSweep.cs" />

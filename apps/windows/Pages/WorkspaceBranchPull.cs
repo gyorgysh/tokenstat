@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -54,8 +53,8 @@ internal static class WorkspaceBranchPull
     }
 
     /// <summary>The state of a chat's pull requests, and how many when there are several.
-    /// Drawing it never asks the forge.</summary>
-    public static UIElement? Badge(JsonNode chat)
+    /// Drawing it never asks the forge. A click lists them, and a row opens one.</summary>
+    public static UIElement? Badge(JsonNode chat, string folderId)
     {
         var pulls = Pulls(chat);
         if (pulls.Count == 0) return null;
@@ -72,15 +71,50 @@ internal static class WorkspaceBranchPull
         if (pulls.Count > 1)
             row.Children.Add(new TextBlock { Text = pulls.Count.ToString(), FontSize = 11, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
         var help = string.Join(Environment.NewLine, pulls.Select(Help));
-        ToolTipService.SetToolTip(row, help);
-        AutomationProperties.SetName(row, help);
+        // A button, so the press stays here instead of opening the chat.
+        var button = new Button
+        {
+            Content = row,
+            Background = Theme.ClearBrush,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(3, 1, 3, 1),
+            MinWidth = 0,
+            MinHeight = 0,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        ToolTipService.SetToolTip(button, help);
+        AutomationProperties.SetName(button, help);
+        var menu = new MenuFlyout();
+        foreach (var pull in pulls)
+        {
+            var glyph = ActionIcon.Merge.Icon();
+            glyph.Foreground = Theme.Brush(() => Tint(pull));
+            var item = new MenuFlyoutItem { Text = Help(pull), Icon = glyph };
+            item.Click += async (_, _) => await PullOpener.OpenAsync(button, folderId, pull);
+            menu.Items.Add(item);
+        }
+        button.Flyout = menu;
+        return button;
+    }
+
+    /// <summary>State, repository and number, and the size of the change.</summary>
+    public static UIElement Summary(JsonNode pull)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        TextBlock Word(string text, Func<Windows.UI.Color>? tint = null) => tint is null
+            ? new TextBlock { Text = text, FontSize = 12, Opacity = 0.68 }
+            : new TextBlock { Text = text, FontSize = 12, Foreground = Theme.Brush(tint) };
+        row.Children.Add(Word(StateLabel(pull), () => Tint(pull)));
+        row.Children.Add(Word((Format.Text(pull, "repo") + " #" + Format.Text(pull, "number")).Trim()));
+        if (pull["additions"] is not null) row.Children.Add(Word("+" + Format.Long(pull, "additions"), static () => Theme.DiffAdded));
+        if (pull["deletions"] is not null) row.Children.Add(Word("−" + Format.Long(pull, "deletions"), static () => Theme.DiffRemoved));
         return row;
     }
 
     public static Button Chip(JsonNode pull)
     {
         var button = Buttons.Secondary(L10n.Text("windows.branchpull.chip", Format.Text(pull, "number"), StateLabel(pull)),
-            ActionIcon.Merge, (_, _) => Open(pull), small: true);
+            ActionIcon.Merge, (_, _) => PullOpener.Browse(pull), small: true);
         button.Foreground = Theme.Brush(() => Tint(pull));
         ToolTipService.SetToolTip(button, Help(pull));
         AutomationProperties.SetName(button, Help(pull));
@@ -98,12 +132,5 @@ internal static class WorkspaceBranchPull
                 (method, parameters) => RemoteWorkspaces.CallWorkspaceAsync(workspaceId, method, parameters));
             await reload();
         }, small: true);
-    }
-
-    private static void Open(JsonNode pull)
-    {
-        if (!Uri.TryCreate(Format.Text(pull, "url"), UriKind.Absolute, out var url) || url.Scheme != "https") return;
-        try { Process.Start(new ProcessStartInfo { FileName = url.AbsoluteUri, UseShellExecute = true }); }
-        catch { }
     }
 }

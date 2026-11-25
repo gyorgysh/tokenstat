@@ -97,12 +97,16 @@ object LogoMotion {
     const val dipHoldMs = 300L
 }
 
+/// The bars in one text colour, for a theme that is not the brand's own.
+private val MONOCHROME_OPACITY = floatArrayOf(0.4f, 0.68f, 1f)
+
 /// The 3-bar tokenstat logo, hand-drawn geometry transcribed from the website
 /// SVG via the Apple client's `Marks.swift`. Bars rise in turn out of the
 /// baseline they share.
 @Composable
 fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
     val reduceMotion = rememberReduceMotion()
+    val colors = LocalTsColors.current
     val unit = size / 42f
     val bars = listOf(
         Triple(34f, 18f, Color(0xFFC3B0FF)),
@@ -127,7 +131,8 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
     }
 
     Box(Modifier.size(size.dp)) {
-        bars.forEachIndexed { index, (y, height, color) ->
+        bars.forEachIndexed { index, (y, height, brand) ->
+            val color = if (colors.showsBrandColors) brand else colors.textPrimary.copy(alpha = MONOCHROME_OPACITY[index])
             val looped = if (animated && loops && !reduceMotion) {
                 val transition = rememberInfiniteTransition(label = "logo")
                 val v by transition.animateFloat(
@@ -205,7 +210,7 @@ fun Wordmark(
             Spacer(Modifier.width((size * 0.75f).dp))
         }
         Text(L10n.text("android.marks.token.3c469e9d"), style = face, color = colors.textPrimary)
-        Text(L10n.text("android.marks.stat.40460da8"), style = face, color = colors.accent)
+        Text(L10n.text("android.marks.stat.40460da8"), style = face, color = if (colors.showsBrandColors) colors.accent else colors.textSecondary)
         if (fills) Spacer(Modifier.weight(1f))
     }
 }

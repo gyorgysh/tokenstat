@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui
 
+import androidx.compose.ui.graphics.toArgb
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import ai.tokenstat.tokenstat.ui.logic.InsightDayAxis
@@ -297,6 +298,7 @@ fun TokenstatApp(model: AppViewModel) {
     }
     TsTheme {
         val colors = LocalTsColors.current
+        SystemBars(colors)
         MaterialTheme(colorScheme = colors.toColorScheme(), typography = TsType.typography) {
             Surface(Modifier.fillMaxSize(), color = colors.background) {
                 val door = when {
@@ -2522,6 +2524,9 @@ private fun AndroidSSHScreenForAccount(
     var vault by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var vaultError by remember { mutableStateOf<String?>(null) }
+    var trustedServers by remember(accountOwner) { mutableStateOf(emptyList<ai.tokenstat.tokenstat.ui.ssh.TrustedServer>()) }
+    var showingTrusted by remember(accountOwner) { mutableStateOf(false) }
+    var trustError by remember(accountOwner) { mutableStateOf<String?>(null) }
     var librarySaving by remember { mutableStateOf(false) }
     var libraryError by remember { mutableStateOf<String?>(null) }
     var addHost by remember { mutableStateOf(false) }
@@ -2566,12 +2571,14 @@ private fun AndroidSSHScreenForAccount(
         val freshHosts = ownedCore("ssh.host.list") as? JsonArray ?: JsonArray(emptyList())
         val freshKeys = ownedCore("ssh.key.list") as? JsonArray ?: JsonArray(emptyList())
         val freshSnippets = ownedCore("ssh.snippet.list") as? JsonArray ?: JsonArray(emptyList())
+        val freshTrusted = ai.tokenstat.tokenstat.ui.ssh.trustedServers(ownedCore("ssh.knownhost.list"))
         val freshFolders = ownedCore("ssh.folder.list") as? JsonArray ?: JsonArray(emptyList())
         val freshVault = if (vaultAllowed) ownedCore("ssh.vault.status") as? JsonObject else null
         vaultOwnerGuard.check()
         hosts = freshHosts
         keys = freshKeys
         snippets = freshSnippets
+        trustedServers = freshTrusted
         folders = freshFolders
         vault = freshVault
     }
@@ -2780,6 +2787,14 @@ private fun AndroidSSHScreenForAccount(
                 contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (tab == 0 && query.isBlank() && trustedServers.isNotEmpty()) item(key = "trusted-servers") {
+                    TsSecondaryButton(
+                        label = L10n.text("android.ssh.trusted_servers"),
+                        icon = ActionIcon.Security.vector,
+                        small = true,
+                        onClick = { trustError = null; showingTrusted = true },
+                    )
+                }
                 items(rows) { value ->
                     val item = value.jsonObject
                     val folderName = item.string("folderId")?.let { id ->
@@ -2866,6 +2881,29 @@ private fun AndroidSSHScreenForAccount(
             }
         }
     }
+    if (showingTrusted) ai.tokenstat.tokenstat.ui.ssh.TrustedServersSheet(
+        servers = trustedServers,
+        working = librarySaving,
+        error = trustError,
+        onForget = { server ->
+            if (!librarySaving && currentVaultOwner()) {
+                librarySaving = true
+                trustError = null
+                scope.launch {
+                    try {
+                        ownedCore("ssh.knownhost.forget", buildJsonObject { put("id", server.hostId) })
+                        load()
+                    } catch (failure: Exception) {
+                        if (failure is CancellationException) throw failure
+                        trustError = failure.message ?: L10n.text("android.tokenstatapp.the_request_failed.db4fb447")
+                    } finally {
+                        librarySaving = false
+                    }
+                }
+            }
+        },
+        onDismiss = { showingTrusted = false },
+    )
     if (vaultOpen && vaultAllowed) ai.tokenstat.tokenstat.ui.ssh.VaultManagementSheet(
         status = vault,
         canWrite = canWriteVault,
@@ -4829,6 +4867,7 @@ private fun AccountDialog(
                     // mark. The switch used to be a bare row above the cards,
                     // so the pane opened on an unlabelled toggle.
                     DeviceNotificationsCard()
+                    ai.tokenstat.tokenstat.ui.components.AppearanceCard()
                     ai.tokenstat.tokenstat.ui.workspace.PullOpenCard()
                     var tabsOpen by remember { mutableStateOf(false) }
                     TabsCard(
@@ -5622,6 +5661,22 @@ private fun AccountDevicesCard(state: ClientState) {
                     }
                 }
             }
+        }
+    }
+}
+
+/// The window behind the app and the bars over it, in the theme on screen.
+/// The system's own night mode may say otherwise, and the activity is not
+/// remade when either changes.
+@Composable
+private fun SystemBars(colors: ai.tokenstat.tokenstat.ui.theme.TsColors) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val window = (view.context as? android.app.Activity)?.window ?: return
+    androidx.compose.runtime.SideEffect {
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(colors.background.toArgb()))
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !colors.isDark
+            isAppearanceLightNavigationBars = !colors.isDark
         }
     }
 }

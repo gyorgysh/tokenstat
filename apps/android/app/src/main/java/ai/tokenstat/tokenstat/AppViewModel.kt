@@ -141,9 +141,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val mutableState = MutableStateFlow(ClientState())
     val state = mutableState.asStateFlow()
 
+    val chatDrafts = ai.tokenstat.tokenstat.ui.logic.ChatDraftFiles(java.io.File(app.filesDir, "chat-drafts"))
+
     /// ViewModel-owned, so Back and changing project tools keep unsent writing.
     val chatComposers = ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions<ai.tokenstat.tokenstat.ui.workspace.StagedAttachment>(
         attachmentCost = { it.data.length.toLong() * 2 + it.name.length.toLong() * 2 },
+        saved = chatDrafts,
     )
     private val mutableNewChatSetups = MutableStateFlow<Map<String, ai.tokenstat.tokenstat.ui.workspace.NewChatSetup>>(emptyMap())
     val newChatSetups = mutableNewChatSetups.asStateFlow()

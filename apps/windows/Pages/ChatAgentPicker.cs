@@ -289,7 +289,7 @@ internal static class ChatAgentPicker
                 };
                 if (answered)
                 {
-                    badge.Child = new FontIcon { Glyph = "\uE73E", FontSize = 9, Foreground = new SolidColorBrush(Colors.White) };
+                    badge.Child = new FontIcon { Glyph = "\uE73E", FontSize = 9, Foreground = Theme.OnAccentBrush };
                 }
                 else
                 {
@@ -299,7 +299,7 @@ internal static class ChatAgentPicker
                         FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
                     };
-                    if (selected) number.Foreground = new SolidColorBrush(Colors.White);
+                    if (selected) number.Foreground = Theme.OnAccentBrush;
                     badge.Child = number;
                 }
                 var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };

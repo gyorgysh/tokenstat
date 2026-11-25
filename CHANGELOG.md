@@ -10,7 +10,10 @@ desktop is a review build. Newest first.
 ### Added
 
 - On Android, Rate tokenstat in Legal opens a sheet where you can rate on Google Play, send feedback, or stop the automatic ask. After you rate or send feedback, tokenstat no longer asks on its own.
-- Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Hover or click the mark on Mac, tap it on Android, or open the chat menu on iPhone and iPad. Opening one asks whether to view it in tokenstat or in the browser. Tick Remember my choice to stop being asked, and change it in Account → GitHub pull requests on Mac, Account → This device on phones and tablets. On Windows, hover the mark for the list. Update the computer to 1.26.0 to see more than the branch's own.
+- Chats show the pull requests they opened or mentioned: green when open, purple when merged, red when closed, with a count when there are several. Older chats and every repository you have added are covered. Hover or click the mark on Mac and Windows, tap it on Android, or open the chat menu on iPhone and iPad. Opening one asks whether to view it in tokenstat or in the browser. Tick Remember my choice to stop being asked, and change it in Account → GitHub pull requests on Mac and Windows, Account → This device on phones and tablets. Update the computer to 1.26.0 to see more than the branch's own.
+- On Android and Windows, choose Auto, Light, Dark or OLED and a color theme under Appearance, in Account → This device on Android and Account → This PC on Windows.
+- On Android, Continue on another device in the chat menu shares your place, and your unsent text if you choose. A chat shared from another device offers to continue from it.
+- On Android, SSH lists the servers you trust. Forget one to be asked again on the next connection.
 
 ### Changed
 
@@ -18,6 +21,7 @@ desktop is a review build. Newest first.
 
 ### Improved
 
+- On Windows, chats open with more history, load earlier messages on their own as you scroll back, and keep the line you were reading in place.
 - On Mac, All repositories shows what each repository needs next: a chat waiting for you, failed checks, a review request, a pull request ready to merge, files not committed, or commits not pushed. Cards show 14 days of tokens with the days pull requests were opened, recent chats, and counts that open the page they count. Repositories you have not used lately shrink to one line. Press Space or Peek on a card to see its changed files, pull requests and which agents worked there, and use the arrow keys to move between cards. Tokens and pull requests are shown for repositories on this Mac.
 - On Mac, Changes in a pull request shows the file list beside the diff. Files, Git, History and the pull request tabs stay ready once opened, so switching back is immediate, and they show the shape of what is loading instead of a spinner.
 - On Mac, the pull request header uses the same small controls as the rest of the app, with Open on GitHub beside Refresh.
@@ -26,6 +30,8 @@ desktop is a review build. Newest first.
 
 - On Mac, opening Changes on a large pull request no longer freezes the app.
 - On Mac, loading placeholders no longer leave a hidden animation running that slowed the app until it was restarted.
+- On Windows, opening Changes on a large pull request no longer draws every line at once. A file list sits beside the diff.
+- On Android and Windows, unsent chat text survives closing the app.
 
 ## [1.25.0] - 2026-11-24
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -93,7 +94,7 @@ fun TsProminentButton(
         enabled = enabled,
         onClick = onClick,
         modifier = modifier,
-        contentColor = Color.White,
+        contentColor = colors.onAccent,
         fill = colors.accent,
         pressedFill = colors.accent.copy(alpha = 0.85f),
         stroke = BorderStroke(1.dp, Color.Transparent),

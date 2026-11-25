@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.theme.onAccent
 import ai.tokenstat.tokenstat.ui.components.*
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
@@ -879,7 +880,7 @@ private class LimitAction(
 private fun LimitActionCell(action: LimitAction, modifier: Modifier) {
     val colors = LocalTsColors.current
     val shape = RoundedCornerShape(10.dp)
-    val content = if (action.prominent) Color.White else colors.textPrimary
+    val content = if (action.prominent) colors.onAccent else colors.textPrimary
     Row(
         modifier
             .heightIn(min = 48.dp)
