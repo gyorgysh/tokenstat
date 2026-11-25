@@ -11,9 +11,11 @@ import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -45,15 +47,22 @@ internal class ChatComposerInput(initialDraft: String) {
 }
 
 @Composable
-internal fun rememberChatComposerInput(owner: String?, draft: String, readDraft: (() -> String)?, writeDraft: (String) -> Unit): ChatComposerInput {
-    val input = remember(owner) { ChatComposerInput(draft) }
+internal fun rememberChatComposerInput(owner: String?, draft: String, readDraft: (() -> String)?, writeDraft: (String) -> Unit): ChatComposerInput = key(owner) {
+    val input = remember { ChatComposerInput(draft) }
     val currentRead by rememberUpdatedState(readDraft ?: { draft })
     val currentWrite by rememberUpdatedState(writeDraft)
     SideEffect { input.sync(currentRead()) }
     LaunchedEffect(input) {
         snapshotFlow { input.editor.text.toString() }.collect { input.publish(currentRead, currentWrite, readDraft != null) }
     }
-    return input
+    if (readDraft != null) {
+        DisposableEffect(input) {
+            // Navigation can retire the field before its final edit reaches
+            // the collector. This scope still has the departing draft owner.
+            onDispose { input.publish(currentRead, currentWrite, verifyWrite = true) }
+        }
+    }
+    input
 }
 
 /** Clipboard and keyboard images use the same owned file import as the picker. */

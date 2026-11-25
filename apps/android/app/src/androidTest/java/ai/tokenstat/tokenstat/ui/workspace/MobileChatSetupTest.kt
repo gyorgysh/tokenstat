@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.net.Uri
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.theme.*
@@ -21,6 +25,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.core.content.FileProvider
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -99,7 +104,7 @@ class MobileChatSetupTest {
         } }
         val input = compose.onNode(hasSetTextAction())
         input.assertIsDisplayed().performTextInput(" stays visible")
-        assertTrue(draft.contains("stays visible"))
+        compose.runOnIdle { assertTrue(draft.contains("stays visible")) }
         compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.send.f6f4688f")).assertIsDisplayed().performClick()
         assertTrue(sent)
         screenshot("composer-short-with-attachments.png")
@@ -135,10 +140,47 @@ class MobileChatSetupTest {
         compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.expand_the_message_box.c0441a94")).performClick()
         compose.runOnIdle { compact = true }
         compose.onNode(hasSetTextAction()).assertIsDisplayed().assertIsFocused().performTextInput(" after resize")
-        assertTrue(draft.contains("after resize"))
+        compose.runOnIdle { assertTrue(draft.contains("after resize")) }
         compose.runOnIdle { compact = false }
         compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.expand_the_message_box.c0441a94")).assertIsDisplayed()
         compose.onNodeWithContentDescription(L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f")).assertDoesNotExist()
+    }
+    @Test fun pastingAnImageUsesTheAttachmentReceiverAndKeepsTheDraft() {
+        var draft by mutableStateOf("Keep this draft")
+        var pasted = emptyList<Uri>()
+        val context = compose.activity
+        val directory = File(context.cacheDir, "chat-downloads").apply { mkdirs() }
+        val file = File.createTempFile("clipboard-fixture", ".png", directory)
+        file.writeBytes(byteArrayOf(1, 2, 3))
+        val clipboard = requireNotNull(context.getSystemService(ClipboardManager::class.java))
+        var previousClip: ClipData? = null
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.chatfiles", file)
+            compose.setContent { Screen {
+                ChatComposer(chat, draft, { draft = it }, "Message", false, staged = emptyList(), onPick = {}, onRemove = {},
+                    onSend = {}, onStop = {}, onChange = { _, _ -> }, backends = backends, onAgent = {},
+                    onPasteImages = { images, release -> pasted = images; release() })
+            } }
+            val input = compose.onNode(hasSetTextAction())
+            input.performClick()
+            compose.runOnIdle {
+                previousClip = clipboard.primaryClip
+                clipboard.setPrimaryClip(ClipData(ClipDescription("Fixture", arrayOf("image/png")), ClipData.Item(uri)))
+            }
+            input.performSemanticsAction(SemanticsActions.PasteText) { it() }
+            compose.runOnIdle {
+                assertEquals(listOf(uri), pasted)
+                assertEquals("Keep this draft", draft)
+            }
+        } finally {
+            compose.runOnIdle {
+                if (clipboard.primaryClipDescription?.label == "Fixture") {
+                    val previous = previousClip
+                    if (previous == null) clipboard.clearPrimaryClip() else clipboard.setPrimaryClip(previous)
+                }
+            }
+            file.delete()
+        }
     }
     @Test fun compoundShellRequestsOfferOnlyActionsThatCanBeHonored() {
         compose.setContent { Screen {
