@@ -3005,6 +3005,32 @@ struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
 
 /// Chat-only backend metadata. `gateTier` is deliberately host-owned: clients
 /// must not imply an interactive approval channel where a CLI only has rules.
+/// A chat model on a local server, named `local:<provider>/<model>` by the
+/// host. Shown as the server and the model rather than the stored id.
+enum LocalChatModel {
+    static func parse(_ id: String?) -> (provider: String, model: String)? {
+        guard let rest = id?.trimmingCharacters(in: .whitespaces), rest.hasPrefix("local:"),
+              let slash = rest.dropFirst(6).firstIndex(of: "/") else { return nil }
+        let provider = String(rest[rest.index(rest.startIndex, offsetBy: 6) ..< slash])
+        let model = String(rest[rest.index(after: slash)...])
+        return provider.isEmpty || model.isEmpty ? nil : (provider, model)
+    }
+
+    static func providerName(_ id: String) -> String {
+        switch id {
+        case "lmstudio": "LM Studio"
+        case "ollama": "Ollama"
+        default: id
+        }
+    }
+
+    /// `LM Studio: qwen/qwen3-coder` for a local id, the id itself otherwise.
+    static func title(_ id: String) -> String {
+        guard let local = parse(id) else { return id }
+        return "\(providerName(local.provider)): \(local.model)"
+    }
+}
+
 struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var label: String

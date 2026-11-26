@@ -202,6 +202,7 @@
   "common.chat_routing_intro": "Choose what happens when an agent reaches a limit.",
   "common.chat_agent_behavior": "Agent & behavior",
   "common.chat.select_agent": "Select agent",
+  "common.chat.local_models": "Local models",
   "common.chat_working_style": "Working style",
   "common.chat_route_reset_options": "After a reset",
   "common.chat.stats": "Context & activity",

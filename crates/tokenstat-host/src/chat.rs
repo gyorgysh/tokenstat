@@ -4448,10 +4448,11 @@ impl Store {
         let cursor_hook_home =
             (chat.backend == "cursor" && helper.is_some() && !cursor_plan(&chat))
                 .then(|| self.cursor_hook_home(id));
+        let turn_model = turn_model(&chat.backend, chat.model.as_deref())?;
         let mut argv = crate::automations::chat_agent_command_in(
             &chat.backend,
             prompt,
-            chat.model.as_deref(),
+            turn_model.cli.as_deref(),
             chat.effort.as_deref(),
             chat.budget_seconds,
             crate::automations::ChatLaunch {
@@ -4467,9 +4468,12 @@ impl Store {
             },
             Some(&workspace.path),
         )?;
+        if !turn_model.leading_args.is_empty() && !argv.is_empty() {
+            argv.splice(1..1, turn_model.leading_args.iter().cloned());
+        }
         crate::chat_fast::apply(
             &chat.backend,
-            chat.model.as_deref(),
+            turn_model.cli.as_deref(),
             chat.fast_mode,
             &mut argv,
         )?;
@@ -4492,7 +4496,7 @@ impl Store {
             .as_ref()
             .map(|(token, file)| PendingTurnCredential::new(self, token.clone(), file.clone()));
         let mut pending_muse = PendingMuseHome::idle();
-        let mut environment = Vec::new();
+        let mut environment = turn_model.environment.clone();
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         environment.push(("TOKENSTAT_WORKSPACE_ID".into(), chat.workspace_id.clone()));
         #[cfg(target_os = "macos")]
@@ -7326,6 +7330,9 @@ pub(crate) fn launcher_profile_id(backend: &str) -> &str {
 
 pub fn backends(force: bool) -> Vec<Value> {
     let catalog = crate::launcher::catalog();
+    // Loopback only, and a refused port answers at once, so this costs
+    // nothing on a machine with no local model server running.
+    let local = crate::local_models::discover().unwrap_or_default();
     crate::automations::backends(force)
         .into_iter()
         .map(|mut backend| {
@@ -7391,10 +7398,100 @@ pub fn backends(force: bool) -> Vec<Value> {
             backend["modelListStatus"] = json!(crate::agent_models::list_status(&id));
             if backend["installed"] == false {
                 backend["models"] = json!(Vec::<String>::new());
+            } else {
+                add_local_models(&mut backend, &id, &local);
             }
             backend
         })
         .collect()
+}
+
+/// Put the models a running local server offers into an agent's list, after
+/// its own. `localModels` carries a readable name for each, so a client can
+/// show "LM Studio: Qwen3" while an older one still offers the plain id.
+fn add_local_models(backend: &mut Value, id: &str, local: &[crate::local_models::LocalProvider]) {
+    let supported = crate::local_models::chat_providers(id);
+    let mut ids = Vec::new();
+    let mut named = Vec::new();
+    for provider in local
+        .iter()
+        .filter(|provider| provider.available && supported.contains(&provider.id.as_str()))
+    {
+        for model in &provider.models {
+            let value = format!(
+                "{}{}/{}",
+                crate::local_models::CHAT_PREFIX,
+                provider.id,
+                model.id
+            );
+            named.push(json!({
+                "id": value,
+                "name": model.name,
+                "provider": provider.id,
+                "providerName": provider.name,
+            }));
+            ids.push(Value::String(value));
+        }
+    }
+    if ids.is_empty() {
+        return;
+    }
+    if let Some(models) = backend["models"].as_array_mut() {
+        models.extend(ids);
+    } else {
+        backend["models"] = Value::Array(ids);
+    }
+    backend["localModels"] = Value::Array(named);
+}
+
+/// The model a turn hands the agent's own `--model`, and the environment
+/// and flags that point it at a local server when the chat picked one.
+struct TurnModel {
+    cli: Option<String>,
+    environment: Vec<(String, String)>,
+    leading_args: Vec<String>,
+}
+
+fn turn_model(backend: &str, model: Option<&str>) -> Result<TurnModel, String> {
+    let Some((provider, local)) = crate::local_models::chat_selection(model) else {
+        return Ok(TurnModel {
+            cli: model.map(str::to_owned),
+            environment: Vec::new(),
+            leading_args: Vec::new(),
+        });
+    };
+    if !crate::local_models::chat_providers(backend).contains(&provider) {
+        return Err(format!(
+            "This agent cannot use a model from {provider}. Pick another model."
+        ));
+    }
+    let command = match backend {
+        "opencode" | "opencode2" => {
+            crate::launcher::resolve_command(backend).unwrap_or_else(|| backend.to_string())
+        }
+        other => other.to_string(),
+    };
+    let environment = crate::launcher::model_environment(&command, Some(provider), Some(local))?;
+    Ok(match backend {
+        // OpenCode looks the model up as `provider/model` in the config the
+        // environment registers.
+        "opencode" | "opencode2" => TurnModel {
+            cli: Some(format!("{provider}/{local}")),
+            environment,
+            leading_args: Vec::new(),
+        },
+        // Codex has to be told to leave its cloud account out of it.
+        "codex" => TurnModel {
+            cli: Some(local.to_owned()),
+            environment,
+            leading_args: vec!["--oss".into(), "--local-provider".into(), provider.into()],
+        },
+        _ => TurnModel {
+            cli: Some(local.to_owned()),
+            environment,
+            leading_args: Vec::new(),
+        },
+    })
 }
 
 /// Grok evaluates explicit rules before its headless `dontAsk` fallback. A
@@ -15792,6 +15889,60 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn local_models_join_only_the_agents_that_can_reach_that_server() {
+        let local = vec![
+            crate::local_models::LocalProvider {
+                id: "lmstudio".into(),
+                name: "LM Studio".into(),
+                base_url: String::new(),
+                port: 1234,
+                default_port: 1234,
+                available: true,
+                models: vec![crate::local_models::LocalModel {
+                    id: "qwen/coder".into(),
+                    name: "Qwen Coder".into(),
+                    size_bytes: None,
+                }],
+                error: None,
+            },
+            crate::local_models::LocalProvider {
+                id: "ollama".into(),
+                name: "Ollama".into(),
+                base_url: String::new(),
+                port: 11434,
+                default_port: 11434,
+                available: true,
+                models: vec![crate::local_models::LocalModel {
+                    id: "llama3.2".into(),
+                    name: "llama3.2".into(),
+                    size_bytes: None,
+                }],
+                error: None,
+            },
+        ];
+        let mut claude = json!({"models": ["opus"]});
+        super::add_local_models(&mut claude, "claude", &local);
+        assert_eq!(
+            claude["models"],
+            json!(["opus", "local:lmstudio/qwen/coder"])
+        );
+        assert_eq!(claude["localModels"][0]["providerName"], "LM Studio");
+        let mut codex = json!({"models": []});
+        super::add_local_models(&mut codex, "codex", &local);
+        assert_eq!(
+            codex["models"],
+            json!(["local:lmstudio/qwen/coder", "local:ollama/llama3.2"])
+        );
+        let mut grok = json!({"models": ["grok-4.6"]});
+        super::add_local_models(&mut grok, "grok", &local);
+        assert_eq!(grok, json!({"models": ["grok-4.6"]}));
+        assert!(super::turn_model("claude", Some("local:ollama/llama3.2")).is_err());
+        let cloud = super::turn_model("claude", Some("opus")).unwrap();
+        assert_eq!(cloud.cli.as_deref(), Some("opus"));
+        assert!(cloud.environment.is_empty() && cloud.leading_args.is_empty());
     }
 
     #[test]

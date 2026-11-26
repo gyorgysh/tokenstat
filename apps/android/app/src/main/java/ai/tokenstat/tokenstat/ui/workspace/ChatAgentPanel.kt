@@ -135,7 +135,7 @@ internal fun chatAgentChoices(
             rows.add(
                 PickerChoice(
                     value = ChatAgentChoice.Model(id),
-                    label = id,
+                    label = localChatModelTitle(id),
                     detail = if (id in listed) null else L10n.text("android.chatagentpanel.saved_choice_availability_unverified.96a7ce32"),
                     section = SECTION_MODEL,
                 ),
@@ -165,7 +165,7 @@ internal fun chatAgentSectionValue(
 ): String? = when (section) {
     SECTION_AGENT -> backendOf(backends, chat?.str("backend"))?.str("label")?.ifBlank { null }
         ?: chat?.str("backend")
-    SECTION_MODEL -> chat?.str("model")?.ifBlank { null } ?: L10n.text("android.chatagentpanel.default.21b111cb")
+    SECTION_MODEL -> chat?.str("model")?.ifBlank { null }?.let(::localChatModelTitle) ?: L10n.text("android.chatagentpanel.default.21b111cb")
     SECTION_EFFORT -> chat?.str("effort")?.ifBlank { null } ?: L10n.text("android.chatagentpanel.default.21b111cb")
     else -> null
 }
@@ -198,6 +198,17 @@ internal fun chatAgentField(choice: ChatAgentChoice): Pair<String, String> = whe
 internal fun chatAgentForcesBypass(backends: List<JsonObject>, id: String): Boolean =
     backendOf(backends, id)?.str("gateTier") == "bypassOnly"
 
+/// A model on a local server, stored by the host as `local:<provider>/<model>`,
+/// reads as the server and the model. Port of `LocalChatModel.title`.
+internal fun localChatModelTitle(id: String): String {
+    val rest = id.trim().removePrefix("local:").takeIf { it != id.trim() } ?: return id
+    val provider = rest.substringBefore('/', "")
+    val model = rest.substringAfter('/', "")
+    if (provider.isEmpty() || model.isEmpty()) return id
+    val name = when (provider) { "lmstudio" -> "LM Studio"; "ollama" -> "Ollama"; else -> provider }
+    return "$name: $model"
+}
+
 /// Prefer the host's label, including custom agents, before the built-in name.
 internal fun chatAgentLabel(backends: List<JsonObject>, chat: JsonObject?): String {
     val id = chat?.str("backend").orEmpty()
@@ -209,7 +220,7 @@ internal fun chatAgentLabel(backends: List<JsonObject>, chat: JsonObject?): Stri
 
 /// The backend mark supplies the name; keep the selected model and effort visible.
 internal fun chatAgentCompactSummary(backends: List<JsonObject>, chat: JsonObject?): String {
-    val parts = mutableListOf(chat?.str("model")?.takeIf { it.isNotBlank() } ?: chatAgentLabel(backends, chat))
+    val parts = mutableListOf(chat?.str("model")?.takeIf { it.isNotBlank() }?.let(::localChatModelTitle) ?: chatAgentLabel(backends, chat))
     val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
     if (stringList(backendOf(backends, chat?.str("backend")), "efforts").isNotEmpty() && effort != null) {
         parts.add(effort)
@@ -222,7 +233,7 @@ internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): St
     val agent = chatAgentLabel(backends, chat)
     val backend = backendOf(backends, chat?.str("backend").orEmpty())
     val parts = mutableListOf(agent)
-    chat?.str("model")?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+    chat?.str("model")?.takeIf { it.isNotBlank() }?.let { parts.add(localChatModelTitle(it)) }
     val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
     if (stringList(backend, "efforts").isNotEmpty() && effort != null) {
         parts.add(L10n.text("android.chatagentpanel.0_effort.b0d63362", "${effort}"))

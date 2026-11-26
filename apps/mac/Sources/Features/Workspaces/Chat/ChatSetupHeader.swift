@@ -634,9 +634,11 @@ struct ChatAgentChoices {
                 )
             )
             rows += modelIDs.map {
-                PickerChoice(value: Choice.model($0), label: $0,
+                PickerChoice(value: Choice.model($0), label: LocalChatModel.title($0),
                              detail: backend.models.contains($0) ? nil : L10n.text("apple.chatsetupheader.saved_choice_availability_unverified.96a7ce32"),
-                             section: L10n.text("apple.chatsetupheader.model.5e2c614c"))
+                             section: LocalChatModel.parse($0) == nil
+                                ? L10n.text("apple.chatsetupheader.model.5e2c614c")
+                                : L10n.text("common.chat.local_models"))
             }
         }
         if let backend, backend.installed != false, !backend.efforts.isEmpty {
@@ -727,7 +729,7 @@ struct ChatAgentChoices {
     }
 
     var compactSummary: String {
-        var parts = [chat.model.flatMap { $0.isEmpty ? nil : $0 } ?? agentLabel]
+        var parts = [chat.model.flatMap { $0.isEmpty ? nil : LocalChatModel.title($0) } ?? agentLabel]
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
             parts.append(effort)
         }
@@ -739,7 +741,7 @@ struct ChatAgentChoices {
         let agent = agentLabel
         var parts = [agent]
         if let name = chat.model, !name.isEmpty {
-            parts.append(name)
+            parts.append(LocalChatModel.title(name))
         }
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
             parts.append(L10n.text("apple.chatsetupheader.0_effort.b0d63362", "\(effort)"))

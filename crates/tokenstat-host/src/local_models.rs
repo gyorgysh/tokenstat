@@ -72,6 +72,29 @@ fn spec(provider: &str) -> Option<&'static ProviderSpec> {
     PROVIDERS.iter().find(|spec| spec.id == provider)
 }
 
+/// Chat names a local model as `local:<provider>/<model>`, so a stored
+/// choice can never be mistaken for a cloud model of the same name.
+pub(crate) const CHAT_PREFIX: &str = "local:";
+
+/// The local servers each chat agent can talk to. Same contract as the
+/// terminal launcher's `model_environment`: Claude needs an Anthropic
+/// compatible endpoint, which only LM Studio serves.
+pub(crate) fn chat_providers(backend: &str) -> &'static [&'static str] {
+    match backend {
+        "claude" => &["lmstudio"],
+        "codex" | "opencode" | "opencode2" => &["lmstudio", "ollama"],
+        _ => &[],
+    }
+}
+
+/// The provider and model a chat's stored model names, when it is local.
+pub(crate) fn chat_selection(model: Option<&str>) -> Option<(&str, &str)> {
+    let rest = model?.trim().strip_prefix(CHAT_PREFIX)?;
+    let (provider, model) = rest.split_once('/')?;
+    (spec(provider).is_some() && !model.is_empty() && !model.chars().any(char::is_control))
+        .then_some((provider, model))
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Ports(BTreeMap<String, u16>);
 
@@ -254,6 +277,23 @@ fn parse_ollama(value: &Value) -> Result<Vec<LocalModel>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_chat_model_is_local_only_with_the_prefix_and_a_known_server() {
+        assert_eq!(
+            super::chat_selection(Some("local:lmstudio/qwen/qwen3-coder")),
+            Some(("lmstudio", "qwen/qwen3-coder"))
+        );
+        assert_eq!(
+            super::chat_selection(Some("local:ollama/llama3.2")),
+            Some(("ollama", "llama3.2"))
+        );
+        assert_eq!(super::chat_selection(Some("lmstudio/qwen")), None);
+        assert_eq!(super::chat_selection(Some("local:elsewhere/qwen")), None);
+        assert_eq!(super::chat_selection(Some("local:ollama/")), None);
+        assert_eq!(super::chat_selection(Some("local:ollama/a\nb")), None);
+        assert_eq!(super::chat_selection(None), None);
+    }
+
     use super::{LocalModel, LocalProvider, api_base_url, origin, parse_lmstudio, parse_ollama};
     use serde_json::json;
 
