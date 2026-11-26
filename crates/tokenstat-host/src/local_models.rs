@@ -200,18 +200,73 @@ pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
         .collect())
 }
 
+/// How many tokens a local model can hold, as its server reports it.
+///
+/// A tool that is told a model with no size assumes a small one, and
+/// OpenCode then compacts a fresh chat on its first turn: a long system
+/// prompt reads as an overflow. Best effort: None when the server does not
+/// say, and the tool keeps its own default.
+pub(crate) fn context_window(provider: &str, model: &str) -> Option<u64> {
+    let port = configured_port(provider).ok()?;
+    match provider {
+        "ollama" => {
+            let info = request_json(
+                port,
+                "/api/show",
+                Some(serde_json::json!({ "model": model })),
+            )
+            .ok()?;
+            info.get("model_info")?
+                .as_object()?
+                .iter()
+                .find(|(key, _)| key.ends_with(".context_length"))
+                .and_then(|(_, value)| value.as_u64())
+        }
+        "lmstudio" => {
+            let path = format!("/api/v0/models/{}", url_segment(model));
+            let info = request_json(port, &path, None).ok()?;
+            info.get("loaded_context_length")
+                .or_else(|| info.get("max_context_length"))
+                .and_then(Value::as_u64)
+        }
+        _ => None,
+    }
+    .filter(|tokens| *tokens > 0)
+}
+
+/// A model id as one path segment. LM Studio ids carry a slash.
+fn url_segment(id: &str) -> String {
+    id.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (byte as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
 fn get_json(port: u16, path: &str) -> Result<Value, String> {
+    request_json(port, path, None)
+}
+
+fn request_json(port: u16, path: &str, body: Option<Value>) -> Result<Value, String> {
     // A real HTTP decoder handles chunked responses and Content-Length without
     // waiting for a server to close a reusable connection. The total deadline
     // also bounds a server that continually trickles a few bytes.
-    let response = tokenstat_sync::http::client_builder()
+    let client = tokenstat_sync::http::client_builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(READ_TIMEOUT)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|error| error.to_string())?
-        .get(format!("http://127.0.0.1:{port}{path}"))
+        .map_err(|error| error.to_string())?;
+    let url = format!("http://127.0.0.1:{port}{path}");
+    let request = match body {
+        Some(body) => client.post(url).json(&body),
+        None => client.get(url),
+    };
+    let response = request
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .map_err(|error| {

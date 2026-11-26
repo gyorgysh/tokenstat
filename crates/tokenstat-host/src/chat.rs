@@ -7480,11 +7480,13 @@ fn turn_model(backend: &str, model: Option<&str>) -> Result<TurnModel, String> {
             environment,
             leading_args: Vec::new(),
         },
-        // Codex has to be told to leave its cloud account out of it.
+        // Codex has to be told to leave its cloud account out of it. A
+        // config override rather than `--oss`, because chat runs Codex as a
+        // live app server, which takes `-c` and refuses launch-only flags.
         "codex" => TurnModel {
             cli: Some(local.to_owned()),
             environment,
-            leading_args: vec!["--oss".into(), "--local-provider".into(), provider.into()],
+            leading_args: vec!["-c".into(), format!("model_provider=\"{provider}\"")],
         },
         _ => TurnModel {
             cli: Some(local.to_owned()),

@@ -1304,13 +1304,23 @@ fn opencode_model_config(
 ) -> Result<String, String> {
     let name = model.rsplit('/').next().unwrap_or(model);
     let base_url = format!("{}/v1", crate::local_models::origin(provider)?);
+    // The model's real size, so a long first prompt is not mistaken for an
+    // overflow and compacted before the model has said anything.
+    let mut entry = json!({ "name": name });
+    if let Some(context) = crate::local_models::context_window(provider, model) {
+        // A small reply reserve: OpenCode compacts once the prompt and the
+        // reserve pass the window, and tokenstat's chat context already
+        // fills much of a 32k local model before anybody has typed.
+        entry["limit"] =
+            json!({ "context": context, "output": (context / 8).clamp(1_024, 16_384) });
+    }
     if generation == crate::opencode_cli::Generation::V2 {
         return serde_json::to_string(&json!({
             "model": format!("{provider}/{model}"),
             "providers": {provider: {
                 "package": "@opencode/ai/providers/openai-compatible",
                 "settings": {"baseURL": base_url},
-                "models": {model: {"name": name}}
+                "models": {model: entry}
             }}
         }))
         .map_err(|error| error.to_string());
@@ -1322,7 +1332,7 @@ fn opencode_model_config(
                 "npm": "@ai-sdk/openai-compatible",
                 "options": { "baseURL": base_url },
                 "models": {
-                    model: { "name": name }
+                    model: entry
                 }
             }
         }
