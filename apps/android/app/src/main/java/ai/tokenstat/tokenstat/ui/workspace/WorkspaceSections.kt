@@ -54,6 +54,10 @@ import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Terminal
@@ -460,29 +464,37 @@ private fun SessionsSection(
         }
         agentProfiles?.takeIf { it.profiles.size > 1 || profileLock != null }?.let { profiles ->
             item {
-                TsCard(Modifier.fillMaxWidth()) {
-                    AgentProfilePicker(
-                        profiles = profiles,
-                        selected = profileLock ?: chosenProfile ?: profiles.defaultId,
-                        lock = profileLock,
-                        enabled = launchingId == null,
-                        onChange = { id ->
-                            chosenProfile = id
-                            profilePrefs.edit().putString("profile.$peer.$workspace", id).apply()
-                        },
-                    )
+                val active = profileLock ?: chosenProfile ?: profiles.defaultId
+                LaunchChoiceCard(
+                    icon = if (profileLock != null) Icons.Default.Lock else Icons.Default.AccountCircle,
+                    caption = L10n.text("common.profiles.label"),
+                    value = profiles.title(active),
+                    note = profileLock?.let { L10n.text("common.profiles.locked", profiles.title(it)) },
+                    choices = if (profileLock != null) emptyList() else profiles.profiles.map { it.id to it.title },
+                    selected = active,
+                    enabled = launchingId == null,
+                ) { id ->
+                    chosenProfile = id
+                    profilePrefs.edit().putString("profile.$peer.$workspace", id).apply()
                 }
             }
         }
         if (localModels.isNotEmpty() || localModelKey != null) {
             item {
-                TsCard(Modifier.fillMaxWidth()) {
-                    LaunchModelPicker(localModels, localModelKey, enabled = launchingId == null) { key ->
-                        localModelKey = key
-                        modelPrefs.edit().apply {
-                            if (key == null) remove("model.$peer.$workspace") else putString("model.$peer.$workspace", key)
-                        }.apply()
-                    }
+                val default = L10n.text("common.launch.each_tool_default")
+                LaunchChoiceCard(
+                    icon = if (localModelKey == null) Icons.Default.Cloud else Icons.Default.Computer,
+                    caption = L10n.text("android.chatagentpanel.model.5e2c614c"),
+                    value = localModels.firstOrNull { it.first == localModelKey }?.second
+                        ?: localModelKey?.substringAfter(':') ?: default,
+                    choices = listOf("" to default) + localModels,
+                    selected = localModelKey ?: "",
+                    enabled = launchingId == null,
+                ) { key ->
+                    localModelKey = key.ifEmpty { null }
+                    modelPrefs.edit().apply {
+                        if (key.isEmpty()) remove("model.$peer.$workspace") else putString("model.$peer.$workspace", key)
+                    }.apply()
                 }
             }
         }
@@ -1532,30 +1544,54 @@ internal fun sessionBelongsToFolder(cwd: String, folder: String): Boolean {
     return path.equals(root, ignoreCase = windows) || path.startsWith("$root/", ignoreCase = windows)
 }
 
-/// Which model agents launched here use: each tool's own, or one loaded in
-/// LM Studio or Ollama on the host.
+/// One setting for the next launch, in the same card as Bypass: what it is,
+/// what it is set to, and the whole card opens the choices. A setting with
+/// nothing to choose (a locked repository) says why instead.
 @Composable
-private fun LaunchModelPicker(choices: List<Pair<String, String>>, selected: String?, enabled: Boolean,
-                              onChange: (String?) -> Unit) {
+private fun LaunchChoiceCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    caption: String,
+    value: String,
+    choices: List<Pair<String, String>>,
+    selected: String,
+    enabled: Boolean,
+    note: String? = null,
+    onPick: (String) -> Unit,
+) {
+    val colors = LocalTsColors.current
     var open by remember { mutableStateOf(false) }
-    val default = L10n.text("common.launch.each_tool_default")
-    val current = choices.firstOrNull { it.first == selected }?.second
-        ?: selected?.substringAfter(':')?.ifBlank { null } ?: default
+    val opens = enabled && choices.isNotEmpty()
     Box {
-        ai.tokenstat.tokenstat.ui.components.TsPickerField(
-            summary = L10n.text("common.launch.model", current),
-            enabled = enabled,
-            onOpen = { open = true },
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(cardRadiusDp))
+                .background(colors.panel)
+                .clickable(enabled = opens, role = androidx.compose.ui.semantics.Role.Button) { open = true }
+                .padding(Space.m),
+        ) {
+            Icon(icon, contentDescription = null, tint = colors.accent)
+            Column(Modifier.weight(1f)) {
+                Text(caption, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+                Text(
+                    value,
+                    style = TextStyle(fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                note?.let { Text(it, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary) }
+            }
+            if (opens) Icon(Icons.Default.UnfoldMore, contentDescription = null, tint = colors.textTertiary)
+        }
         androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            androidx.compose.material3.DropdownMenuItem(
-                text = { Text(default) }, enabled = selected != null,
-                onClick = { open = false; onChange(null) },
-            )
             choices.forEach { (key, label) ->
                 androidx.compose.material3.DropdownMenuItem(
-                    text = { Text(label) }, enabled = key != selected,
-                    onClick = { open = false; onChange(key) },
+                    text = { Text(label) },
+                    enabled = key != selected,
+                    onClick = { open = false; onPick(key) },
                 )
             }
         }

@@ -675,7 +675,9 @@ struct ChatAgentChoices {
     func currentValue(_ section: String) -> String? {
         let values: [String: String?] = [
             L10n.text("apple.chatsetupheader.agent.11b39c93"): agentLabel,
-            L10n.text("apple.chatsetupheader.model.5e2c614c"): chat.model?.isEmpty == false ? chat.model : L10n.text("apple.chatsetupheader.default.21b111cb"),
+            L10n.text("apple.chatsetupheader.model.5e2c614c"): chat.model?.isEmpty == false
+                ? chat.model.map { LocalChatModel.parse($0)?.model ?? $0 }
+                : L10n.text("apple.chatsetupheader.default.21b111cb"),
             L10n.text("apple.chatsetupheader.effort.4387e5d3"): chat.effort?.isEmpty == false ? chat.effort : L10n.text("apple.chatsetupheader.default.21b111cb"),
         ]
         return values[section] ?? nil
@@ -734,7 +736,8 @@ struct ChatAgentChoices {
     }
 
     var compactSummary: String {
-        var parts = [chat.model.flatMap { $0.isEmpty ? nil : LocalChatModel.title($0) } ?? agentLabel]
+        // The agent's mark sits beside this, so a local model needs only its name.
+        var parts = [chat.model.flatMap { $0.isEmpty ? nil : (LocalChatModel.parse($0)?.model ?? $0) } ?? agentLabel]
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
             parts.append(effort)
         }

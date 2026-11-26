@@ -308,7 +308,7 @@ fun ProfileSheet(
                                 ) { BrandCheckDisc(profile.isPublic) }
                             }
                         }
-                        if (profile.isPublic) {
+                        if (profile.isPublic) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Row(
                                 Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,

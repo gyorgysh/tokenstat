@@ -168,7 +168,7 @@ internal fun chatAgentSectionValue(
 ): String? = when (section) {
     SECTION_AGENT -> backendOf(backends, chat?.str("backend"))?.str("label")?.ifBlank { null }
         ?: chat?.str("backend")
-    SECTION_MODEL -> chat?.str("model")?.ifBlank { null }?.let(::localChatModelTitle) ?: L10n.text("android.chatagentpanel.default.21b111cb")
+    SECTION_MODEL -> chat?.str("model")?.ifBlank { null }?.let { localChatModelName(it) ?: it } ?: L10n.text("android.chatagentpanel.default.21b111cb")
     SECTION_EFFORT -> chat?.str("effort")?.ifBlank { null } ?: L10n.text("android.chatagentpanel.default.21b111cb")
     else -> null
 }
@@ -229,7 +229,8 @@ internal fun chatAgentLabel(backends: List<JsonObject>, chat: JsonObject?): Stri
 
 /// The backend mark supplies the name; keep the selected model and effort visible.
 internal fun chatAgentCompactSummary(backends: List<JsonObject>, chat: JsonObject?): String {
-    val parts = mutableListOf(chat?.str("model")?.takeIf { it.isNotBlank() }?.let(::localChatModelTitle) ?: chatAgentLabel(backends, chat))
+    // The agent's mark sits beside this, so a local model needs only its name.
+    val parts = mutableListOf(chat?.str("model")?.takeIf { it.isNotBlank() }?.let { localChatModelName(it) ?: it } ?: chatAgentLabel(backends, chat))
     val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
     if (stringList(backendOf(backends, chat?.str("backend")), "efforts").isNotEmpty() && effort != null) {
         parts.add(effort)
