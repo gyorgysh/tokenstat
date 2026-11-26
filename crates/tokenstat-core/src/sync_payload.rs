@@ -359,6 +359,21 @@ pub struct SyncBuildArgs<'a> {
     /// Live allowlist from `/api/v1/schema`. `None` skips the check (dry-run offline).
     pub allowed_sources: Option<&'a [String]>,
     pub allowed_confidence: Option<&'a [String]>,
+    /// Prices that know which models ran on this machine's LM Studio or
+    /// Ollama. Those go up as `local:<model>`, so the account prices them at
+    /// zero instead of borrowing a cloud model's rate for the same name.
+    pub prices: Option<&'a crate::pricing::PriceTable>,
+}
+
+/// The model id as the account should see it: `local:` marks a model this
+/// machine served itself.
+fn synced_model(model: String, prices: Option<&crate::pricing::PriceTable>) -> String {
+    let trimmed = model.trim();
+    if trimmed.starts_with("local:") || !prices.is_some_and(|p| p.is_local(trimmed)) {
+        return model;
+    }
+    let tagged = format!("local:{trimmed}");
+    if tagged.len() > 128 { model } else { tagged }
 }
 
 /// Build a sealed sync payload from the archive rollup.
@@ -420,7 +435,7 @@ pub fn build_sync_payload(
             d: b.d,
             ev: b.ev,
             input: b.input,
-            model: b.model,
+            model: synced_model(b.model, args.prices),
             out: b.out,
             plan: b.plan,
             proj,
@@ -697,6 +712,7 @@ mod tests {
                 schema_v: 1,
                 allowed_sources: None,
                 allowed_confidence: None,
+                prices: None,
             },
         )
         .unwrap();
@@ -887,5 +903,27 @@ mod tests {
         assert_eq!(merged[0].ev, 3);
         assert!(!merged[0].plan);
         assert_eq!(merged[0].conf, "strong");
+    }
+
+    #[test]
+    fn local_models_sync_with_a_local_prefix() {
+        let prices = crate::pricing::PriceTable::default()
+            .with_local_models(["llama3.2:1b".to_string()].into_iter().collect());
+        assert_eq!(
+            super::synced_model("llama3.2:1b".into(), Some(&prices)),
+            "local:llama3.2:1b"
+        );
+        assert_eq!(
+            super::synced_model("local:x".into(), Some(&prices)),
+            "local:x"
+        );
+        assert_eq!(super::synced_model("gpt-5".into(), Some(&prices)), "gpt-5");
+        assert_eq!(
+            super::synced_model("llama3.2:1b".into(), None),
+            "llama3.2:1b"
+        );
+        let long = "a".repeat(125);
+        let prices = prices.with_local_models([long.clone()].into_iter().collect());
+        assert_eq!(super::synced_model(long.clone(), Some(&prices)), long);
     }
 }

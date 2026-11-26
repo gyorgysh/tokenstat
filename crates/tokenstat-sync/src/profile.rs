@@ -1327,6 +1327,7 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
     };
 
     let prune = opts.prune;
+    let prices = tokenstat_core::PriceTable::load();
     let payload = build_sync_payload(
         store,
         SyncBuildArgs {
@@ -1339,6 +1340,7 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
             schema_v,
             allowed_sources: sources.as_deref(),
             allowed_confidence: confidence.as_deref(),
+            prices: Some(&prices),
         },
     )?;
     let canonical = payload.canonical_bytes()?;
@@ -2364,6 +2366,7 @@ mod tests {
                 schema_v: 1,
                 allowed_sources: None,
                 allowed_confidence: None,
+                prices: None,
             },
         )
         .unwrap();

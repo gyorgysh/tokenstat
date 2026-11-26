@@ -64,7 +64,17 @@ pub mod local_models {
 
     /// Explicit local provenance in usage logs or host model selections.
     pub(super) fn qualified_id(model: &str) -> Option<&str> {
-        let id = model.trim().strip_prefix("local:").unwrap_or(model.trim());
+        let trimmed = model.trim();
+        // Marked by the machine that served it. The provider may be absent
+        // when only the model name was known, and an LM Studio name can hold
+        // a slash of its own.
+        if let Some(rest) = trimmed.strip_prefix("local:") {
+            return match rest.split_once('/') {
+                Some(("ollama" | "lmstudio", model)) if !model.is_empty() => Some(model),
+                _ => (!rest.is_empty()).then_some(rest),
+            };
+        }
+        let id = trimmed;
         let (provider, model) = id.split_once('/')?;
         (matches!(provider, "ollama" | "lmstudio") && !model.is_empty()).then_some(model)
     }
@@ -656,6 +666,11 @@ mod tests {
         let collision = table.with_local_models(["qwen2.5".to_string()].into_iter().collect());
         assert!(!collision.is_local("qwen2.5"));
         assert!(collision.is_local("ollama/qwen2.5"));
+        // A synced row its machine marked, with or without a provider.
+        assert!(collision.is_local("local:qwen2.5"));
+        assert!(collision.is_local("local:qwen/qwen3-coder"));
+        assert!(collision.is_local("local:lmstudio/qwen/qwen3-coder"));
+        assert!(!collision.is_local("local:"));
     }
 
     use super::*;
