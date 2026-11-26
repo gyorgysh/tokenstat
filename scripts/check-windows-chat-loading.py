@@ -16,7 +16,8 @@ def method(signature, content=source):
         end += 1
     return content[start:end]
 methods = '\n'.join(method(s) for s in ['    private async Task RefreshCatalogAsync(',
-    '    private async Task RefreshBackendCatalogAsync(', '    private async Task RefreshPersonaCatalogAsync('])
+    '    private async Task RefreshBackendCatalogAsync(', '    private async Task RefreshPersonaCatalogAsync(',
+    '    private async Task RefreshAgentProfilesAsync('])
 activity = method('    private async Task ShowActivityAsync(',
     (root / 'apps/windows/Pages/ChatPage.Activity.cs').read_text())
 commands = method('    private async Task<bool> ConsumeCommandAsync(',
@@ -45,6 +46,16 @@ class Checks {
         (key == null ? node : node[key]) as JsonArray ?? new();
     void CheckSelectedSignIn() {}
     void RefreshCatalogPresentation() {}
+    void PaintConversation() { _paints++; }
+    int _paints = 0;
+    AgentProfiles? _agentProfiles;
+    class AgentProfiles {
+        public static Queue<TaskCompletionSource<AgentProfiles?>> Reads = new();
+        public static Task<AgentProfiles?> ReadAsync(string workspace) {
+            var reply = new TaskCompletionSource<AgentProfiles?>();
+            Reads.Enqueue(reply); return reply.Task;
+        }
+    }
     void Banner(string text) { errors.Add(text); }
     class Overlay {
         public int BeginRead() => 1;
@@ -136,6 +147,11 @@ class Checks {
         c.pending["chat.backends"][2].SetResult(new JsonArray("new"));
         c.pending["chat.personas"][2].SetResult(new JsonObject { ["personas"] = new JsonArray("new") });
         if (c._chats[0]!.GetValue<string>() != "b" || c._personas[0]!.GetValue<string>() != "new") throw new Exception("Current catalog lost");
+        AgentProfiles.Reads.Dequeue().SetException(new Exception("offline"));
+        AgentProfiles.Reads.Dequeue().SetResult(new AgentProfiles());
+        if (c._agentProfiles is not null) throw new Exception("A retired profiles read published");
+        AgentProfiles.Reads.Dequeue().SetResult(new AgentProfiles());
+        if (c._agentProfiles is null || c._paints != 1) throw new Exception("A failed profiles read lost the current profiles");
         Console.WriteLine("Windows actual catalog: held/failed auxiliary reads cannot hide history; retired menus rejected");
         var activity = new Checks();
         var activityOpening = activity.ShowActivityAsync("all");
