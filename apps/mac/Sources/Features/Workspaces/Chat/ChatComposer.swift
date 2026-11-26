@@ -214,10 +214,14 @@ struct ChatComposer: View {
                     ChatComposerControls(model: model, chat: chat, locked: setupLocked, compact: true, condensed: true)
                     HStack(spacing: Theme.Space.s) {
                         turnStatus
-                        ComposerLimitsBadge(backend: chat.backend, peer: model.peer, profileID: model.limitsProfileID(for: chat), compact: true, showUsage: {
-                            model.showingUsageStats = true
-                            model.showingCommandStats = true
-                        })
+                        // A local model spends no plan, so the plan's windows
+                        // would only suggest that it does.
+                        if LocalChatModel.parse(chat.model) == nil {
+                            ComposerLimitsBadge(backend: chat.backend, peer: model.peer, profileID: model.limitsProfileID(for: chat), compact: true, showUsage: {
+                                model.showingUsageStats = true
+                                model.showingCommandStats = true
+                            })
+                        }
                         if !model.isSharedSource {
                             ChatDictationButton(dictation: dictation, draft: $draft, size: 28, disabled: dictationBlocked)
                         }

@@ -1243,8 +1243,14 @@ pub(crate) fn model_environment(
                 ("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into()),
             ])
         }
+        // Recent Ollama releases serve Anthropic's API at the server root.
+        // An older one answers "not found", which Claude Code reports.
         ("claude", Some("ollama")) => {
-            Err("Ollama does not provide the Anthropic-compatible endpoint Claude needs".into())
+            let base = crate::local_models::origin("ollama")?;
+            Ok(vec![
+                ("ANTHROPIC_BASE_URL".into(), base),
+                ("ANTHROPIC_AUTH_TOKEN".into(), "ollama".into()),
+            ])
         }
         // Copilot takes the endpoint through its own variables rather than the
         // generic OPENAI_* pair, and needs no key for a loopback server that
@@ -2604,10 +2610,13 @@ mod tests {
     }
 
     #[test]
-    fn ollama_is_rejected_for_claude() {
-        let error = model_environment("claude", Some("ollama"), Some("llama3.2"))
-            .expect_err("unsupported provider");
-        assert!(error.contains("Anthropic-compatible"));
+    fn claude_gets_ollama_anthropic_environment() {
+        crate::test_identity::isolated(|| {
+            let env =
+                model_environment("claude", Some("ollama"), Some("llama3.2")).expect("environment");
+            assert!(env.contains(&("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:11434".into())));
+            assert!(env.contains(&("ANTHROPIC_AUTH_TOKEN".into(), "ollama".into())));
+        });
     }
 
     #[test]

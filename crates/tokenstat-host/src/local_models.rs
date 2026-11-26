@@ -33,6 +33,9 @@ pub(crate) struct LocalProvider {
     pub available: bool,
     pub models: Vec<LocalModel>,
     pub error: Option<String>,
+    /// Serves Anthropic's Messages API, which Claude Code needs. LM Studio
+    /// always has. Ollama gained it in a later release, so it is asked.
+    pub anthropic: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -78,11 +81,11 @@ pub(crate) const CHAT_PREFIX: &str = "local:";
 
 /// The local servers each chat agent can talk to. Same contract as the
 /// terminal launcher's `model_environment`: Claude needs an Anthropic
-/// compatible endpoint, which only LM Studio serves.
+/// compatible endpoint, which LM Studio and recent Ollama builds serve.
 pub(crate) fn chat_providers(backend: &str) -> &'static [&'static str] {
     match backend {
-        "claude" => &["lmstudio"],
-        "codex" | "opencode" | "opencode2" => &["lmstudio", "ollama"],
+        // Ollama only where it answers Anthropic's API: see `anthropic`.
+        "claude" | "codex" | "opencode" | "opencode2" => &["lmstudio", "ollama"],
         _ => &[],
     }
 }
@@ -170,6 +173,56 @@ pub(crate) fn api_base_url(provider: &str) -> Result<String, String> {
 
 /// Probe the supported local model servers without contacting the internet.
 pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
+    let providers = probe()?;
+    // Reports price these at zero. Best effort: a failed write only means a
+    // local model may borrow a similar cloud model's list rate.
+    let _ = tokenstat_core::pricing::local_models::remember(
+        providers
+            .iter()
+            .flat_map(|provider| provider.models.iter().map(|model| model.id.clone())),
+    );
+    Ok(providers)
+}
+
+/// Before a turn, make sure the server is up and still has the model, so a
+/// person reads what to do rather than the agent's connection error.
+pub(crate) fn check_ready(provider: &str, model: &str, anthropic: bool) -> Result<(), String> {
+    let spec = spec(provider).ok_or("unknown local model provider")?;
+    check_ready_at(spec, configured_port(provider)?, model, anthropic)?;
+    let _ = tokenstat_core::pricing::local_models::remember([model.to_owned()]);
+    Ok(())
+}
+
+fn check_ready_at(
+    spec: &ProviderSpec,
+    port: u16,
+    model: &str,
+    anthropic: bool,
+) -> Result<(), String> {
+    let models = get_json(port, spec.path)
+        .and_then(|value| (spec.parse)(&value))
+        .map_err(|_| {
+            format!(
+                "{} is not running on this computer. Start it, or pick another model for this chat.",
+                spec.name
+            )
+        })?;
+    if !models.iter().any(|known| known.id == model) {
+        return Err(format!(
+            "{} is running but no longer has {model}. Load it again, or pick another model.",
+            spec.name
+        ));
+    }
+    if anthropic && spec.id == "ollama" && !has_messages_route(port) {
+        return Err(
+            "This Ollama server does not support Claude Code. Update Ollama or pick another model."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn probe() -> Result<Vec<LocalProvider>, String> {
     let ports = load_ports(&ports_path()?)?;
     Ok(PROVIDERS
         .iter()
@@ -186,6 +239,7 @@ pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
                 Ok(models) => (true, models, None),
                 Err(error) => (false, Vec::new(), Some(error)),
             };
+            let anthropic = available && (spec.id == "lmstudio" || has_messages_route(port));
             LocalProvider {
                 id: spec.id.to_string(),
                 name: spec.name.to_string(),
@@ -195,6 +249,7 @@ pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
                 available,
                 models,
                 error,
+                anthropic,
             }
         })
         .collect())
@@ -210,6 +265,14 @@ pub(crate) fn context_window(provider: &str, model: &str) -> Option<u64> {
     let port = configured_port(provider).ok()?;
     match provider {
         "ollama" => {
+            // The loaded window can be much smaller than the model's maximum.
+            if let Some(tokens) = get_json(port, "/api/ps")
+                .ok()
+                .as_ref()
+                .and_then(|value| ollama_loaded_context(value, model))
+            {
+                return Some(tokens);
+            }
             let info = request_json(
                 port,
                 "/api/show",
@@ -235,6 +298,22 @@ pub(crate) fn context_window(provider: &str, model: &str) -> Option<u64> {
 }
 
 /// A model id as one path segment. LM Studio ids carry a slash.
+fn ollama_loaded_context(value: &Value, model: &str) -> Option<u64> {
+    value
+        .get("models")?
+        .as_array()?
+        .iter()
+        .find(|row| {
+            row.get("name")
+                .or_else(|| row.get("model"))
+                .and_then(Value::as_str)
+                == Some(model)
+        })?
+        .get("context_length")?
+        .as_u64()
+        .filter(|tokens| *tokens > 0)
+}
+
 fn url_segment(id: &str) -> String {
     id.bytes()
         .map(|byte| match byte {
@@ -244,6 +323,27 @@ fn url_segment(id: &str) -> String {
             other => format!("%{other:02X}"),
         })
         .collect()
+}
+
+/// Whether the server knows Anthropic's `/v1/messages` route. An empty body
+/// is refused as a bad request where the route exists and as not found where
+/// it does not, so nothing is generated and no model is loaded to answer.
+fn has_messages_route(port: u16) -> bool {
+    let Ok(client) = tokenstat_sync::http::client_builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(READ_TIMEOUT)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    else {
+        return false;
+    };
+    client
+        .post(format!("http://127.0.0.1:{port}/v1/messages"))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body("{}")
+        .send()
+        .is_ok_and(|response| matches!(response.status().as_u16(), 400 | 422))
 }
 
 fn get_json(port: u16, path: &str) -> Result<Value, String> {
@@ -378,6 +478,87 @@ mod tests {
         assert_eq!(result.unwrap(), json!({"data": []}));
     }
 
+    #[test]
+    fn local_readiness_checks_route_compatibility_missing_models_and_server_loss() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for (expected, status, body) in [
+                (
+                    "GET /api/tags ",
+                    "200 OK",
+                    r#"{"models":[{"name":"qwen:latest"}]}"#,
+                ),
+                ("POST /v1/messages ", "400 Bad Request", "{}"),
+                (
+                    "GET /api/tags ",
+                    "200 OK",
+                    r#"{"models":[{"name":"qwen:latest"}]}"#,
+                ),
+                ("POST /v1/messages ", "404 Not Found", "{}"),
+                ("GET /api/tags ", "200 OK", r#"{"models":[]}"#),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(super::READ_TIMEOUT)).unwrap();
+                let mut request = BufReader::new(&mut stream);
+                let mut line = String::new();
+                request.read_line(&mut line).unwrap();
+                assert!(line.starts_with(expected), "{line}");
+                while line != "\r\n" {
+                    line.clear();
+                    assert_ne!(request.read_line(&mut line).unwrap(), 0);
+                }
+                write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+        });
+
+        let ollama = super::spec("ollama").unwrap();
+        super::check_ready_at(ollama, port, "qwen:latest", true).unwrap();
+        assert!(
+            super::check_ready_at(ollama, port, "qwen:latest", true)
+                .unwrap_err()
+                .contains("Update Ollama")
+        );
+        assert!(
+            super::check_ready_at(ollama, port, "qwen:latest", false)
+                .unwrap_err()
+                .contains("Load it again")
+        );
+        server.join().unwrap();
+        assert!(
+            super::check_ready_at(ollama, port, "qwen:latest", false)
+                .unwrap_err()
+                .contains("Start it")
+        );
+    }
+
+    #[test]
+    fn ollama_reports_the_loaded_window_for_the_exact_model() {
+        let ps = json!({"models": [
+            {"name": "llama3.2:1b", "context_length": 32_768},
+            {"model": "llama3.2:3b", "context_length": 65_536},
+            {"name": "not-reported", "context_length": 0},
+        ]});
+        assert_eq!(
+            super::ollama_loaded_context(&ps, "llama3.2:1b"),
+            Some(32_768)
+        );
+        assert_eq!(
+            super::ollama_loaded_context(&ps, "llama3.2:3b"),
+            Some(65_536)
+        );
+        assert_eq!(super::ollama_loaded_context(&ps, "llama3.2"), None);
+        assert_eq!(super::ollama_loaded_context(&ps, "not-reported"), None);
+    }
+
     fn fixture_dir() -> std::path::PathBuf {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -462,6 +643,7 @@ mod tests {
                 name: "qwen/a".into(),
                 size_bytes: Some(7),
             }],
+            anthropic: false,
             error: None,
         })
         .expect("serialize");
@@ -471,6 +653,7 @@ mod tests {
         assert_eq!(
             keys,
             [
+                "anthropic",
                 "available",
                 "baseUrl",
                 "defaultPort",

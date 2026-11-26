@@ -164,7 +164,10 @@ internal static class ChatAgentPicker
         // flyout and close it.
         var flyout = new Flyout();
         var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };
-        panel.Children.Add(new TextBlock { Text = L10n.Text("windows.chatpage.agent_model_and_effort.217ff8ae"), FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        var header = new Grid { ColumnSpacing = Theme.SpaceS };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock { Text = L10n.Text("windows.chatpage.agent_model_and_effort.217ff8ae"), FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         if (profiles is not null && source.PickProfile is { } pickProfile &&
             profiles.Picker(profileId, source.ProfileLock?.Invoke(), !locked, async id =>
             {
@@ -172,7 +175,11 @@ internal static class ChatAgentPicker
                 flyout.Hide();
                 source.Repaint();
             }) is FrameworkElement picker)
-            panel.Children.Add(picker);
+        {
+            Grid.SetColumn(picker, 1);
+            header.Children.Add(picker);
+        }
+        panel.Children.Add(header);
         var strip = new Grid { ColumnSpacing = 2 };
         panel.Children.Add(new Border
         {
@@ -405,7 +412,15 @@ internal static class ChatAgentPicker
                     var lines = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
                     lines.Children.Add(label);
                     if (local is not null)
-                        lines.Children.Add(new TextBlock { Text = L10n.Text("common.chat.local_model_host", local), FontSize = 11, Opacity = 0.7 });
+                    {
+                        var place = L10n.Text("common.chat.local_model_host", local);
+                        var tokens = (CurrentBackend()?["localModels"] as JsonArray)?.OfType<JsonObject>()
+                            .FirstOrDefault(entry => Format.Text(entry, "id") == item.Value) is { } info
+                            ? Format.Long(info, "contextLength") : 0;
+                        if (tokens > 0 && tokens < LocalChatModel.RoomyContext)
+                            place += " · " + L10n.Text("common.chat.local_model_small", $"{tokens / 1024}K");
+                        lines.Children.Add(new TextBlock { Text = place, FontSize = 11, Opacity = 0.7 });
+                    }
                     var mark = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
                     mark.Children.Add(new FontIcon
                     {
@@ -556,37 +571,4 @@ internal static class ChatAgentPicker
         ToolTipService.SetToolTip(button, label);
         return button;
     }
-}
-
-/// <summary>
-/// A chat model on a local server, named <c>local:&lt;provider&gt;/&lt;model&gt;</c> by
-/// the host. Shown as the server and the model rather than the stored id.
-/// Port of the Apple <c>LocalChatModel</c>.
-/// </summary>
-internal static class LocalChatModel
-{
-    private static (string Provider, string Model)? Parse(string id)
-    {
-        if (!id.StartsWith("local:", StringComparison.Ordinal)) return null;
-        var rest = id["local:".Length..];
-        var slash = rest.IndexOf('/');
-        if (slash <= 0 || slash == rest.Length - 1) return null;
-        return (rest[..slash], rest[(slash + 1)..]);
-    }
-
-    private static string ProviderName(string id) => id switch
-    {
-        "lmstudio" => "LM Studio",
-        "ollama" => "Ollama",
-        _ => id,
-    };
-
-    /// <summary>The server's name for a local id, null for a cloud model.</summary>
-    internal static string? Provider(string id) => Parse(id) is { } local ? ProviderName(local.Provider) : null;
-
-    /// <summary>The model alone for a local id, the id itself otherwise.</summary>
-    internal static string Name(string id) => Parse(id)?.Model ?? id;
-
-    /// <summary><c>Ollama: qwen2.5</c> for a local id, the id itself otherwise.</summary>
-    internal static string Title(string id) => Parse(id) is { } local ? $"{ProviderName(local.Provider)}: {local.Model}" : id;
 }

@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 
 internal fun chatFastModeAvailable(model: String?, models: JsonArray?, backend: String? = null): Boolean {
-    if (models == null) return false
+    if (models == null || localChatProvider(model.orEmpty()) != null) return false
     if (backend == "grok") return models.any { (it as? JsonPrimitive)?.content == (model ?: "") }
     if (models.isEmpty()) return true
     if (model == null) return models.any { (it as? JsonPrimitive)?.content == "" }

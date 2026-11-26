@@ -111,6 +111,7 @@ struct Payload<'a> {
     // session_meta
     id: Option<&'a str>,
     cwd: Option<&'a str>,
+    model_provider: Option<&'a str>,
     // turn_context
     model: Option<&'a str>,
     // token_count
@@ -214,6 +215,7 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
     let mut session = String::new();
     let mut project = String::from("unknown");
     let mut model = String::from("unknown");
+    let mut provider = None;
     let mut billing = BillingMode::Unknown;
     let mut ordinal: u32 = 0;
 
@@ -252,6 +254,10 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
                 {
                     session = id.to_string();
                     first_index = out.events.len();
+                    provider = None;
+                }
+                if payload.model_provider.is_some() {
+                    provider = payload.model_provider;
                 }
                 if let Some(cwd) = payload.cwd {
                     project = cwd
@@ -265,7 +271,10 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             // walked rather than read once.
             Some("turn_context") => {
                 if let Some(m) = payload.model {
-                    model = m.to_string();
+                    model = match payload.model_provider.or(provider) {
+                        Some(provider @ ("ollama" | "lmstudio")) => format!("{provider}/{m}"),
+                        _ => m.to_owned(),
+                    };
                 }
             }
             _ => {}
@@ -511,6 +520,20 @@ mod tests {
         assert_eq!(e.model, "gpt-5.5");
         assert_eq!(e.project, "tokenstat");
         assert_eq!(e.session, "sess-1");
+    }
+
+    #[test]
+    fn a_local_provider_remains_distinct_from_the_same_cloud_model() {
+        let session = META.replace("\"cwd\":", "\"model_provider\":\"ollama\",\"cwd\":");
+        let cloud = CTX.replace("\"model\":", "\"model_provider\":\"openai\",\"model\":");
+        let input = format!(
+            "{session}\n{CTX}\n{}\n{cloud}\n{}\n",
+            tc(10, 0, 5, 10, 0, 5),
+            tc(10, 0, 5, 20, 0, 10)
+        );
+        let out = parse_file(&p(), &input);
+        assert_eq!(out.events[0].model, "ollama/gpt-5.5");
+        assert_eq!(out.events[1].model, "gpt-5.5");
     }
 
     #[test]

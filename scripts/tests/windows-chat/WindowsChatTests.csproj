@@ -11,6 +11,7 @@
     <Compile Include="../../../apps/windows/Pages/HistoryAvatarCache.cs" Link="HistoryAvatarCache.cs" />
     <Compile Include="../../../apps/windows/Pages/ChartViewport.cs" Link="ChartViewport.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatAgentSteps.cs" Link="ChatAgentSteps.cs" />
+    <Compile Include="../../../apps/windows/Pages/LocalChatModel.cs" Link="LocalChatModel.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamSharedFile.cs" Link="TeamSharedFile.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamFolderShareModel.cs" Link="TeamFolderShareModel.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamPublisherModel.cs" Link="TeamPublisherModel.cs" />

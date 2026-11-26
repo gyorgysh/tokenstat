@@ -60,11 +60,26 @@ internal sealed class AgentProfiles(JsonNode value, bool local)
             item.Click += async (_, _) => await onChoose(id);
             menu.Items.Add(item);
         }
+        // A small chip beside the panel's title, as on the Mac and the phones:
+        // which login the listed agents run as, one tap from changing.
+        var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        chip.Children.Add(new FontIcon { Glyph = "\uE77B", FontSize = 12 }); // Contact
+        chip.Children.Add(new TextBlock { Text = Title(selected), FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        chip.Children.Add(new FontIcon { Glyph = "\uE70D", FontSize = 9 }); // ChevronDown
         var picker = new Button
         {
-            Content = L10n.Text("common.profiles.label") + " · " + Title(selected),
+            Content = chip,
             Flyout = menu, IsEnabled = enabled,
+            Foreground = Theme.AccentBrush,
+            Background = Theme.Brush(static () => Theme.AccentSoft),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(10, 3, 10, 3),
+            MinHeight = 0,
+            VerticalAlignment = VerticalAlignment.Center,
         };
+        ToolTipService.SetToolTip(picker, L10n.Text("common.profiles.label"));
+        AutomationProperties.SetName(picker, L10n.Text("common.profiles.label") + ", " + Title(selected));
         AutomationProperties.SetAutomationId(picker, "agentProfiles.picker");
         return picker;
     }

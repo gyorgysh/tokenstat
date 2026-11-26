@@ -127,6 +127,22 @@ internal sealed class AccountPage : Page, IToolbarItems
             });
     }
 
+    private static readonly HashSet<string> OfferedHandles = new();
+    private bool _offeringHandle;
+
+    private async Task OfferHandleAsync(JsonNode? account)
+    {
+        if (_offeringHandle || !IsLoaded || XamlRoot is null || _pane != "account" || !_signedIn || account is null
+            || !string.IsNullOrEmpty(Format.Text(account, "handle"))
+            || account["profile"]?["handlePrompted"] is not JsonValue flag
+            || !flag.TryGetValue<bool>(out var prompted) || prompted
+            || Format.Text(account, "accountId") is not { Length: > 0 } id
+            || !OfferedHandles.Add(Format.Text(account, "host") + "|" + id)) return;
+        _offeringHandle = true;
+        try { await ProfileDialog.ShowAsync(this, account, LoadAsync, offer: true); }
+        finally { _offeringHandle = false; }
+    }
+
     private async Task LoadAsync()
     {
         var generation = ++_loadGeneration;
@@ -147,6 +163,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         RaiseToolbarChanged();
         RebuildTabs();
         await RenderPaneAsync();
+        if (generation == _loadGeneration) await OfferHandleAsync(_account);
     }
 
     private async Task RenderPaneAsync()
@@ -202,6 +219,12 @@ internal sealed class AccountPage : Page, IToolbarItems
         else
         {
             content.Children.Add(IdentityCard(account));
+            // The address, the handle, who can open the page and whether
+            // search engines may list it, as on the Mac and the phones.
+            var profileButton = Buttons.Secondary(L10n.Text("common.profile.title"), ActionIcon.Profile,
+                async (_, _) => await ProfileDialog.ShowAsync(this, account, LoadAsync));
+            profileButton.HorizontalAlignment = HorizontalAlignment.Left;
+            content.Children.Add(profileButton);
             content.Children.Add(RelayUsageCard(account));
             if (await RelayFallbackCardAsync() is { } relayFallback)
                 content.Children.Add(relayFallback);

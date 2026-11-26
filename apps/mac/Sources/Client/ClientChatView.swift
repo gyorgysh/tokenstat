@@ -1573,6 +1573,7 @@ struct ClientChatThread: View {
         // broken once back online raises its own error then.
         .modifier(ChatFileTransferControls(model: model, cancelOnDisappear: session == nil))
         .modifier(ChatCacheWarningAlert(model: model, isActive: isActive))
+        .modifier(AgentUpdatePromptSheet(model: model, isActive: isActive))
         .alert(L10n.text("apple.clientchatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil && connectivity.status != .offline },
             set: { if !$0 { model.error = nil } }
@@ -2957,7 +2958,8 @@ struct ClientChatThread: View {
         }
     }
 
-    private func submit(from chat: ChatConversation, sendNow: Bool = false, cacheConfirmed: Bool = false) {
+    private func submit(from chat: ChatConversation, sendNow: Bool = false, cacheConfirmed: Bool = false,
+                        updateAnswered: Bool = false) {
         guard isActive, model.selected?.id == chat.id, model.unconfirmedSend == nil else { return }
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
@@ -3008,6 +3010,23 @@ struct ClientChatThread: View {
                 }
                 return
             }
+        }
+        // The agent this chat runs on is behind. Offer the update before the
+        // message goes, once per version, as on the Mac. The words stay in
+        // the composer until the answer.
+        if !updateAnswered, model.updatingAgentID == nil,
+           AgentUpdatePrompt.isDue(model.backend(for: chat.backend), peer: model.peer),
+           let backend = model.backend(for: chat.backend) {
+            let owner = model.currentReference
+            let attachments = model.attachments
+            model.agentUpdatePrompt = AgentUpdatePrompt(backend: backend) {
+                guard model.currentReference == owner, let current = model.selected,
+                      current.id == chat.id, current.backend == chat.backend,
+                      model.draft.trimmingCharacters(in: .whitespacesAndNewlines) == text,
+                      model.attachments == attachments else { return }
+                submit(from: current, cacheConfirmed: cacheConfirmed, updateAnswered: true)
+            }
+            return
         }
         if !cacheConfirmed,
            !ChatPromptCacheRule.isSuppressed(ChatPromptCacheRule.idleSuppressedKey),

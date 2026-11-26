@@ -4359,6 +4359,25 @@ impl Store {
         let profile_login = profile_environment
             .first()
             .map(|(_, path)| PathBuf::from(path));
+        // A profile's own login that was never signed in fails inside the
+        // agent with advice to sign in "on this computer", which would sign
+        // in the machine's login instead. Say which login and where.
+        if profile_login.is_some()
+            && let Some(profile) = chat.profile_id.as_deref()
+            && let Ok(status) = crate::launcher::check_sign_in_for(
+                launcher_profile_id(&chat.backend),
+                Some(profile),
+            )
+            && status["checked"] == true
+            && status["readiness"] == "needsSignIn"
+        {
+            let name = crate::profiles::name(profile).unwrap_or_else(|| profile.to_string());
+            return Err(format!(
+                "The {name} profile has no {} login yet. Sign it in from Account, Profiles, then send again.",
+                crate::automations::backend_label(&chat.backend)
+            )
+            .into());
+        }
         self.recover_codex_session(&mut chat);
         self.recover_opencode_session(&mut chat, &workspace.path, profile_login.as_deref());
         self.recover_claude_session(&mut chat, profile_login.as_deref());
@@ -4474,7 +4493,7 @@ impl Store {
         crate::chat_fast::apply(
             &chat.backend,
             turn_model.cli.as_deref(),
-            chat.fast_mode,
+            chat.fast_mode && crate::local_models::chat_selection(chat.model.as_deref()).is_none(),
             &mut argv,
         )?;
         let turn = if asks_before_tools || muse_note {
@@ -5361,6 +5380,13 @@ impl Store {
         } else {
             turn_status(exit, stopped)
         };
+        if status == "error"
+            && let Some((provider, model)) = crate::local_models::chat_selection(launch_model)
+            && let Err(message) =
+                crate::local_models::check_ready(provider, model, backend == "claude")
+        {
+            self.record_events(id, backend, vec![Event::Failed { text: message }]);
+        }
         let phase = match status {
             "ok" => "done",
             "stopped" => "stopped",
@@ -7330,9 +7356,7 @@ pub(crate) fn launcher_profile_id(backend: &str) -> &str {
 
 pub fn backends(force: bool) -> Vec<Value> {
     let catalog = crate::launcher::catalog();
-    // Loopback only, and a refused port answers at once, so this costs
-    // nothing on a machine with no local model server running.
-    let local = crate::local_models::discover().unwrap_or_default();
+    let (local, contexts) = local_model_catalog();
     crate::automations::backends(force)
         .into_iter()
         .map(|mut backend| {
@@ -7399,24 +7423,71 @@ pub fn backends(force: bool) -> Vec<Value> {
             if backend["installed"] == false {
                 backend["models"] = json!(Vec::<String>::new());
             } else {
-                add_local_models(&mut backend, &id, &local);
+                add_local_models(&mut backend, &id, &local, &contexts);
             }
             backend
         })
         .collect()
 }
 
+/// The local servers' models and how much each holds, read once per list.
+/// Loopback only, and a refused port answers at once, so this costs nothing
+/// on a machine with no local model server running.
+fn local_model_catalog() -> (
+    Vec<crate::local_models::LocalProvider>,
+    std::collections::HashMap<(String, String), u64>,
+) {
+    let local = crate::local_models::discover().unwrap_or_default();
+    // How much each local model holds, asked once per list rather than once
+    // per agent. A picker warns about a model too small for an agent's
+    // instructions.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let contexts: std::collections::HashMap<(String, String), u64> = local
+        .iter()
+        .filter(|provider| provider.available)
+        .flat_map(|provider| {
+            provider
+                .models
+                .iter()
+                .take(40)
+                .map(move |model| (provider, model))
+        })
+        .take_while(|_| std::time::Instant::now() < deadline)
+        .filter_map(|(provider, model)| {
+            crate::local_models::context_window(&provider.id, &model.id)
+                .map(|tokens| ((provider.id.clone(), model.id.clone()), tokens))
+        })
+        .collect();
+    (local, contexts)
+}
+
+/// Tasks, workflows and automations offer the same local models as chat.
+pub fn with_local_models(mut backends: Vec<Value>) -> Vec<Value> {
+    let (local, contexts) = local_model_catalog();
+    for backend in &mut backends {
+        let id = backend["id"].as_str().unwrap_or("").to_string();
+        add_local_models(backend, &id, &local, &contexts);
+    }
+    backends
+}
+
 /// Put the models a running local server offers into an agent's list, after
 /// its own. `localModels` carries a readable name for each, so a client can
 /// show "LM Studio: Qwen3" while an older one still offers the plain id.
-fn add_local_models(backend: &mut Value, id: &str, local: &[crate::local_models::LocalProvider]) {
+fn add_local_models(
+    backend: &mut Value,
+    id: &str,
+    local: &[crate::local_models::LocalProvider],
+    contexts: &std::collections::HashMap<(String, String), u64>,
+) {
     let supported = crate::local_models::chat_providers(id);
     let mut ids = Vec::new();
     let mut named = Vec::new();
-    for provider in local
-        .iter()
-        .filter(|provider| provider.available && supported.contains(&provider.id.as_str()))
-    {
+    for provider in local.iter().filter(|provider| {
+        provider.available
+            && supported.contains(&provider.id.as_str())
+            && (id != "claude" || provider.anthropic)
+    }) {
         for model in &provider.models {
             let value = format!(
                 "{}{}/{}",
@@ -7424,12 +7495,16 @@ fn add_local_models(backend: &mut Value, id: &str, local: &[crate::local_models:
                 provider.id,
                 model.id
             );
-            named.push(json!({
+            let mut entry = json!({
                 "id": value,
                 "name": model.name,
                 "provider": provider.id,
                 "providerName": provider.name,
-            }));
+            });
+            if let Some(tokens) = contexts.get(&(provider.id.clone(), model.id.clone())) {
+                entry["contextLength"] = json!(tokens);
+            }
+            named.push(entry);
             ids.push(Value::String(value));
         }
     }
@@ -7446,14 +7521,17 @@ fn add_local_models(backend: &mut Value, id: &str, local: &[crate::local_models:
 
 /// The model a turn hands the agent's own `--model`, and the environment
 /// and flags that point it at a local server when the chat picked one.
-struct TurnModel {
-    cli: Option<String>,
-    environment: Vec<(String, String)>,
-    leading_args: Vec<String>,
+pub(crate) struct TurnModel {
+    pub(crate) cli: Option<String>,
+    pub(crate) environment: Vec<(String, String)>,
+    pub(crate) leading_args: Vec<String>,
 }
 
-fn turn_model(backend: &str, model: Option<&str>) -> Result<TurnModel, String> {
+pub(crate) fn turn_model(backend: &str, model: Option<&str>) -> Result<TurnModel, String> {
     let Some((provider, local)) = crate::local_models::chat_selection(model) else {
+        if model.is_some_and(|id| id.trim().starts_with(crate::local_models::CHAT_PREFIX)) {
+            return Err("Invalid local model selection. Pick another model.".into());
+        }
         return Ok(TurnModel {
             cli: model.map(str::to_owned),
             environment: Vec::new(),
@@ -7465,6 +7543,7 @@ fn turn_model(backend: &str, model: Option<&str>) -> Result<TurnModel, String> {
             "This agent cannot use a model from {provider}. Pick another model."
         ));
     }
+    crate::local_models::check_ready(provider, local, backend == "claude")?;
     let command = match backend {
         "opencode" | "opencode2" => {
             crate::launcher::resolve_command(backend).unwrap_or_else(|| backend.to_string())
@@ -15895,7 +15974,7 @@ mod tests {
 
     #[test]
     fn local_models_join_only_the_agents_that_can_reach_that_server() {
-        let local = vec![
+        let mut local = vec![
             crate::local_models::LocalProvider {
                 id: "lmstudio".into(),
                 name: "LM Studio".into(),
@@ -15909,6 +15988,7 @@ mod tests {
                     size_bytes: None,
                 }],
                 error: None,
+                anthropic: true,
             },
             crate::local_models::LocalProvider {
                 id: "ollama".into(),
@@ -15923,25 +16003,34 @@ mod tests {
                     size_bytes: None,
                 }],
                 error: None,
+                // An Ollama too old for Anthropic's API is not offered to Claude.
+                anthropic: false,
             },
         ];
         let mut claude = json!({"models": ["opus"]});
-        super::add_local_models(&mut claude, "claude", &local);
+        super::add_local_models(&mut claude, "claude", &local, &Default::default());
         assert_eq!(
             claude["models"],
             json!(["opus", "local:lmstudio/qwen/coder"])
         );
         assert_eq!(claude["localModels"][0]["providerName"], "LM Studio");
         let mut codex = json!({"models": []});
-        super::add_local_models(&mut codex, "codex", &local);
+        super::add_local_models(&mut codex, "codex", &local, &Default::default());
         assert_eq!(
             codex["models"],
             json!(["local:lmstudio/qwen/coder", "local:ollama/llama3.2"])
         );
         let mut grok = json!({"models": ["grok-4.6"]});
-        super::add_local_models(&mut grok, "grok", &local);
+        super::add_local_models(&mut grok, "grok", &local, &Default::default());
         assert_eq!(grok, json!({"models": ["grok-4.6"]}));
-        assert!(super::turn_model("claude", Some("local:ollama/llama3.2")).is_err());
+        local[1].anthropic = true;
+        let mut claude = json!({"models": []});
+        super::add_local_models(&mut claude, "claude", &local, &Default::default());
+        assert_eq!(
+            claude["models"],
+            json!(["local:lmstudio/qwen/coder", "local:ollama/llama3.2"])
+        );
+        assert!(super::turn_model("grok", Some("local:ollama/llama3.2")).is_err());
         let cloud = super::turn_model("claude", Some("opus")).unwrap();
         assert_eq!(cloud.cli.as_deref(), Some("opus"));
         assert!(cloud.environment.is_empty() && cloud.leading_args.is_empty());

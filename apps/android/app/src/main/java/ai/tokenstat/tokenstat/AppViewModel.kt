@@ -699,7 +699,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /// Update one agent on `peer`'s host. `finished` gets the host's answer,
     /// or null when there was none, so the caller can refresh its lists.
     fun updateAgent(peer: String, id: String, label: String, finished: (JsonObject?) -> Unit = {}) {
-        if (mutableUpdatingAgent.value != null) return
+        if (mutableUpdatingAgent.value != null) {
+            finished(null)
+            return
+        }
         mutableUpdatingAgent.value = id
         mutableAgentUpdate.value = AgentUpdateNotice(L10n.text("common.agent_updates.toast_updating", label), done = false, failed = false)
         viewModelScope.launch {

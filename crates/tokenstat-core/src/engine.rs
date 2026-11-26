@@ -37,6 +37,9 @@ pub struct PricedBucket {
     /// Reporting it as a total would be the "never report zero for a tool that
     /// does not expose counts" mistake in a different coat.
     pub unpriced_models: Vec<String>,
+    /// Every model in this bucket ran on a local server. Its value is zero
+    /// because nothing was billed, and a front end says "local", not $0.
+    pub local: bool,
 }
 
 impl PricedBucket {
@@ -130,8 +133,12 @@ impl Engine {
         let split = self.store.report_by_model(group, q)?;
 
         let mut value_by_key: HashMap<&str, (i64, bool, Vec<String>)> = HashMap::new();
+        let mut cloud_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for row in &split {
             let lookup = display_usage_model_id(&row.split);
+            if !prices.is_local(&lookup) {
+                cloud_keys.insert(row.key.as_str());
+            }
             let entry = value_by_key.entry(row.key.as_str()).or_default();
             match EquivalentValue::price(prices, &lookup, &row.counters) {
                 Some(v) => {
@@ -149,6 +156,8 @@ impl Engine {
         let priced: Vec<PricedBucket> = buckets
             .into_iter()
             .map(|b| {
+                let local = value_by_key.contains_key(b.key.as_str())
+                    && !cloud_keys.contains(b.key.as_str());
                 let (micros, estimated, unpriced) =
                     value_by_key.remove(b.key.as_str()).unwrap_or_default();
                 PricedBucket {
@@ -159,6 +168,7 @@ impl Engine {
                     value: EquivalentValue::from_micros(micros),
                     estimated,
                     unpriced_models: unpriced,
+                    local,
                 }
             })
             .collect();
@@ -234,6 +244,7 @@ fn fold_priced_source_buckets(rows: Vec<PricedBucket>) -> Vec<PricedBucket> {
             let micros = merged[i].value.micros().saturating_add(row.value.micros());
             merged[i].value = EquivalentValue::from_micros(micros);
             merged[i].estimated |= row.estimated;
+            merged[i].local &= row.local;
             for model in row.unpriced_models {
                 if !merged[i].unpriced_models.contains(&model) {
                     merged[i].unpriced_models.push(model);

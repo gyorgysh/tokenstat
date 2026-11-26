@@ -2372,7 +2372,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with an
         // environment key has no login file at all.
-        if (!liveInput && !SeparateLogin(backend) && Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
+        if (!liveInput && LocalChatModel.Provider(Format.Text(_openChat, "model")) is null
+            && !SeparateLogin(backend) && Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
         {
             Banner(L10n.Text("windows.agentsetup.draft_kept", Format.Text(backend, "label")));
             return;
@@ -2382,6 +2383,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
         var text = _draft.Text.Trim();
         if (text.Length == 0 && _attachments.Count == 0) return;
+        if (!liveInput && backend is not null)
+        {
+            bool OwnsDraft() => Current() && _draft.Text.Trim() == text;
+            if (!await OfferAgentUpdateAsync(backend, OwnsDraft) || !OwnsDraft()) return;
+        }
         // A long pause emptied the prompt cache: this message would make the
         // agent read the whole conversation again. Files are uploaded into
         // this chat, so a message carrying them cannot move to a new one.

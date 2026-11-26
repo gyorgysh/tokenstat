@@ -29,6 +29,7 @@ internal sealed partial class ChatPage
         bool Current() => _commandUsageOnly && body is not null && ReferenceEquals(body, _commandDialogBody)
             && owner == InspectionOwner() && visibility == _inspectionVisibilityGeneration && IsLoaded
             && App.CurrentWindow is not MainWindow { IsForeground: false };
+        if (LocalChatModel.Provider(Format.Text(_openChat, "model")) is not null) return;
         if (!Current() || _usageFlight is not null || !force && DateTimeOffset.UtcNow - _usageAttempt < TimeSpan.FromSeconds(30)) return;
         var flight = new object(); _usageFlight = flight; _usageAttempt = DateTimeOffset.UtcNow;
         try
@@ -38,6 +39,7 @@ internal sealed partial class ChatPage
             if (!Current()) return;
             if (result is not JsonArray readings) throw new InvalidDataException();
             var backend = Format.Text(_openChat, "backend");
+            if (LocalChatModel.Provider(Format.Text(_openChat, "model")) is not null) return;
             _usageLimits = ChatQuotaData.Read(readings, backend, SeparateLogin(Backend(backend)) ? ChatProfileId : null);
             _usageReadFailed = false; _usageReadVisibility = visibility;
         }
@@ -50,33 +52,36 @@ internal sealed partial class ChatPage
     }
     private void AddChatUsage(StackPanel target)
     {
-        var limits = new StackPanel { Spacing = Theme.SpaceS };
-        var refresh = Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => await RefreshChatLimitsAsync(force: true));
-        refresh.IsEnabled = _usageFlight is null;
-        if (_usageLimits is JsonObject provider)
+        if (LocalChatModel.Provider(Format.Text(_openChat, "model")) is null)
         {
-            var stale = _usageReadFailed || _usageReadVisibility != _inspectionVisibilityGeneration || Format.Flag(provider, "stale");
-            foreach (var window in AsArray(provider, "windows").OfType<JsonObject>())
+            var limits = new StackPanel { Spacing = Theme.SpaceS };
+            var refresh = Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => await RefreshChatLimitsAsync(force: true));
+            refresh.IsEnabled = _usageFlight is null;
+            if (_usageLimits is JsonObject provider)
             {
-                var percent = ChatUsageTotals.Amount(window["percent"])!.Value;
-                var label = Format.Text(window, "label");
-                var scope = Format.Text(window, "scope");
-                if (!string.IsNullOrWhiteSpace(scope)) label += $" ({scope})";
-                limits.Children.Add(StatsMetric(label, $"{percent:0}%"));
-                limits.Children.Add(new ProgressBar { Value = Math.Clamp(percent, 0, 100), Maximum = 100, Height = 5,
-                    Foreground = stale ? Theme.Brush(static () => Theme.Secondary)
-                        : percent >= 90 ? Theme.Brush(static () => Theme.Danger)
-                        : percent >= 70 ? Theme.Brush(static () => Theme.Warning) : Theme.AccentBrush });
-                if (UsageDate(window["resetsAtMs"]) is string reset)
-                    limits.Children.Add(Muted(L10n.Text("common.chat.usage.resets", reset)));
+                var stale = _usageReadFailed || _usageReadVisibility != _inspectionVisibilityGeneration || Format.Flag(provider, "stale");
+                foreach (var window in AsArray(provider, "windows").OfType<JsonObject>())
+                {
+                    var percent = ChatUsageTotals.Amount(window["percent"])!.Value;
+                    var label = Format.Text(window, "label");
+                    var scope = Format.Text(window, "scope");
+                    if (!string.IsNullOrWhiteSpace(scope)) label += $" ({scope})";
+                    limits.Children.Add(StatsMetric(label, $"{percent:0}%"));
+                    limits.Children.Add(new ProgressBar { Value = Math.Clamp(percent, 0, 100), Maximum = 100, Height = 5,
+                        Foreground = stale ? Theme.Brush(static () => Theme.Secondary)
+                            : percent >= 90 ? Theme.Brush(static () => Theme.Danger)
+                            : percent >= 70 ? Theme.Brush(static () => Theme.Warning) : Theme.AccentBrush });
+                    if (UsageDate(window["resetsAtMs"]) is string reset)
+                        limits.Children.Add(Muted(L10n.Text("common.chat.usage.resets", reset)));
+                }
+                if (stale) limits.Children.Add(Muted(L10n.Text("common.chat.usage.stale")));
+                if (UsageDate(provider["observedAtMs"]) is string observed)
+                    limits.Children.Add(Muted(L10n.Text("common.chat.usage.reported", observed)));
             }
-            if (stale) limits.Children.Add(Muted(L10n.Text("common.chat.usage.stale")));
-            if (UsageDate(provider["observedAtMs"]) is string observed)
-                limits.Children.Add(Muted(L10n.Text("common.chat.usage.reported", observed)));
+            else limits.Children.Add(Muted(L10n.Text(_usageFlight is not null ? "common.loading" : "common.chat.usage.no_limits")));
+            target.Children.Add(Chrome.Card(Format.Text(Backend(Format.Text(_openChat, "backend")), "label", Format.Text(_openChat, "backend")), limits,
+                Format.Text(_usageLimits, "plan"), accessory: refresh));
         }
-        else limits.Children.Add(Muted(L10n.Text(_usageFlight is not null ? "common.loading" : "common.chat.usage.no_limits")));
-        target.Children.Add(Chrome.Card(Format.Text(Backend(Format.Text(_openChat, "backend")), "label", Format.Text(_openChat, "backend")), limits,
-            Format.Text(_usageLimits, "plan"), accessory: refresh));
 
         var data = CurrentInspection as JsonObject;
         var context = new StackPanel { Spacing = Theme.SpaceS };

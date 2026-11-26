@@ -2820,8 +2820,8 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         "automation.runs" => serde_json::to_value(crate::automations::shared().runs()).envelope(),
         "automation.backends" => {
             let p: AutomationParams = parse(params)?;
-            Ok(serde_json::Value::Array(crate::automations::backends(
-                p.refresh == Some(true),
+            Ok(serde_json::Value::Array(crate::chat::with_local_models(
+                crate::automations::backends(p.refresh == Some(true)),
             )))
         }
         "automation.interactiveCommand" => {
@@ -3858,6 +3858,11 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 p.model_provider.as_deref(),
                 p.model_id.as_deref(),
             )?;
+            if let (Some(provider), Some(model)) =
+                (p.model_provider.as_deref(), p.model_id.as_deref())
+            {
+                crate::local_models::check_ready(provider, model, agent == Some("claude_code"))?;
+            }
             environment.extend(profile_environment);
             // The selection's arguments are appended here rather than sent by
             // the caller, so the two halves of one harness contract are decided

@@ -335,6 +335,16 @@ fn default_id() -> String {
         .unwrap_or_else(|| SYSTEM.to_string())
 }
 
+/// The name a person gave a profile, for messages about it.
+pub(crate) fn name(id: &str) -> Option<String> {
+    load()
+        .ok()?
+        .profiles
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .map(|profile| profile.name)
+}
+
 /// Whether `id` names a profile that exists. The machine's always does.
 pub(crate) fn exists(id: &str) -> bool {
     id == SYSTEM || load().is_ok_and(|store| store.profiles.iter().any(|p| p.id == id))

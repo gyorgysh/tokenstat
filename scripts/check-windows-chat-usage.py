@@ -75,6 +75,13 @@ METHOD
             await Complete(m, pending);
             Assert(m._usageLimits is null && m.renders == before, "A retired reply changed the view: " + change);
         }
+        m = Fresh(); m._openChat["model"] = "local:ollama/llama3.2:1b";
+        await m.RefreshChatLimitsAsync(force: true);
+        Assert(AppServices.Host.Calls == 0, "Local models do not ask for cloud quota");
+        m = Fresh(); var cloud = m.RefreshChatLimitsAsync();
+        m._openChat["model"] = "local:ollama/llama3.2:1b";
+        await Complete(m, cloud);
+        Assert(m._usageLimits is null, "A local model never receives a pending cloud quota reading");
         m = Fresh(); ((MainWindow)App.CurrentWindow).IsForeground = false;
         await m.RefreshChatLimitsAsync(force: true);
         Assert(AppServices.Host.Calls == 0, "Background views do not read quota");
@@ -234,7 +241,7 @@ code = code.replace('        await CommandCheck.Run();', '        await CommandC
 folder = root / 'target/chat-performance/windows-usage-fixture'
 folder.mkdir(parents=True, exist_ok=True)
 (folder / 'Program.cs').write_text(code)
-includes = ''.join(f'<Compile Include="{root / "apps/windows/Pages" / name}" />' for name in ['ChatQuotaData.cs', 'ChatHistoryBuffer.cs', 'ChatCommandRules.cs'])
+includes = ''.join(f'<Compile Include="{root / "apps/windows/Pages" / name}" />' for name in ['ChatQuotaData.cs', 'ChatHistoryBuffer.cs', 'ChatCommandRules.cs', 'LocalChatModel.cs'])
 project = folder / 'Usage.csproj'
 project.write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup><ItemGroup>' + includes + '</ItemGroup></Project>')
 subprocess.run(['dotnet', 'run', '--project', str(project), '-c', 'Release'], check=True)

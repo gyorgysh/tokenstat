@@ -778,6 +778,7 @@ public sealed partial class MainWindow : Window
             Tag = "ws:" + id + ":Launcher",
             IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ws:" + id + ":Launcher", true),
         };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(parent, "sidebar.workspace." + id);
         TrackSidebarExpansion(parent);
         if (!string.IsNullOrEmpty(path))
         {

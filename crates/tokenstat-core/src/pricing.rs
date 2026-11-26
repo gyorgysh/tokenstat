@@ -13,7 +13,7 @@
 //!    `tokenstat-sync`) refreshes a snapshot into the user's data directory.
 //!    Core only reads that file. No network, and we do not ship a price book.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,6 +32,90 @@ pub struct Rates {
     pub cache_read: f64,
     pub cache_write_5m: f64,
     pub cache_write_1h: f64,
+}
+
+impl Rates {
+    /// A model running on this machine: no list rate applies.
+    pub const FREE: Rates = Rates {
+        input: 0.0,
+        output: 0.0,
+        cache_read: 0.0,
+        cache_write_5m: 0.0,
+        cache_write_1h: 0.0,
+    };
+}
+
+/// The models LM Studio and Ollama have served here, remembered in the data
+/// directory. The host writes it when it discovers them, because only the
+/// host may talk to a local server. Reports read it to price them at zero.
+pub mod local_models {
+    use std::collections::BTreeSet;
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    /// Enough for any real machine, small enough that a runaway server
+    /// cannot grow the file without bound.
+    const CAP: usize = 2_000;
+
+    fn path() -> Option<PathBuf> {
+        tokenstat_paths::data_dir().map(|dir| dir.join("local-models.json"))
+    }
+
+    /// Explicit local provenance in usage logs or host model selections.
+    pub(super) fn qualified_id(model: &str) -> Option<&str> {
+        let id = model.trim().strip_prefix("local:").unwrap_or(model.trim());
+        let (provider, model) = id.split_once('/')?;
+        (matches!(provider, "ollama" | "lmstudio") && !model.is_empty()).then_some(model)
+    }
+
+    pub fn load() -> BTreeSet<String> {
+        path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+            .map(|ids| ids.into_iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// Add these ids to what is remembered. Ids stay once seen, because the
+    /// usage they produced stays in the archive after a model is removed.
+    pub fn remember(ids: impl IntoIterator<Item = String>) -> std::io::Result<()> {
+        let Some(path) = path() else { return Ok(()) };
+        let candidates: BTreeSet<_> = ids
+            .into_iter()
+            .map(|id| id.trim().to_ascii_lowercase())
+            .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
+            .collect();
+        if candidates.is_subset(&load()) {
+            return Ok(());
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let lock = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("lock"))?;
+        lock.lock()?;
+        let mut known = load();
+        let before = known.len();
+        let additions: Vec<_> = candidates
+            .difference(&known)
+            .take(CAP.saturating_sub(before))
+            .cloned()
+            .collect();
+        known.extend(additions);
+        if known.len() == before {
+            return Ok(());
+        }
+        let temp = path.with_extension("json.tmp");
+        let mut file = std::fs::File::create(&temp)?;
+        serde_json::to_writer(&mut file, &known).map_err(std::io::Error::other)?;
+        file.flush()?;
+        drop(file);
+        std::fs::rename(temp, path)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +150,10 @@ pub struct PriceTable {
     /// tables.
     stems: Vec<(String, Rates)>,
     catalog: Option<Arc<Catalog>>,
+    /// Models this machine has served from LM Studio or Ollama. They cost
+    /// nothing, and a name that happens to resemble a cloud model must not
+    /// borrow that model's price.
+    local: Arc<BTreeSet<String>>,
 }
 
 impl PriceTable {
@@ -81,10 +169,28 @@ impl PriceTable {
     /// (every model prices as unknown) rather than an error, so reports still
     /// render counts when the user has not refreshed prices yet.
     pub fn load() -> PriceTable {
-        match Self::default_path() {
+        let table = match Self::default_path() {
             Ok(path) => Self::load_from(&path).unwrap_or_default(),
             Err(_) => PriceTable::default(),
+        };
+        table.with_local_models(local_models::load())
+    }
+
+    /// Mark these model ids as served on this machine, so they price at zero.
+    pub fn with_local_models(mut self, ids: BTreeSet<String>) -> PriceTable {
+        self.local = Arc::new(ids.into_iter().map(|id| id.to_ascii_lowercase()).collect());
+        self
+    }
+
+    /// Whether this model ran on a local server rather than a provider's cloud.
+    pub fn is_local(&self, model: &str) -> bool {
+        if local_models::qualified_id(model).is_some() {
+            return true;
         }
+        let id = model.trim().to_ascii_lowercase();
+        // Bare historical ids lack provenance. Preserve exact cloud rates,
+        // and never use a price-book alias to infer where a model ran.
+        self.local.contains(&id) && self.get_exact(&id).is_none() && !is_cursor_router_id(&id)
     }
 
     pub fn load_from(path: &Path) -> Option<PriceTable> {
@@ -121,6 +227,7 @@ impl PriceTable {
             stems: build_stems(&by_pattern),
             by_pattern,
             catalog: None,
+            local: Arc::default(),
         })
     }
 
@@ -164,6 +271,9 @@ impl PriceTable {
     /// `cursor-router-auto` would otherwise false-match LiteLLM rows like
     /// `openrouter/switchpoint/router` via the `router` stem.
     pub fn rates_for(&self, model: &str) -> Option<Rates> {
+        if self.is_local(model) {
+            return Some(Rates::FREE);
+        }
         if is_cursor_router_id(model) {
             return estimate_rates(model);
         }
@@ -181,6 +291,9 @@ impl PriceTable {
     ///
     /// `None` when the model priced from the book, or did not price at all.
     pub fn estimate_source(&self, model: &str) -> Option<EstimateSource> {
+        if self.is_local(model) {
+            return None;
+        }
         if is_cursor_router_id(model) {
             return Some(EstimateSource::CursorRouterFloor);
         }
@@ -491,6 +604,40 @@ impl fmt::Display for EquivalentValue {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_model_served_on_this_machine_is_free_and_never_borrows_a_cloud_price() {
+        let table = PriceTable::parse(
+            r#"{"effective_from":"2026-11-01","models":[{"match":"qwen2.5","input":1.0,"output":2.0,"cache_read":0.1,"cache_write_5m":0.0,"cache_write_1h":0.0}]}"#,
+        )
+        .expect("table");
+        let counters = Counters {
+            input_fresh: Some(1_000_000),
+            output: Some(1_000_000),
+            ..Counters::default()
+        };
+        assert!(
+            EquivalentValue::price(&table, "qwen2.5:1.5b", &counters)
+                .unwrap()
+                .micros()
+                > 0
+        );
+        let table = table.with_local_models(["Qwen2.5:1.5B".to_string()].into_iter().collect());
+        assert!(table.is_local("qwen2.5:1.5b"));
+        assert!(table.is_local("ollama/qwen2.5:1.5b"));
+        assert_eq!(
+            EquivalentValue::price(&table, "qwen2.5:1.5b", &counters)
+                .unwrap()
+                .micros(),
+            0
+        );
+        assert_eq!(table.estimate_source("qwen2.5:1.5b"), None);
+        assert!(!table.is_local("qwen2.5-72b"));
+        assert!(!table.is_local("openrouter/qwen2.5:1.5b"));
+        let collision = table.with_local_models(["qwen2.5".to_string()].into_iter().collect());
+        assert!(!collision.is_local("qwen2.5"));
+        assert!(collision.is_local("ollama/qwen2.5"));
+    }
+
     use super::*;
 
     const FIXTURE: &str = r#"{

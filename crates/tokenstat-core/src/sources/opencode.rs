@@ -83,6 +83,8 @@ pub struct ParseOutput {
 struct MessageData {
     #[serde(rename = "modelID")]
     model_id: Option<String>,
+    #[serde(rename = "providerID")]
+    provider_id: Option<String>,
     /// OpenCode 2 nests what version 1 kept at the top level.
     model: Option<ModelRef>,
     role: Option<String>,
@@ -94,6 +96,8 @@ struct MessageData {
 #[derive(Deserialize)]
 struct ModelRef {
     id: Option<String>,
+    #[serde(alias = "providerID")]
+    provider: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -338,11 +342,21 @@ fn read_layout(
             .find(|s| !s.is_empty())
             .unwrap_or("unknown")
             .to_string();
+        let provider = msg.provider_id.as_deref().or_else(|| {
+            msg.model
+                .as_ref()
+                .and_then(|model| model.provider.as_deref())
+        });
         let model = msg
             .model_id
-            .or_else(|| msg.model.and_then(|m| m.id))
+            .as_deref()
+            .or_else(|| msg.model.as_ref().and_then(|model| model.id.as_deref()))
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "unknown".to_string());
+            .unwrap_or("unknown");
+        let model = match provider {
+            Some(provider @ ("ollama" | "lmstudio")) => format!("{provider}/{model}"),
+            _ => model.to_owned(),
+        };
         let ts_ms = msg.time.and_then(|t| t.created).unwrap_or(time_created);
 
         // Reasoning is additive in OpenCode's own total, so fold it into output
@@ -500,6 +514,33 @@ mod tests {
             .unwrap();
         }
         path
+    }
+
+    #[test]
+    fn provider_provenance_keeps_local_and_cloud_models_distinct() {
+        let path = temp_db(&[
+            (
+                "local",
+                "session",
+                1,
+                r#"{"role":"assistant","modelID":"same","providerID":"ollama","tokens":{"input":2,"output":1}}"#,
+                "/tmp/repo",
+            ),
+            (
+                "cloud",
+                "session",
+                2,
+                r#"{"role":"assistant","modelID":"same","providerID":"openrouter","tokens":{"input":2,"output":1}}"#,
+                "/tmp/repo",
+            ),
+        ]);
+        let out = parse_db(&path);
+        let models: Vec<_> = out
+            .events
+            .iter()
+            .map(|event| event.model.as_str())
+            .collect();
+        assert_eq!(models, ["ollama/same", "same"]);
     }
 
     fn temp_db_v2(rows: &[(&str, &str, i64, &str, &str)]) -> PathBuf {

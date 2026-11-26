@@ -948,20 +948,24 @@ impl Store {
             return Err("the run budget is spent".into());
         }
         let remaining = remaining_budget(run);
-        let argv = automations::agent_command_in(
-            backend,
-            &prompt,
-            node.model.as_deref(),
-            node.effort.as_deref(),
-            remaining,
-            Some(Path::new(workspace_path)),
-        )?;
+        let automations::AgentRunCommand { argv, environment } =
+            automations::with_local_model(backend, node.model.as_deref(), |model| {
+                automations::agent_command_in(
+                    backend,
+                    &prompt,
+                    model,
+                    node.effort.as_deref(),
+                    remaining,
+                    Some(Path::new(workspace_path)),
+                )
+            })?;
         let run_id = run.id.clone();
         let node_id = node.id.clone();
         drain_pty(
             DrainPty {
                 run,
                 argv: &argv,
+                environment,
                 cwd: workspace_path,
                 budget_seconds: remaining,
                 node,
@@ -1002,6 +1006,7 @@ impl Store {
             DrainPty {
                 run,
                 argv: &argv,
+                environment: Vec::new(),
                 cwd: workspace_path,
                 budget_seconds: remaining,
                 node,
@@ -1148,14 +1153,17 @@ pub fn design(
     } else {
         folder
     };
-    let argv = automations::agent_command_in(
-        &backend,
-        &brief,
-        model.as_deref(),
-        effort.as_deref(),
-        180,
-        Some(Path::new(&cwd)),
-    )?;
+    let automations::AgentRunCommand { argv, environment } =
+        automations::with_local_model(&backend, model.as_deref(), |model| {
+            automations::agent_command_in(
+                &backend,
+                &brief,
+                model,
+                effort.as_deref(),
+                180,
+                Some(Path::new(&cwd)),
+            )
+        })?;
     let mut scratch = WorkflowRun {
         id: format!("design-{}", now_ms()),
         workflow_id: String::new(),
@@ -1189,6 +1197,7 @@ pub fn design(
         DrainPty {
             run: &mut scratch,
             argv: &argv,
+            environment,
             cwd: &cwd,
             budget_seconds: 180,
             node: &node,
@@ -2134,6 +2143,8 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
 struct DrainPty<'a> {
     run: &'a mut WorkflowRun,
     argv: &'a [String],
+    /// What points the agent at a local model, when the node picked one.
+    environment: Vec<(String, String)>,
     cwd: &'a str,
     budget_seconds: u64,
     node: &'a Node,
@@ -2149,6 +2160,7 @@ fn drain_pty(
     let DrainPty {
         run,
         argv,
+        environment: local_environment,
         cwd,
         budget_seconds,
         node,
@@ -2157,11 +2169,12 @@ fn drain_pty(
     let mut writer = crate::workspace_writer::Guard::acquire(Path::new(cwd))
         .map_err(|error| error.to_string())?;
     writer.ensure_current().map_err(|error| error.to_string())?;
-    let environment = match crate::launcher::agent_id_for_command(&argv[0]) {
+    let mut environment = match crate::launcher::agent_id_for_command(&argv[0]) {
         Some(agent) => crate::profiles::for_workspace_agent(&run.workspace_id, None, agent)?,
         None => Vec::new(),
     };
     let remove = crate::profiles::inherited_auth(&environment);
+    environment.extend(local_environment);
     let info = writer
         .spawn_removing_env(
             &tokenstat_pty::Spawn {

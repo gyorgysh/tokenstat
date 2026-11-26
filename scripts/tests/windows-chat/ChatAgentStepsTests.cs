@@ -19,6 +19,12 @@ internal static class ChatAgentStepsTests
             "back goes one step and stops at the first");
         Check(ChatAgentSteps.Current(noEffort, "effort") == "model" && ChatAgentSteps.Current(full, "model") == "model",
             "a step the new agent lacks falls back to its last one");
+        const string local = "local:lmstudio/qwen/coder";
+        Check(LocalChatModel.Title(local) == "LM Studio: qwen/coder" && LocalChatModel.Name(local) == "qwen/coder",
+            "local model labels preserve slashes in model IDs");
+        Check(LocalChatModel.Provider("local:ollama/qwen2.5:1.5b") == "Ollama", "Ollama has a readable provider label");
+        Check(LocalChatModel.Title("openrouter/qwen/coder") == "openrouter/qwen/coder"
+            && LocalChatModel.Provider("local:ollama/") is null, "cloud and malformed IDs keep their original labels");
         Console.WriteLine("Agent steps: agent, model and effort walk in order, skip what an agent lacks, and go back.");
     }
 }

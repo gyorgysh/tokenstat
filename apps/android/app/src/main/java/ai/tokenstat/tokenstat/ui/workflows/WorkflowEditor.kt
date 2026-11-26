@@ -689,7 +689,7 @@ private fun StarterSection(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                 ChoiceChip(L10n.text("android.workfloweditor.default.21b111cb"), designModel.isEmpty(), { onDesignModel("") })
                 backend.models.forEach { model ->
-                    ChoiceChip(model, designModel == model, { onDesignModel(model) })
+                    ChoiceChip(ai.tokenstat.tokenstat.ui.workspace.localChatModelTitle(model), designModel == model, { onDesignModel(model) })
                 }
             }
         }
@@ -868,7 +868,7 @@ private fun StepDetailFields(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                         ChoiceChip(L10n.text("android.workfloweditor.default.21b111cb"), node.model.isNullOrEmpty(), { onUpdate { it.copy(model = null) } })
                         backend.models.forEach { model ->
-                            ChoiceChip(model, node.model == model, { onUpdate { it.copy(model = model) } })
+                            ChoiceChip(ai.tokenstat.tokenstat.ui.workspace.localChatModelTitle(model), node.model == model, { onUpdate { it.copy(model = model) } })
                         }
                     }
                 }

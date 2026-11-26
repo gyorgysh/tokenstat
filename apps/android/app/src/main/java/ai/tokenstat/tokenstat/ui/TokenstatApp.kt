@@ -2105,7 +2105,12 @@ private fun InsightRow(row: JsonObject, cut: Int, peak: Long) {
                 )
             }
             Spacer(Modifier.width(Space.s))
-            Text(moneyValue(value, estimated, complete), color = tsAccent(), style = TsType.numeric(16))
+            val price = if (row["local"]?.jsonPrimitive?.booleanOrNull == true && value == 0L) {
+                L10n.text("common.value.local")
+            } else {
+                moneyValue(value, estimated, complete)
+            }
+            Text(price, color = tsAccent(), style = TsType.numeric(16))
         }
         Box(
             Modifier

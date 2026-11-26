@@ -605,7 +605,7 @@ private fun AutomationBackendChips(
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             ChoiceChip(L10n.text("android.automationeditor.default.21b111cb"), fields.model.isEmpty(), { onFields(fields.copy(model = "")) })
             models.forEach { model ->
-                ChoiceChip(model, fields.model == model, { onFields(fields.copy(model = model)) })
+                ChoiceChip(ai.tokenstat.tokenstat.ui.workspace.localChatModelTitle(model), fields.model == model, { onFields(fields.copy(model = model)) })
             }
         }
     }

@@ -28,6 +28,19 @@ class ChatAgentPanelTest {
         )
 
     @Test
+    fun `local model labels preserve slashes tags and cloud IDs`() {
+        val local = "local:lmstudio/qwen/coder"
+        assertEquals("LM Studio: qwen/coder", localChatModelTitle(local))
+        assertEquals("qwen/coder", localChatModelName(local))
+        assertEquals("Ollama", localChatProvider("local:ollama/qwen2.5:1.5b"))
+        assertEquals("openrouter/qwen/coder", localChatModelTitle("openrouter/qwen/coder"))
+        assertNull(localChatProvider("local:ollama/"))
+        val backend = obj("""{"localModels":[{"id":"$local","contextLength":32768}]}""")
+        assertEquals(32768L, localModelContext(backend, local))
+        assertNull(localModelContext(backend, "qwen/coder"))
+    }
+
+    @Test
     fun `only an explicit false means not installed`() {
         assertTrue(backendNotInstalled(obj("""{"installed":false}""")))
         assertFalse(backendNotInstalled(obj("""{"installed":true}""")))

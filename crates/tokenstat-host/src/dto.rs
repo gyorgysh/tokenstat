@@ -127,6 +127,9 @@ pub struct BucketDto {
     pub estimated: bool,
     /// Models nothing could price. Non-empty means `valueMicros` is a floor.
     pub unpriced_models: Vec<String>,
+    /// Every model here ran on a local server, so the value is zero.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
 }
 
 impl From<PricedBucket> for BucketDto {
@@ -139,6 +142,7 @@ impl From<PricedBucket> for BucketDto {
             value_micros: b.value.micros(),
             estimated: b.estimated,
             unpriced_models: b.unpriced_models,
+            local: b.local,
         }
     }
 }

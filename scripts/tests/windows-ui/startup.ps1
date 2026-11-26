@@ -506,6 +506,48 @@ try {
         Write-Output "PASS: cold protocol activation $cold of 3 waits for the project inventory and opens Changes"
     }
     Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'
+    # Exercise the real terminal bar with a named account and a model whose tag
+    # contains a colon. The provider stays on loopback and never starts an agent.
+    $previousOllama = Call-Host 'local.models' | Where-Object { $_.id -eq 'ollama' } | Select-Object -First 1
+    if (!$previousOllama) { throw 'The host did not list the Ollama provider' }
+    $catalogPortFile = Join-Path $env:RUNNER_TEMP "tokenstat-ollama-$PID.port"
+    $catalogScript = Join-Path $PSScriptRoot 'local-model-fixture.py'
+    $catalogProcess = Start-Process -FilePath (Get-Command python).Source -ArgumentList @("`"$catalogScript`"", "`"$catalogPortFile`"") -PassThru -WindowStyle Hidden
+    try {
+        for ($attempt = 0; $attempt -lt 40; $attempt++) {
+            if ($catalogProcess.HasExited) { throw 'The local model fixture exited before publishing its port' }
+            if (Test-Path -LiteralPath $catalogPortFile) { break }
+            Start-Sleep -Milliseconds 100
+        }
+        $catalogPort = [int](Get-Content -LiteralPath $catalogPortFile -Raw)
+        Call-Host 'local.provider.set' @{id = 'ollama'; port = $catalogPort} | Out-Null
+        Open-Place 'Repositories'
+        Reveal-RepositorySidebar
+        Invoke-Control (Wait-ForControl "sidebar.workspace.$($folder.id)" 15 -Enabled)
+        Invoke-Control (Wait-ForControl 'workspace.launchProfile' 15 -Enabled)
+        Invoke-Control (Wait-ForControl "workspace.launchProfile.option.$($profile.id)" 15 -Enabled -IncludePopups -ExpectedName $profileName)
+        Invoke-Control (Wait-ForControl 'workspace.launchModel' 15 -Enabled)
+        Invoke-Control (Wait-ForControl 'workspace.launchModel.option.ollama:fixture:latest' 15 -Enabled -IncludePopups)
+        $modelMenu = Wait-ForControl 'workspace.launchModel' 15 -Enabled -ExpectedName 'Model · Ollama: fixture:latest'
+        $launchPrefs = Get-Content -LiteralPath "$env:LOCALAPPDATA/tokenstat/workspace-launch.json" -Raw | ConvertFrom-Json -AsHashtable
+        $choices = $launchPrefs[$folder.id]
+        if ($choices.profile -ne $profile.id -or $choices.localModel -ne 'ollama:fixture:latest') {
+            throw 'The native terminal menus did not persist the selected profile and model'
+        }
+        Invoke-Control $modelMenu
+        Invoke-Control (Wait-ForControl 'workspace.launchModel.default' 15 -Enabled -IncludePopups)
+        Wait-ForControl 'workspace.launchModel' 15 -Enabled -ExpectedName "Model · Each tool’s default" | Out-Null
+        $launchPrefs = Get-Content -LiteralPath "$env:LOCALAPPDATA/tokenstat/workspace-launch.json" -Raw | ConvertFrom-Json -AsHashtable
+        if ($launchPrefs[$folder.id].localModel) { throw 'The native terminal model menu did not clear its selection' }
+        Write-Output 'PASS: the native terminal menus select and persist a named profile and tagged local model, and restore the model default'
+    } finally {
+        try { Call-Host 'local.provider.set' @{id = 'ollama'; port = $previousOllama.port} | Out-Null }
+        finally {
+            if (!$catalogProcess.HasExited) { $catalogProcess.Kill(); $catalogProcess.WaitForExit() }
+            $catalogProcess.Dispose()
+            Remove-Item -LiteralPath $catalogPortFile -ErrorAction SilentlyContinue
+        }
+    }
     Call-Host 'profiles.setWorkspaceLock' @{workspaceId = $folder.id; profileId = $profile.id} | Out-Null
     Open-Place 'Repositories'
     Reveal-RepositorySidebar

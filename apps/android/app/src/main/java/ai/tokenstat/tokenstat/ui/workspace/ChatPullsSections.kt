@@ -435,6 +435,19 @@ fun ChatSection(
     }
     DisposableEffect(projectOwner) { onDispose { cacheAnswer?.complete(ChatCacheAnswer.CANCEL) } }
     cacheQuestion?.let { question -> ChatCacheDialog(question, context) { cacheAnswer?.complete(it) } }
+    // An agent update offered before a message goes, once per version, as on
+    // the Mac. True sends after updating, false sends without, null cancels.
+    var updateQuestion by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
+    var updateAnswer by remember(projectOwner) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean?>?>(null) }
+    suspend fun askUpdate(backend: JsonObject): Boolean? {
+        updateAnswer?.complete(null)
+        val answer = kotlinx.coroutines.CompletableDeferred<Boolean?>()
+        updateQuestion = backend; updateAnswer = answer
+        return try { answer.await() } finally { updateQuestion = null; updateAnswer = null }
+    }
+    updateQuestion?.let { backend ->
+        AgentUpdateDialog(backend) { updateAnswer?.complete(it) }
+    }
     DisposableEffect(projectOwner) { onDispose { fileRelayAnswer?.complete(false); fileTransferJob?.cancel() } }
     fileRelayPrompt?.let { (name, size) ->
         ChatFileRelayDialog(name, size, fileRelayRemaining, client.account,
@@ -1304,15 +1317,33 @@ fun ChatSection(
         // an environment key has no login file at all.
         val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") &&
             ChatCommandRules.canSteer(command, staged.isNotEmpty(), chat.bol("nativeSteerAttachments"))
-        if (!liveInput && ownAgentProfile(profiles, chat?.str("profileId"), selectedBackend?.str("launcherId")) == null && selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
+        val clean = text.trim()
+        if (clean.isEmpty() && staged.isEmpty()) return
+        val local = localChatProvider(chat?.str("model").orEmpty()) != null
+        if (!liveInput && !local && ownAgentProfile(profiles, chat?.str("profileId"), selectedBackend?.str("launcherId")) == null && selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
             error = L10n.text("android.agentsetup.draft_kept", selectedBackend?.str("label") ?: "")
             return
         }
         val sentOwner = projectOwner?.conversation(id) ?: return
         val sentDraft = model.chatComposers.capture(sentOwner)
         val sent = sentDraft.snapshot
-        val clean = text.trim()
-        if (clean.isEmpty() && staged.isEmpty()) return
+        if (!liveInput && selectedBackend != null && AgentUpdateOffer.isDue(context, selectedBackend, peer)) {
+            val answer = askUpdate(selectedBackend)
+            if (!ownsProject() || openId != id || model.chatComposers.capture(sentOwner) != sentDraft) return
+            when (answer) {
+                null -> return
+                false -> AgentUpdateOffer.skip(context, selectedBackend, peer)
+                true -> {
+                    val updated = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                    model.updateAgent(peer, selectedBackend.str("launcherId").orEmpty(), selectedBackend.str("label").orEmpty()) {
+                        updated.complete((it?.get("ok") as? JsonPrimitive)?.booleanOrNull == true)
+                    }
+                    // A failed update keeps the words in the composer.
+                    if (!updated.await() || openId != id || !ownsProject()) return
+                }
+            }
+            if (!ownsProject() || openId != id || model.chatComposers.capture(sentOwner) != sentDraft) return
+        }
         // A long pause emptied the prompt cache: this message would make the
         // agent read the whole conversation again. Ask first. Files are
         // uploaded into this chat, so a message carrying them cannot move.
@@ -2321,7 +2352,10 @@ fun ChatSection(
                 compactKeyboard = compactKeyboard,
                 chat = chats.firstOrNull { it.str("id") == openId },
                 profileTitle = agentProfileTitle(profiles, openChat?.str("profileId")),
-                quota = {
+                quota = quota@{
+                    // A local model spends no plan, so the plan's windows
+                    // would only suggest that it does.
+                    if (localChatProvider(openChat?.str("model").orEmpty()) != null) return@quota
                     val backendId = openChat?.str("backend").orEmpty()
                     val launcher = backendOf(backends, backendId)?.str("launcherId")
                     val profile = ownAgentProfile(profiles, openChat?.str("profileId"), launcher)
@@ -3991,7 +4025,7 @@ internal fun ChatComposer(
                     }
                     val speedBackend = backends.firstOrNull { it.str("id") == chat?.str("backend") }
                     val fastModels = speedBackend?.get("fastModeModels") as? JsonArray
-                    if (fastModels != null && !offline && !compactKeyboard) {
+                    if (fastModels != null && !offline && !compactKeyboard && localChatProvider(chat?.str("model").orEmpty()) == null) {
                         val fast = chatFastModeOn(chat)
                         val fastAvailable = chatFastModeAvailable(chat?.str("model"), fastModels, chat?.str("backend"))
                         val grokSpeed = chat?.str("backend") == "grok"
@@ -4150,4 +4184,47 @@ internal fun deferUnavailableSteer(
     if (index < 0 || items[index] != attempt) return false
     items[index] = attempt.copy(delivery = ChatDelivery.Waiting, attemptedAtMs = null)
     return true
+}
+
+/// An agent update offered just before a message goes to an agent that is
+/// behind. Port of the Apple `AgentUpdatePrompt`: asked once per version and
+/// per host, and the picker still updates any agent by hand.
+internal object AgentUpdateOffer {
+    private fun prefs(context: android.content.Context) =
+        context.getSharedPreferences("tokenstat.agentupdate.v1", android.content.Context.MODE_PRIVATE)
+
+    private fun key(backend: JsonObject, peer: String) =
+        "skipped.$peer.${backend.str("launcherId") ?: backend.str("id")}"
+
+    fun isDue(context: android.content.Context, backend: JsonObject, peer: String): Boolean {
+        val latest = backend.str("latestVersion") ?: return false
+        if (!backend.bol("updateAvailable") || backend.str("launcherId") == null) return false
+        if ((backend["installed"] as? JsonPrimitive)?.booleanOrNull == false) return false
+        return prefs(context).getString(key(backend, peer), null) != latest
+    }
+
+    fun skip(context: android.content.Context, backend: JsonObject, peer: String) {
+        val latest = backend.str("latestVersion") ?: return
+        prefs(context).edit().putString(key(backend, peer), latest).apply()
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun AgentUpdateDialog(backend: JsonObject, answer: (Boolean?) -> Unit) {
+    val label = backend.str("label").orEmpty()
+    AlertDialog(
+        onDismissRequest = { answer(null) },
+        title = { Text(L10n.text("common.agent_updates.prompt_title", label)) },
+        text = {
+            Text(
+                listOfNotNull(
+                    backend.str("installedVersion")?.let { L10n.text("common.agent_updates.installed") + " " + it },
+                    backend.str("latestVersion")?.let { L10n.text("common.agent_updates.latest") + " " + it },
+                    L10n.text("common.agent_updates.prompt_detail"),
+                ).joinToString("\n"),
+            )
+        },
+        confirmButton = { TextButton(onClick = { answer(true) }) { Text(L10n.text("common.agent_updates.update_and_send")) } },
+        dismissButton = { TextButton(onClick = { answer(false) }) { Text(L10n.text("common.agent_updates.skip_version")) } },
+    )
 }

@@ -260,6 +260,30 @@ pub fn agent_command(
     agent_command_in(backend, prompt, model, effort, budget_seconds, None)
 }
 
+pub(crate) struct AgentRunCommand {
+    pub(crate) argv: Vec<String>,
+    pub(crate) environment: Vec<(String, String)>,
+}
+
+/// Build an agent's command for a run that may use a local model: the
+/// model name the CLI expects, its local flags, and the environment that
+/// points it at LM Studio or Ollama. The same setup chat turns use.
+pub(crate) fn with_local_model(
+    backend: &str,
+    model: Option<&str>,
+    build: impl FnOnce(Option<&str>) -> Result<Vec<String>, String>,
+) -> Result<AgentRunCommand, String> {
+    let run = crate::chat::turn_model(backend, model)?;
+    let mut argv = build(run.cli.as_deref())?;
+    if !run.leading_args.is_empty() && !argv.is_empty() {
+        argv.splice(1..1, run.leading_args.iter().cloned());
+    }
+    Ok(AgentRunCommand {
+        argv,
+        environment: run.environment,
+    })
+}
+
 pub(crate) fn agent_command_in(
     backend: &str,
     prompt: &str,
@@ -1163,6 +1187,14 @@ pub(crate) fn agent_backends() -> impl Iterator<Item = &'static BackendSpec> {
 /// names. `force` is somebody pressing Refresh in the picker: probe the
 /// CLIs now and wait, instead of serving the cache while a background pass
 /// catches up.
+/// The name a person reads for an agent, such as "Claude".
+pub(crate) fn backend_label(id: &str) -> &str {
+    BACKENDS
+        .iter()
+        .find(|backend| backend.id == id)
+        .map_or(id, |backend| backend.label)
+}
+
 pub fn backends(force: bool) -> Vec<serde_json::Value> {
     if force {
         crate::agent_models::refresh_now();
@@ -2026,24 +2058,26 @@ impl Store {
     ) -> Result<RunRecord, String> {
         self.ensure_runs_available()?;
         let workspace = crate::workspaces::folder(&job.workspace_id)?;
-        if interactive {
-            interactive_agent_command_in(
-                &job.backend,
-                &job.prompt,
-                job.model.as_deref(),
-                job.effort.as_deref(),
-                Some(&workspace.path),
-            )?;
-        } else {
-            agent_command_in(
-                &job.backend,
-                &job.prompt,
-                job.model.as_deref(),
-                job.effort.as_deref(),
-                job.budget_seconds,
-                Some(&workspace.path),
-            )?;
-        }
+        with_local_model(&job.backend, job.model.as_deref(), |model| {
+            if interactive {
+                interactive_agent_command_in(
+                    &job.backend,
+                    &job.prompt,
+                    model,
+                    job.effort.as_deref(),
+                    Some(&workspace.path),
+                )
+            } else {
+                agent_command_in(
+                    &job.backend,
+                    &job.prompt,
+                    model,
+                    job.effort.as_deref(),
+                    job.budget_seconds,
+                    Some(&workspace.path),
+                )
+            }
+        })?;
         let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
         let pending = Pending {
             interactive,
@@ -2151,31 +2185,41 @@ impl Store {
         let workspace = crate::workspaces::folder(&pending.job.workspace_id)?;
         let mut writer = crate::workspace_writer::Guard::acquire(&workspace.path)
             .map_err(|error| error.to_string())?;
-        let argv = if pending.interactive {
-            interactive_agent_command_in(
-                &pending.job.backend,
-                &pending.job.prompt,
-                pending.job.model.as_deref(),
-                pending.job.effort.as_deref(),
-                Some(&workspace.path),
-            )?
-        } else {
-            agent_command_in(
-                &pending.job.backend,
-                &pending.job.prompt,
-                pending.job.model.as_deref(),
-                pending.job.effort.as_deref(),
-                pending.job.budget_seconds,
-                Some(&workspace.path),
-            )?
-        };
+        let AgentRunCommand {
+            argv,
+            environment: local_environment,
+        } = with_local_model(
+            &pending.job.backend,
+            pending.job.model.as_deref(),
+            |model| {
+                if pending.interactive {
+                    interactive_agent_command_in(
+                        &pending.job.backend,
+                        &pending.job.prompt,
+                        model,
+                        pending.job.effort.as_deref(),
+                        Some(&workspace.path),
+                    )
+                } else {
+                    agent_command_in(
+                        &pending.job.backend,
+                        &pending.job.prompt,
+                        model,
+                        pending.job.effort.as_deref(),
+                        pending.job.budget_seconds,
+                        Some(&workspace.path),
+                    )
+                }
+            },
+        )?;
         writer.ensure_current().map_err(|error| error.to_string())?;
-        let environment = crate::profiles::for_workspace_agent(
+        let mut environment = crate::profiles::for_workspace_agent(
             &workspace.id,
             None,
             crate::chat::launcher_profile_id(&pending.job.backend),
         )?;
         let remove = crate::profiles::inherited_auth(&environment);
+        environment.extend(local_environment);
         let info = writer
             .spawn_removing_env(
                 &tokenstat_pty::Spawn {

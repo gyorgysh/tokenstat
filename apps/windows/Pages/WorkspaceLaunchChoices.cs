@@ -43,10 +43,8 @@ internal static class WorkspaceLaunchChoices
         {
             if (await AgentProfiles.ReadAsync(workspaceId) is { } profiles && profiles.Lock(workspaceId) is null)
             {
-                var id = Profile(workspaceId) ?? profiles.DefaultId;
-                // A profile deleted since it was picked falls back to the
-                // computer's own logins rather than failing every launch.
-                if (id != AgentProfiles.SystemId && profiles.Find(id) is not null) spawn["profileId"] = id;
+                var id = SelectedProfile(workspaceId, profiles);
+                if (id != AgentProfiles.SystemId) spawn["profileId"] = id;
             }
         }
         catch
@@ -79,6 +77,14 @@ internal static class WorkspaceLaunchChoices
         return button;
     }
 
+    private static string SelectedProfile(string workspaceId, AgentProfiles profiles)
+    {
+        if (profiles.Lock(workspaceId) is { } locked) return locked;
+        var id = Profile(workspaceId) ?? profiles.DefaultId;
+        // The launch and its label agree when a remembered profile was removed.
+        return profiles.Find(id) is not null ? id : AgentProfiles.SystemId;
+    }
+
     private static async Task FillProfilesAsync(DropDownButton button, string workspaceId, Action changed)
     {
         AgentProfiles? profiles;
@@ -86,7 +92,7 @@ internal static class WorkspaceLaunchChoices
         catch { return; }
         if (profiles is null || profiles.Choices.Length < 2) return;
         var locked = profiles.Lock(workspaceId);
-        var current = locked ?? Profile(workspaceId) ?? profiles.DefaultId;
+        var current = SelectedProfile(workspaceId, profiles);
         SetLabel(button, locked is null ? "" : "", profiles.Title(current), current != AgentProfiles.SystemId);
         var flyout = new MenuFlyout();
         foreach (var choice in profiles.Choices)
@@ -98,6 +104,7 @@ internal static class WorkspaceLaunchChoices
                 IsChecked = id == current,
                 IsEnabled = locked is null || locked == id,
             };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, "workspace.launchProfile.option." + id);
             item.Click += (_, _) => { Set(workspaceId, "profile", id); changed(); };
             flyout.Items.Add(item);
         }
@@ -131,12 +138,14 @@ internal static class WorkspaceLaunchChoices
         SetLabel(button, selected is null ? "" : "", current, selected is not null); // Cloud, Devices
         var flyout = new MenuFlyout();
         var standard = new ToggleMenuFlyoutItem { Text = defaultLabel, IsChecked = selected is null };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(standard, "workspace.launchModel.default");
         standard.Click += (_, _) => { Set(workspaceId, "localModel", null); changed(); };
         flyout.Items.Add(standard);
         if (choices.Count > 0) flyout.Items.Add(new MenuFlyoutSeparator());
         foreach (var choice in choices)
         {
             var item = new ToggleMenuFlyoutItem { Text = choice.Label, IsChecked = choice.Key == selected };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, "workspace.launchModel.option." + choice.Key);
             item.Click += (_, _) => { Set(workspaceId, "localModel", choice.Key); changed(); };
             flyout.Items.Add(item);
         }

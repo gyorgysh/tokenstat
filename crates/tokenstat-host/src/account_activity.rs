@@ -554,6 +554,9 @@ pub fn breakdown(
                 value: EquivalentValue::from_micros(micros),
                 estimated,
                 unpriced_models: unpriced,
+                // The account plane carries synced totals, which never say
+                // where a model ran.
+                local: false,
             }
         })
         .collect();

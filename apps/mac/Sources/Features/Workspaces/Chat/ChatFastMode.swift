@@ -7,7 +7,7 @@ enum ChatFastMode {
     /// A nil list also covers older
     /// hosts, which must not show a switch they cannot honor.
     static func available(model: String?, models: [String]?, backend: String? = nil) -> Bool {
-        guard let models else { return false }
+        guard let models, model?.trimmingCharacters(in: .whitespaces).hasPrefix("local:") != true else { return false }
         if backend == "grok" { return models.contains(model ?? "") }
         if models.isEmpty { return true }
         guard let model else { return models.contains("") }

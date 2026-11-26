@@ -84,6 +84,11 @@ pub(super) fn total_cell(c: &Counters) -> String {
 /// as tokenstat.ai and the upcoming CLI 0.1.2 note on opaque routers.
 pub(super) fn price_cell(prices: &PriceTable, model: &str, c: &Counters) -> String {
     let lookup = display_usage_model_id(model);
+    // A model served on this machine costs nothing. Say so, rather than a
+    // $0 that reads like a free tier.
+    if prices.is_local(&lookup) {
+        return "local".to_string();
+    }
     match EquivalentValue::price(prices, &lookup, c) {
         Some(v) if prices.is_estimate(&lookup) && v.dollars() > 0.0 => {
             format!("~{}", ui::usd(v.dollars()))

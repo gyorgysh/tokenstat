@@ -101,8 +101,8 @@ struct FavoriteModelPicker: View {
         let favs = favorites.ids(for: backendID).filter { ids.contains($0) }
         let rest = ids.filter { !favs.contains($0) }
         return [(value: "", label: L10n.text("apple.favoritemodelpicker.default.21b111cb"))]
-            + favs.map { (value: $0, label: $0) }
-            + rest.map { (value: $0, label: $0) }
+            + favs.map { (value: $0, label: LocalChatModel.title($0)) }
+            + rest.map { (value: $0, label: LocalChatModel.title($0)) }
     }
 
     private func clampSelection() {

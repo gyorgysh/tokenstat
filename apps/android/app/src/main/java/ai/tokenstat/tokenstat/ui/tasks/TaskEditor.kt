@@ -124,7 +124,7 @@ fun TaskFields(
                 ChoiceChip(L10n.text("android.taskeditor.default.21b111cb"), fields.model.isEmpty(), { changeFields(fields.copy(model = "")) })
                 options.forEach { model ->
                     ChoiceChip(
-                        model,
+                        ai.tokenstat.tokenstat.ui.workspace.localChatModelTitle(model),
                         fields.model == model,
                         { changeFields(fields.copy(model = model)) },
                     )

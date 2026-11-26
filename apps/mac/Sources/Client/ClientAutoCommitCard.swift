@@ -75,7 +75,7 @@ struct ClientAutoCommitCard: View {
         if let backend = session.selectedBackend, !backend.models.isEmpty {
             AppMenuPicker(
                 title: L10n.text("apple.clientautocommitcard.model.5e2c614c"),
-                options: backend.models.map { (value: $0, label: $0) },
+                options: backend.models.map { (value: $0, label: LocalChatModel.title($0)) },
                 selection: Binding(
                     get: { session.draft.model },
                     set: { session.setModel($0) }

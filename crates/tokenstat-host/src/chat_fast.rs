@@ -40,6 +40,9 @@ fn grok_models(catalog: &[String]) -> Option<Vec<String>> {
 }
 
 pub(crate) fn available(backend: &str, model: Option<&str>) -> bool {
+    if crate::local_models::chat_selection(model).is_some() {
+        return false;
+    }
     let Some(models) = models(backend) else {
         return false;
     };

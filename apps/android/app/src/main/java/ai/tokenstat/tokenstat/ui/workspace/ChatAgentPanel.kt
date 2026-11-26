@@ -58,6 +58,7 @@ import kotlinx.serialization.json.JsonArray
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -139,7 +140,13 @@ internal fun chatAgentChoices(
                     value = ChatAgentChoice.Model(id),
                     label = localChatModelName(id) ?: id,
                     detail = if (id !in listed) L10n.text("android.chatagentpanel.saved_choice_availability_unverified.96a7ce32")
-                        else localChatProvider(id)?.let { L10n.text("common.chat.local_model_host", it) },
+                        else localChatProvider(id)?.let { place ->
+                            val host = L10n.text("common.chat.local_model_host", place)
+                            val tokens = localModelContext(current, id)
+                            if (tokens != null && tokens < LOCAL_ROOMY_CONTEXT) {
+                                host + " · " + L10n.text("common.chat.local_model_small", "${tokens / 1024}K")
+                            } else host
+                        },
                     section = SECTION_MODEL,
                 ),
             )
@@ -203,6 +210,15 @@ internal fun chatAgentForcesBypass(backends: List<JsonObject>, id: String): Bool
 
 /// A model on a local server, stored by the host as `local:<provider>/<model>`,
 /// reads as the server and the model. Port of `LocalChatModel.title`.
+/// Below this an agent's own instructions crowd out the conversation.
+internal const val LOCAL_ROOMY_CONTEXT = 65_536L
+
+/// Tokens a local model holds, when the host's server said.
+internal fun localModelContext(backend: JsonObject?, id: String): Long? =
+    (backend?.get("localModels") as? JsonArray)?.filterIsInstance<JsonObject>()
+        ?.firstOrNull { it.str("id") == id }?.get("contextLength")
+        ?.let { (it as? JsonPrimitive)?.longOrNull }
+
 internal fun localChatProvider(id: String): String? =
     localChatModelTitle(id).takeIf { it != id }?.substringBefore(": ")
 

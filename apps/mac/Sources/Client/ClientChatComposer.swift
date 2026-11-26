@@ -156,7 +156,9 @@ struct ClientChatComposer: View {
             showCompactAgent: !compactHeight || expanded
         ) {
             HStack(spacing: Theme.Space.s) {
-                if !model.isSharedSource {
+                // A local model spends no plan, so the plan's windows would
+                // only suggest that it does.
+                if !model.isSharedSource, LocalChatModel.parse(chat.model) == nil {
                     ComposerLimitsBadge(backend: chat.backend, peer: model.peer, profileID: model.limitsProfileID(for: chat), compact: true, showUsage: {
                         model.showingUsageStats = true
                         model.showingCommandStats = true

@@ -359,6 +359,8 @@ final class ChatModel {
     /// send: a stored token past its expiry is routine (the CLI renews it),
     /// and an agent signed in with an environment key has no login file.
     func needsSignIn(_ backendID: String) -> Bool {
+        if let chat = selected, chat.backend == backendID, let model = chat.model,
+           LocalChatModel.parse(model) != nil { return false }
         guard let backend = backend(for: backendID) else { return false }
         if peer != nil && usesOwnLogin(backend, chat: selected) { return false }
         if usesOwnLogin(backend, chat: selected), let id = profileID(for: selected) {

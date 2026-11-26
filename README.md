@@ -59,6 +59,37 @@ everything that runs on your machine.
   <em>One archive, one core. The terminal, the Mac, the phone and the tablet all read it.</em>
 </p>
 
+## Agent profiles and local models
+
+### Separate work and personal logins
+
+On the computer that runs your agents, open **Account** and go to **Agent
+profiles**. On Windows, look under **This PC**. Create a profile and give the agent its own login, then sign in
+from that profile. Agents set to share the computer's login continue to use
+that login. The profile picker in chat and the terminal launcher shows which
+profile will run the agent.
+
+To enforce a profile for a repository, open that repository's profile control
+and set a lock. To switch an existing chat to another profile, continue it in
+a new chat. The new profile gets a handoff summary and starts with its own
+session. Use the profile filters in Insights to inspect each login's usage.
+
+### Use a local model
+
+Start Ollama or LM Studio on the computer that runs the agent. Install a model
+in Ollama or load one in LM Studio. In tokenstat, choose a supported agent,
+then choose a model marked **Local** in the chat picker or terminal launcher.
+You can also select local models for agent tasks, workflow steps and
+automations. On a paired phone or tablet, the model runs on the connected
+computer.
+
+Claude Code needs a local server that supports the Anthropic Messages API.
+The picker warns when the server reports a context window below 64K tokens.
+Choose a larger window for long chats and tool-heavy work. If the server stops
+or the model is unloaded, start the server or load the model again before
+retrying. Insights labels identifiable local usage **Local** and values it at
+zero.
+
 ## Charts in agent replies
 
 Agents can present interactive charts directly in chat on Mac, Windows, iPhone,

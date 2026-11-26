@@ -1987,6 +1987,9 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     /// </summary>
     private static string Money(JsonNode? row)
     {
+        // Ran on a local server: nothing to value, and $0.00 would read like
+        // a free tier of a cloud model.
+        if (Format.Flag(row, "local") && Format.Long(row, "valueMicros") == 0) return L10n.Text("common.value.local");
         string amount = Format.ListRate(Format.Long(row, "valueMicros"));
         if (row?["unpricedModels"] is JsonArray unpriced && unpriced.Count > 0)
         {

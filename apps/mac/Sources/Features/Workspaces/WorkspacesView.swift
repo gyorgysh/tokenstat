@@ -754,7 +754,7 @@ private struct CommitBox: View {
             )
             if let backend = selectedBackend, !backend.models.isEmpty {
                 AppMenuPicker(
-                    options: backend.models.map { (value: $0, label: $0) },
+                    options: backend.models.map { (value: $0, label: LocalChatModel.title($0)) },
                     selection: modelBinding
                 )
             }

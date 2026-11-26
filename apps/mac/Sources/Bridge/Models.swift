@@ -880,6 +880,8 @@ struct Bucket: Codable, Sendable, Hashable, Identifiable {
     var valueMicros: Int64
     var estimated: Bool
     var unpricedModels: [String]
+    /// Every model here ran on a local server. Absent from older hosts.
+    var local: Bool?
 
     var id: String { key }
 
@@ -887,7 +889,8 @@ struct Bucket: Codable, Sendable, Hashable, Identifiable {
     /// valued the same way, so this is what the tokens were worth at list
     /// rates, not what anyone was billed.
     var value: Money {
-        Money(micros: valueMicros, estimated: estimated, complete: unpricedModels.isEmpty)
+        Money(micros: valueMicros, estimated: estimated, complete: unpricedModels.isEmpty,
+              local: local == true)
     }
 }
 
@@ -1271,6 +1274,9 @@ struct Money: Sendable, Hashable {
     /// Every model in the bucket could be priced. When false the figure is a
     /// floor, and presenting it as a total would understate silently.
     var complete: Bool
+    /// Ran on a local server: nothing to value, and $0 would read like a
+    /// free tier of a cloud model.
+    var local = false
 
     var dollars: Double { Double(micros) / 1_000_000 }
 
@@ -1289,6 +1295,7 @@ struct Money: Sendable, Hashable {
     }()
 
     var formatted: String {
+        if local && micros == 0 { return L10n.text("common.value.local") }
         let amount = Self.currency.string(from: NSNumber(value: dollars))
             ?? String(format: "$%.2f", dollars)
         // A floor reads as "at least this much", an estimate as "about this
@@ -3027,6 +3034,12 @@ enum LocalModelLaunch {
     }
 }
 
+/// One local model in an agent's list, as the host describes it.
+struct LocalChatModelInfo: Codable, Sendable, Hashable {
+    var id: String
+    var contextLength: Int?
+}
+
 /// A chat model on a local server, named `local:<provider>/<model>` by the
 /// host. Shown as the server and the model rather than the stored id.
 enum LocalChatModel {
@@ -3045,6 +3058,10 @@ enum LocalChatModel {
         default: id
         }
     }
+
+    /// Below this an agent's own instructions crowd out the conversation, and
+    /// some agents start summarising on the first turn.
+    static let roomyContext = 65_536
 
     /// `LM Studio: qwen/qwen3-coder` for a local id, the id itself otherwise.
     static func title(_ id: String) -> String {
@@ -3080,6 +3097,8 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var updateAvailable: Bool = false
     var latestVersion: String? = nil
     var installedVersion: String? = nil
+    /// The local models in `models`, with how much each one holds.
+    var localModels: [LocalChatModelInfo] = []
 
     /// Older hosts already support these two terminal flows, but do not yet
     /// include sign-in metadata in chat.backends.
@@ -3097,6 +3116,7 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         case launcherID = "launcherId"
         case canInstall, readiness, signIn, canCheckSignIn
         case updateAvailable, latestVersion, installedVersion
+        case localModels
     }
 
     init(from decoder: Decoder) throws {
@@ -3121,6 +3141,12 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         fastModeModels = try c.decodeIfPresent([String].self, forKey: .fastModeModels)
         fastModeLive = try c.decodeIfPresent(Bool.self, forKey: .fastModeLive) ?? false
         gateTier = try c.decodeIfPresent(String.self, forKey: .gateTier) ?? "full"
+        localModels = (try? c.decodeIfPresent([LocalChatModelInfo].self, forKey: .localModels)) ?? []
+    }
+
+    /// Tokens a local model holds, when its server said.
+    func contextLength(of id: String) -> Int? {
+        localModels.first { $0.id == id }?.contextLength
     }
 
     func encode(to encoder: Encoder) throws {
@@ -3143,6 +3169,7 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         try c.encode(updateAvailable, forKey: .updateAvailable)
         try c.encodeIfPresent(latestVersion, forKey: .latestVersion)
         try c.encodeIfPresent(installedVersion, forKey: .installedVersion)
+        if !localModels.isEmpty { try c.encode(localModels, forKey: .localModels) }
     }
 }
 

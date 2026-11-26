@@ -266,7 +266,8 @@ struct ChatFastModeButton: View {
     }
 
     var body: some View {
-        if backend?.fastModeModels != nil, backend?.installed != false, model.savedCopy == nil {
+        if backend?.fastModeModels != nil, backend?.installed != false, model.savedCopy == nil,
+           LocalChatModel.parse(chat.model) == nil {
             Button(title, .fastMode) {
                 #if os(macOS)
                 save(!chat.fastMode)
@@ -638,9 +639,11 @@ struct ChatAgentChoices {
                 let detail: String? = !backend.models.contains(id)
                     ? L10n.text("apple.chatsetupheader.saved_choice_availability_unverified.96a7ce32")
                     : local.map {
-                        model.peer == nil
+                        let place = model.peer == nil
                             ? L10n.text("common.chat.local_model_here", LocalChatModel.providerName($0.provider))
                             : L10n.text("common.chat.local_model_host", LocalChatModel.providerName($0.provider))
+                        guard let tokens = backend.contextLength(of: id), tokens < LocalChatModel.roomyContext else { return place }
+                        return place + " · " + L10n.text("common.chat.local_model_small", "\(tokens / 1024)K")
                     }
                 return PickerChoice(value: Choice.model(id), label: local?.model ?? id, detail: detail,
                                     section: L10n.text("apple.chatsetupheader.model.5e2c614c"))
