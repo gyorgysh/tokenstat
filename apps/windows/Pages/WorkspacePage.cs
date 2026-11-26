@@ -974,12 +974,16 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                         {
                             foreach (var flag in bypassArgs) args.Add(flag?.DeepClone());
                         }
-                        var session = await AppServices.Host.CallAsync("pty.spawn", new JsonObject
+                        var spawn = new JsonObject
                         {
                             ["workspaceId"] = _id, ["command"] = Format.Text(profile, "command"),
                             ["args"] = args,
                             ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
-                        });
+                        };
+                        // The project's profile and local model, decided by
+                        // the host beside the rest of each tool's contract.
+                        await WorkspaceLaunchChoices.AddToAsync(spawn, _id, id);
+                        var session = await AppServices.Host.CallAsync("pty.spawn", spawn);
                         var sessionId = Format.Text(session, "id");
                         if (string.IsNullOrEmpty(sessionId)) throw new InvalidOperationException(L10n.Text("windows.workspacepage.the_host_did_not_return_a_session.8a4eda9a"));
                         AppServices.OpenTerminal?.Invoke(_id, sessionId);

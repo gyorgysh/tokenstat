@@ -3005,6 +3005,28 @@ struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
 
 /// Chat-only backend metadata. `gateTier` is deliberately host-owned: clients
 /// must not imply an interactive approval channel where a CLI only has rules.
+/// Which launcher tools can be pointed at a local model server.
+///
+/// The host decides what a selection turns into, in
+/// `tokenstat-host::launcher::model_environment`, and refuses a pair it has
+/// no contract for. This list only decides whether to offer the choice, so a
+/// tool missing here costs a menu entry, never a bad launch. Shared by every
+/// Apple client, so the Mac and the phone offer the same thing.
+enum LocalModelLaunch {
+    static func accepts(_ launcherID: String) -> Bool {
+        ["claude_code", "codex", "opencode", "opencode2", "copilot"].contains(launcherID)
+    }
+
+    /// `provider:model`, the key a folder's choice is stored under.
+    static func parse(_ key: String?) -> (provider: String, model: String)? {
+        guard let key, let separator = key.firstIndex(of: ":") else { return nil }
+        let provider = String(key[key.startIndex ..< separator])
+        let model = String(key[key.index(after: separator)...])
+        guard !provider.isEmpty, !model.isEmpty else { return nil }
+        return (provider, model)
+    }
+}
+
 /// A chat model on a local server, named `local:<provider>/<model>` by the
 /// host. Shown as the server and the model rather than the stored id.
 enum LocalChatModel {

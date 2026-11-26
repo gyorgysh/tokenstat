@@ -293,6 +293,34 @@ private fun SessionsSection(
         if (profileLock != null) return null
         return (chosenProfile ?: profiles.defaultId).takeIf { it != "system" && profiles.byId(it) != null }
     }
+    // A model on the host's own LM Studio or Ollama for the agents launched
+    // here, remembered per folder. The host turns the pick into each tool's
+    // own flags and environment, so this only names it.
+    val modelPrefs = remember(context) {
+        context.getSharedPreferences("tokenstat.launchmodel.v1", android.content.Context.MODE_PRIVATE)
+    }
+    var localModelKey by remember(peer, workspace) {
+        mutableStateOf(modelPrefs.getString("model.$peer.$workspace", null))
+    }
+    var localModels by remember(peer) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    LaunchedEffect(peer) {
+        runCatching { model.workspaceSection(peer, "local.models", buildJsonObject {}) }
+            .onSuccess { element ->
+                localModels = asObjects(element).filter { it.bol("available") }.flatMap { provider ->
+                    asObjects(provider["models"]).mapNotNull { row ->
+                        val id = row.str("id") ?: return@mapNotNull null
+                        "${provider.str("id")}:$id" to "${provider.str("name")}: ${row.str("name") ?: id}"
+                    }
+                }
+            }
+    }
+    fun launchModel(launcher: String): Pair<String, String>? {
+        if (launcher !in setOf("claude_code", "codex", "opencode", "opencode2", "copilot")) return null
+        val key = localModelKey ?: return null
+        val provider = key.substringBefore(':', "")
+        val id = key.substringAfter(':', "")
+        return if (provider.isEmpty() || id.isEmpty()) null else provider to id
+    }
     val locallyHidden: Set<String> = remember(prefs, hiddenVersion) {
         prefs.getStringSet("hidden.$peer", emptySet()) ?: emptySet()
     }
@@ -351,6 +379,7 @@ private fun SessionsSection(
                     put("noColor", false)
                     put("dark", dark)
                     launchProfileId()?.let { put("profileId", it) }
+                    launchModel(profile.id)?.let { (provider, id) -> put("modelProvider", provider); put("modelId", id) }
                 }) as? JsonObject
             }.onSuccess { info ->
                 launchingId = null
@@ -442,6 +471,18 @@ private fun SessionsSection(
                             profilePrefs.edit().putString("profile.$peer.$workspace", id).apply()
                         },
                     )
+                }
+            }
+        }
+        if (localModels.isNotEmpty() || localModelKey != null) {
+            item {
+                TsCard(Modifier.fillMaxWidth()) {
+                    LaunchModelPicker(localModels, localModelKey, enabled = launchingId == null) { key ->
+                        localModelKey = key
+                        modelPrefs.edit().apply {
+                            if (key == null) remove("model.$peer.$workspace") else putString("model.$peer.$workspace", key)
+                        }.apply()
+                    }
                 }
             }
         }
@@ -1489,4 +1530,34 @@ internal fun sessionBelongsToFolder(cwd: String, folder: String): Boolean {
     val path = cwd.replace('\\', '/').trimEnd('/')
     val windows = folder.contains('\\') || (folder.length > 1 && folder[1] == ':')
     return path.equals(root, ignoreCase = windows) || path.startsWith("$root/", ignoreCase = windows)
+}
+
+/// Which model agents launched here use: each tool's own, or one loaded in
+/// LM Studio or Ollama on the host.
+@Composable
+private fun LaunchModelPicker(choices: List<Pair<String, String>>, selected: String?, enabled: Boolean,
+                              onChange: (String?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val default = L10n.text("common.launch.each_tool_default")
+    val current = choices.firstOrNull { it.first == selected }?.second
+        ?: selected?.substringAfter(':')?.ifBlank { null } ?: default
+    Box {
+        ai.tokenstat.tokenstat.ui.components.TsPickerField(
+            summary = L10n.text("common.launch.model", current),
+            enabled = enabled,
+            onOpen = { open = true },
+        )
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text(default) }, enabled = selected != null,
+                onClick = { open = false; onChange(null) },
+            )
+            choices.forEach { (key, label) ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(label) }, enabled = key != selected,
+                    onClick = { open = false; onChange(key) },
+                )
+            }
+        }
+    }
 }

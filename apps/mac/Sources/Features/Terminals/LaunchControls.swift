@@ -14,11 +14,7 @@ enum LocalModelSelection {
 
     /// The provider and model a stored key names, or nil when nothing is set.
     static func parse(_ key: String?) -> (provider: String, model: String)? {
-        guard let key, let separator = key.firstIndex(of: ":") else { return nil }
-        let provider = String(key[key.startIndex ..< separator])
-        let model = String(key[key.index(after: separator)...])
-        guard !provider.isEmpty, !model.isEmpty else { return nil }
-        return (provider, model)
+        LocalModelLaunch.parse(key)
     }
 
     /// The selection stored for a workspace, ready to hand to a spawn.

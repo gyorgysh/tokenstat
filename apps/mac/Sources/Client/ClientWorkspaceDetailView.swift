@@ -58,6 +58,9 @@ struct ClientWorkspaceSessionsView: View {
     /// The agent login the next launch uses. See `LaunchAgentProfile`.
     @State private var launchProfiles: AgentProfiles?
     @State private var launchProfile: String?
+    /// Model servers on the host, for pointing a launch at a local model.
+    @State private var localProviders: [LocalProvider] = []
+    @State private var localModelKey: String?
     /// How many launch tiles this host had last time, so the grid opens at the
     /// size it will end up. Without it the row painted one Shell tile and then
     /// jumped to eight when the catalog answered. Per host: two machines with
@@ -126,8 +129,12 @@ struct ClientWorkspaceSessionsView: View {
             closeBrowser()
             bypassOn = WorkspacePreference.bypassPermissions(for: folder.id)
             launchProfile = LaunchAgentProfile.chosen(for: folder.id)
+            localModelKey = WorkspacePreference.localModel(for: folder.id)
         }
-        .task(id: "\(peer)|\(folder.id)") { await loadLaunchProfiles() }
+        .task(id: "\(peer)|\(folder.id)") {
+            await loadLaunchProfiles()
+            await loadLocalModels()
+        }
         .task(id: workspaceID) {
             // Keyed on the folder: the sidebar can swap folders under this
             // screen, and an unkeyed task would keep showing the old one's
@@ -253,6 +260,7 @@ struct ClientWorkspaceSessionsView: View {
 
                 bypassCard
                 profileCard
+                localModelCard
                 openCard
                 launchCard
                 sessionsCard
@@ -302,6 +310,82 @@ struct ClientWorkspaceSessionsView: View {
         guard !Task.isCancelled, folder.id == folderID else { return }
         launchProfiles = loaded
         LaunchAgentProfile.remember(loaded, folderID: folderID, workspaceID: workspaceID)
+    }
+
+    private func loadLocalModels() async {
+        let folderID = folder.id
+        let loaded = (try? await Bridge.localModels(onPeer: peer)) ?? []
+        guard !Task.isCancelled, folder.id == folderID else { return }
+        localProviders = loaded
+    }
+
+    /// The folder's local model, for a tool that can use one.
+    private func localSelection(for profile: RemoteLaunchProfile) -> (provider: String, model: String)? {
+        guard LocalModelLaunch.accepts(profile.id) else { return nil }
+        return LocalModelLaunch.parse(localModelKey)
+    }
+
+    private var localChoices: [(key: String, label: String)] {
+        localProviders.filter(\.available).flatMap { provider in
+            provider.models.map { ("\(provider.id):\($0.id)", "\(provider.name): \($0.name)") }
+        }
+    }
+
+    /// Which model the agents launched here use: each tool's own, or one
+    /// loaded on the host in LM Studio or Ollama. Hidden until one is.
+    @ViewBuilder
+    private var localModelCard: some View {
+        let choices = localChoices
+        if !choices.isEmpty || localModelKey != nil {
+            let current = choices.first { $0.key == localModelKey }?.label
+                ?? LocalModelLaunch.parse(localModelKey)?.model
+                ?? L10n.text("apple.launchcontrols.each_tool_s_default.03e1b871")
+            HStack(spacing: Theme.Space.s) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.Space.xs)
+                        .fill(Theme.accent.opacity(0.12))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: localModelKey == nil ? "cloud" : "desktopcomputer")
+                        .foregroundStyle(Theme.accent)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.text("apple.chatsetupheader.model.5e2c614c"))
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                    Text(current)
+                        .font(ClientType.label.weight(.medium))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Menu {
+                    Button {
+                        select(localModel: nil)
+                    } label: {
+                        Label(L10n.text("apple.launchcontrols.each_tool_s_default.03e1b871"),
+                              systemImage: localModelKey == nil ? "checkmark" : "")
+                    }
+                    ForEach(choices, id: \.key) { choice in
+                        Button {
+                            select(localModel: choice.key)
+                        } label: {
+                            Label(choice.label, systemImage: choice.key == localModelKey ? "checkmark" : "")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel(L10n.text("apple.chatsetupheader.model.5e2c614c"))
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .cardSurface()
+        }
+    }
+
+    private func select(localModel key: String?) {
+        localModelKey = key
+        WorkspacePreference.setLocalModel(key, for: folder.id)
     }
 
     /// Which agent login a launch here uses, beside the bypass switch.
@@ -823,7 +907,9 @@ struct ClientWorkspaceSessionsView: View {
                 rows: 40,
                 cols: 100,
                 dark: dark,
-                profileID: LaunchAgentProfile.stored(for: folder.id)
+                profileID: LaunchAgentProfile.stored(for: folder.id),
+                modelProvider: localSelection(for: profile)?.provider,
+                modelID: localSelection(for: profile)?.model
             )
             guard owner == WorkSessionContext.shared.scope else { pending.stop(); return }
             pending.attach(info: info)

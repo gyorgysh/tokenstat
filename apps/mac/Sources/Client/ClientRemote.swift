@@ -64,7 +64,9 @@ enum ClientRemote {
         rows: Int,
         cols: Int,
         dark: Bool,
-        profileID: String? = nil
+        profileID: String? = nil,
+        modelProvider: String? = nil,
+        modelID: String? = nil
     ) async throws -> PtySessionInfo {
         var params: [String: Any] = [
             "workspaceId": workspaceID,
@@ -76,6 +78,12 @@ enum ClientRemote {
             "dark": dark,
         ]
         if let profileID { params["profileId"] = profileID }
+        // The host adds the arguments and environment for the selection, so
+        // a phone gets the machine's own mapping for each tool.
+        if let modelProvider, let modelID {
+            params["modelProvider"] = modelProvider
+            params["modelId"] = modelID
+        }
         return try await Bridge.onPeer(peer, "pty.spawn", params, as: PtySessionInfo.self)
     }
 

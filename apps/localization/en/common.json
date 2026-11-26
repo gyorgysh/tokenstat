@@ -57,6 +57,8 @@
   "common.profiles.host_update": "The chat host must support agent profiles to use this selection.",
   "common.profiles.continue": "Continue in a new chat on {0}",
   "common.profiles.named_limits": "Agent profile",
+  "common.launch.each_tool_default": "Each tool’s default",
+  "common.launch.model": "Model · {0}",
   "common.profiles.label": "Profile",
   "common.profiles.launch_help": "The agent login the next session in this folder uses. Shells are not affected.",
   "common.profiles.locked": "This repository uses {0}.",

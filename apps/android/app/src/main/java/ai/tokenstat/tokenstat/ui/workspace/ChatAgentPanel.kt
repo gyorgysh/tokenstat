@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Computer
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.ChatCacheRules
 
@@ -522,8 +524,7 @@ internal fun ChatAgentSheet(
                     }
                 }
             } else {
-                if (profiles != null) {
-                    AgentProfilePicker(profiles, profileId, profileLock, enabled = !locked && !updating) { id ->
+                fun changeProfile(id: String) {
                         if (id != profileId) {
                             if (chat?.get("lastMessageAtMs") is JsonPrimitive || !chat?.str("resumeToken").isNullOrEmpty()) {
                                 if (onContinueProfile != null) continueProfile = id
@@ -543,13 +544,15 @@ internal fun ChatAgentSheet(
                             }
                         }
                     }
-                }
                 TsPickerOptionList(
                     choices = choices,
                     isSelected = { chatAgentIsSelected(it, chat) },
                     prompt = L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da"),
                     emptyMessage = L10n.text("android.chatagentpanel.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
                     caption = L10n.text("android.chatagentpanel.agents_on_0.ebf316db", "${hostLabel.ifBlank { L10n.text("android.chatagentpanel.this_computer.058bf37c") }}"),
+                    captionAccessory = profiles?.let { list ->
+                        { AgentProfileChip(list, profileId, profileLock, enabled = !locked && !updating, onChange = ::changeProfile) }
+                    },
                     onRefresh = if (HostContracts.supportsModelRefresh(protocol)) {
                         { load(refresh = true) }
                     } else {
@@ -687,7 +690,21 @@ internal fun ChatAgentRowExtras(
 /// The agent's brand mark at the start of its row in the picker.
 @Composable
 internal fun ChatAgentRowMark(value: ChatAgentChoice) {
-    (value as? ChatAgentChoice.Agent)?.let { HarnessMark(it.id, 26.dp) }
+    when (value) {
+        is ChatAgentChoice.Agent -> HarnessMark(value.id, 26.dp)
+        // Where the model runs, at a glance: the provider's cloud, or a
+        // server on the machine.
+        is ChatAgentChoice.Model -> if (value.id.isNotEmpty()) {
+            val colors = LocalTsColors.current
+            val local = localChatProvider(value.id) != null
+            Icon(
+                if (local) androidx.compose.material.icons.Icons.Default.Computer else androidx.compose.material.icons.Icons.Default.Cloud, null,
+                tint = if (local) colors.accent else colors.textTertiary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        else -> {}
+    }
 }
 
 /// "Version 2.1.318 · 2.1.322 available", from one `launcher.updates` row.

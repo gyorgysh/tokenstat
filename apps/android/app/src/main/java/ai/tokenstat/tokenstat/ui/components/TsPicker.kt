@@ -200,6 +200,9 @@ fun <T> TsPickerOptionList(
     monospaced: Boolean = true,
     /// A line above the search field naming what the panel is for.
     caption: String? = null,
+    /// A control at the end of the caption line, such as which login the
+    /// listed agents run as.
+    captionAccessory: (@Composable () -> Unit)? = null,
     onRefresh: (suspend () -> Unit)? = null,
     /// What a section is currently set to, shown beside its heading.
     sectionValue: ((String) -> String?)? = null,
@@ -288,7 +291,13 @@ fun <T> TsPickerOptionList(
             Modifier.fillMaxWidth().padding(Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.xs),
         ) {
-            if (!caption.isNullOrEmpty()) {
+            if (captionAccessory != null) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(caption.orEmpty(), style = TsType.caption, color = colors.textSecondary,
+                        maxLines = 1, modifier = Modifier.weight(1f))
+                    captionAccessory()
+                }
+            } else if (!caption.isNullOrEmpty()) {
                 Text(caption, style = TsType.caption, color = colors.textSecondary)
             }
             if (selectionSummary != null && !tabbed) {

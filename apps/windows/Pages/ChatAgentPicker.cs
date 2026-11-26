@@ -90,7 +90,7 @@ internal static class ChatAgentPicker
     internal static string Summary(JsonNode? backend, string backendId, string model, string effort)
     {
         var parts = new List<string> { Format.Text(backend, "label", backendId) };
-        if (!string.IsNullOrEmpty(model)) parts.Add(model);
+        if (!string.IsNullOrEmpty(model)) parts.Add(LocalChatModel.Title(model));
         if (backend?["efforts"] is JsonArray { Count: > 0 } && !string.IsNullOrEmpty(effort)) parts.Add(effort + " effort");
         return string.Join(" · ", parts);
     }
@@ -128,7 +128,7 @@ internal static class ChatAgentPicker
         if (backendId.Length > 0) field.Children.Add(mark);
         var modelText = new TextBlock
         {
-            Text = backendId.Length == 0 ? label : string.IsNullOrWhiteSpace(model) ? Format.Text(backend, "label", backendId) : model,
+            Text = backendId.Length == 0 ? label : string.IsNullOrWhiteSpace(model) ? Format.Text(backend, "label", backendId) : LocalChatModel.Title(model),
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -228,7 +228,8 @@ internal static class ChatAgentPicker
                 return Format.Text(Backend(id), "label", id);
             }
             var text = Format.Text(chat, name);
-            return string.IsNullOrWhiteSpace(text) ? L10n.Text("windows.chatpage.default.21b111cb") : text;
+            return string.IsNullOrWhiteSpace(text) ? L10n.Text("windows.chatpage.default.21b111cb")
+                : name == ChatAgentSteps.Model ? LocalChatModel.Title(text) : text;
         }
         List<(string Value, string Label)> Options(string name)
         {
@@ -246,7 +247,7 @@ internal static class ChatAgentPicker
                 foreach (var value in values)
                 {
                     var text = value?.ToString() ?? "";
-                    if (text.Length > 0) options.Add((text, text));
+                    if (text.Length > 0) options.Add((text, name == ChatAgentSteps.Model ? LocalChatModel.Name(text) : text));
                 }
             }
             var saved = Format.Text(Chat(), name);
@@ -396,6 +397,27 @@ internal static class ChatAgentPicker
                     rows.Children.Add(new TextBlock { Text = note, FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
                     label = rows;
                 }
+                if (step == ChatAgentSteps.Model && item.Value.Length > 0)
+                {
+                    // Where the model runs, at a glance: the provider's
+                    // cloud, or a server on the machine, with its name.
+                    var local = LocalChatModel.Provider(item.Value);
+                    var lines = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+                    lines.Children.Add(label);
+                    if (local is not null)
+                        lines.Children.Add(new TextBlock { Text = L10n.Text("common.chat.local_model_host", local), FontSize = 11, Opacity = 0.7 });
+                    var mark = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+                    mark.Children.Add(new FontIcon
+                    {
+                        Glyph = local is null ? "\uE753" : "\uE7F8", // Cloud, Devices
+                        FontSize = 13,
+                        Width = 20,
+                        Foreground = local is null ? Theme.Brush(static () => Theme.ControlGlyph) : Theme.Brush(static () => Theme.Accent),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    });
+                    mark.Children.Add(lines);
+                    label = mark;
+                }
                 FrameworkElement content = step == ChatAgentSteps.Agent ? AgentMark.Row(item.Value, label) : label;
                 if (step == ChatAgentSteps.Agent && QuotaLine(Readings(), item.Value, ownLogin ? profileId : null) is { } quota)
                 {
@@ -534,4 +556,37 @@ internal static class ChatAgentPicker
         ToolTipService.SetToolTip(button, label);
         return button;
     }
+}
+
+/// <summary>
+/// A chat model on a local server, named <c>local:&lt;provider&gt;/&lt;model&gt;</c> by
+/// the host. Shown as the server and the model rather than the stored id.
+/// Port of the Apple <c>LocalChatModel</c>.
+/// </summary>
+internal static class LocalChatModel
+{
+    private static (string Provider, string Model)? Parse(string id)
+    {
+        if (!id.StartsWith("local:", StringComparison.Ordinal)) return null;
+        var rest = id["local:".Length..];
+        var slash = rest.IndexOf('/');
+        if (slash <= 0 || slash == rest.Length - 1) return null;
+        return (rest[..slash], rest[(slash + 1)..]);
+    }
+
+    private static string ProviderName(string id) => id switch
+    {
+        "lmstudio" => "LM Studio",
+        "ollama" => "Ollama",
+        _ => id,
+    };
+
+    /// <summary>The server's name for a local id, null for a cloud model.</summary>
+    internal static string? Provider(string id) => Parse(id) is { } local ? ProviderName(local.Provider) : null;
+
+    /// <summary>The model alone for a local id, the id itself otherwise.</summary>
+    internal static string Name(string id) => Parse(id)?.Model ?? id;
+
+    /// <summary><c>Ollama: qwen2.5</c> for a local id, the id itself otherwise.</summary>
+    internal static string Title(string id) => Parse(id) is { } local ? $"{ProviderName(local.Provider)}: {local.Model}" : id;
 }

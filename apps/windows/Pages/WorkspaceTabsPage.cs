@@ -339,6 +339,8 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             or WorkspaceTerminalPane or TerminalPage)
         {
             actions.Insert(0, WorkspaceBypass.Control(WorkspaceId, Changed));
+            actions.Insert(0, WorkspaceLaunchChoices.ProfileControl(WorkspaceId, Changed));
+            actions.Insert(0, WorkspaceLaunchChoices.ModelControl(WorkspaceId, Changed));
         }
         return actions;
     }

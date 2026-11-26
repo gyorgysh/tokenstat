@@ -72,7 +72,7 @@ struct LaunchProfile: Identifiable, Sendable {
     /// choice, so a harness missing here costs a menu entry, never a bad
     /// launch. Keep the two in step when a harness gains local support.
     static func acceptsLocalModel(_ profileID: String) -> Bool {
-        ["claude_code", "codex", "opencode", "opencode2", "copilot"].contains(profileID)
+        LocalModelLaunch.accepts(profileID)
     }
 
     static let all: [LaunchProfile] = [
