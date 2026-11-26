@@ -124,6 +124,7 @@ mod opencode_cli;
 pub mod ownership;
 pub(crate) mod presence;
 pub mod pricing;
+pub(crate) mod profiles;
 pub(crate) mod provision;
 mod proxy_http;
 #[cfg(feature = "local-host")]

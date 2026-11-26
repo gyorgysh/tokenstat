@@ -578,7 +578,11 @@ pub(crate) fn catalog() -> Value {
 
 /// Ask the CLI itself on an explicit setup/status check. Catalog reads stay
 /// cheap and file-based; this check covers keychains and configured providers.
-pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
+///
+/// In a profile, the agent is asked with that profile's folders, so the
+/// answer is about the profile's own login.
+pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value, String> {
+    let environment = crate::profiles::environment(profile, id)?;
     let profile = PROFILES
         .iter()
         .find(|profile| profile.id == id)
@@ -608,13 +612,15 @@ pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
     let mut result = crate::agent_readiness::describe(id, true);
     // Older CLI versions may lack a status command. A timeout or an unknown
     // response proves neither signed-in nor signed-out.
-    let probe = probe_sign_in(&command, args, id);
+    let probe = probe_sign_in(&command, args, id, &environment);
     let probed = probe.is_some();
     let state = probe.unwrap_or_else(|| {
         // An older CLI or a Windows npm shim may not support this process
         // probe. Keep positive saved-login evidence; inconclusive failures
         // must not block a working environment/provider credential.
-        if result["readiness"] == "signedIn" {
+        // That evidence is the machine's own files, so it says nothing
+        // about a profile's separate login.
+        if result["readiness"] == "signedIn" && environment.is_empty() {
             "signedIn"
         } else {
             "unknown"
@@ -632,14 +638,38 @@ pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
     Ok(result)
 }
 
-fn probe_sign_in(command: &str, args: &[&str], id: &str) -> Option<&'static str> {
-    status_readiness(id, &run_probe(command, args)?)
+fn probe_sign_in(
+    command: &str,
+    args: &[&str],
+    id: &str,
+    environment: &[(String, String)],
+) -> Option<&'static str> {
+    status_readiness(id, &run_probe_with(command, args, environment)?)
 }
 
 /// Run one of an agent's own commands to completion, for what it prints on
 /// stdout and stderr. None when it cannot start or takes longer than five
 /// seconds, which is killed rather than left behind.
 fn run_probe(command: &str, args: &[&str]) -> Option<[Vec<u8>; 2]> {
+    run_probe_with(command, args, &[])
+}
+
+/// Run an agent's own command with a profile's variables, quietly, for its
+/// effect. Used to sign a profile out before its folder is removed.
+pub(crate) fn run_agent_quietly(id: &str, args: &[&str], environment: &[(String, String)]) {
+    let Some(profile) = PROFILES.iter().find(|profile| profile.id == id) else {
+        return;
+    };
+    if let Some(command) = resolve_profile(profile, &search_path(), Path::new(&user_home())) {
+        let _ = run_probe_with(&command, args, environment);
+    }
+}
+
+fn run_probe_with(
+    command: &str,
+    args: &[&str],
+    environment: &[(String, String)],
+) -> Option<[Vec<u8>; 2]> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
@@ -653,6 +683,10 @@ fn run_probe(command: &str, args: &[&str]) -> Option<[Vec<u8>; 2]> {
         for (key, value) in &env.vars {
             cmd.env(key, value);
         }
+    }
+    // A profile's variables last, so they win over the login shell's.
+    for (key, value) in environment {
+        cmd.env(key, value);
     }
     #[cfg(unix)]
     cmd.process_group(0);
@@ -754,7 +788,14 @@ fn status_readiness(id: &str, parts: &[Vec<u8>]) -> Option<&'static str> {
 /// Nothing about the login is read back. Whatever the agent prints, including
 /// a code the person has to carry to a browser, stays in the terminal they are
 /// looking at.
-pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Result<Value, String> {
+pub(crate) fn sign_in(
+    id: &str,
+    rows: u16,
+    cols: u16,
+    dark: Option<bool>,
+    profile: Option<&str>,
+) -> Result<Value, String> {
+    let environment = crate::profiles::environment(profile, id)?;
     let Some(profile) = PROFILES.iter().find(|profile| profile.id == id) else {
         return Err(format!("no such agent: {id}"));
     };
@@ -784,7 +825,7 @@ pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Res
             cols,
             no_color: false,
             dark,
-            environment: Vec::new(),
+            environment,
         })
         .map_err(|e| e.to_string())?;
     serde_json::to_value(info).map_err(|e| e.to_string())
@@ -1784,7 +1825,7 @@ mod tests {
             "definitely-not-an-agent",
             "claude_code; rm -rf /",
         ] {
-            let refused = sign_in(id, 40, 100, None).expect_err("must refuse");
+            let refused = sign_in(id, 40, 100, None, None).expect_err("must refuse");
             assert!(
                 refused.contains("no such agent") || refused.contains("no sign-in"),
                 "{id}: {refused}"

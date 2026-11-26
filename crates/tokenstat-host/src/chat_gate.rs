@@ -214,6 +214,16 @@ pub(crate) fn team_hooks_document(helper: &Path, flavor: &str) -> Value {
 /// Passing the home without the flag is fail-open, which is the bug this whole
 /// module exists to stop.
 pub fn write_codex_home(home: &Path, helper: Option<&Path>) -> Result<(), String> {
+    write_codex_home_signed_in(home, helper, None)
+}
+
+/// [`write_codex_home`] with the login taken from a profile's own Codex
+/// folder rather than the person's. Everything else still comes from theirs.
+pub fn write_codex_home_signed_in(
+    home: &Path,
+    helper: Option<&Path>,
+    login: Option<&Path>,
+) -> Result<(), String> {
     let source = user_codex_home();
     if source
         .as_ref()
@@ -231,11 +241,28 @@ pub fn write_codex_home(home: &Path, helper: Option<&Path>) -> Result<(), String
     } else {
         clear_codex_hooks(home)?;
     }
-    link_credential(home, ".codex", "auth.json")?;
+    match login {
+        Some(login) => route_cli_credential(&login.join("auth.json"), &home.join("auth.json"))?,
+        None => link_credential(home, ".codex", "auth.json")?,
+    }
     if let Some(source) = source {
         share_codex_home(&source, home, helper.is_some()).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// Share the person's Codex settings into a profile's own Codex folder.
+/// The login there stays the profile's: `auth.json` is never linked.
+pub(crate) fn share_user_codex_home(folder: &Path) {
+    if let Some(source) = user_codex_home().filter(|source| !paths_match(source, folder)) {
+        let _ = share_codex_home(&source, folder, false);
+    }
+}
+
+/// Link one of the person's files or folders into a profile's folder,
+/// unless something is already there.
+pub(crate) fn link_shared(source: &Path, target: &Path) -> std::io::Result<()> {
+    link_path(source, target)
 }
 
 /// Retire the hook configuration without touching Codex's session history.

@@ -205,6 +205,11 @@ pub struct Conversation {
     /// told where that history is, without being handed all of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continued_from: Option<String>,
+    /// Which logins the agent runs with: a profile id, or none for the
+    /// machine's own. Chosen when the chat starts and kept, because the
+    /// agent's own history for this chat lives in that profile's folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
 }
 
 /// The only conversation metadata needed by a host-wide recent-chat list.
@@ -402,6 +407,9 @@ pub struct Create {
     pub autonomy: Option<String>,
     pub budget_seconds: Option<u64>,
     pub persona_id: Option<String>,
+    /// Omitted means the machine's default profile. `"system"` is the
+    /// machine's own logins.
+    pub profile_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -420,6 +428,9 @@ pub struct Update {
     pub budget_seconds: Option<u64>,
     pub system_prompt: Option<String>,
     pub persona_id: Option<String>,
+    /// Only before the first message. After that the chat's history lives
+    /// in its profile's folder, and moving it would lose the history.
+    pub profile_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2455,6 +2466,10 @@ impl Store {
                 "Select a supported model listed by this agent to use fast mode. Refresh the model list if needed.".into(),
             );
         }
+        let profile = input.profile_id.unwrap_or_else(crate::profiles::default_id);
+        if !crate::profiles::exists(&profile) {
+            return Err("That profile was removed. Pick another.".into());
+        }
         let id = mint_record_id("chat");
         let now = now_ms();
         let chat = Conversation {
@@ -2495,6 +2510,7 @@ impl Store {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: (profile != crate::profiles::SYSTEM).then_some(profile),
         };
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
@@ -2641,6 +2657,19 @@ impl Store {
             }
             if let Some(title) = changes.title.filter(|text| !text.trim().is_empty()) {
                 chat.title = title;
+            }
+            if let Some(profile) = changes.profile_id.clone() {
+                let profile = (profile != crate::profiles::SYSTEM && !profile.is_empty())
+                    .then_some(profile);
+                if profile != chat.profile_id {
+                    if chat.last_message_at_ms.is_some() || chat.resume_token.is_some() {
+                        return Err("This chat already started with another profile. Continue in a new chat to switch.".into());
+                    }
+                    if !crate::profiles::exists(profile.as_deref().unwrap_or(crate::profiles::SYSTEM)) {
+                        return Err("That profile was removed. Pick another.".into());
+                    }
+                    chat.profile_id = profile;
+                }
             }
             if let Some(backend) = changes.backend
                 && backend != chat.backend
@@ -3886,6 +3915,13 @@ impl Store {
             // included, so a persona edited or removed since does not change
             // or refuse the continuation.
             persona_id: Some(String::new()),
+            // Same logins: a continuation is the same work.
+            profile_id: Some(
+                source
+                    .profile_id
+                    .clone()
+                    .unwrap_or_else(|| crate::profiles::SYSTEM.into()),
+            ),
         })?;
         self.edit_conversation(&created.id, |chat| {
             chat.persona_id = source.persona_id.clone();
@@ -4435,12 +4471,26 @@ impl Store {
                 crate::chat_gate::GATE_DEADLINE_SECONDS.to_string(),
             ));
         }
+        // The chat's profile decides whose login the agent uses. Nothing
+        // for the machine's own, so every chat from before profiles runs as
+        // it always did. A removed profile stops the turn rather than quietly
+        // using the machine's account.
+        let profile_environment =
+            crate::profiles::environment(chat.profile_id.as_deref(), &chat.backend)?;
+        let profile_login = profile_environment
+            .first()
+            .map(|(_, path)| PathBuf::from(path));
         let codex_home = if chat.backend == "codex" && private_codex_home(helper.is_some()) {
             let home = self.codex_home(id);
-            crate::chat_gate::write_codex_home(&home, helper.as_deref())?;
+            crate::chat_gate::write_codex_home_signed_in(
+                &home,
+                helper.as_deref(),
+                profile_login.as_deref(),
+            )?;
             environment.push(("CODEX_HOME".into(), home.display().to_string()));
             Some(home)
         } else {
+            environment.extend(profile_environment);
             None
         };
         // Like Codex, Grok keeps its sessions inside its private home, so the
@@ -8870,6 +8920,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         store.save().unwrap();
         store.record_events(
@@ -11701,6 +11752,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         };
         store.conversations.lock().unwrap().extend([
             sample("chat-a1", "workspace-a"),
@@ -11881,6 +11933,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         };
         store.conversations.lock().unwrap().push(chat);
         store.save().unwrap();
@@ -12010,6 +12063,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         store.save().unwrap();
         let attachment = store
@@ -12074,6 +12128,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         store.save().unwrap();
     }
@@ -15665,6 +15720,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -15783,6 +15839,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -15929,6 +15986,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -16036,6 +16094,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         store.save().unwrap();
         let source = root.path().join("answer.txt");
@@ -16175,6 +16234,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         store.save().unwrap();
         store.record_events(
@@ -16234,6 +16294,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         {
             let mut chats = store.conversations.lock().unwrap();
@@ -16320,6 +16381,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         store.save().unwrap();
         let turn_token = store.register_turn_token("chat-test", "claude").unwrap();
@@ -16676,6 +16738,7 @@ mod tests {
             branch: None,
             prompt_cache: None,
             continued_from: None,
+            profile_id: None,
         });
         let other = store
             .save_persona(Persona {

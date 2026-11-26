@@ -675,6 +675,7 @@ struct ChatParams {
     transfer_id: Option<String>,
     allow_relay: Option<bool>,
     persona_id: Option<String>,
+    profile_id: Option<String>,
     system_prompt: Option<String>,
     persona: Option<crate::chat::Persona>,
     choice: Option<String>,
@@ -716,6 +717,7 @@ impl ChatParams {
             autonomy: self.autonomy,
             budget_seconds: self.budget_seconds,
             persona_id: self.persona_id,
+            profile_id: self.profile_id,
         }
     }
 
@@ -734,6 +736,7 @@ impl ChatParams {
             budget_seconds: self.budget_seconds,
             system_prompt: self.system_prompt,
             persona_id: self.persona_id,
+            profile_id: self.profile_id,
         }
     }
 }
@@ -1304,6 +1307,12 @@ fn owner_only_method(method: &str) -> bool {
                 | "account.skipHandle"
                 | "account.setVisibility"
                 | "account.renameMachine"
+                | "profiles.list"
+                | "profiles.create"
+                | "profiles.rename"
+                | "profiles.setAgent"
+                | "profiles.setDefault"
+                | "profiles.delete"
                 | "account.unlinkMachine"
                 | "account.registerMachine"
                 | "account.pairingCode"
@@ -4364,6 +4373,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
 fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("pty.")
         && !method.starts_with("launcher.")
+        && !method.starts_with("profiles.")
         && !method.starts_with("harness.")
         && !method.starts_with("stream.")
         && !method.starts_with("proxy.")
@@ -4636,13 +4646,45 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // machine that owns it through `remote.call`, so the launcher always
         // means the machine the session would actually run on.
         "launcher.catalog" => Ok(crate::launcher::catalog()),
+
+        // Profiles: more than one login per agent on this machine. See
+        // `profiles`. Owner only: a peer may not add, rename or remove a
+        // login on someone's machine.
+        "profiles.list" => crate::profiles::list(),
+        "profiles.create"
+        | "profiles.rename"
+        | "profiles.setAgent"
+        | "profiles.setDefault"
+        | "profiles.delete" => {
+            #[derive(Deserialize)]
+            struct Params {
+                #[serde(default)]
+                id: String,
+                #[serde(default)]
+                name: String,
+                #[serde(default)]
+                agent: String,
+                #[serde(default)]
+                own: bool,
+            }
+            let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            match method {
+                "profiles.create" => crate::profiles::create(&p.name),
+                "profiles.rename" => crate::profiles::rename(&p.id, &p.name),
+                "profiles.setAgent" => crate::profiles::set_agent(&p.id, &p.agent, p.own),
+                "profiles.setDefault" => crate::profiles::set_default(&p.id),
+                _ => crate::profiles::delete(&p.id),
+            }
+        }
         "launcher.checkSignIn" => {
             #[derive(Deserialize)]
             struct Params {
                 id: String,
+                #[serde(default)]
+                profile: Option<String>,
             }
             let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            crate::launcher::check_sign_in(&p.id)
+            crate::launcher::check_sign_in_for(&p.id, p.profile.as_deref())
         }
 
         // Run a catalog profile's official installer on this machine. The id
@@ -4704,6 +4746,10 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 cols: u16,
                 #[serde(default)]
                 dark: Option<bool>,
+                /// Sign in inside a profile's own folder. Absent for the
+                /// machine's own login.
+                #[serde(default)]
+                profile: Option<String>,
             }
             fn default_rows() -> u16 {
                 40
@@ -4715,7 +4761,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 Ok(p) => p,
                 Err(e) => return Err(e.to_string()),
             };
-            crate::launcher::sign_in(&p.id, p.rows, p.cols, p.dark)
+            crate::launcher::sign_in(&p.id, p.rows, p.cols, p.dark, p.profile.as_deref())
         }
 
         // Take a profile off this machine's launcher, or put it back. The
