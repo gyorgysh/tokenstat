@@ -44,7 +44,7 @@ enum WorkspacePreference {
         if holdList { return await withCheckedContinuation { listWaiter = $0 } }
         return list
     }
-    static func ptySpawn(workspaceID: String, command: String, args: [String], rows: Int, cols: Int, noColor: Bool, dark: Bool, modelProvider: String?, modelID: String?, hidden: Bool) async throws -> PtySessionInfo {
+    static func ptySpawn(workspaceID: String, command: String, args: [String], rows: Int, cols: Int, noColor: Bool, dark: Bool, modelProvider: String?, modelID: String?, profileID: String?, hidden: Bool) async throws -> PtySessionInfo {
         await withCheckedContinuation { spawnWaiters.append($0) }
     }
     static func ptyClose(id: String) async throws { closed.append(id) }

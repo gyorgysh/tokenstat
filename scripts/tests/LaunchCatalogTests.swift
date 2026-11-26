@@ -2,6 +2,8 @@
 // Compile with LaunchCatalog.swift LauncherVisibility.swift.
 import Foundation
 struct AgentBackend { var id: String }
+/// Lives in Models.swift, which this test does not compile.
+enum LocalModelLaunch { static func accepts(_ id: String) -> Bool { false } }
 struct RemoteLaunchProfile: Codable {
     var id = "codex"; var name = "Codex"; var command = "codex"; var args: [String] = []
     var bypassArgs: [String] = []; var harnessId: String?; var symbol: String?; var openUrl: String?
