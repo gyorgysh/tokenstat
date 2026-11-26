@@ -633,12 +633,17 @@ struct ChatAgentChoices {
                     section: L10n.text("apple.chatsetupheader.model.5e2c614c")
                 )
             )
-            rows += modelIDs.map {
-                PickerChoice(value: Choice.model($0), label: LocalChatModel.title($0),
-                             detail: backend.models.contains($0) ? nil : L10n.text("apple.chatsetupheader.saved_choice_availability_unverified.96a7ce32"),
-                             section: LocalChatModel.parse($0) == nil
-                                ? L10n.text("apple.chatsetupheader.model.5e2c614c")
-                                : L10n.text("common.chat.local_models"))
+            rows += modelIDs.map { id in
+                let local = LocalChatModel.parse(id)
+                let detail: String? = !backend.models.contains(id)
+                    ? L10n.text("apple.chatsetupheader.saved_choice_availability_unverified.96a7ce32")
+                    : local.map {
+                        model.peer == nil
+                            ? L10n.text("common.chat.local_model_here", LocalChatModel.providerName($0.provider))
+                            : L10n.text("common.chat.local_model_host", LocalChatModel.providerName($0.provider))
+                    }
+                return PickerChoice(value: Choice.model(id), label: local?.model ?? id, detail: detail,
+                                    section: L10n.text("apple.chatsetupheader.model.5e2c614c"))
             }
         }
         if let backend, backend.installed != false, !backend.efforts.isEmpty {
@@ -904,7 +909,6 @@ struct ChatAgentPanel: View {
             }
             .padding(Theme.Space.s)
             #endif
-            if !showingSetup { profilePicker }
             if showingSetup {
                 setupList
             } else {
@@ -914,6 +918,7 @@ struct ChatAgentPanel: View {
                     prompt: L10n.text("apple.chatsetupheader.filter_agents_models_and_efforts.315032da"),
                     emptyMessage: L10n.text("apple.chatsetupheader.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
                     caption: model.peer == nil ? L10n.text("apple.chatsetupheader.agents_on_this_computer.133ab3d5") : L10n.text("apple.chatsetupheader.agents_on_this_chat_s_remote_host.2c090971"),
+                    captionAccessory: profileMenu,
                     refresh: nil,
                     sectionValue: choices.currentValue,
                     sectionTabs: choices.selectableSections,
@@ -925,8 +930,23 @@ struct ChatAgentPanel: View {
                     pick: { _ in },
                     accessory: { value in AnyView(star(for: value)) },
                     icon: { value in
-                        guard case let .agent(id) = value else { return nil }
-                        return AnyView(HarnessMark(id: id, size: 26))
+                        switch value {
+                        case let .agent(id):
+                            return AnyView(HarnessMark(id: id, size: 26))
+                        case let .model(id) where !id.isEmpty:
+                            // Where the model runs, at a glance: the
+                            // provider's cloud, or a server on the machine.
+                            let local = LocalChatModel.parse(id) != nil
+                            return AnyView(
+                                Image(systemName: local ? "desktopcomputer" : "cloud")
+                                    .font(Theme.font(12, weight: .medium))
+                                    .foregroundStyle(local ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                                    .frame(width: 20)
+                                    .accessibilityHidden(true)
+                            )
+                        default:
+                            return nil
+                        }
                     },
                     trailing: { value in
                         guard case let .agent(id) = value else { return nil }
@@ -1052,45 +1072,61 @@ struct ChatAgentPanel: View {
         let agents: [String]
     }
 
-    @ViewBuilder
-    private var profilePicker: some View {
-        if let profiles = model.agentProfiles, !profiles.named.isEmpty || chat.profileId != nil {
-            let selected = model.profileID(for: chat) ?? AgentProfiles.system
-            HStack {
-                Text(L10n.text("apple.profiles.profile")).font(Theme.caption)
-                Spacer()
-                if let lock = model.workspaceProfileLock, let profile = profiles.profile(lock) {
-                    if selected != lock && !locked {
-                        Button(L10n.text("apple.profiles.continue", profile.title), .next) { continuingProfile = profile }
-                    } else {
-                        Label(L10n.text("apple.profiles.locked", profile.title), systemImage: "lock")
-                            .font(Theme.caption).foregroundStyle(.secondary)
-                    }
-                } else {
-                    Menu {
-                        ForEach(profiles.profiles) { profile in
-                            Button {
-                                if chat.lastMessageAtMs != nil || chat.resumeToken != nil {
-                                    continuingProfile = profile
-                                } else {
-                                    performSetupChange(model: model, chat: chat) { await model.update(profileID: profile.id) }
-                                }
-                            } label: {
-                                if selected == profile.id { Label(profile.title, systemImage: "checkmark") }
-                                else { Text(profile.title) }
-                            }
-                            .disabled(selected == profile.id)
+    /// Which login the listed agents run as, at the end of the caption line.
+    /// Nil, and nothing drawn, until there is more than the machine's own.
+    private var profileMenu: AnyView? {
+        guard let profiles = model.agentProfiles, !profiles.named.isEmpty || chat.profileId != nil else { return nil }
+        let selected = model.profileID(for: chat) ?? AgentProfiles.system
+        if let lock = model.workspaceProfileLock, let profile = profiles.profile(lock) {
+            if selected != lock && !locked {
+                return AnyView(
+                    Button(L10n.text("apple.profiles.continue", profile.title), .next) { continuingProfile = profile }
+                        .buttonStyle(QuietLinkStyle())
+                        .font(Theme.caption)
+                )
+            }
+            return AnyView(
+                Label(profile.title, systemImage: "lock.fill")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .help(L10n.text("apple.profiles.locked", profile.title))
+            )
+        }
+        return AnyView(
+            Menu {
+                ForEach(profiles.profiles) { profile in
+                    Button {
+                        if chat.lastMessageAtMs != nil || chat.resumeToken != nil {
+                            continuingProfile = profile
+                        } else {
+                            performSetupChange(model: model, chat: chat) { await model.update(profileID: profile.id) }
                         }
                     } label: {
-                        Text(profiles.profile(selected)?.title ?? L10n.text("apple.profiles.unavailable"))
+                        if selected == profile.id { Label(profile.title, systemImage: "checkmark") }
+                        else { Text(profile.title) }
                     }
-                    .fixedSize()
-                    .disabled(locked || updating)
+                    .disabled(selected == profile.id)
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "person.crop.circle")
+                    Text(profiles.profile(selected)?.title ?? L10n.text("apple.profiles.unavailable"))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down").font(Theme.font(9, weight: .semibold))
+                }
+                .font(Theme.caption.weight(.medium))
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Theme.accentSoft))
             }
-            .padding(.horizontal, Theme.Space.s)
-            .padding(.bottom, Theme.Space.s)
-        }
+            .modifier(BorderlessMenu())
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(locked || updating)
+            .help(L10n.text("apple.profiles.profile"))
+            .accessibilityLabel(L10n.text("apple.profiles.profile"))
+        )
     }
 
     private var setupList: some View {
@@ -1559,5 +1595,16 @@ extension EnvironmentValues {
     var chatAgentPickerFocus: (Bool) -> Void {
         get { self[ChatAgentPickerFocusKey.self] }
         set { self[ChatAgentPickerFocusKey.self] = newValue }
+    }
+}
+
+/// The Mac's borderless menu, and the phone's plain one.
+private struct BorderlessMenu: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.menuStyle(.borderlessButton)
+        #else
+        content
+        #endif
     }
 }

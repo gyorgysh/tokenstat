@@ -310,6 +310,10 @@ struct PickerOptionList<Value: Hashable>: View {
     /// A line above the search field naming what the panel is for. The phone
     /// gets this from the sheet's navigation title instead.
     var caption: String?
+    /// A control at the end of the caption line, such as which login the
+    /// agents in the list run as. Shown on the phone too, with the caption,
+    /// because it is a setting rather than a title.
+    var captionAccessory: AnyView? = nil
     var refresh: (() async -> Void)?
     var sectionValue: ((String) -> String?)?
     /// Tabs for a picker that holds several independent settings, one per
@@ -345,13 +349,26 @@ struct PickerOptionList<Value: Hashable>: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                #if os(macOS)
-                if let caption, !caption.isEmpty {
-                    Text(caption)
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
+                if let captionAccessory {
+                    HStack(spacing: Theme.Space.xs) {
+                        if let caption, !caption.isEmpty {
+                            Text(caption)
+                                .font(Theme.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: Theme.Space.s)
+                        captionAccessory
+                    }
+                } else {
+                    #if os(macOS)
+                    if let caption, !caption.isEmpty {
+                        Text(caption)
+                            .font(Theme.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    #endif
                 }
-                #endif
                 if let selectionSummary, !tabbed {
                     Text(selectionSummary)
                         .font(Theme.callout)

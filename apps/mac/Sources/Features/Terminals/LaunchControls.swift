@@ -260,7 +260,11 @@ struct AgentProfileLaunchControl: View {
     }
 
     var body: some View {
-        Group {
+        // The load hangs off a view that is always there. Until the list
+        // arrives there is nothing else to draw, and SwiftUI never starts a
+        // task attached to an empty view.
+        ZStack {
+            Color.clear.frame(width: 0, height: 0)
             if let profiles, !profiles.named.isEmpty {
                 Menu {
                     ForEach(profiles.profiles) { profile in
@@ -278,16 +282,19 @@ struct AgentProfileLaunchControl: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: lock != nil ? "lock.fill" : ActionIcon.team.symbol)
+                        Image(systemName: lock != nil ? "lock.fill" : "person.crop.circle")
                             .font(Theme.font(11))
                         Text(profiles.profile(current)?.title ?? AgentProfiles.system)
                             .font(Theme.font(11))
                             .lineLimit(1)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(current == AgentProfiles.system
+                                     ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.accent))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                // macOS caches a menu's label. Rebuild it when the choice moves.
+                .id("\(current)|\(profiles.profile(current)?.title ?? "")")
                 .help(L10n.text("common.profiles.launch_help"))
                 .accessibilityLabel(L10n.text("common.profiles.label"))
             }

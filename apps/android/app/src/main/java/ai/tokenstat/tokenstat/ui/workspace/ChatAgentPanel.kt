@@ -135,8 +135,9 @@ internal fun chatAgentChoices(
             rows.add(
                 PickerChoice(
                     value = ChatAgentChoice.Model(id),
-                    label = localChatModelTitle(id),
-                    detail = if (id in listed) null else L10n.text("android.chatagentpanel.saved_choice_availability_unverified.96a7ce32"),
+                    label = localChatModelName(id) ?: id,
+                    detail = if (id !in listed) L10n.text("android.chatagentpanel.saved_choice_availability_unverified.96a7ce32")
+                        else localChatProvider(id)?.let { L10n.text("common.chat.local_model_host", it) },
                     section = SECTION_MODEL,
                 ),
             )
@@ -200,6 +201,12 @@ internal fun chatAgentForcesBypass(backends: List<JsonObject>, id: String): Bool
 
 /// A model on a local server, stored by the host as `local:<provider>/<model>`,
 /// reads as the server and the model. Port of `LocalChatModel.title`.
+internal fun localChatProvider(id: String): String? =
+    localChatModelTitle(id).takeIf { it != id }?.substringBefore(": ")
+
+internal fun localChatModelName(id: String): String? =
+    localChatModelTitle(id).takeIf { it != id }?.substringAfter(": ")
+
 internal fun localChatModelTitle(id: String): String {
     val rest = id.trim().removePrefix("local:").takeIf { it != id.trim() } ?: return id
     val provider = rest.substringBefore('/', "")
