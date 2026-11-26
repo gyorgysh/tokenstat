@@ -14,6 +14,7 @@ swift = r'''import Foundation
 enum WorkReference { struct Scope: Codable, Equatable, Sendable {
     enum Kind: String, Codable { case account }; var kind = Kind.account
     var origin = "https://test.example"; let identity: String
+    var wireIdentity: String { identity }
 } }
 @MainActor final class WorkSessionContext {
     static let shared = WorkSessionContext()
