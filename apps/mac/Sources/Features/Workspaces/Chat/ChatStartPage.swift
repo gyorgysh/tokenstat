@@ -79,6 +79,10 @@ struct ChatStartPage: View {
             && owner.scope == WorkSessionContext.shared.scope && owner.session == WorkSessionContext.shared.generation
     }
 
+    /// The narrowest pane that fits the glance's three cards with their text
+    /// readable, padding included.
+    private static let glanceMinimumWidth: CGFloat = 600
+
     var body: some View {
         ZStack {
             ChatStartBackdrop(isFullScreen: isFullScreen,
@@ -94,10 +98,15 @@ struct ChatStartPage: View {
                             composer
                             if showsStarters {
                                 // Facts about what you are starting first, then
-                                // ideas for what to ask.
-                                ChatStartGlance(repository: selected, data: glance, backend: draft.agent?.backend)
-                                    .padding(.top, -6)
-                                    .transition(.opacity.combined(with: .offset(y: 6)))
+                                // ideas for what to ask. Three cards need room
+                                // to read: on a phone they would only be
+                                // truncated labels, so the ideas stand alone.
+                                if pane.size.width >= Self.glanceMinimumWidth {
+                                    ChatStartGlance(repository: selected, data: glance, backend: draft.agent?.backend,
+                                                    localProvider: LocalChatModel.parse(draft.agent?.model)?.provider)
+                                        .padding(.top, -6)
+                                        .transition(.opacity.combined(with: .offset(y: 6)))
+                                }
                                 ChatStartStarters(onPick: { draft.text = $0 }, revealed: true)
                                     .transition(.opacity)
                             }

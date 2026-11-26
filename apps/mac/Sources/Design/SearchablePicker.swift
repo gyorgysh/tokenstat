@@ -214,7 +214,7 @@ struct PickerOptionRow<Trailing: View>: View {
                     Text(detail)
                         .font(Theme.caption2)
                         .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
             }
             Spacer(minLength: Theme.Space.xs)

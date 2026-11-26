@@ -1450,7 +1450,10 @@ fn current_prices() -> Arc<PriceTable> {
         .ok()
         .and_then(|p| p.metadata().ok())
         .and_then(|m| m.modified().ok());
-    if prices_mtime != guard.prices_mtime || catalog_mtime != guard.catalog_mtime {
+    if prices_mtime != guard.prices_mtime
+        || catalog_mtime != guard.catalog_mtime
+        || guard.prices.local_models_stale()
+    {
         guard.prices = Arc::new(PriceTable::load_with_catalog());
         guard.prices_mtime = prices_mtime;
         guard.catalog_mtime = catalog_mtime;

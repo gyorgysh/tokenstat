@@ -536,7 +536,7 @@ private fun <T> TsPickerRow(
                         choice.detail,
                         style = TsType.caption2,
                         color = colors.textTertiary,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }

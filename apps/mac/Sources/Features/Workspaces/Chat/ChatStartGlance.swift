@@ -24,6 +24,9 @@ struct ChatStartGlance: View {
     let data: ChatStartGlanceData?
     /// The agent picked in the composer, as a chat backend id.
     let backend: String?
+    /// The composer's model, when it runs on a local server. Such a chat
+    /// spends no plan, so the panel says that instead of another tool's limits.
+    var localProvider: String? = nil
     @State private var limits = PlanLimitsStore.shared
     @State private var projectWeek: [UInt64]?
 
@@ -145,7 +148,18 @@ struct ChatStartGlance: View {
         return limits.visible.contains { $0.source == source && !$0.windows.isEmpty }
     }
 
-    private var limitsPanel: some View {
+    @ViewBuilder private var limitsPanel: some View {
+        if let localProvider {
+            GlancePanel(label: L10n.text("common.chat.local_limits_title"), symbol: "desktopcomputer", height: Self.height) {
+                Text(L10n.text("common.chat.local_no_limits", LocalChatModel.providerName(localProvider)))
+                    .font(Theme.callout).foregroundStyle(.secondary)
+            }
+        } else {
+            planLimitsPanel
+        }
+    }
+
+    private var planLimitsPanel: some View {
         let rows = limitRows
         // Named for the agent when the windows are its own, so "60%" is not
         // left to guess whose.

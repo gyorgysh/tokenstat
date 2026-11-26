@@ -208,6 +208,8 @@
   "common.chat.local_model_here": "Local, {0} on this computer",
   "common.chat.local_model_host": "Local, {0} on the host",
   "common.chat.local_model_small": "{0} context, tight for an agent",
+  "common.chat.local_limits_title": "Local model",
+  "common.chat.local_no_limits": "Runs on {0}. No plan limits.",
   "common.chat_working_style": "Working style",
   "common.chat_route_reset_options": "After a reset",
   "common.chat.stats": "Context & activity",

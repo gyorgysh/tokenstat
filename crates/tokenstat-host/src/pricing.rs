@@ -40,7 +40,19 @@ pub fn reload(session: &mut Session) {
 fn reload_from(session: &mut Session, path: &std::path::Path) {
     session.prices = PriceTable::load_from(path)
         .unwrap_or_default()
-        .with_catalog(std::sync::Arc::new(tokenstat_core::catalog::Catalog::load()));
+        .with_catalog(std::sync::Arc::new(tokenstat_core::catalog::Catalog::load()))
+        .with_local_models(tokenstat_core::pricing::local_models::load());
+}
+
+/// Attach the local model list again once a server has shown a new one, so
+/// its usage prices at zero without waiting for a restart.
+pub fn refresh_local_models(session: &mut Session) {
+    if session.prices.local_models_stale() {
+        session.prices = session
+            .prices
+            .clone()
+            .with_local_models(tokenstat_core::pricing::local_models::load());
+    }
 }
 
 /// What seeding did, so a front end can say so rather than guess.
@@ -136,7 +148,8 @@ fn seed_into(
     // cannot mark an unknown model as an estimate.
     session.prices = PriceTable::load_from(destination)
         .unwrap_or_default()
-        .with_catalog(std::sync::Arc::new(tokenstat_core::catalog::Catalog::load()));
+        .with_catalog(std::sync::Arc::new(tokenstat_core::catalog::Catalog::load()))
+        .with_local_models(tokenstat_core::pricing::local_models::load());
     Ok(Seeded {
         adopted: true,
         models: table.len(),

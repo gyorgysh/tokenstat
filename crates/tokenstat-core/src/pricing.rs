@@ -69,6 +69,14 @@ pub mod local_models {
         (matches!(provider, "ollama" | "lmstudio") && !model.is_empty()).then_some(model)
     }
 
+    /// Bumped each time this process remembers a new id, so a long-lived
+    /// price table can tell it is behind without reading the file again.
+    static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    pub fn generation() -> u64 {
+        GENERATION.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     pub fn load() -> BTreeSet<String> {
         path()
             .and_then(|path| std::fs::read_to_string(path).ok())
@@ -114,7 +122,9 @@ pub mod local_models {
         serde_json::to_writer(&mut file, &known).map_err(std::io::Error::other)?;
         file.flush()?;
         drop(file);
-        std::fs::rename(temp, path)
+        std::fs::rename(temp, path)?;
+        GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Ok(())
     }
 }
 
@@ -154,6 +164,8 @@ pub struct PriceTable {
     /// nothing, and a name that happens to resemble a cloud model must not
     /// borrow that model's price.
     local: Arc<BTreeSet<String>>,
+    /// The [`local_models::generation`] the `local` set was read at.
+    local_generation: u64,
 }
 
 impl PriceTable {
@@ -178,8 +190,15 @@ impl PriceTable {
 
     /// Mark these model ids as served on this machine, so they price at zero.
     pub fn with_local_models(mut self, ids: BTreeSet<String>) -> PriceTable {
+        self.local_generation = local_models::generation();
         self.local = Arc::new(ids.into_iter().map(|id| id.to_ascii_lowercase()).collect());
         self
+    }
+
+    /// Whether this process has remembered a local model since the table was
+    /// read, so a long-lived holder should attach the list again.
+    pub fn local_models_stale(&self) -> bool {
+        self.local_generation != local_models::generation()
     }
 
     /// Whether this model ran on a local server rather than a provider's cloud.
@@ -228,6 +247,7 @@ impl PriceTable {
             by_pattern,
             catalog: None,
             local: Arc::default(),
+            local_generation: 0,
         })
     }
 

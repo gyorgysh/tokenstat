@@ -164,6 +164,12 @@ internal sealed partial class NewChatPage
 
     private void RenderGlanceLimits()
     {
+        // A local model spends no plan, so another tool's limits would mislead.
+        if (LocalChatModel.Provider(Format.Text(_setup, "model")) is { } provider)
+        {
+            FillGlance(_glanceLimits, L10n.Text("common.chat.local_no_limits", provider));
+            return;
+        }
         if (_glanceProviders is null)
         {
             FillGlance(_glanceLimits, L10n.Text("common.loading"));

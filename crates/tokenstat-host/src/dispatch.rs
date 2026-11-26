@@ -1161,6 +1161,7 @@ fn with_session<T>(
     s: &mut Session,
     f: impl FnOnce(&mut Session) -> Result<T, DispatchError>,
 ) -> Result<T, DispatchError> {
+    crate::pricing::refresh_local_models(s);
     f(s)
 }
 
