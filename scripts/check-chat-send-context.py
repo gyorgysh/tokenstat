@@ -23,7 +23,8 @@ struct Conversation { let id: String; let sendRevision: UInt64? }
     static func updateChat(id: String, title: String?, backend: String?, model: String?,
         effort: String?, fastMode: Bool?, expectedRevision: UInt64?, mode: String?,
         autonomy: String?, personaID: String?, systemPrompt: String?, allowedTools: [String]?,
-        allowedShellPrefixes: [String]?, peer: String?) async throws -> Conversation {
+        allowedShellPrefixes: [String]?, profileID: String? = nil,
+        peer: String?) async throws -> Conversation {
         updates += 1
         beforeReply?()
         return reply
@@ -44,7 +45,7 @@ struct Conversation { let id: String; let sendRevision: UInt64? }
     }
     func replace(_ chat: Conversation) { selected = chat }
     func loadInstructions(id: String, generation: UInt64) async {}
-    func updateLanding(backend: String?, model: String?, effort: String?, fastMode: Bool?, mode: String?, autonomy: String?) {
+    func updateLanding(backend: String?, model: String?, effort: String?, fastMode: Bool?, mode: String?, autonomy: String?, profileID: String? = nil) {
         landingModel = model
     }
 '''
