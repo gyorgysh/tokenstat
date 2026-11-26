@@ -162,6 +162,9 @@ try {
         $pattern = $null
         if ($Control.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) { $pattern.Invoke(); return }
         if ($Control.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) { $pattern.Select(); return }
+        # A checkable menu item (the launch profile and model menus) offers
+        # Toggle, which WinUI routes through the same click as a tap.
+        if ($Control.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) { $pattern.Toggle(); return }
         throw "Control cannot be invoked: $($Control.Current.Name)"
     }
     function Reveal-RepositorySidebar {
