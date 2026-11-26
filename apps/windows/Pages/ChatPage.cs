@@ -2138,11 +2138,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         try
         {
             var profiles = await AgentProfiles.ReadAsync(_workspaceId);
-            if (generation == _openGeneration && IsLoaded)
-            {
-                _agentProfiles = profiles;
-                if (!Busy()) PaintConversation();
-            }
+            if (generation != _openGeneration || !IsLoaded) return;
+            _agentProfiles = profiles;
+            // Like the other catalog reads: refresh the inspector and the
+            // composer in place. PaintConversation would clear the whole
+            // root, destroying a chat list it did not build.
+            RefreshCatalogPresentation();
+            CheckSelectedSignIn();
         }
         catch { /* Older hosts keep the ordinary agent picker. */ }
     }

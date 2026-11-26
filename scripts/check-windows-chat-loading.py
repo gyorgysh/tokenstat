@@ -45,9 +45,8 @@ class Checks {
     static JsonArray AsArray(JsonNode node, string? key = null) =>
         (key == null ? node : node[key]) as JsonArray ?? new();
     void CheckSelectedSignIn() {}
-    void RefreshCatalogPresentation() {}
-    void PaintConversation() { _paints++; }
-    int _paints = 0;
+    void RefreshCatalogPresentation() { _presentations++; }
+    int _presentations = 0;
     AgentProfiles? _agentProfiles;
     class AgentProfiles {
         public static Queue<TaskCompletionSource<AgentProfiles?>> Reads = new();
@@ -150,8 +149,9 @@ class Checks {
         AgentProfiles.Reads.Dequeue().SetException(new Exception("offline"));
         AgentProfiles.Reads.Dequeue().SetResult(new AgentProfiles());
         if (c._agentProfiles is not null) throw new Exception("A retired profiles read published");
+        var presented = c._presentations;
         AgentProfiles.Reads.Dequeue().SetResult(new AgentProfiles());
-        if (c._agentProfiles is null || c._paints != 1) throw new Exception("A failed profiles read lost the current profiles");
+        if (c._agentProfiles is null || c._presentations <= presented) throw new Exception("A failed profiles read lost the current profiles");
         Console.WriteLine("Windows actual catalog: held/failed auxiliary reads cannot hide history; retired menus rejected");
         var activity = new Checks();
         var activityOpening = activity.ShowActivityAsync("all");
