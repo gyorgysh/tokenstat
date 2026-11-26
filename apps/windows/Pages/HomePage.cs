@@ -2128,6 +2128,9 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     private static string ShortModel(string id)
     {
         var raw = id.Trim();
+        // `local:` marks synced usage a machine served itself. Its price
+        // says so already, and the name reads without it.
+        if (raw.StartsWith("local:", StringComparison.OrdinalIgnoreCase)) raw = raw[6..];
         var slash = raw.LastIndexOf('/');
         var leaf = slash >= 0 ? raw[(slash + 1)..] : raw;
         if (leaf.ToLowerInvariant() is "default" or "auto" or "cursor-auto"

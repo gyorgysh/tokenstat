@@ -9,18 +9,16 @@ desktop is a review build. Newest first.
 
 ### Added
 
-- Claim your handle and choose who can open your profile from the app on Mac, iPhone, iPad, Android and Windows. Open your profile from Account: your tokenstat.ai address, Private or Public, search engine listing, and View public profile, which opens your browser on desktop and stays in the app on phones and tablets. An account without a handle is offered one once after sign-in, with a live check while you type. Skipping it on one device answers it on all of them. Turning off search engine listing explains that removing a page a search engine already lists is up to that search engine and can take days or months.
-
-- On Mac, Refresh in the agent picker also checks every agent for a newer version, and the setup page offers Update all for the agents that are behind. When the agent a chat runs on is behind, all clients offer Update and send or Skip this version. The picker still updates any agent by hand.
+- Give your coding agents more than one login with profiles, such as Work and Personal. Add a profile in Account on Mac, Windows, iPhone, iPad or Android, then pick it when you start a chat or open a terminal. A folder's terminals use the default profile until you pick another. Lock a repository to a profile so work code never runs on a personal plan. Claude, Codex, Grok, OpenCode and Muse keep a separate login per profile, while Cursor and Antigravity keep using this machine's login. Plan limits and Insights split by profile, and the composer names the profile when it is not the default.
+- Run chats on local models from LM Studio or Ollama. They appear in the model picker for Claude, Codex and OpenCode on every client, marked as local beside cloud models, and tasks, workflow steps and automations can use them too. Claude needs a server with the Anthropic Messages API. iPhone, iPad, Android and Windows can also launch terminal agents on a local model, as the Mac already could.
+- Claim your tokenstat.ai handle and choose who can open your profile, from Account on Mac, iPhone, iPad, Android and Windows. Set it Private or Public, turn search engine listing on or off, and open your public page: in your browser on desktop, inside the app on phones and tablets. An account without a handle is offered one once after sign-in, with a live check while you type, and skipping it on one device skips it on all of them. Turning listing off explains that each search engine decides when to drop a page it already lists, which can take days or months.
+- When the agent a chat runs on has a newer version, every client offers Update and send, or Skip this version. On Mac, Refresh in the agent picker also checks every agent for updates, and the setup page offers Update all for the ones that are behind.
 - On Mac, click your name on Home to open your profile.
-- Chat can run on a local model. Models loaded in LM Studio or Ollama appear in the model picker for Claude, Codex and OpenCode on every client, marked as local beside cloud models. Claude requires a server with the Anthropic Messages API. Tasks, workflow steps and automations can use local models too. iPhone, iPad, Android and Windows can also launch terminal agents on a local model, as the Mac already could.
-- OpenCode Go limits are asked of OpenCode itself first, through its own login. A stored API key is only the fallback.
-- Sign your coding agents in with more than one account. Add a profile in Account on Mac, Windows, iPhone, iPad or Android, pick it from the agent picker when starting a chat, and optionally lock a repository to one profile so work code never runs on a personal plan. Claude, Codex, Grok, OpenCode and Muse can each keep their own login per profile, while Cursor and Antigravity keep using this machine's login. Plan limits and Insights split by profile, and the composer names the profile when it is not the default. Terminals use the same profiles: every client launches agents on the profile picked for that folder, the default profile until you pick one.
+- OpenCode Go limits come from OpenCode's own login first. A stored API key is only the fallback.
 
 ### Fixed
 
-- Identifiable local usage is marked Local and valued at zero, in the apps and on your synced account and profile. Local chats hide cloud plan limits and explain how to recover if the model server stops. The picker warns when a model reports less than 64K context.
-
+- Local model usage is marked Local and valued at zero, in the apps and on your synced account and profile. Local chats hide cloud plan limits and say how to recover if the model server stops, and the picker warns when a model reports less than 64K of context.
 - On Mac, iPhone, iPad and Android, drafts, pins and recent places on this device stay with your account when you claim or change your handle.
 - On iPhone and iPad, recent chats and the project chat list show the pull request a chat opened, as they already do on Mac and Android.
 

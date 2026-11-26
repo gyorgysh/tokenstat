@@ -1140,7 +1140,10 @@ struct DayPart: Codable, Sendable, Hashable, Identifiable {
 /// reads fine, "claude-haiku-4-5-20251001" does not. Cursor's auto router logs
 /// as bare "default"/"auto", which would otherwise render as a mystery.
 func shortModel(_ id: String) -> String {
-    let raw = id.trimmingCharacters(in: .whitespaces)
+    var raw = id.trimmingCharacters(in: .whitespaces)
+    // `local:` marks synced usage a machine served itself. Its price says
+    // so already, and the name reads without it.
+    if raw.lowercased().hasPrefix("local:") { raw = String(raw.dropFirst(6)) }
     let leaf = raw.split(separator: "/").last.map(String.init) ?? raw
     let lower = leaf.lowercased()
     if ["default", "auto", "cursor-auto", "cursor-default", "cursor-router-auto"].contains(lower) {

@@ -1308,6 +1308,8 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
     let tz = tokenstat_core::timezone(opts.tz_name)?;
     let tz_name = tz.iana_name().unwrap_or("UTC");
 
+    let prices = tokenstat_core::PriceTable::load();
+    let local_models_known = tokenstat_core::pricing::local_models::load().len();
     let window = if let Some(raw) = opts.window {
         parse_window_arg(raw)?
     } else {
@@ -1316,7 +1318,13 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
             .to_zoned_datetime(tz.clone())
             .date()
             .to_string();
-        let cursor_from = config::cursor_for(&host)?.map(|c| c.from);
+        let cursor = config::cursor_for(&host)?;
+        // Local models found since the last sync priced their older days as
+        // cloud models on the account. Send the history again, once.
+        let relabel = cursor
+            .as_ref()
+            .is_some_and(|c| local_models_known > c.local_models.unwrap_or(0));
+        let cursor_from = cursor.filter(|_| !relabel).map(|c| c.from);
         default_sync_window(
             totals.first_date.as_deref(),
             totals.last_date.as_deref(),
@@ -1327,7 +1335,6 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
     };
 
     let prune = opts.prune;
-    let prices = tokenstat_core::PriceTable::load();
     let payload = build_sync_payload(
         store,
         SyncBuildArgs {
@@ -1442,7 +1449,14 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
     // The success body carries the plan's interval and the next slot, so a
     // scheduled run can pace itself without a second request.
     let pacing = pacing_from_body(&response_text, None);
-    config::record_sync_cursor(&host, &window.from, &window.to, &last_sync_at, pacing)?;
+    config::record_sync_cursor(
+        &host,
+        &window.from,
+        &window.to,
+        &last_sync_at,
+        pacing,
+        local_models_known,
+    )?;
 
     // Opt-in plan limits post (P2). Failures are not a failed sync: the
     // counters already landed, and a vendor that is down must not block that.

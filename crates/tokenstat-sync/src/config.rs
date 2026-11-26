@@ -84,6 +84,11 @@ pub struct SyncCursor {
     /// Minimum seconds between accepted syncs on the account's current plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_interval: Option<u64>,
+    /// How many local models this machine knew at the last accepted sync.
+    /// More now means older days went up under bare names and priced as
+    /// cloud models, so the next sync sends the history again once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_models: Option<usize>,
 }
 
 /// Local project-hashing salt. `id` goes on the wire; `key` never does.
@@ -317,6 +322,7 @@ pub fn record_sync_cursor(
     to: &str,
     last_sync_at: &str,
     pacing: SyncPacing,
+    local_models: usize,
 ) -> Result<(), ConfigError> {
     update(|cfg| {
         cfg.sync.cursor.insert(
@@ -327,6 +333,7 @@ pub fn record_sync_cursor(
                 last_sync_at: last_sync_at.to_string(),
                 next_allowed_at: pacing.next_allowed_at,
                 min_interval: pacing.min_interval,
+                local_models: Some(local_models),
             },
         );
         Ok(())
@@ -364,6 +371,7 @@ pub fn record_sync_hold(host: &str, pacing: SyncPacing) -> Result<(), ConfigErro
                     last_sync_at: String::new(),
                     next_allowed_at: pacing.next_allowed_at,
                     min_interval: pacing.min_interval,
+                    local_models: None,
                 },
             );
         } else {
@@ -492,6 +500,7 @@ mod tests {
                                 last_sync_at: String::new(),
                                 next_allowed_at: None,
                                 min_interval: None,
+                                local_models: None,
                             },
                         );
                         Ok(())
