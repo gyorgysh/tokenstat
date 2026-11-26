@@ -113,7 +113,7 @@ class Checks {
     class ScrollViewer { public object? Content { get; set; } public double MaxHeight { get; set; } }
     class DispatcherTimer {
         public TimeSpan Interval { get; set; }
-        public event EventHandler? Tick;
+        public event EventHandler? Tick { add {} remove {} }
         public void Start() {}
         public void Stop() {}
     }

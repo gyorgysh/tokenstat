@@ -15,7 +15,8 @@ namespace Microsoft.UI.Xaml {
     public enum VerticalAlignment { Center }
     public struct GridLength { public double Value; public GridLength(double n) { Value = n; } public GridLength(double n, GridUnitType type) { Value = n; } public static GridLength Auto => new(0); }
     public class UIElement { public Visibility Visibility { get; set; }
-        public event EventHandler<Microsoft.UI.Xaml.Input.PointerRoutedEventArgs>? PointerPressed, PointerMoved, PointerReleased, PointerCaptureLost;
+        public event EventHandler<Microsoft.UI.Xaml.Input.PointerRoutedEventArgs>? PointerPressed, PointerMoved, PointerReleased;
+        public event EventHandler<Microsoft.UI.Xaml.Input.PointerRoutedEventArgs>? PointerCaptureLost { add {} remove {} }
         public bool CapturePointer(Microsoft.UI.Xaml.Input.Pointer p) => true; public void ReleasePointerCapture(Microsoft.UI.Xaml.Input.Pointer p) {}
         public void Drag(double from, double to) {
             PointerPressed?.Invoke(this, new(from)); PointerMoved?.Invoke(this, new(to)); PointerReleased?.Invoke(this, new(to)); } }
