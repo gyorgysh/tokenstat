@@ -172,14 +172,20 @@ try {
         # visible check followed by navigation can go stale before the next
         # wait. Re-open until the control stays visible instead of toggling once.
         $id = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'sidebar.addProject')
-        for ($attempt = 0; $attempt -lt 3; $attempt++) {
-            $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
-            $add = $window.FindFirst($descendants, $id)
-            if ($add -and !$add.Current.IsOffscreen) {
-                Start-Sleep -Milliseconds 500
+        for ($attempt = 0; $attempt -lt 4; $attempt++) {
+            # The drawer animates open, so give each toggle time to land
+            # before deciding it missed. A quick recheck flips it shut again.
+            for ($poll = 0; $poll -lt 10; $poll++) {
                 $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
                 $add = $window.FindFirst($descendants, $id)
-                if ($add -and !$add.Current.IsOffscreen) { return }
+                if ($add -and !$add.Current.IsOffscreen) {
+                    Start-Sleep -Milliseconds 500
+                    $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+                    $add = $window.FindFirst($descendants, $id)
+                    if ($add -and !$add.Current.IsOffscreen) { return }
+                }
+                if ($attempt -eq 0 -and $poll -eq 0) { break }
+                Start-Sleep -Milliseconds 300
             }
             Open-Place 'Show or hide repositories'
         }
