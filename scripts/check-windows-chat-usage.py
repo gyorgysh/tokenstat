@@ -28,6 +28,10 @@ class Check {
     bool _commandUsageOnly = true, _usageReadFailed, IsLoaded = true;
     object? _commandDialogBody = new(), _usageFlight;
     string? _commandDialogOwner = "account/chat/claude", owner = "account/chat/claude";
+    JsonNode? Backend(string id) => null;
+    bool SeparateLogin(JsonNode? agent) => false;
+    string? ChatProfileId => null;
+    Task<JsonNode> CallChatAsync(string method, JsonObject args) => AppServices.Host.CallAsync(method, args);
     long _inspectionVisibilityGeneration, _usageReadVisibility = -1;
     DateTimeOffset _usageAttempt;
     JsonObject? _usageLimits;

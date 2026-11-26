@@ -18,19 +18,32 @@ def method(signature):
 
 methods = '\n'.join(method(s) for s in ['    func load(workspaceID:',
     '    private func loadSetup(', '    private func loadBackendCatalog(',
-    '    private func loadPersonaCatalog(', '    private static func uniqued('])
+    '    private func loadPersonaCatalog(', '    func refreshAgentProfiles(',
+    '    private static func uniqued('])
 swift = r'''import Foundation
 struct Logger { init(subsystem: String, category: String) {}; func error(_ text: String) {} }
 enum WorkReference { struct Scope: Equatable, Sendable { let identity: String } }
 @MainActor final class WorkSessionContext {
     static let shared = WorkSessionContext()
     var scope: WorkReference.Scope? = .init(identity: "alice")
+    var generation: UInt64 = 0
     var localHostIdentity: String? = "local"
     func resolveLocalHostIdentity() async {}
 }
 struct ChatConversation: Equatable, Sendable { let id: String }
 struct ChatBackend: Sendable { let id: String }
 struct Voices: Sendable { let personas: [String]; let defaultId: String }
+struct AgentProfiles: Sendable {}
+@MainActor final class ProfileCatalogStub {
+    var value: AgentProfiles?
+    var remembered: [String] = []
+    func refresh() async {}
+    func remember(_ profiles: AgentProfiles, peer: String, account: UInt64) { remembered.append(peer) }
+}
+enum RemoteHostFeature {
+    case agentProfiles
+    func isSupported(peer: String?) async -> Bool { true }
+}
 @MainActor final class Held<T> {
     var replies: [CheckedContinuation<T, Error>?] = []
     func read() async throws -> T { try await withCheckedThrowingContinuation { replies.append($0) } }
@@ -38,11 +51,12 @@ struct Voices: Sendable { let personas: [String]; let defaultId: String }
     func fail(_ index: Int) { replies[index]?.resume(throwing: NSError(domain: "offline", code: 1)); replies[index] = nil }
 }
 @MainActor enum Bridge {
-    static let backend = Held<[ChatBackend]>(), voices = Held<Voices>(), list = Held<[ChatConversation]>()
+    static let backend = Held<[ChatBackend]>(), voices = Held<Voices>(), list = Held<[ChatConversation]>(), profiles = Held<AgentProfiles>()
     static func chatRoute(workspaceID: String, peer: String?) -> (workspaceID: String, peer: String?) { (workspaceID, peer) }
     static func chats(workspaceID: String, peer: String?) async throws -> [ChatConversation] { try await list.read() }
     static func chatBackends(peer: String?) async throws -> [ChatBackend] { try await backend.read() }
     static func chatPersonas(workspaceID: String, peer: String?) async throws -> Voices { try await voices.read() }
+    static func agentProfiles(peer: String?) async throws -> AgentProfiles { try await profiles.read() }
 }
 struct Mark { let itemID: String? }
 struct WorkContinuityStore { static let shared = Self(); func lastConversation(scope: WorkReference.Scope, hostIdentity: String, workspaceID: String) -> Mark? { nil } }
@@ -63,6 +77,8 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
     var chats: [ChatConversation] = [], selected: ChatConversation?
     var backends: [ChatBackend] = [], backendRefreshError: String?, personas: [String] = [], defaultPersonaID: String?
     var pendingRevealID: String?, pendingRevealFolderID: String?, error: String?
+    private let profileCatalog = ProfileCatalogStub()
+    private var remoteProfileCatalog: (peer: String, profiles: AgentProfiles)?
     var steerOverlay = Bag(), listMutations = Bag(), recentMessages = Bag()
     var events: [String] = [], outgoing: [String] = [], approvals: [String] = []
     var outgoingWatermark: [String: Int] = [:], responseAttachmentData: [String: Data] = [:]
@@ -95,23 +111,24 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
 @main struct Check {
     @MainActor static func main() async {
         let m = Model()
+        m.adoptPeer("mac")
         m.sidebarListErrors["old-folder"] = (.init(identity: "old-account"), "Unavailable")
         let opening = Task { await m.load(workspaceID: "p", peer: "mac", selectFirst: false) }
-        await until { Bridge.list.replies.count == 1 && Bridge.backend.replies.count == 1 && Bridge.voices.replies.count == 1 }
+        await until { Bridge.list.replies.count == 1 && Bridge.backend.replies.count == 1 && Bridge.voices.replies.count == 1 && Bridge.profiles.replies.count == 1 }
         Bridge.list.finish(0, [.init(id: "history")]); await opening.value
         precondition(m.sidebarListErrors.isEmpty, "Scope adoption retained another account's sidebar error")
         precondition(m.chats.count == 1 && !m.isLoading && m.error == nil,
                      "Held auxiliary requests hid successful history")
-        Bridge.backend.fail(0); Bridge.voices.fail(0)
+        Bridge.backend.fail(0); Bridge.voices.fail(0); Bridge.profiles.fail(0)
         await until { m.backendRefreshError != nil }
         precondition(m.chats.count == 1 && m.error == nil)
         // Another project supersedes a suspended catalog and its default voice.
         let first = Task { await m.load(workspaceID: "a", peer: "mac", selectFirst: false) }
-        await until { Bridge.list.replies.count == 2 && Bridge.voices.replies.count == 2 }
-        Bridge.list.finish(1, [.init(id: "a")]); await first.value
+        await until { Bridge.list.replies.count == 2 && Bridge.voices.replies.count == 2 && Bridge.profiles.replies.count == 2 }
+        Bridge.list.finish(1, [.init(id: "a")]); Bridge.profiles.finish(1, .init()); await first.value
         let second = Task { await m.load(workspaceID: "b", peer: "mac", selectFirst: false) }
-        await until { Bridge.list.replies.count == 3 && Bridge.voices.replies.count == 3 && Bridge.backend.replies.count == 3 }
-        Bridge.list.finish(2, [.init(id: "b")]); await second.value
+        await until { Bridge.list.replies.count == 3 && Bridge.voices.replies.count == 3 && Bridge.backend.replies.count == 3 && Bridge.profiles.replies.count == 3 }
+        Bridge.list.finish(2, [.init(id: "b")]); Bridge.profiles.finish(2, .init()); await second.value
         Bridge.backend.finish(1, [.init(id: "old")]); Bridge.voices.finish(1, .init(personas: ["old"], defaultId: "old"))
         Bridge.backend.finish(2, [.init(id: "new")]); Bridge.voices.finish(2, .init(personas: ["new"], defaultId: "new"))
         await until { m.defaultPersonaID == "new" && m.backends.first?.id == "new" }
@@ -121,11 +138,11 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
         // list only refreshes that same conversation after the open lands.
         m.pendingRevealID = "a"; m.pendingRevealFolderID = "a"
         let primed = Task { await m.load(workspaceID: "a", peer: "mac", selectFirst: true) }
-        await until { Bridge.list.replies.count == 4 }
+        await until { Bridge.list.replies.count == 4 && Bridge.profiles.replies.count == 4 }
         await until { m.opened == ["a"] }
         precondition(m.refreshes.isEmpty && m.openingConversation == false,
                      "The cached conversation waited for the folder list before opening")
-        Bridge.list.finish(3, [.init(id: "a")]); await primed.value
+        Bridge.list.finish(3, [.init(id: "a")]); Bridge.profiles.finish(3, .init()); await primed.value
         precondition(m.opened == ["a"] && m.refreshes == ["a"], "The answered list opened the conversation a second time")
         print("ChatModel loading: history survives held/failed auxiliary reads; superseded catalog/default voice rejected; cached folders open before the list answers")
     }
