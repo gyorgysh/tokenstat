@@ -2965,11 +2965,27 @@ struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
     var lastMessageAuthor: String?
     var running: Bool
     var needsAttention: Bool
+    /// The pull requests the host knows for this chat, read from its cache.
+    /// A host that only reports the branch's own sends `pull` alone.
+    var pulls: [ChatPull] = []
 
     enum CodingKeys: String, CodingKey {
         case id
         case workspaceID = "workspaceId"
-        case title, backend, lastMessageAtMs, lastMessageAuthor, running, needsAttention
+        case title, backend, lastMessageAtMs, lastMessageAuthor, running, needsAttention, pulls, pull
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(workspaceID, forKey: .workspaceID)
+        try c.encode(title, forKey: .title)
+        try c.encode(backend, forKey: .backend)
+        try c.encodeIfPresent(lastMessageAtMs, forKey: .lastMessageAtMs)
+        try c.encodeIfPresent(lastMessageAuthor, forKey: .lastMessageAuthor)
+        try c.encode(running, forKey: .running)
+        try c.encode(needsAttention, forKey: .needsAttention)
+        try c.encode(pulls, forKey: .pulls)
     }
 
     init(from decoder: Decoder) throws {
@@ -2982,6 +2998,8 @@ struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
         lastMessageAuthor = try c.decodeIfPresent(String.self, forKey: .lastMessageAuthor)
         running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
         needsAttention = try c.decodeIfPresent(Bool.self, forKey: .needsAttention) ?? false
+        let pull = try? c.decodeIfPresent(BranchPull.self, forKey: .pull)
+        pulls = (try? c.decodeIfPresent([ChatPull].self, forKey: .pulls)) ?? pull.map { [ChatPull($0)] } ?? []
     }
 }
 

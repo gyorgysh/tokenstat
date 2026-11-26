@@ -19,6 +19,7 @@ desktop is a review build. Newest first.
 ### Fixed
 
 - On Mac, iPhone, iPad and Android, drafts, pins and recent places on this device stay with your account when you claim or change your handle.
+- On iPhone and iPad, recent chats and the project chat list show the pull request a chat opened, as they already do on Mac and Android.
 
 ## [1.26.0] - 2026-11-25
 

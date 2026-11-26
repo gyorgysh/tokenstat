@@ -37,6 +37,7 @@ struct ClientProjectChatRows: View {
                         HarnessMark(id: chat.backend, size: 16)
                         Text(chat.title).font(ClientType.caption).lineLimit(1)
                         Spacer(minLength: 0)
+                        ChatPullMark(pulls: chat.pulls, size: 11, font: ClientType.caption)
                         if chat.running {
                             Image(systemName: "circle.fill")
                                 .font(Theme.fixed(6)).foregroundStyle(Theme.accent)

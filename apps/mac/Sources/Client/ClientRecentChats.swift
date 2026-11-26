@@ -263,6 +263,7 @@ private struct ClientRecentChatRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 0)
+            ChatPullMark(pulls: chat.pulls, font: ClientType.caption)
             Image(systemName: ActionIcon.next.symbol)
                 .font(Theme.font(12, weight: .semibold))
                 .foregroundStyle(.tertiary)
