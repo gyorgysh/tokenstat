@@ -492,9 +492,11 @@ impl Manager {
         Ok((info, witness))
     }
 
-    /// Open a pty, spawn the command and start its reader thread. Used by both
-    /// the fresh path and the shell pool, so the two share one definition of
-    /// what a session is.
+    /// Open a pty, spawn the command and start its reader thread. Used by the
+    /// unix shell pool, so it shares one definition of what a session is.
+    /// Windows builds no shell pool, so this stays unix-only rather than
+    /// tripping deny-warnings dead code there.
+    #[cfg(unix)]
     fn build_session(
         &self,
         req: &Spawn,
