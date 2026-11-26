@@ -340,47 +340,62 @@ struct ClientWorkspaceSessionsView: View {
             let current = choices.first { $0.key == localModelKey }?.label
                 ?? LocalModelLaunch.parse(localModelKey)?.model
                 ?? L10n.text("apple.launchcontrols.each_tool_s_default.03e1b871")
-            HStack(spacing: Theme.Space.s) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: Theme.Space.xs)
-                        .fill(Theme.accent.opacity(0.12))
-                        .frame(width: 32, height: 32)
-                    Image(systemName: localModelKey == nil ? "cloud" : "desktopcomputer")
-                        .foregroundStyle(Theme.accent)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.text("apple.chatsetupheader.model.5e2c614c"))
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                    Text(current)
-                        .font(ClientType.label.weight(.medium))
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Menu {
-                    Button {
-                        select(localModel: nil)
-                    } label: {
-                        Label(L10n.text("apple.launchcontrols.each_tool_s_default.03e1b871"),
-                              systemImage: localModelKey == nil ? "checkmark" : "")
-                    }
-                    ForEach(choices, id: \.key) { choice in
-                        Button {
-                            select(localModel: choice.key)
-                        } label: {
-                            Label(choice.label, systemImage: choice.key == localModelKey ? "checkmark" : "")
-                        }
-                    }
+            Menu {
+                Button {
+                    select(localModel: nil)
                 } label: {
-                    Image(systemName: "chevron.up.chevron.down")
-                        .frame(minWidth: 44, minHeight: 44)
+                    Label(L10n.text("apple.launchcontrols.each_tool_s_default.03e1b871"),
+                          systemImage: localModelKey == nil ? "checkmark" : "")
                 }
-                .accessibilityLabel(L10n.text("apple.chatsetupheader.model.5e2c614c"))
+                ForEach(choices, id: \.key) { choice in
+                    Button {
+                        select(localModel: choice.key)
+                    } label: {
+                        Label(choice.label, systemImage: choice.key == localModelKey ? "checkmark" : "")
+                    }
+                }
+            } label: {
+                launchChoiceRow(symbol: localModelKey == nil ? "cloud" : "desktopcomputer",
+                                caption: L10n.text("apple.chatsetupheader.model.5e2c614c"),
+                                value: current, opens: true)
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .cardSurface()
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.text("apple.chatsetupheader.model.5e2c614c"))
+            .accessibilityValue(current)
         }
+    }
+
+    /// One launch setting in the same card as Bypass. The whole card opens
+    /// its choices, like the rest of the rows here.
+    private func launchChoiceRow(symbol: String, caption: String, value: String, opens: Bool) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            ZStack {
+                RoundedRectangle(cornerRadius: Theme.Space.xs)
+                    .fill(Theme.accent.opacity(0.12))
+                    .frame(width: 32, height: 32)
+                Image(systemName: symbol)
+                    .foregroundStyle(Theme.accent)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(caption)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(ClientType.label.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if opens {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .contentShape(.rect)
+        .cardSurface()
     }
 
     private func select(localModel key: String?) {
@@ -395,42 +410,30 @@ struct ClientWorkspaceSessionsView: View {
         if let profiles = launchProfiles, !profiles.named.isEmpty {
             let lock = profiles.workspaceLocks?[workspaceID]
             let current = lock ?? launchProfile ?? profiles.default
-            HStack(spacing: Theme.Space.s) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: Theme.Space.xs)
-                        .fill(Theme.accent.opacity(0.12))
-                        .frame(width: 32, height: 32)
-                    Image(systemName: lock != nil ? "lock.fill" : ActionIcon.team.symbol)
-                        .foregroundStyle(Theme.accent)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.text("common.profiles.label"))
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                    Text(profiles.profile(current)?.title ?? L10n.text("common.profiles.removed"))
-                        .font(ClientType.label.weight(.medium))
-                }
-                Spacer(minLength: 0)
-                if lock == nil {
-                    Menu {
-                        ForEach(profiles.profiles) { profile in
-                            Button {
-                                launchProfile = profile.id
-                                LaunchAgentProfile.choose(profile.id, for: folder.id)
-                            } label: {
-                                Label(profile.title, systemImage: profile.id == current ? "checkmark" : "")
-                            }
+            let title = profiles.profile(current)?.title ?? L10n.text("common.profiles.removed")
+            if lock != nil {
+                launchChoiceRow(symbol: "lock.fill", caption: L10n.text("common.profiles.label"),
+                                value: title, opens: false)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint(L10n.text("common.profiles.locked", title))
+            } else {
+                Menu {
+                    ForEach(profiles.profiles) { profile in
+                        Button {
+                            launchProfile = profile.id
+                            LaunchAgentProfile.choose(profile.id, for: folder.id)
+                        } label: {
+                            Label(profile.title, systemImage: profile.id == current ? "checkmark" : "")
                         }
-                    } label: {
-                        Image(systemName: "chevron.up.chevron.down")
-                            .frame(minWidth: 44, minHeight: 44)
                     }
-                    .accessibilityLabel(L10n.text("common.profiles.label"))
+                } label: {
+                    launchChoiceRow(symbol: "person.crop.circle", caption: L10n.text("common.profiles.label"),
+                                    value: title, opens: true)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("common.profiles.label"))
+                .accessibilityValue(title)
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .cardSurface()
         }
     }
 

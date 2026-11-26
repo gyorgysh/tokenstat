@@ -111,6 +111,7 @@ struct ProfileSheet: View {
             if let profile = account?.profile {
                 choices(profile)
                 if profile.isPublic {
+                    VStack(alignment: .leading, spacing: 4) {
                     Toggle(L10n.text("common.profile.indexable"), isOn: Binding(
                         get: { profile.indexable },
                         set: { wanted in save { try await model.setProfile(indexable: wanted) } }
@@ -128,6 +129,7 @@ struct ProfileSheet: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.leading, 4)
+                    }
                 }
             }
             if isPublic, let url { viewButton(url) }
