@@ -110,14 +110,6 @@ impl Guard {
     pub fn ensure_current(&self) -> Result<(), Error> {
         self.location.ensure_current()
     }
-    #[cfg(test)]
-    pub fn spawn(
-        &mut self,
-        request: &tokenstat_pty::Spawn,
-    ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
-        self.spawn_removing_env(request, &[])
-    }
-
     pub fn spawn_removing_env(
         &mut self,
         request: &tokenstat_pty::Spawn,
@@ -126,13 +118,6 @@ impl Guard {
         self.spawn_with_io(request, false, remove)
     }
     /// Structured, noninteractive agent output must survive a quick child exit.
-    #[cfg(test)]
-    pub fn spawn_piped(
-        &mut self,
-        request: &tokenstat_pty::Spawn,
-    ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
-        self.spawn_with_io(request, true, &[])
-    }
     pub fn spawn_piped_removing_env(
         &mut self,
         request: &tokenstat_pty::Spawn,

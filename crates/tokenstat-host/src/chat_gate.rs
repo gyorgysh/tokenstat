@@ -328,7 +328,10 @@ const CHAT_CONFIG_MARKER: &str = "# Written by tokenstat from your Codex config.
 ///
 /// Optional files are shared best effort. Preparing the gated configuration
 /// must succeed before the turn starts.
-#[cfg(test)]
+///
+/// Test-only, and unix-only with the symlink tests that use it: Windows
+/// builds no caller, so an ungated definition trips deny-warnings dead code.
+#[cfg(all(test, unix))]
 fn share_codex_home(source: &Path, home: &Path, gated: bool) -> std::io::Result<()> {
     share_codex_home_config(source, home, gated, false)
 }

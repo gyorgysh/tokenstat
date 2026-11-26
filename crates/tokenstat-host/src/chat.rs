@@ -3864,6 +3864,16 @@ impl Store {
                 tail_chars(reply.trim(), CONTINUATION_REPLY_CHARS)
             ));
         }
+        // Name the cache the new session gives up. A warm multi-hour chat
+        // can hold hundreds of thousands of cached tokens; the new login
+        // starts cold and pays to rebuild them as it rereads context.
+        if let Some(cache) = source.prompt_cache.as_ref() {
+            let age_mins = now_ms().saturating_sub(cache.at_ms).max(0) / 60_000;
+            brief.push_str(&format!(
+                "\nThe earlier conversation held about {} cached input tokens for {} (recorded {}m ago). This session has no such cache.\n",
+                cache.tokens, cache.backend, age_mins
+            ));
+        }
         Ok(Some(Handover {
             announce: false,
             brief,
@@ -3910,6 +3920,26 @@ impl Store {
         profile: Option<String>,
     ) -> Result<Conversation, String> {
         let source = self.get(id)?;
+        // Same logins: a continuation is the same work.
+        let target = profile.unwrap_or_else(|| {
+            source
+                .profile_id
+                .clone()
+                .unwrap_or_else(|| crate::profiles::SYSTEM.into())
+        });
+        // A handoff already made for this chat onto this profile is the
+        // continuation. Reopening it keeps one chat per profile instead of
+        // one per switch, so going back and forth never litters the list.
+        if let Some(existing) = self.list(&source.workspace_id).into_iter().find(|chat| {
+            chat.continued_from.as_deref() == Some(source.id.as_str())
+                && chat
+                    .profile_id
+                    .as_deref()
+                    .unwrap_or(crate::profiles::SYSTEM)
+                    == target
+        }) {
+            return Ok(existing);
+        }
         let created = self.create(Create {
             workspace_id: source.workspace_id.clone(),
             title: None,
@@ -3924,15 +3954,7 @@ impl Store {
             // included, so a persona edited or removed since does not change
             // or refuse the continuation.
             persona_id: Some(String::new()),
-            // Same logins: a continuation is the same work.
-            profile_id: profile.or_else(|| {
-                Some(
-                    source
-                        .profile_id
-                        .clone()
-                        .unwrap_or_else(|| crate::profiles::SYSTEM.into()),
-                )
-            }),
+            profile_id: Some(target),
         })?;
         self.edit_conversation(&created.id, |chat| {
             chat.persona_id = source.persona_id.clone();
@@ -10804,6 +10826,53 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_continuation_reopens_its_chat_and_names_its_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("repo");
+        std::fs::create_dir_all(&folder).unwrap();
+        let workspace = crate::workspaces::write().add(&folder, 1).unwrap().id;
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-old");
+        conversation_for_receipts(&store, "chat-new");
+        store
+            .edit_conversation("chat-old", |chat| {
+                chat.workspace_id = workspace.clone();
+                chat.prompt_cache = Some(crate::chat_cache::PromptCache {
+                    backend: "claude".into(),
+                    tokens: 180_000,
+                    model: None,
+                    selection: None,
+                    at_ms: 1,
+                    ttl_ms: 3_600_000,
+                });
+                Ok(())
+            })
+            .unwrap();
+        store
+            .edit_conversation("chat-new", |chat| {
+                chat.workspace_id = workspace.clone();
+                chat.continued_from = Some("chat-old".into());
+                chat.profile_id = Some("p_work".into());
+                Ok(())
+            })
+            .unwrap();
+        // The handover names the cache the new login gives up.
+        let brief = store.continuation("chat-old").unwrap().unwrap();
+        assert!(
+            brief
+                .brief
+                .contains("180000 cached input tokens for claude")
+        );
+        // Continuing onto the same profile reopens the handoff instead of
+        // starting another chat.
+        let reopened = store
+            .continue_in_new("chat-old", Some("p_work".into()))
+            .unwrap();
+        assert_eq!(reopened.id, "chat-new");
+        assert_eq!(store.list(&workspace).len(), 2);
+    }
+
+    #[test]
     fn a_claude_session_claude_code_deleted_is_handed_over_not_resumed() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -12858,18 +12927,21 @@ mod tests {
             }
             let mut writer = crate::workspace_writer::Guard::acquire(root.path()).unwrap();
             let process = writer
-                .spawn_piped(&tokenstat_pty::Spawn {
-                    command: "/usr/bin/printf".into(),
-                    args: vec!["%s\n".into(), record],
-                    cwd: root.path().into(),
-                    workspace_id: None,
-                    hidden: true,
-                    rows: 24,
-                    cols: 80,
-                    no_color: true,
-                    dark: None,
-                    environment: vec![],
-                })
+                .spawn_piped_removing_env(
+                    &tokenstat_pty::Spawn {
+                        command: "/usr/bin/printf".into(),
+                        args: vec!["%s\n".into(), record],
+                        cwd: root.path().into(),
+                        workspace_id: None,
+                        hidden: true,
+                        rows: 24,
+                        cols: 80,
+                        no_color: true,
+                        dark: None,
+                        environment: vec![],
+                    },
+                    &[],
+                )
                 .unwrap();
             Arc::clone(&store).drain(
                 id,

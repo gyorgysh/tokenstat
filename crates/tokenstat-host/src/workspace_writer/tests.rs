@@ -39,9 +39,9 @@ fn request(folder: &Path, script: &str) -> tokenstat_pty::Spawn {
 fn structured_runs_use_closed_input_and_preserve_raw_output() {
     let temp = tempfile::tempdir().unwrap();
     let mut writer = Guard::acquire(temp.path()).unwrap();
-    let info = writer.spawn_piped(&request(temp.path(),
+    let info = writer.spawn_piped_removing_env(&request(temp.path(),
         "if [ -t 0 ] || [ -t 1 ] || [ -t 2 ]; then exit 7; fi; if read -r input; then exit 8; fi; printf 'raw café 日本語 ✓\\n'; printf 'error details\\n' >&2; exit 23"
-    )).unwrap();
+    ), &[]).unwrap();
     let _session = Session(info.id.clone());
     let manager = tokenstat_pty::manager();
     wait_until("structured output EOF", || {
@@ -61,7 +61,7 @@ fn structured_runs_use_closed_input_and_preserve_raw_output() {
 fn closed_output_and_a_dropped_guard_keep_observing_a_live_process() {
     let temp = tempfile::tempdir().unwrap();
     let mut writer = Guard::acquire(temp.path()).unwrap();
-    let info = writer.spawn_piped(&request(temp.path(), "exec </dev/null >/dev/null 2>&1; echo ready > ready.txt; while [ ! -f release.txt ]; do sleep 0.02; done; echo done > done.txt")).unwrap();
+    let info = writer.spawn_piped_removing_env(&request(temp.path(), "exec </dev/null >/dev/null 2>&1; echo ready > ready.txt; while [ ! -f release.txt ]; do sleep 0.02; done; echo done > done.txt"), &[]).unwrap();
     let _session = Session(info.id);
     wait_until("stream closure while the root stays alive", || {
         temp.path().join("ready.txt").exists() && writer.process.as_ref().unwrap().output_closed()
@@ -84,10 +84,13 @@ fn agents_in_the_same_checkout_are_observed_independently() {
     let temp = tempfile::tempdir().unwrap();
     let mut first = Guard::acquire(temp.path()).unwrap();
     let first_info = first
-        .spawn_piped(&request(
-            temp.path(),
-            "echo ready > first.ready; while [ ! -f first.release ]; do sleep 0.02; done",
-        ))
+        .spawn_piped_removing_env(
+            &request(
+                temp.path(),
+                "echo ready > first.ready; while [ ! -f first.release ]; do sleep 0.02; done",
+            ),
+            &[],
+        )
         .unwrap();
     let _first_session = Session(first_info.id);
     let first_process = first.process.as_ref().unwrap().clone();
@@ -97,10 +100,13 @@ fn agents_in_the_same_checkout_are_observed_independently() {
 
     let mut second = Guard::acquire(temp.path()).unwrap();
     let second_info = second
-        .spawn_piped(&request(
-            temp.path(),
-            "echo ready > second.ready; while [ ! -f second.release ]; do sleep 0.02; done",
-        ))
+        .spawn_piped_removing_env(
+            &request(
+                temp.path(),
+                "echo ready > second.ready; while [ ! -f second.release ]; do sleep 0.02; done",
+            ),
+            &[],
+        )
         .unwrap();
     let _second_session = Session(second_info.id);
     let second_process = second.process.as_ref().unwrap().clone();
@@ -124,10 +130,10 @@ fn agents_can_start_while_another_operation_uses_the_same_checkout() {
     let temp = tempfile::tempdir().unwrap();
     let mut background = Guard::acquire(temp.path()).unwrap();
     let info = background
-        .spawn_piped(&request(
+        .spawn_piped_removing_env(&request(
             temp.path(),
             "echo ready > background.ready; while [ ! -f background.release ]; do sleep 0.02; done",
-        ))
+        ), &[])
         .unwrap();
     let _background_session = Session(info.id);
     wait_until("background job startup", || {
@@ -136,7 +142,7 @@ fn agents_can_start_while_another_operation_uses_the_same_checkout() {
     let _operation = Lease::acquire(temp.path()).unwrap();
     let mut chat = Guard::acquire(temp.path()).unwrap();
     let info = chat
-        .spawn_piped(&request(temp.path(), "echo ran > chat.started"))
+        .spawn_piped_removing_env(&request(temp.path(), "echo ran > chat.started"), &[])
         .unwrap();
     let _session = Session(info.id);
     wait_until("chat alongside another checkout operation", || {
@@ -155,7 +161,7 @@ fn a_process_launch_does_not_require_working_git_metadata() {
     std::fs::write(temp.path().join(".git"), "gitdir: no-longer-present\n").unwrap();
     let mut guard = Guard::acquire(temp.path()).unwrap();
     let info = guard
-        .spawn_piped(&request(temp.path(), "echo ran > started"))
+        .spawn_piped_removing_env(&request(temp.path(), "echo ran > started"), &[])
         .unwrap();
     let _session = Session(info.id);
     wait_until("launch in folder with broken Git metadata", || {
@@ -174,7 +180,7 @@ fn a_replaced_launch_folder_is_rejected_and_stays_rejected() {
     std::fs::create_dir(&folder).unwrap();
     assert!(
         guard
-            .spawn_piped(&request(&folder, "echo wrong > started"))
+            .spawn_piped_removing_env(&request(&folder, "echo wrong > started"), &[])
             .is_err()
     );
     assert!(!folder.join("started").exists());
@@ -190,7 +196,7 @@ fn a_writer_cannot_launch_in_a_different_folder() {
     let mut writer = Guard::acquire(temp.path()).unwrap();
     assert!(
         writer
-            .spawn(&request(other.path(), "echo wrong > launched.txt"))
+            .spawn_removing_env(&request(other.path(), "echo wrong > launched.txt"), &[])
             .is_err()
     );
     assert!(!other.path().join("launched.txt").exists());

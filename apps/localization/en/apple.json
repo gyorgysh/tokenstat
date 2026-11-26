@@ -3,6 +3,8 @@
   "apple.profiles.any": "Any profile",
   "apple.profiles.continue": "Continue in a new chat on {0}",
   "apple.profiles.continue_message": "The new chat will have the earlier conversation for context and will use {0}.",
+  "apple.profiles.continue_cache": "This chat holds about {0} cached tokens; the new session starts cold and rebuilds them as it rereads context.",
+  "apple.profiles.continue_limits": "{0} plan windows right now: {1}.",
   "apple.profiles.default": "Default for new chats",
   "apple.profiles.delete": "Delete {0}?",
   "apple.profiles.delete_message": "This removes the saved agent logins for this profile. To continue an existing chat, choose a profile in a new chat.",

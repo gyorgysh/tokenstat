@@ -1011,8 +1011,37 @@ struct ChatAgentPanel: View {
                 }
             }
         } message: { profile in
-            Text(L10n.text("apple.profiles.continue_message", profile.title))
+            Text(continueMessage(chat: chat, profile: profile, peer: model.peer))
         }
+    }
+
+    /// What the profile switch costs: the cached tokens the new login gives
+    /// up, and the target profile's own plan windows. Both are already on
+    /// screen behind the alert; naming them here keeps the approval informed.
+    private func continueMessage(chat: ChatConversation, profile: AgentProfile, peer: String?) -> String {
+        var parts = [L10n.text("apple.profiles.continue_message", profile.title)]
+        if let cache = chat.promptCache {
+            parts.append(L10n.text("apple.profiles.continue_cache",
+                                   cache.tokens.formatted(.number.grouping(.automatic))))
+        }
+        let readings = ChatPlanLimits.store(peer: peer)
+        if let provider = ComposerLimits.pick(
+            backend: chat.backend, canonical: harnessCanonicalID,
+            providers: readings.visible.filter { $0.profileId == profile.id },
+            source: \.source, hasWindows: \.hasWindows
+        ) {
+            let rows = harnessCanonicalID(provider.source) == "codex"
+                ? ComposerLimits.codexHeadlineRows(windows: provider.windows, label: \.label, scope: \.scope)
+                : ComposerLimits.badgeRows(windows: provider.windows, label: \.label, scope: \.scope)
+            let windows = rows.map {
+                L10n.text("apple.composerlimitsbadge.0_1_percent.f674c60d", $0.display,
+                          $0.window.percent.formatted(.number.precision(.fractionLength(0))))
+            }.joined(separator: ", ")
+            if !windows.isEmpty {
+                parts.append(L10n.text("apple.profiles.continue_limits", profile.title, windows))
+            }
+        }
+        return parts.joined(separator: "\n")
     }
 
     private struct ProfileProbeKey: Equatable {

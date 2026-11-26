@@ -192,6 +192,8 @@ def main():
                 continued = call("chat.continueInNew", {"id": legacy["id"], "profileId": work})
                 assert continued["profileId"] == work
                 assert continued["continuedFrom"] == legacy["id"]
+                again = call("chat.continueInNew", {"id": legacy["id"], "profileId": work})
+                assert again["id"] == continued["id"], (again, continued)
 
                 terminal = call("pty.spawn", {"workspaceId": workspace, "command": "codex",
                                                "args": ["--fixture-profile-terminal"], "hidden": True})
