@@ -5249,6 +5249,8 @@ internal fun LimitCard(reading: JsonObject) {
         else -> RelativeClock.label(observedAt)
     }
     val source = reading.string("source") ?: ""
+    val name = harnessName(source.ifEmpty { L10n.text("android.tokenstatapp.provider.472590ae") })
+    val title = if (reading.string("profileId") == null) name else "$name · ${L10n.text("common.profiles.named_limits")}"
     TsCard {
         Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -5259,7 +5261,7 @@ internal fun LimitCard(reading: JsonObject) {
                 // provider a few letters, clipped mid-glyph: "OpenCod".
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
-                        harnessName(source.ifEmpty { L10n.text("android.tokenstatapp.provider.472590ae") }),
+                        title,
                         style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                         color = colors.textPrimary,
                     )

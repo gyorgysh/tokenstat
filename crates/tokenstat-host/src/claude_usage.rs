@@ -127,7 +127,7 @@ fn read_through_claude(force: bool) -> Option<ProviderLimits> {
         }
     }
     let program = crate::launcher::resolve_command("claude")?;
-    let reading = get_usage(&program);
+    let reading = get_usage(&program, &[]);
     *last = Some(Pace {
         at: Instant::now(),
         reading: reading.clone(),
@@ -141,7 +141,14 @@ fn read_through_claude(force: bool) -> Option<ProviderLimits> {
 /// person's own settings are left out (`--setting-sources ""`), so their
 /// hooks and status line do not fire for a process they did not start, and
 /// nothing is saved as a session.
-fn get_usage(program: &str) -> ProviderLimits {
+pub(crate) fn read_profile(environment: &[(String, String)]) -> ProviderLimits {
+    crate::launcher::resolve_command("claude").map_or_else(
+        || ProviderLimits::unavailable(SOURCE, "No Claude Code command found."),
+        |program| get_usage(&program, environment),
+    )
+}
+
+fn get_usage(program: &str, environment: &[(String, String)]) -> ProviderLimits {
     let mut command = Command::new(program);
     command
         .args([
@@ -156,6 +163,7 @@ fn get_usage(program: &str) -> ProviderLimits {
             "",
         ])
         .env("PATH", crate::launcher::search_path_var())
+        .envs(environment.iter().map(|(key, value)| (key, value)))
         // A host started from inside a Claude Code session must not make
         // this child believe it is nested in one.
         .env_remove("CLAUDECODE")
@@ -165,6 +173,9 @@ fn get_usage(program: &str) -> ProviderLimits {
         .stderr(Stdio::null());
     if let Some(home) = tokenstat_paths::home_dir() {
         command.current_dir(home);
+    }
+    for key in crate::profiles::inherited_auth(environment) {
+        command.env_remove(key);
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -260,7 +271,10 @@ pub fn run_status_line() -> u8 {
     let reading = serde_json::from_slice::<Value>(&input)
         .ok()
         .and_then(|payload| claude_feed::from_status_line(&payload, now_ms()));
-    if let Some(reading) = &reading {
+    if let Some(reading) = &reading
+        && !std::env::var_os("CLAUDE_CONFIG_DIR")
+            .is_some_and(|dir| crate::profiles::is_own_claude_folder(std::path::Path::new(&dir)))
+    {
         let _ = claude_feed::live::store(reading);
     }
 

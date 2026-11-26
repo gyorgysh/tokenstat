@@ -65,6 +65,27 @@ class MobileChatSetupTest {
         assertEquals(1, layouts.single().lineCount)
         assertFalse("The compact label must fit", layouts.single().isLineEllipsized(0))
     }
+    @Test fun profilePickerSelectsNamedLoginAndDisplaysRepositoryLock() {
+        val id = "p_0000000000000001"
+        val profiles = AgentProfiles(json("""{"default":"system","profiles":[
+            {"id":"system","platform":"macos","own":[]},
+            {"id":"$id","name":"Fixture Work","own":["codex"]}]}"""))
+        var selected by mutableStateOf("system")
+        var lock by mutableStateOf<String?>(null)
+        compose.setContent {
+            Screen {
+                AgentProfilePicker(profiles, selected, lock, enabled = true) { selected = it }
+            }
+        }
+        val label = L10n.text("common.profiles.label")
+        compose.onNodeWithText("$label · ${L10n.text("common.profiles.this_mac")}").performClick()
+        compose.onNodeWithText("Fixture Work").assertIsDisplayed().performClick()
+        compose.onNodeWithText("$label · Fixture Work").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(id, selected); lock = id }
+        compose.onNodeWithText(L10n.text("common.profiles.locked", "Fixture Work")).assertIsDisplayed()
+        compose.onNodeWithText("$label · Fixture Work").assertDoesNotExist()
+    }
+
     @Test fun pendingPermissionStaysInlineWithAUsableComposer() {
         var request by mutableStateOf(json("""{"id":"approval","verb":"write","preview":"/tmp/owned/preview.py"}"""))
         var resolved = ""

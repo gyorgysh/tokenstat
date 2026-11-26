@@ -95,6 +95,7 @@ fn serve_fixture() {
     // A fictional quota belongs only to this disposable host. It lets native
     // composer tests see a dated reading through the real encrypted endpoint.
     tokenstat_core::limits::cache::store(&[tokenstat_core::limits::ProviderLimits {
+        profile_id: None,
         source: "grok".into(),
         plan: Some("Native QA".into()),
         windows: vec![tokenstat_core::limits::UsageWindow {
@@ -179,10 +180,12 @@ fn serve_fixture() {
     }
     local("host.setPolicy", json!({"alwaysOn":true}));
     let workspace = local("workspace.add", json!({"path":root.join("workspace")}));
+    let profile = std::env::var_os("TOKENSTAT_NATIVE_HISTORY_PROFILES")
+        .map(|_| local("profiles.create", json!({"name": "Fixture Work"}))["id"].clone());
     let chat = local(
         "chat.create",
         json!({"workspaceId":workspace["id"], "backend":"grok",
-        "title":"Native encrypted history", "autonomy":"bypass", "personaId":""}),
+        "title":"Native encrypted history", "autonomy":"bypass", "personaId":"", "profileId":profile}),
     );
     let id = chat["id"].as_str().unwrap();
     let transcript = root.join("host-data/chat").join(id).join("events.ndjson");
@@ -271,7 +274,7 @@ fn serve_fixture() {
         "expectedRevision":chat["sendRevision"]}),
     );
     let ready = json!({"root":root,"workspaceId":workspace["id"],"conversationId":id,
-        "hostKey":host.public_key_hex(),"address":address,"transcript":transcript,"socket":socket});
+        "hostKey":host.public_key_hex(),"address":address,"transcript":transcript,"socket":socket,"profileId":profile});
     private_file(
         &root.join("fixture.json"),
         &serde_json::to_vec_pretty(&ready).unwrap(),

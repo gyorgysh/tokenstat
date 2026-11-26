@@ -314,6 +314,7 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             .unwrap_or(Timestamp::from_ms(0));
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["codex", &session, &ordinal.to_string()]),
             source: SourceId::Codex,
             ts,
@@ -348,6 +349,7 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             // disagree with the source.
             out.events.truncate(first_index);
             out.events.push(UsageEvent {
+                profile_id: None,
                 id: rollup_event_id(&session),
                 source: SourceId::Codex,
                 ts: Timestamp::from_ms(0),

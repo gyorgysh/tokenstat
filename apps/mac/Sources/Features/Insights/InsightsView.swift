@@ -18,7 +18,9 @@ struct InsightsView: View {
     var onBackToHome: (() -> Void)?
 
     private var tabs: [(tab: InsightsModel.Tab, label: String, symbol: String)] {
-        InsightsModel.Tab.allCases.map { ($0, $0.label, $0.symbol) }
+        InsightsModel.Tab.allCases.filter { tab in
+            tab != .profiles || model.byProfile.contains { $0.key != AgentProfiles.system }
+        }.map { ($0, $0.label, $0.symbol) }
     }
 
     var body: some View {
@@ -130,15 +132,16 @@ struct InsightsView: View {
                     case .overview:
                         overview
                             .transition(.smoothIn(reduceMotion: reduceMotion))
-                    case .models, .projects, .harnesses, .sessions:
+                    case .models, .projects, .harnesses, .profiles, .sessions:
                         BreakdownTable(
                             rows: model.rows,
                             selected: $model.selected,
                             showsValue: model.tab == .models,
                             // A session id or a project path is read character
                             // by character. A harness has a name, not an id.
-                            monospaced: model.tab != .harnesses,
-                            isHarness: model.tab == .harnesses
+                            monospaced: model.tab != .harnesses && model.tab != .profiles,
+                            isHarness: model.tab == .harnesses,
+                            isProfile: model.tab == .profiles
                         )
                         // A fresh page window per breakdown and per period.
                         // Without the id the table is the same view across
@@ -266,12 +269,19 @@ struct InsightsView: View {
 
 /// The full breakdown for a tab. No sort controls: the archive already returns
 /// rows largest first, which is the order anyone wants.
+@MainActor
+private func profileTitle(_ id: String) -> String {
+    if let title = AgentProfileCatalog.shared.value?.profile(id)?.title { return title }
+    return id == AgentProfiles.system ? L10n.text("common.profiles.this_mac") : L10n.text("apple.profiles.unavailable")
+}
+
 private struct BreakdownTable: View {
     var rows: [Bucket]
     @Binding var selected: Bucket?
     var showsValue: Bool
     var monospaced: Bool
     var isHarness: Bool = false
+    var isProfile: Bool = false
 
     /// How many rows the table draws before the reveal button.
     ///
@@ -306,7 +316,8 @@ private struct BreakdownTable: View {
                         showsValue: showsValue,
                         monospaced: monospaced,
                         isSelected: selected?.key == row.key,
-                        isHarness: isHarness
+                        isHarness: isHarness,
+                        title: isProfile ? profileTitle(row.key) : nil
                     )
                     .contentShape(.rect)
                     .onTapGesture { selected = selected?.key == row.key ? nil : row }
@@ -388,12 +399,14 @@ private struct BreakdownRow: View {
     /// dimension is a raw id and stays one.
     var isHarness: Bool = false
 
+    var title: String? = nil
+
     var body: some View {
         HStack(spacing: Theme.Space.m) {
             if isHarness {
                 HarnessMark(id: row.key, size: 16)
             }
-            Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? L10n.text("apple.insightsview.unknown.b23a6a84") : row.key))
+            Text(title ?? (isHarness ? harnessName(row.key) : (row.key.isEmpty ? L10n.text("apple.insightsview.unknown.b23a6a84") : row.key)))
                 .font(monospaced ? Theme.mono(12) : Theme.font(13))
                 .lineLimit(1)
                 .truncationMode(.middle)

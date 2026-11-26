@@ -5,6 +5,8 @@ import Foundation
 struct ProviderLimits: Sendable, Equatable {
     var source: String; var reading: Int; var stale: Bool? = nil
     var observedAtMs: Int64 = 1
+    var profileId: String? = nil
+    var id: String { profileId.map { "\(source):\($0)" } ?? source }
 }
 struct LimitsSyncState: Sendable {
     var enabled = false
@@ -79,6 +81,16 @@ enum Bridge {
         skipped.settingsChanged(LimitsSyncState(enabled: true, skip: ["claude_code"]))
         skipped.acceptCachedSettings(LimitsSyncState(), requested: ticket)
         precondition(skipped.enabled && skipped.skip == ["claude_code"], "late Account cache cannot undo a sharing edit")
+        let work = ProviderLimits(source: "codex", reading: 25, profileId: "p_0000000000000001")
+        let machine = ProviderLimits(source: "codex", reading: 71)
+        let profiled = PlanLimitsStore(owner: { owner }, readCache: {
+            LimitsSyncState(providers: [machine, work])
+        }, readLive: { _ in [machine, work] })
+        profiled.settingsChanged(LimitsSyncState(providers: [machine, work]))
+        precondition(profiled.providers.count == 2, "cached readings from different logins coexist")
+        try await profiled.refresh()
+        precondition(Set(profiled.providers.map(\.reading)) == [25, 71], "live readings remain independent")
+
         let orderedGate = Gate()
         let ordered = PlanLimitsStore(owner: { owner }, readCache: {
             LimitsSyncState(providers: ["antigravity", "claude_code", "codex", "cursor"].map { ProviderLimits(source: $0, reading: 1) })

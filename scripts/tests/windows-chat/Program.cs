@@ -81,6 +81,9 @@ Check(selectedNewChatSetup.Mode == "execute" && selectedNewChatSetup.Autonomy ==
 Check(selectedNewChatSetup.IsAvailable(Json("""{"id":"codex","models":["model"],"efforts":["high"]}""")), "older descriptors without installed flag still validate explicit new-chat selections");
 foreach (var descriptor in new[] { """{"id":"claude","models":["model"],"efforts":["high"]}""", """{"id":"codex","installed":false,"models":["model"],"efforts":["high"]}""", """{"id":"codex","models":["other-model"],"efforts":["high"]}""", """{"id":"codex","models":["model"],"efforts":["low"]}""" })
     Check(!selectedNewChatSetup.IsAvailable(Json(descriptor)), "a changed agent, model, effort or installation cannot silently replace the captured landing setup");
+var workSetup = selectedNewChatSetup with { ProfileId = "p_0000000000000001" };
+Check((workSetup with { Backend = "claude" }).ProfileId == workSetup.ProfileId && selectedNewChatSetup.ProfileId is null,
+    "explicit profile selection is retained separately from the agent choice");
 Check(!selectedNewChatSetup.IsAvailable(null) && new NewChatSetup("codex", null, null).IsAvailable(Json("""{"id":"codex"}""")), "absent agents fail while explicitly chosen default settings require no invented model");
 Check(!new NewChatSetup("", null, null).IsAvailable(Json("""{"id":""}""")), "an empty agent descriptor cannot become a launch choice");
 Check(NewChatSetup.ShouldSend("", 1), "file-only landing prompts use explicit Send");

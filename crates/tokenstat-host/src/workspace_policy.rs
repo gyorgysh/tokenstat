@@ -430,6 +430,7 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         | "work.continuity.attachments" => true,
         m if m.starts_with("todo.") => true,
         m if m.starts_with("launcher.") => true,
+        "profiles.list" => true,
         m if m.starts_with("harness.") => true,
         m if m.starts_with("proxy.") => true,
         // The screen has its own grant, and a screen stream must not need this

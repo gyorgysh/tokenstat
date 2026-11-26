@@ -79,6 +79,8 @@ internal sealed partial class NewChatPage : Page
     private bool _handoff;
     private string? _catalogRepository;
     private string? _requestedRepository;
+    private AgentProfiles? _profiles;
+    private string? _profileLock;
     private NewChatSetup? _preferredSetup;
     private static string Copy(string key) { var resource = "common.new_chat." + key; return L10n.Text(resource); }
 
@@ -368,7 +370,15 @@ internal sealed partial class NewChatPage : Page
                 NormalizeFastMode(); RememberDraft(); RefreshWorkingStyle(); RefreshFastMode(); RefreshActions();
                 return Task.FromResult(true);
             },
-            Repaint: () => { RenderAgent(); RefreshActions(); }), locked);
+            Repaint: () => { RenderAgent(); RefreshActions(); },
+            Profiles: () => _profiles,
+            SelectedProfile: () => _profileLock ?? Format.Text(_setup, "profileId", _profiles?.DefaultId ?? AgentProfiles.SystemId),
+            ProfileLock: () => _profileLock,
+            PickProfile: id => {
+                _setup["profileId"] = id;
+                RememberDraft();
+                return Task.CompletedTask;
+            }, LimitsWorkspace: _selected?.Id), locked);
         AutomationProperties.SetAutomationId(_agentSlot.Child, "newChat.agent");
     }
 
@@ -423,7 +433,13 @@ internal sealed partial class NewChatPage : Page
         _retry.Visibility = Visibility.Collapsed;
         try {
             var result = await _loadAgents(repository);
+            AgentProfiles? profiles;
+            try { profiles = await AgentProfiles.ReadAsync(repository.Id); }
+            catch { profiles = null; }
             if (revision != _catalogRevision || _account != AppServices.AccountGeneration || !IsLoaded || _selected?.Id != repository.Id) return;
+            _profiles = profiles;
+            var workspace = RemoteWorkspaces.TrySplit(repository.Id, out _, out var inner) ? inner : repository.Id;
+            _profileLock = profiles?.Lock(workspace);
             _available = ((result as JsonArray ?? result["backends"] as JsonArray)?.OfType<JsonObject>()
                 .Where(backend => Format.Text(backend, "id") is { Length: > 0 } id && id != "sh" && ChatAgentPicker.Installed(backend)).ToArray() ?? []);
             _catalogRepository = repository.Id;
@@ -442,6 +458,7 @@ internal sealed partial class NewChatPage : Page
                 _setup = new JsonObject { ["backend"] = id, ["model"] = Offered("models", model), ["effort"] = Offered("efforts", effort) };
             }
             else { Notice(Copy("setup_changed")); _retry.Visibility = Visibility.Visible; }
+            if ((_profileLock ?? _preferredSetup?.ProfileId) is string profile) _setup["profileId"] = profile;
             _restoringDraft = false;
             NormalizeFastMode(); RememberDraft(); RenderAgent(); RefreshWorkingStyle(); RefreshActions();
         } catch (Exception error) {
@@ -455,7 +472,7 @@ internal sealed partial class NewChatPage : Page
 
     private void ClearCatalog()
     {
-        _available = []; _setup = new JsonObject();
+        _available = []; _setup = new JsonObject(); _profiles = null; _profileLock = null;
         RenderAgent();
     }
 
@@ -465,7 +482,7 @@ internal sealed partial class NewChatPage : Page
             return (_preferredSetup ?? new NewChatSetup("", null, null)) with { Mode = _mode, Autonomy = _autonomy, FastMode = _fastMode };
         string? Choice(string key) => Format.Text(_setup, key) is { Length: > 0 } value ? value : null;
         return new NewChatSetup(Format.Text(backend, "id"), Choice("model"), Choice("effort"), _mode,
-            Format.Text(backend, "gateTier") == "bypassOnly" ? "bypass" : _autonomy, _fastMode);
+            Format.Text(backend, "gateTier") == "bypassOnly" ? "bypass" : _autonomy, _fastMode, Choice("profileId"));
     }
 
     private void RememberDraft()

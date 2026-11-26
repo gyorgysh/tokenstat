@@ -107,6 +107,9 @@ struct HomeView: View {
         .onDisappear { model.hover(day: nil) }
         .onChange(of: savedScope) { _, scope in Task { await model.setScope(scope) } }
         .task {
+            #if os(macOS)
+            try? await AgentProfileCatalog.shared.refresh()
+            #endif
             // Wait until the host splash has finished (or the host already
             // answers). Loading during splash races ensureHosted and can open
             // a second in-process archive.
@@ -320,13 +323,19 @@ struct HomeView: View {
             PlanLimitPanel(
                 provider: provider,
                 isLoading: model.isLoadingLimits,
-                fillsHeight: true
+                fillsHeight: true,
+                profileTitle: limitProfileTitle(provider)
             ) {
                 Task { await model.loadPlanLimits() }
             }
         case let .planUsage(rows):
             PlanUsageCard(rows: rows, fillsHeight: true)
         }
+    }
+
+    private func limitProfileTitle(_ provider: ProviderLimits) -> String? {
+        guard let profiles = AgentProfileCatalog.shared.value, !profiles.named.isEmpty else { return nil }
+        return profiles.profile(provider.profileId)?.title
     }
 
     private var panels: [HomePanel] {
@@ -740,7 +749,7 @@ private struct HomePanel: Identifiable {
 
     var id: String {
         switch kind {
-        case let .limits(provider): return "limits.\(provider.source)"
+        case let .limits(provider): return "limits.\(provider.id)"
         case .planUsage: return "planUsage"
         }
     }

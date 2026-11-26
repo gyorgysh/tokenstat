@@ -261,6 +261,8 @@ final class SocketTransport: Transport, @unchecked Sendable {
         "pulls.comment",
         "pulls.review",
         "launcher.signIn",
+        "profiles.create",
+        "profiles.delete",
         "launcher.install",
         "launcher.update",
         "launcher.reinstall",

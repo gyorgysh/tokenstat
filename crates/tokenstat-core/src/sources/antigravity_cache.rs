@@ -203,6 +203,7 @@ fn parse_usage(
     };
 
     Some(UsageEvent {
+        profile_id: None,
         id,
         source: SourceId::Antigravity,
         ts: Timestamp::from_ms(ts_ms),

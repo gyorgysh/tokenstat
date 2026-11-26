@@ -124,7 +124,8 @@ mod opencode_cli;
 pub mod ownership;
 pub(crate) mod presence;
 pub mod pricing;
-pub(crate) mod profiles;
+#[cfg(feature = "local-host")]
+mod profiles;
 pub(crate) mod provision;
 mod proxy_http;
 #[cfg(feature = "local-host")]
@@ -300,4 +301,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 55 adds `launcher.updates` and `launcher.update`.
 /// Version 56 adds the general folder: `workspace.list` with `includeGeneral`
 /// returns it, marked `general`, for chats that belong to no repository.
-pub const PROTOCOL_VERSION: &str = "56";
+/// Version 57 exposes agent profile choices to trusted clients.
+pub const PROTOCOL_VERSION: &str = "57";

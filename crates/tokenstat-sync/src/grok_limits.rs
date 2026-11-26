@@ -92,14 +92,22 @@ struct Period {
 /// login, an expired token or an unreachable endpoint are all "we cannot say",
 /// and this lands on a dashboard beside numbers that are known.
 pub fn fetch() -> ProviderLimits {
-    let account = match stored_account() {
-        Some(a) => a,
-        None => {
-            return ProviderLimits::unavailable(
-                "grok",
-                "Not signed in to Grok on this machine, so its limits cannot be read.",
-            );
-        }
+    let account = directories::UserDirs::new()
+        .and_then(|dirs| stored_account(dirs.home_dir().join(".grok").as_path()));
+    fetch_account(account)
+}
+
+/// Use the same vendor quota reader with the account from this CLI home.
+pub fn fetch_profile(home: &std::path::Path) -> ProviderLimits {
+    fetch_account(stored_account(home))
+}
+
+fn fetch_account(account: Option<StoredAccount>) -> ProviderLimits {
+    let Some(account) = account else {
+        return ProviderLimits::unavailable(
+            "grok",
+            "Not signed in to Grok, so its limits cannot be read.",
+        );
     };
 
     if account
@@ -155,6 +163,7 @@ pub fn fetch() -> ProviderLimits {
     }
 
     ProviderLimits {
+        profile_id: None,
         source: "grok".to_string(),
         plan: None,
         windows,
@@ -241,9 +250,8 @@ fn weekly_window(config: &BillingConfig) -> Option<UsageWindow> {
 ///
 /// The freshest entry wins. A machine that has signed in more than once holds
 /// several, and the one that expires last is the one still usable.
-fn stored_account() -> Option<StoredAccount> {
-    let home = directories::UserDirs::new()?.home_dir().to_path_buf();
-    let raw = std::fs::read_to_string(home.join(".grok/auth.json")).ok()?;
+fn stored_account(home: &std::path::Path) -> Option<StoredAccount> {
+    let raw = std::fs::read_to_string(home.join("auth.json")).ok()?;
     serde_json::from_str::<StoredAccounts>(&raw)
         .ok()?
         .0
@@ -268,6 +276,25 @@ fn parse_iso_ms(raw: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_profile_home_supplies_only_its_own_account() {
+        let work = tempfile::tempdir().unwrap();
+        let personal = tempfile::tempdir().unwrap();
+        for (root, key) in [(&work, "work-fixture"), (&personal, "personal-fixture")] {
+            std::fs::write(
+                root.path().join("auth.json"),
+                format!(r#"{{"fixture":{{"key":"{key}"}}}}"#),
+            )
+            .unwrap();
+        }
+        assert_eq!(stored_account(work.path()).unwrap().key, "work-fixture");
+        assert_eq!(
+            stored_account(personal.path()).unwrap().key,
+            "personal-fixture"
+        );
+        assert!(stored_account(&work.path().join("missing")).is_none());
+    }
 
     #[test]
     fn the_account_file_parses_the_way_the_cli_writes_it() {

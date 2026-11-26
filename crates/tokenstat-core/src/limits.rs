@@ -64,6 +64,8 @@ pub struct UsageWindow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     /// Archive source id, so the mark beside it is the same mark used
     /// everywhere else: `codex`, `claude_code`.
     pub source: String,
@@ -84,8 +86,16 @@ pub struct ProviderLimits {
 }
 
 impl ProviderLimits {
+    pub fn cache_key(&self) -> String {
+        match &self.profile_id {
+            Some(profile) => format!("{}:{}", self.source, profile),
+            None => self.source.clone(),
+        }
+    }
+
     pub fn unavailable(source: &str, note: impl Into<String>) -> Self {
         Self {
+            profile_id: None,
             source: source.to_string(),
             plan: None,
             windows: Vec::new(),
@@ -145,7 +155,7 @@ pub mod cache {
                 let mut keep = provider.clone();
                 // The note belongs to the attempt, not to the numbers.
                 keep.note = None;
-                all.insert(keep.source.clone(), keep);
+                all.insert(keep.cache_key(), keep);
             }
         }
         if let Some(parent) = path.parent() {
@@ -176,8 +186,9 @@ pub mod cache {
                 if provider.has_reading() {
                     return provider;
                 }
-                match remembered.get(&provider.source) {
+                match remembered.get(&provider.cache_key()) {
                     Some(old) => ProviderLimits {
+                        profile_id: provider.profile_id,
                         source: provider.source,
                         plan: old.plan.clone(),
                         windows: old.windows.clone(),
@@ -189,6 +200,30 @@ pub mod cache {
                 }
             })
             .collect()
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn remembered_windows_are_scoped_to_the_login() {
+        let mut machine = ProviderLimits::unavailable("codex", "");
+        machine.windows.push(super::UsageWindow {
+            label: "weekly".into(),
+            scope: None,
+            percent: 81.0,
+            resets_at_ms: None,
+            severity: super::LimitSeverity::Warning,
+        });
+        let mut work = machine.clone();
+        work.profile_id = Some("p_0000000000000001".into());
+        work.windows[0].percent = 19.0;
+        let cache = BTreeMap::from([
+            (machine.cache_key(), machine),
+            (work.cache_key(), work.clone()),
+        ]);
+        work.windows.clear();
+        let merged = merge(vec![work], &cache);
+        assert_eq!(merged[0].windows[0].percent, 19.0);
+        assert!(merged[0].stale);
     }
 }
 
@@ -416,6 +451,7 @@ fn codex_reading(
             .iter()
             .any(|window| window.resets_at_ms.is_some_and(|reset| reset <= now));
     ProviderLimits {
+        profile_id: None,
         source: "codex".into(), plan, windows, observed_at_ms,
         note: stale.then(|| "Codex has not reported a recent limit for every window. Run a Codex turn and refresh.".into()),
         stale,
@@ -1547,6 +1583,7 @@ mod tests {
         remembered.insert(
             "claude_code".to_string(),
             ProviderLimits {
+                profile_id: None,
                 source: "claude_code".to_string(),
                 plan: Some("max".to_string()),
                 windows: vec![UsageWindow {
@@ -1587,6 +1624,7 @@ mod tests {
         remembered.insert(
             "codex".to_string(),
             ProviderLimits {
+                profile_id: None,
                 source: "codex".to_string(),
                 plan: None,
                 windows: vec![UsageWindow {
@@ -1603,6 +1641,7 @@ mod tests {
         );
 
         let fresh = vec![ProviderLimits {
+            profile_id: None,
             source: "codex".to_string(),
             plan: None,
             windows: vec![UsageWindow {

@@ -1463,6 +1463,8 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
 pub struct AccountLimitProvider {
     pub src: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
     pub observed_at_ms: i64,
     #[serde(default)]
@@ -1520,7 +1522,7 @@ pub fn post_limits(
     let body_providers: Vec<serde_json::Value> = eligible_limit_providers(&list, &skip)
         .into_iter()
         .map(|p| {
-            serde_json::json!({
+            let mut row = serde_json::json!({
                 "src": p.source,
                 "plan": p.plan,
                 "observed_at_ms": p.observed_at_ms,
@@ -1539,7 +1541,11 @@ pub fn post_limits(
                     }
                     window
                 }).collect::<Vec<_>>(),
-            })
+            });
+            if let Some(id) = &p.profile_id {
+                row["profile_id"] = serde_json::Value::String(id.clone());
+            }
+            row
         })
         .collect();
     if body_providers.is_empty() {
@@ -1548,27 +1554,53 @@ pub fn post_limits(
     let observed_at = jiff::Timestamp::now()
         .strftime("%Y-%m-%dT%H:%M:%SZ")
         .to_string();
-    let body = serde_json::json!({
-        "v": 1,
-        "machine": machine,
-        "observed_at": observed_at,
-        "providers": body_providers,
-    });
     let client = http_client()?;
-    let resp = client
-        .post(format!("{host}/api/v1/limits"))
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()?;
-    let status = resp.status();
-    let text = limited_text(resp)?;
+    let send = |rows: &[serde_json::Value]| -> Result<_, ProfileError> {
+        let body = serde_json::json!({
+            "v": 1,
+            "machine": machine,
+            "observed_at": observed_at,
+            "providers": rows,
+        });
+        let resp = client
+            .post(format!("{host}/api/v1/limits"))
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()?;
+        let status = resp.status();
+        Ok((status, limited_text(resp)?))
+    };
+    let (mut status, mut text) = send(&body_providers)?;
+    let mut count = body_providers.len();
+    // Older servers reject profile fields and limit the number of readings.
+    // Keep their existing machine-account upload working, without ever
+    // relabeling a profile's quota as the machine's.
+    if status == reqwest::StatusCode::BAD_REQUEST
+        && body_providers.iter().any(|p| !p["profile_id"].is_null())
+        && serde_json::from_str::<serde_json::Value>(&text).is_ok_and(|error| {
+            (error["error"] == "unknown_field"
+                && error["message"] == "Unknown provider field: profile_id")
+                || (error["error"] == "invalid_schema"
+                    && error["message"] == "providers must be an array of at most 32.")
+        })
+    {
+        let base: Vec<_> = body_providers
+            .into_iter()
+            .filter(|p| p["profile_id"].is_null())
+            .collect();
+        if base.is_empty() {
+            return Ok(0);
+        }
+        count = base.len();
+        (status, text) = send(&base)?;
+    }
     if !status.is_success() {
         return Err(ProfileError::Message(format!(
             "limits post failed ({status}): {text}"
         )));
     }
-    Ok(body_providers.len() as u32)
+    Ok(count as u32)
 }
 
 /// GET plan-limit readings for this account (every machine, or one).
@@ -1579,7 +1611,10 @@ pub fn fetch_account_limits(
     let host = resolve_api_host(host_flag)?;
     let token =
         keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
-    let url = query_url(&format!("{host}/api/v1/limits"), &[("machine", machine)])?;
+    let url = query_url(
+        &format!("{host}/api/v1/limits"),
+        &[("machine", machine), ("include_profiles", Some("1"))],
+    )?;
     let client = http_client()?;
     let resp = client
         .get(url)
@@ -2140,6 +2175,7 @@ mod tests {
 
     fn reading(source: &str, stale: bool) -> tokenstat_core::limits::ProviderLimits {
         tokenstat_core::limits::ProviderLimits {
+            profile_id: None,
             source: source.into(),
             plan: Some("pro".into()),
             windows: vec![tokenstat_core::limits::UsageWindow {
@@ -2174,6 +2210,7 @@ mod tests {
     fn a_posted_window_keeps_its_scope() {
         // Two weekly figures without a scope both read "weekly" on the phone.
         let reading = tokenstat_core::limits::ProviderLimits {
+            profile_id: None,
             source: "codex".into(),
             plan: Some("prolite".into()),
             windows: vec![
@@ -2290,6 +2327,7 @@ mod tests {
         store
             .insert_events(
                 &[UsageEvent {
+                    profile_id: None,
                     id: EventId::derive(&["x"]),
                     source: SourceId::ClaudeCode,
                     ts: Timestamp::from_ms(ms),

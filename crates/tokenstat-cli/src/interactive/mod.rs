@@ -608,6 +608,7 @@ mod tests {
         let events: Vec<_> = ["2026-09-18T12:00:00Z", "2026-09-19T12:00:00Z"]
             .into_iter()
             .map(|date| UsageEvent {
+                profile_id: None,
                 id: EventId::derive(&[date]),
                 source: SourceId::ClaudeCode,
                 ts: Timestamp::from_ms(date.parse::<jiff::Timestamp>().unwrap().as_millisecond()),

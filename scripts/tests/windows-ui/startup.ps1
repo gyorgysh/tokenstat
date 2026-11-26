@@ -35,6 +35,7 @@ $originalPath = $env:PATH
 $originalTrace = $env:TOKENSTAT_UI_STARTUP_TRACE
 $started = Get-Date
 $process = $null
+$profile = $null
 $crashTracers = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 $crashLogs = [System.Collections.Generic.List[string]]::new()
 function Start-NativeCrashTrace([System.Diagnostics.Process]$Target) {
@@ -336,6 +337,8 @@ try {
     Wait-ForControl "sidebar.chat.$($chats[4].id)" | Out-Null
     Invoke-Control (Wait-ForControl 'sidebar.chatAll')
     Wait-ForControl 'chat.list.create' | Out-Null
+    $profileName = "UI smoke Work $PID"
+    $profile = Call-Host 'profiles.create' @{name = $profileName}
     $before = @(Call-Host 'chat.list' @{workspaceId = $folder.id})
     Open-Place 'New chat in UI smoke project'
     Wait-ForControl 'newChat.repository' | Out-Null
@@ -353,9 +356,12 @@ try {
     if (@(Call-Host 'chat.list' @{workspaceId = $folder.id}).Count -ne $before.Count) {
         throw 'Reopening the new chat landing page created a conversation'
     }
+    Invoke-Control (Wait-ForControl 'newChat.agent' 30 -Enabled)
+    Invoke-Control (Wait-ForControl 'agentProfiles.picker' 15 -Enabled -IncludePopups)
+    Invoke-Control (Wait-ForControl "agentProfiles.option.$($profile.id)" 15 -Enabled -IncludePopups)
     # An explicit empty Open chat restores file/image-first prompts without
     # sending a message. It uses the production creation and composer path.
-    $landingValue.SetValue('')
+    (Wait-ForControl 'newChat.composer').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('')
     # ValuePattern.SetValue can return before TextChanged updates the button's
     # accessible name. The existing Send button is already enabled, so wait
     # for the expected action as well before asserting and invoking it.
@@ -368,6 +374,7 @@ try {
     if ($after.Count -ne $before.Count + 1 -or $created.Count -ne 1) { throw 'Explicit Open chat must create exactly one conversation' }
     $latest = $created[0]
     if ($latest.running -or $latest.sendRevision -ne 0) { throw 'Empty Open chat started an agent turn' }
+    if ($latest.profileId -ne $profile.id) { throw 'The host did not store the profile chosen in the native picker' }
     if (@((Call-Host 'chat.events' @{id = $latest.id; offset = 0}).events).Count -ne 0) {
         throw 'Empty Open chat appended transcript events'
     }
@@ -488,7 +495,20 @@ try {
         Write-Output "PASS: cold protocol activation $cold of 3 waits for the project inventory and opens Changes"
     }
     Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'
+    Call-Host 'profiles.setWorkspaceLock' @{workspaceId = $folder.id; profileId = $profile.id} | Out-Null
+    Open-Place 'Repositories'
+    Reveal-RepositorySidebar
+    Open-Place 'New chat in UI smoke project'
+    Invoke-Control (Wait-ForControl 'newChat.agent' 30 -Enabled)
+    Wait-ForControl 'agentProfiles.locked' 15 -IncludePopups -ExpectedName "This repository uses $profileName." | Out-Null
+    Write-Output 'PASS: the native agent picker saves a named profile and displays the repository lock'
 } finally {
+    if ($profile) {
+        try {
+            Call-Host 'profiles.setWorkspaceLock' @{workspaceId = $folder.id} | Out-Null
+            Call-Host 'profiles.delete' @{id = $profile.id} | Out-Null
+        } catch { Write-Warning "Could not clean up the smoke profile: $_" }
+    }
     $env:PATH = $originalPath
     $env:TOKENSTAT_UI_STARTUP_TRACE = $originalTrace
     if ($hadAgent) { Move-Item -LiteralPath $previousAgent -Destination $agentFile -Force }

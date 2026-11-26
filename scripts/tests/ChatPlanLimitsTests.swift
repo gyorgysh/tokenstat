@@ -5,6 +5,8 @@ import Foundation
 struct ProviderLimits: Sendable, Equatable {
     var source: String; var reading: Int; var stale: Bool? = nil
     var observedAtMs: Int64 = 1
+    var profileId: String? = nil
+    var id: String { profileId.map { "\(source):\($0)" } ?? source }
 }
 struct LimitsSyncState: Sendable {
     var enabled = false

@@ -144,6 +144,7 @@ pub fn from_get_usage(response: &Value, now_ms: i64) -> ProviderLimits {
         };
     }
     ProviderLimits {
+        profile_id: None,
         source: SOURCE.to_string(),
         plan,
         windows,
@@ -170,6 +171,7 @@ pub fn from_status_line(payload: &Value, now_ms: i64) -> Option<ProviderLimits> 
         return None;
     }
     Some(ProviderLimits {
+        profile_id: None,
         source: SOURCE.to_string(),
         plan: None,
         windows,

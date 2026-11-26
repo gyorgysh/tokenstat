@@ -25,7 +25,7 @@ use crate::watermark::Watermark;
 mod vendor_totals;
 pub use vendor_totals::VendorHour;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Upsert for one row of `event`. Shared by [`Store::insert_events`] and
 /// [`Store::replace_recovered`] so the max-on-conflict semantics cannot drift
@@ -33,9 +33,10 @@ const SCHEMA_VERSION: i64 = 1;
 const UPSERT_EVENT_SQL: &str = r#"INSERT INTO event
    (id, source, ts_ms, local_date, local_hour, model, session, project,
     input_fresh, cache_read, cache_write_5m, cache_write_1h, output,
-    billing, confidence)
-   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+    billing, confidence, profile_id)
+   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
    ON CONFLICT(id) DO UPDATE SET
+     profile_id     = COALESCE(event.profile_id, excluded.profile_id),
      input_fresh    = CASE
        WHEN excluded.input_fresh IS NULL THEN input_fresh
        WHEN input_fresh IS NULL THEN excluded.input_fresh
@@ -56,7 +57,8 @@ const UPSERT_EVENT_SQL: &str = r#"INSERT INTO event
        WHEN excluded.output IS NULL THEN output
        WHEN output IS NULL THEN excluded.output
        ELSE MAX(output, excluded.output) END
-   WHERE COALESCE(excluded.output, -1)         > COALESCE(event.output, -1)
+   WHERE (event.profile_id IS NULL AND excluded.profile_id IS NOT NULL)
+      OR COALESCE(excluded.output, -1)         > COALESCE(event.output, -1)
       OR COALESCE(excluded.input_fresh, -1)    > COALESCE(event.input_fresh, -1)
       OR COALESCE(excluded.cache_read, -1)     > COALESCE(event.cache_read, -1)
       OR COALESCE(excluded.cache_write_5m, -1) > COALESCE(event.cache_write_5m, -1)
@@ -203,6 +205,7 @@ pub enum GroupBy {
     Model,
     Project,
     Source,
+    Profile,
     Session,
 }
 
@@ -217,6 +220,7 @@ impl GroupBy {
             GroupBy::Model => "model",
             GroupBy::Project => "project",
             GroupBy::Source => "source",
+            GroupBy::Profile => "COALESCE(profile_id, 'system')",
             GroupBy::Session => "session",
         }
     }
@@ -281,6 +285,7 @@ impl Store {
             // Indexes added after first ship. IF NOT EXISTS is a catalog check
             // when present, so a ready archive still gains new ones without a
             // full migrate write path.
+            Self::migrate_event_profiles(&conn)?;
             Self::ensure_indexes(&conn)?;
         }
         Ok(Store {
@@ -369,7 +374,8 @@ impl Store {
               cache_write_1h INTEGER,
               output         INTEGER,
               billing        TEXT NOT NULL,
-              confidence     TEXT NOT NULL
+              confidence     TEXT NOT NULL,
+              profile_id     TEXT
             ) STRICT;
 
             CREATE INDEX IF NOT EXISTS event_date  ON event(local_date);
@@ -463,6 +469,28 @@ impl Store {
             "INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', ?1)",
             params![SCHEMA_VERSION.to_string()],
         )?;
+        Ok(())
+    }
+
+    fn migrate_event_profiles(conn: &Connection) -> Result<(), CoreError> {
+        let needs_column = |conn: &Connection| {
+            conn.query_row("SELECT NOT EXISTS(SELECT 1 FROM pragma_table_info('event') WHERE name = 'profile_id')",
+                [], |row| row.get::<_, bool>(0))
+        };
+        if needs_column(conn)? {
+            let tx = rusqlite::Transaction::new_unchecked(
+                conn,
+                rusqlite::TransactionBehavior::Immediate,
+            )?;
+            if needs_column(&tx)? {
+                tx.execute_batch("ALTER TABLE event ADD COLUMN profile_id TEXT")?;
+                tx.execute(
+                    "UPDATE meta SET v = ?1 WHERE k = 'schema_version'",
+                    [SCHEMA_VERSION.to_string()],
+                )?;
+            }
+            tx.commit()?;
+        }
         Ok(())
     }
 
@@ -606,6 +634,7 @@ impl Store {
                 e.counters.output.map(clamp_i64),
                 e.billing.as_str(),
                 e.confidence.as_str(),
+                e.profile_id,
             ])?;
             touched += n as u64;
         }
@@ -1616,6 +1645,7 @@ mod tests {
 
     fn ev(id: &str, date_ms: i64, model: &str, out: u64) -> UsageEvent {
         UsageEvent {
+            profile_id: None,
             id: EventId::derive(&[id]),
             source: SourceId::ClaudeCode,
             ts: Timestamp::from_ms(date_ms),
@@ -1633,6 +1663,32 @@ mod tests {
             billing: BillingMode::Plan,
             confidence: Confidence::Exact,
         }
+    }
+
+    #[test]
+    fn existing_archive_migrates_before_grouping_by_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("archive.db");
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut store = Store::open(&path).unwrap();
+        store.conn.execute_batch("ALTER TABLE event DROP COLUMN profile_id; UPDATE meta SET v = '1' WHERE k = 'schema_version'").unwrap();
+        drop(store);
+        store = Store::open(&path).unwrap();
+        let mut machine = ev("machine", 1, "model", 1);
+        machine.profile_id = None;
+        let mut work = ev("work", 1, "model", 1);
+        work.profile_id = Some("p_0000000000000001".into());
+        store.insert_events(&[machine, work], &tz).unwrap();
+        let keys: std::collections::HashSet<_> = store
+            .report(GroupBy::Profile, &Query::default())
+            .unwrap()
+            .into_iter()
+            .map(|row| row.key)
+            .collect();
+        assert_eq!(
+            keys,
+            std::collections::HashSet::from(["system".into(), "p_0000000000000001".into()])
+        );
     }
 
     #[test]

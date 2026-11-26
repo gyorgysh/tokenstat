@@ -23,6 +23,7 @@ enum RemoteHostFeature: Hashable {
     case inviteCode
     case agentSignIn
     case agentReinstall
+    case agentProfiles
     case agentUpdates
     case confirmedSend
     case handoff
@@ -70,6 +71,7 @@ enum RemoteHostFeature: Hashable {
         case .inviteCode: L10n.text("apple.clientremotefeaturegate.adding_this_device.4bb25dcd")
         case .agentSignIn: L10n.text("apple.clientremotefeaturegate.signing_in_to_an_agent.7a8b7e31")
         case .agentReinstall: L10n.text("apple.harnessconfigview.reinstall")
+        case .agentProfiles: L10n.text("apple.profiles.title")
         case .agentUpdates: L10n.text("common.agent_updates.title")
         case .confirmedSend: L10n.text("apple.clientremotefeaturegate.confirming_a_sent_message.86a0a4b6")
         case .handoff: L10n.text("apple.clientremotefeaturegate.handoff.f89e2d72")
@@ -149,6 +151,7 @@ enum RemoteHostFeature: Hashable {
         case .inviteCode: 7
         case .agentSignIn: 9
         case .agentReinstall: 37
+        case .agentProfiles: 57
         case .agentUpdates: 55
         case .confirmedSend: 14
         case .handoff: 12
@@ -200,6 +203,7 @@ enum RemoteHostFeature: Hashable {
         case .inviteCode: "key.horizontal.fill"
         case .agentSignIn: "person.badge.key.fill"
         case .agentReinstall: "arrow.clockwise"
+        case .agentProfiles: "person.2"
         case .agentUpdates: "arrow.down.circle"
         case .confirmedSend: "checkmark.message.fill"
         case .handoff: "arrow.left.arrow.right"

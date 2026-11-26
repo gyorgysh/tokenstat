@@ -250,6 +250,8 @@ internal sealed class AccountPage : Page, IToolbarItems
     {
         content.Children.Add(await HostCardAsync());
         content.Children.Add(await LocalTrafficCardAsync());
+        content.Children.Add(Chrome.Card(L10n.Text("windows.profiles.title"), new AgentProfileSettings(),
+            L10n.Text("windows.profiles.description")));
         content.Children.Add(await LocalModelsCardAsync());
         content.Children.Add(NotificationsCard());
         content.Children.Add(AppearanceSettings.Card());

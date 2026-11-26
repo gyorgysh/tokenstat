@@ -348,6 +348,7 @@ fn read_layout(
         // Reasoning is additive in OpenCode's own total, so fold it into output
         // and keep the split in extras for transparency.
         out.events.push(UsageEvent {
+            profile_id: None,
             // The tool's own name in the id, so a machine that runs both
             // OpenCode and a fork of it cannot collide on a message id that is
             // only unique inside one database.

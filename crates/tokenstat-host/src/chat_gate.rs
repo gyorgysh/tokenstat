@@ -245,18 +245,29 @@ pub fn write_codex_home_signed_in(
         Some(login) => route_cli_credential(&login.join("auth.json"), &home.join("auth.json"))?,
         None => link_credential(home, ".codex", "auth.json")?,
     }
+    let gated = helper.is_some();
     if let Some(source) = source {
-        share_codex_home(&source, home, helper.is_some()).map_err(|error| error.to_string())?;
+        share_codex_home_config(&source, home, gated, login.is_some())
+            .map_err(|error| error.to_string())?;
+    } else if login.is_some() {
+        write_chat_config(None, &home.join("config.toml"), gated, true)
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
 
 /// Share the person's Codex settings into a profile's own Codex folder.
 /// The login there stays the profile's: `auth.json` is never linked.
-pub(crate) fn share_user_codex_home(folder: &Path) {
-    if let Some(source) = user_codex_home().filter(|source| !paths_match(source, folder)) {
-        let _ = share_codex_home(&source, folder, false);
+pub(crate) fn share_user_codex_home(folder: &Path) -> std::io::Result<()> {
+    if let Some(source) = user_codex_home() {
+        if paths_match(&source, folder) {
+            return Err(std::io::Error::other(
+                "The selected Codex profile resolves to the machine home.",
+            ));
+        }
+        return share_codex_home_config(&source, folder, false, true);
     }
+    write_chat_config(None, &folder.join("config.toml"), false, true)
 }
 
 /// Link one of the person's files or folders into a profile's folder,
@@ -317,7 +328,17 @@ const CHAT_CONFIG_MARKER: &str = "# Written by tokenstat from your Codex config.
 ///
 /// Optional files are shared best effort. Preparing the gated configuration
 /// must succeed before the turn starts.
+#[cfg(test)]
 fn share_codex_home(source: &Path, home: &Path, gated: bool) -> std::io::Result<()> {
+    share_codex_home_config(source, home, gated, false)
+}
+
+fn share_codex_home_config(
+    source: &Path,
+    home: &Path,
+    gated: bool,
+    own_login: bool,
+) -> std::io::Result<()> {
     for name in SHARED_CODEX_FILES {
         share_file(&source.join(name), &home.join(name));
     }
@@ -328,9 +349,10 @@ fn share_codex_home(source: &Path, home: &Path, gated: bool) -> std::io::Result<
         refresh_cache(&source.join(name), &home.join(name));
     }
     write_chat_config(
-        &source.join("config.toml"),
+        Some(&source.join("config.toml")),
         &home.join("config.toml"),
         gated,
+        own_login,
     )
 }
 
@@ -461,14 +483,19 @@ fn write_replacing(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Publish a managed configuration atomically. An unmanaged file is retained
 /// for ungated turns and blocks a gated turn because it could switch hooks off.
-fn write_chat_config(source: &Path, target: &Path, gated: bool) -> std::io::Result<()> {
+fn write_chat_config(
+    source: Option<&Path>,
+    target: &Path,
+    gated: bool,
+    own_login: bool,
+) -> std::io::Result<()> {
     match std::fs::symlink_metadata(target) {
         Ok(metadata) => {
             let managed = metadata.is_file()
                 && std::fs::read_to_string(target)
                     .is_ok_and(|text| text.starts_with(CHAT_CONFIG_MARKER));
             if !managed {
-                return if gated {
+                return if gated || own_login {
                     Err(std::io::Error::other(
                         "unmanaged config.toml in the private Codex home",
                     ))
@@ -481,11 +508,12 @@ fn write_chat_config(source: &Path, target: &Path, gated: bool) -> std::io::Resu
         Err(error) => return Err(error),
     }
 
-    let generated = std::fs::read_to_string(source)
-        .ok()
-        .and_then(|text| chat_codex_config(&text, gated));
+    let generated = source
+        .and_then(|source| std::fs::read_to_string(source).ok())
+        .and_then(|text| codex_config(&text, gated, own_login));
     if let Some(text) = generated.or_else(|| {
-        gated.then(|| chat_codex_config("", true).expect("empty Codex config is valid"))
+        (gated || own_login)
+            .then(|| codex_config("", gated, own_login).expect("empty Codex config is valid"))
     }) {
         write_replacing(target, text.as_bytes())?;
     } else if let Err(error) = std::fs::remove_file(target)
@@ -519,16 +547,21 @@ const STRIPPED_CODEX_KEYS: &[&str] = &[
 
 /// Derive a chat's `config.toml` from the person's. `None` when theirs does
 /// not parse, which Codex itself would refuse too.
+#[cfg(test)]
 pub(crate) fn chat_codex_config(text: &str, gated: bool) -> Option<String> {
+    codex_config(text, gated, false)
+}
+
+fn codex_config(text: &str, gated: bool, own_login: bool) -> Option<String> {
     let mut document = text.parse::<toml_edit::DocumentMut>().ok()?;
-    scrub_codex_table(document.as_table_mut(), gated);
+    scrub_codex_table(document.as_table_mut(), gated, own_login);
     if let Some(profiles) = document
         .get_mut("profiles")
         .and_then(toml_edit::Item::as_table_like_mut)
     {
         for (_, profile) in profiles.iter_mut() {
             if let Some(profile) = profile.as_table_like_mut() {
-                scrub_codex_table(profile, gated);
+                scrub_codex_table(profile, gated, own_login);
             }
         }
     }
@@ -552,7 +585,20 @@ pub(crate) fn chat_codex_config(text: &str, gated: bool) -> Option<String> {
     Some(format!("{CHAT_CONFIG_MARKER}\n{document}"))
 }
 
-fn scrub_codex_table(table: &mut dyn toml_edit::TableLike, gated: bool) {
+fn scrub_codex_table(table: &mut dyn toml_edit::TableLike, gated: bool, own_login: bool) {
+    if own_login {
+        for key in [
+            "model_provider",
+            "model_providers",
+            "openai_base_url",
+            "chatgpt_base_url",
+            "forced_chatgpt_workspace_id",
+            "forced_login_method",
+        ] {
+            table.remove(key);
+        }
+        table.insert("cli_auth_credentials_store", toml_edit::value("file"));
+    }
     for key in STRIPPED_CODEX_KEYS {
         table.remove(key);
     }
@@ -652,7 +698,7 @@ pub fn write_cursor_plugin(dir: &Path, helper: &Path) -> Result<(), String> {
 ///
 /// The person's `auth.json` and their `config.toml` are linked in: relocating
 /// the home must not sign them out or lose the model defaults they chose.
-pub fn write_grok_home(home: &Path, helper: &Path) -> Result<(), String> {
+pub fn write_grok_home(home: &Path, helper: &Path, login: Option<&Path>) -> Result<(), String> {
     let hooks = home.join("hooks");
     std::fs::create_dir_all(&hooks).map_err(|error| error.to_string())?;
     std::fs::write(
@@ -660,9 +706,15 @@ pub fn write_grok_home(home: &Path, helper: &Path) -> Result<(), String> {
         hooks_document(helper, "grok").to_string(),
     )
     .map_err(|error| error.to_string())?;
-    link_credential(home, ".grok", "auth.json")?;
-    // Best effort: a missing config is a grok default, not a failure.
-    let _ = link_credential(home, ".grok", "config.toml");
+    if let Some(login) = login {
+        route_cli_credential(&login.join("auth.json"), &home.join("auth.json"))?;
+        if login.join("config.toml").is_file() {
+            let _ = link_shared(&login.join("config.toml"), &home.join("config.toml"));
+        }
+    } else {
+        link_credential(home, ".grok", "auth.json")?;
+        let _ = link_credential(home, ".grok", "config.toml");
+    }
     Ok(())
 }
 

@@ -14,6 +14,7 @@ struct ComposerLimitsBadge: View {
     /// "claude_code" readings.
     let backend: String
     var peer: String?
+    var profileID: String? = nil
     var compact = false
     var showUsage: (() -> Void)?
 
@@ -21,7 +22,7 @@ struct ComposerLimitsBadge: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingDetail = false
     private var shared: [ProviderLimits] {
-        readings.visible
+        readings.visible.filter { $0.profileId == profileID }
     }
 
     /// The readings for the agent this conversation runs on, and nobody
@@ -176,11 +177,12 @@ struct ComposerLimitsLine: View {
 struct AgentLimitsSummary: View {
     let backend: String
     var peer: String?
+    var profileID: String? = nil
 
     var body: some View {
         let readings = ChatPlanLimits.store(peer: peer)
         if let provider = ComposerLimits.pick(
-            backend: backend, canonical: harnessCanonicalID, providers: readings.visible,
+            backend: backend, canonical: harnessCanonicalID, providers: readings.visible.filter { $0.profileId == profileID },
             source: \.source, hasWindows: \.hasWindows
         ) {
             let rows = harnessCanonicalID(provider.source) == "codex"

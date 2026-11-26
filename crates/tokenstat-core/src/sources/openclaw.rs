@@ -144,6 +144,7 @@ pub fn parse_sessions_file(path: &Path, contents: &str) -> ParseOutput {
         let billing = billing_for_provider(row.model_provider.as_deref());
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["openclaw", "session", &session]),
             source: SourceId::OpenClaw,
             ts: Timestamp::from_ms(ts_ms),
@@ -262,6 +263,7 @@ fn parse_model_completed(row: &Value, fallback_session: &str, agent: &str) -> Op
     let ts_ms = parse_ts(row.get("ts"));
 
     Some(UsageEvent {
+        profile_id: None,
         id: EventId::derive(&["openclaw", "turn", &session, run_id, &seq]),
         source: SourceId::OpenClaw,
         ts: Timestamp::from_ms(ts_ms),

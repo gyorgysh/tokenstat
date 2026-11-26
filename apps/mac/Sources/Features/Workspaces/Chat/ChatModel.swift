@@ -28,6 +28,71 @@ final class ChatModel {
     /// shows when somebody points at it. Nil once it can.
     var landingBlockReason: String?
 
+    private let profileCatalog = AgentProfileCatalog.shared
+    private var profileSignIn: [String: [String: AgentSetupStatus]] = [:]
+
+    private var remoteProfileCatalog: (peer: String, profiles: AgentProfiles)?
+    var agentProfiles: AgentProfiles? {
+        guard let peer else { return profileCatalog.value }
+        return remoteProfileCatalog?.peer == peer ? remoteProfileCatalog?.profiles : nil
+    }
+
+    func refreshAgentProfiles() async {
+        guard let peer else { try? await profileCatalog.refresh(); return }
+        let scope = WorkSessionContext.shared.generation
+        guard await RemoteHostFeature.agentProfiles.isSupported(peer: peer),
+              let profiles = try? await Bridge.agentProfiles(peer: peer),
+              !Task.isCancelled, self.peer == peer, WorkSessionContext.shared.generation == scope else { return }
+        remoteProfileCatalog = (peer, profiles)
+        profileCatalog.remember(profiles, peer: peer, account: scope)
+    }
+
+    var workspaceProfileLock: String? {
+        workspaceID.flatMap { agentProfiles?.workspaceLocks?[WorkDestinationResolver.route(folderID: $0).workspaceID] }
+    }
+
+    func setWorkspaceProfileLock(_ profile: String?) async {
+        guard peer == nil, let workspaceID else { return }
+        do {
+            profileCatalog.replace(try await Bridge.setWorkspaceAgentProfile(workspaceID: workspaceID, profileID: profile))
+        } catch {
+            if self.workspaceID == workspaceID, peer == nil { self.error = error.localizedDescription }
+        }
+    }
+
+    func profileID(for chat: ChatConversation?) -> String? {
+        if landingDraft != nil {
+            return workspaceProfileLock ?? chat?.profileId ?? agentProfiles?.default
+        }
+        return chat?.profileId
+    }
+
+    func profileTitle(_ chat: ChatConversation?) -> String? {
+        guard let id = profileID(for: chat), id != AgentProfiles.system else { return nil }
+        return agentProfiles?.profile(id)?.title
+    }
+
+    func usesOwnLogin(_ backend: ChatBackend, chat: ChatConversation?) -> Bool {
+        guard let id = profileID(for: chat), id != AgentProfiles.system else { return false }
+        // Until the local catalog arrives, there is no evidence that a named
+        // profile uses the machine login.
+        guard let profile = agentProfiles?.profile(id) else { return true }
+        return backend.launcherID.map(profile.own.contains) ?? false
+    }
+
+    func limitsProfileID(for chat: ChatConversation) -> String? {
+        guard let backend = backend(for: chat.backend) else { return profileID(for: chat) }
+        guard usesOwnLogin(backend, chat: chat) else { return nil }
+        return profileID(for: chat)
+    }
+
+    func signInReadiness(for backend: ChatBackend, chat: ChatConversation? = nil) -> String? {
+        let chat = chat ?? selected
+        if peer != nil && usesOwnLogin(backend, chat: chat) { return nil }
+        guard usesOwnLogin(backend, chat: chat), let id = profileID(for: chat) else { return backend.readiness }
+        return profileSignIn[id]?[backend.id]?.readiness
+    }
+
     /// An in-memory adapter lets the real composer edit local landing state.
     /// Its synthetic ID is never dispatched to a host or a conversation store.
     func configureLanding(_ state: ChatStartDraft, backends: [ChatBackend], peer: String?) {
@@ -43,6 +108,7 @@ final class ChatModel {
         chat.model = state.agent?.model; chat.effort = state.agent?.effort
         chat.mode = state.agent?.mode ?? "execute"; chat.autonomy = state.agent?.autonomy ?? Self.newChatInitialAutonomy
         chat.fastMode = state.agent?.fastMode ?? false
+        chat.profileId = state.agent?.profileID
         // A new import generation must close an old picker before it can edit.
         chat.id += reference.anchor ?? ""
         if selected?.id != chat.id { loadGeneration &+= 1 }
@@ -52,11 +118,12 @@ final class ChatModel {
         stagingAttachments = state.stagingAttachments
     }
 
-    private func updateLanding(backend: String?, model: String?, effort: String?, fastMode: Bool?, mode: String?, autonomy: String?) {
+    private func updateLanding(backend: String?, model: String?, effort: String?, fastMode: Bool?, mode: String?, autonomy: String?, profileID: String?) {
         guard let state = landingDraft, !state.isSubmitting, let owner = state.owner,
               owner.scope == WorkSessionContext.shared.scope, owner.session == WorkSessionContext.shared.generation else { return }
         var choice = state.agent ?? .init(backend: backend ?? "", model: nil, effort: nil)
         if let backend, backend != choice.backend { choice.backend = backend; choice.model = nil; choice.effort = nil; choice.fastMode = false }
+        if let profileID { choice.profileID = profileID }
         if let model { choice.model = model.isEmpty ? nil : model }
         if let effort { choice.effort = effort.isEmpty ? nil : effort }
         if let fastMode { choice.fastMode = fastMode }
@@ -292,8 +359,13 @@ final class ChatModel {
     /// send: a stored token past its expiry is routine (the CLI renews it),
     /// and an agent signed in with an environment key has no login file.
     func needsSignIn(_ backendID: String) -> Bool {
-        guard let backend = backend(for: backendID), backend.signInVerified else { return false }
-        return ["needsSignIn", "expired"].contains(backend.readiness ?? "")
+        guard let backend = backend(for: backendID) else { return false }
+        if peer != nil && usesOwnLogin(backend, chat: selected) { return false }
+        if usesOwnLogin(backend, chat: selected), let id = profileID(for: selected) {
+            guard let status = profileSignIn[id]?[backendID], status.checked == true else { return false }
+            return status.outcome == .needsSignIn
+        }
+        return backend.signInVerified && ["needsSignIn", "expired"].contains(backend.readiness ?? "")
     }
 
     enum SignInHold { case notNeeded, held, refused }
@@ -1951,7 +2023,8 @@ final class ChatModel {
         async let catalog: Void = loadBackendCatalog(peer: peer, generation: generation, scope: scope)
         async let voices: Void = loadPersonaCatalog(workspaceID: workspaceID, peer: peer,
                                                    generation: generation, scope: scope)
-        _ = await (catalog, voices)
+        async let profiles: Void = refreshAgentProfiles()
+        _ = await (catalog, voices, profiles)
     }
 
     private func loadBackendCatalog(peer: String?, generation: UInt64, scope: WorkReference.Scope?) async {
@@ -2320,6 +2393,7 @@ final class ChatModel {
                 model: model,
                 effort: effort,
                 personaID: rememberedPersonaID(saved),
+                profileID: workspaceProfileLock ?? requestedChoice?.profileID,
                 peer: targetPeer
             )
             guard !Task.isCancelled, context == loadGeneration, scope == WorkSessionContext.shared.scope else {
@@ -2393,12 +2467,20 @@ final class ChatModel {
         guard backend.canCheckSignIn else { await reloadBackends(refreshModels: false); return nil }
         let context = loadGeneration
         let owner = peer
+        let selection = selectionGeneration
+        let profile = profileID(for: selected)
+        if owner != nil && usesOwnLogin(backend, chat: selected) { return nil }
         do {
-            let status = try await Bridge.agentSetupCheck(peer: owner, id: id)
-            guard context == loadGeneration, peer == owner,
+            let status = try await Bridge.agentSetupCheck(peer: owner, id: id, profile: profile)
+            guard !Task.isCancelled, context == loadGeneration, peer == owner,
+                  selection == selectionGeneration, profile == profileID(for: selected),
                   let index = backends.firstIndex(where: { $0.id == backend.id }) else { return nil }
-            backends[index].readiness = status.readiness
-            backends[index].signInVerified = status.checked == true
+            if usesOwnLogin(backend, chat: selected), let profile {
+                profileSignIn[profile, default: [:]][backend.id] = status
+            } else {
+                backends[index].readiness = status.readiness
+                backends[index].signInVerified = status.checked == true
+            }
             backendRefreshError = nil
             return status
         } catch {
@@ -2504,11 +2586,11 @@ final class ChatModel {
     /// Start a chat that continues `conversation`, put it in the sidebar and
     /// open it. Nil when it could not be made, or the folder or account
     /// changed while it was being made.
-    func continueInNew(_ conversation: ChatConversation, expectedDraft: String) async -> ChatConversation? {
+    func continueInNew(_ conversation: ChatConversation, expectedDraft: String, profileID: String? = nil) async -> ChatConversation? {
         guard let folderID else { return nil }
         let scope = WorkSessionContext.shared.scope
         do {
-            let created = try await Bridge.continueChatInNew(id: conversation.id, peer: peer)
+            let created = try await Bridge.continueChatInNew(id: conversation.id, profileID: profileID, peer: peer)
             guard scope == WorkSessionContext.shared.scope, self.folderID == folderID,
                   selected?.id == conversation.id, draft == expectedDraft,
                   attachments.isEmpty else { return nil }
@@ -2532,10 +2614,11 @@ final class ChatModel {
         personaID: String? = nil,
         systemPrompt: String? = nil,
         allowedTools: [String]? = nil,
-        allowedShellPrefixes: [String]? = nil
+        allowedShellPrefixes: [String]? = nil,
+        profileID: String? = nil
     ) async {
         if landingDraft != nil {
-            updateLanding(backend: backend, model: model, effort: effort, fastMode: fastMode, mode: mode, autonomy: autonomy)
+            updateLanding(backend: backend, model: model, effort: effort, fastMode: fastMode, mode: mode, autonomy: autonomy, profileID: profileID)
             return
         }
         guard !isSharedSource, savedCopy == nil, let selected else { return }
@@ -2548,13 +2631,14 @@ final class ChatModel {
                 model: model,
                 effort: effort,
                 fastMode: fastMode,
-                expectedRevision: fastMode != nil ? selected.sendRevision : nil,
+                expectedRevision: fastMode != nil || profileID != nil ? selected.sendRevision : nil,
                 mode: mode,
                 autonomy: autonomy,
                 personaID: personaID,
                 systemPrompt: systemPrompt,
                 allowedTools: allowedTools,
                 allowedShellPrefixes: allowedShellPrefixes,
+                profileID: profileID,
                 peer: peer
             )
             guard selectionMatches(id: selected.id, generation: generation) else { return }

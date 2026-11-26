@@ -416,12 +416,16 @@ impl Manager {
                 }
             }
         }
-        self.spawn_fresh(req)
+        self.spawn_removing_env(req, &[])
     }
 
-    fn spawn_fresh(&self, req: &Spawn) -> Result<SessionInfo, PtyError> {
+    pub fn spawn_removing_env(
+        &self,
+        req: &Spawn,
+        remove: &[&str],
+    ) -> Result<SessionInfo, PtyError> {
         let id = self.next_session_id();
-        let (session, info) = self.build_session(req, id)?;
+        let (session, info) = self.build_session_checked(req, id, || Ok(()), false, remove)?;
         self.sessions
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -439,7 +443,16 @@ impl Manager {
         req: &Spawn,
         check: impl FnOnce() -> Result<(), PtyError>,
     ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
-        self.spawn_owned_with_io(req, check, false)
+        self.spawn_owned_removing_env(req, check, &[])
+    }
+
+    pub fn spawn_owned_removing_env(
+        &self,
+        req: &Spawn,
+        check: impl FnOnce() -> Result<(), PtyError>,
+        remove: &[&str],
+    ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
+        self.spawn_owned_with_io(req, check, false, remove)
     }
     /// Noninteractive owned work can use its original byte stream on every
     /// platform. Interactive terminals retain their normal PTY transport.
@@ -448,16 +461,26 @@ impl Manager {
         req: &Spawn,
         check: impl FnOnce() -> Result<(), PtyError>,
     ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
-        self.spawn_owned_with_io(req, check, true)
+        self.spawn_piped_owned_removing_env(req, check, &[])
+    }
+
+    pub fn spawn_piped_owned_removing_env(
+        &self,
+        req: &Spawn,
+        check: impl FnOnce() -> Result<(), PtyError>,
+        remove: &[&str],
+    ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
+        self.spawn_owned_with_io(req, check, true, remove)
     }
     fn spawn_owned_with_io(
         &self,
         req: &Spawn,
         check: impl FnOnce() -> Result<(), PtyError>,
         piped: bool,
+        remove: &[&str],
     ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
         let id = self.next_session_id();
-        let (session, info) = self.build_session_checked(req, id, check, piped)?;
+        let (session, info) = self.build_session_checked(req, id, check, piped, remove)?;
         let witness = ProcessWitness {
             session: Arc::clone(&session),
             id: info.id.clone(),
@@ -477,7 +500,7 @@ impl Manager {
         req: &Spawn,
         id: String,
     ) -> Result<(Arc<Session>, SessionInfo), PtyError> {
-        self.build_session_checked(req, id, || Ok(()), false)
+        self.build_session_checked(req, id, || Ok(()), false, &[])
     }
     fn build_session_checked(
         &self,
@@ -485,6 +508,7 @@ impl Manager {
         id: String,
         check: impl FnOnce() -> Result<(), PtyError>,
         piped: bool,
+        remove: &[&str],
     ) -> Result<(Arc<Session>, SessionInfo), PtyError> {
         let size = PtySize {
             rows: req.rows.max(1),
@@ -518,6 +542,9 @@ impl Manager {
             apply_login_environment(&mut cmd, req);
         }
         apply_terminal_environment(&mut cmd, req);
+        for key in remove {
+            cmd.env_remove(key);
+        }
         for (key, value) in &req.environment {
             cmd.env(key, value);
         }

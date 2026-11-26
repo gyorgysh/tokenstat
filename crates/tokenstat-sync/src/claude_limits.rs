@@ -258,6 +258,7 @@ fn fetch_stored(
         }
 
         ProviderLimits {
+            profile_id: None,
             source: "claude_code".to_string(),
             plan: None,
             windows,

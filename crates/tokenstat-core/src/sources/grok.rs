@@ -258,6 +258,7 @@ pub fn parse_file(
             });
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["grok", sid, &loop_index.to_string(), ts_raw]),
             source: SourceId::Grok,
             ts,

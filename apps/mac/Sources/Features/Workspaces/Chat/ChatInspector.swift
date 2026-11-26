@@ -12,6 +12,7 @@ struct ChatInspector: View {
     var onClose: () -> Void
     var showsHeader = true
     @State private var showingPersonas = false
+    @State private var savingProfileLock = false
     @State private var pendingDelete = false
     @State private var deletionTarget: DeletionTarget?
 
@@ -163,6 +164,28 @@ struct ChatInspector: View {
                 if let branch = folder?.git?.branch, !branch.isEmpty {
                     Label(branch, systemImage: "arrow.triangle.branch").font(Theme.caption).foregroundStyle(.secondary)
                 }
+                #if os(macOS)
+                if let profiles = model.agentProfiles, !profiles.named.isEmpty || model.workspaceProfileLock != nil,
+                   model.savedCopy == nil, !model.isSharedSource {
+                    Picker(L10n.text("apple.profiles.project_profile"), selection: Binding<String?>(
+                        get: { model.workspaceProfileLock },
+                        set: { profile in
+                            savingProfileLock = true
+                            Task {
+                                defer { savingProfileLock = false }
+                                await model.setWorkspaceProfileLock(profile)
+                            }
+                        }
+                    )) {
+                        Text(L10n.text("apple.profiles.any")).tag(nil as String?)
+                        ForEach(profiles.profiles) { profile in
+                            Text(profile.title).tag(Optional(profile.id))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(savingProfileLock)
+                }
+                #endif
             }
         }
     }

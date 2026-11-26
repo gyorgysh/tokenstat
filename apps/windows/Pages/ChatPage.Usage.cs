@@ -34,10 +34,11 @@ internal sealed partial class ChatPage
         try
         {
             RenderCommandStats();
-            var result = await AppServices.Host.CallAsync("usage.limits", new JsonObject { ["force"] = force });
+            var result = await CallChatAsync("usage.limits", new JsonObject { ["force"] = force });
             if (!Current()) return;
             if (result is not JsonArray readings) throw new InvalidDataException();
-            _usageLimits = ChatQuotaData.Read(readings, Format.Text(_openChat, "backend"));
+            var backend = Format.Text(_openChat, "backend");
+            _usageLimits = ChatQuotaData.Read(readings, backend, SeparateLogin(Backend(backend)) ? ChatProfileId : null);
             _usageReadFailed = false; _usageReadVisibility = visibility;
         }
         catch { if (Current()) _usageReadFailed = true; }

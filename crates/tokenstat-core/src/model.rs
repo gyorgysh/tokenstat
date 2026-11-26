@@ -396,6 +396,8 @@ impl fmt::Display for EventId {
 /// One normalized API request.
 #[derive(Debug, Clone)]
 pub struct UsageEvent {
+    /// Opaque local agent profile id. Missing for the machine account.
+    pub profile_id: Option<String>,
     pub id: EventId,
     pub source: SourceId,
     pub ts: Timestamp,

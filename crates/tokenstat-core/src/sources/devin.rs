@@ -304,6 +304,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         let pos = out.events.len();
         by_id.insert(id, pos);
         out.events.push(UsageEvent {
+            profile_id: None,
             id,
             source: SourceId::Devin,
             ts: Timestamp::from_ms(ts),

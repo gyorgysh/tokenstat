@@ -2170,19 +2170,28 @@ impl Store {
             )?
         };
         writer.ensure_current().map_err(|error| error.to_string())?;
+        let environment = crate::profiles::for_workspace_agent(
+            &workspace.id,
+            None,
+            crate::chat::launcher_profile_id(&pending.job.backend),
+        )?;
+        let remove = crate::profiles::inherited_auth(&environment);
         let info = writer
-            .spawn(&tokenstat_pty::Spawn {
-                command: crate::launcher::spawn_command(&argv[0]),
-                args: argv[1..].to_vec(),
-                cwd: workspace.path.clone(),
-                workspace_id: Some(workspace.id.clone()),
-                hidden: !pending.interactive,
-                rows: 24,
-                cols: 120,
-                no_color: false,
-                dark: None,
-                environment: Vec::new(),
-            })
+            .spawn_removing_env(
+                &tokenstat_pty::Spawn {
+                    command: crate::launcher::spawn_command(&argv[0]),
+                    args: argv[1..].to_vec(),
+                    cwd: workspace.path.clone(),
+                    workspace_id: Some(workspace.id.clone()),
+                    hidden: !pending.interactive,
+                    rows: 24,
+                    cols: 120,
+                    no_color: false,
+                    dark: None,
+                    environment,
+                },
+                remove,
+            )
             .map_err(|e| e.to_string())?;
 
         let run = RunRecord {

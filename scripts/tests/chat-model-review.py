@@ -96,16 +96,17 @@ RECOVERY
         func decode() throws -> ChatConversation { try JSONDecoder().decode(ChatConversation.self, from: JSONSerialization.data(withJSONObject: row)) }
         let model = SharedSourcePolicy()
         model.selected = try decode()
-        precondition(!model.isSharedSource && !model.queuePaused)
+        precondition(!model.isSharedSource && !model.queuePaused && model.selected?.profileId == nil)
+        row["profileId"] = "p_work"
         row["teamShare"] = ["id":"share-fixture", "initialFingerprint":"PRIVATE_HOST_FINGERPRINT", "historyBytes":10]
         model.selected = try decode()
-        precondition(model.isSharedSource && model.queuePaused)
+        precondition(model.isSharedSource && model.queuePaused && model.selected?.profileId == "p_work")
         guard case .refused = model.holdForSignIn(model.draft, backend: "codex") else { fatalError("shared source queued private writing") }
         precondition(model.draft == "Private unsent note" && model.queued == 0)
         let cached = String(data: try JSONEncoder().encode(model.selected), encoding: .utf8)!
         precondition(cached.contains("share-fixture") && !cached.contains("PRIVATE_HOST_FINGERPRINT"))
         model.selected = try JSONDecoder().decode(ChatConversation.self, from: Data(cached.utf8))
-        precondition(model.isSharedSource && model.queuePaused)
+        precondition(model.isSharedSource && model.queuePaused && model.selected?.profileId == "p_work")
         row["teamShare"] = NSNull(); model.selected = try decode()
         guard case .held = model.holdForSignIn(model.draft, backend: "codex") else { fatalError("private control did not queue") }
         precondition(model.queued == 1 && model.draft.isEmpty)
@@ -219,6 +220,7 @@ struct Choice {
     var model: String? = nil, effort: String? = nil
     var fastMode = false
     var mode = "execute", autonomy = "standard"
+    var profileID: String? = nil
 }
 struct ChatBackend {
     var id: String
@@ -238,18 +240,21 @@ enum ChatFastMode {
     static var beforeReply: (() -> Void)?
     static var removed: [String?] = []
     static var choices: [String] = []
+    static var profiles: [String?] = []
     static func chatBackends(peer: String?) async throws -> [ChatBackend] { [] }
     static func createChat(workspaceID: String, backend: String, mode: String, autonomy: String,
-        model: String?, effort: String?, personaID: String?, peer: String?) async throws -> ChatConversation {
+        model: String?, effort: String?, personaID: String?, profileID: String?, peer: String?) async throws -> ChatConversation {
         choices.append(backend)
+        profiles.append(profileID)
         beforeReply?()
         return ChatConversation()
     }
     static func removeChat(id: String, peer: String?) async throws { removed.append(peer) }
 }
 @MainActor final class Model {
-    var newChatChoice: Choice? = Choice(backend: "claude")
+    var newChatChoice: Choice? = Choice(backend: "claude", profileID: "p_work")
     var lastLaunchChoice: Choice? = Choice(backend: "codex")
+    var workspaceProfileLock: String?
     var loadGeneration: UInt64 = 0, selectionGeneration: UInt64 = 0
     var workspaceID: String? = "workspace", folderID: String? = "remote:original:workspace"
     var continuityScope: String? = "account", peer: String? = "original"
@@ -268,6 +273,11 @@ PERFORM
         assert(first != nil && model.newChatChoice == nil)
         _ = await model.performCreate(expectedGeneration: 0)
         assert(Bridge.choices == ["claude", "codex"], "landing setup is used once")
+        assert(Bridge.profiles == ["p_work", nil])
+        let locked = Model()
+        locked.workspaceProfileLock = "p_locked"
+        _ = await locked.performCreate(expectedGeneration: 0)
+        assert(Bridge.profiles.last == .some("p_locked"))
 
         let stale = Model()
         Bridge.beforeReply = {

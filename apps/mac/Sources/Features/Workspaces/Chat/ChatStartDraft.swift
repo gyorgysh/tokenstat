@@ -14,6 +14,7 @@ final class ChatStartDraft {
         var mode = "execute"
         var autonomy = "bypass"
         var fastMode = false
+        var profileID: String? = nil
     }
     struct Submission {
         let id: UUID

@@ -2466,7 +2466,8 @@ impl Store {
                 "Select a supported model listed by this agent to use fast mode. Refresh the model list if needed.".into(),
             );
         }
-        let profile = input.profile_id.unwrap_or_else(crate::profiles::default_id);
+        let profile =
+            crate::profiles::for_new_chat(&input.workspace_id, input.profile_id.as_deref())?;
         if !crate::profiles::exists(&profile) {
             return Err("That profile was removed. Pick another.".into());
         }
@@ -2665,6 +2666,7 @@ impl Store {
                     if chat.last_message_at_ms.is_some() || chat.resume_token.is_some() {
                         return Err("This chat already started with another profile. Continue in a new chat to switch.".into());
                     }
+                    crate::profiles::check_workspace_lock(&chat.workspace_id, profile.as_deref())?;
                     if !crate::profiles::exists(profile.as_deref().unwrap_or(crate::profiles::SYSTEM)) {
                         return Err("That profile was removed. Pick another.".into());
                     }
@@ -3508,8 +3510,11 @@ impl Store {
         let muse_root = if chat.resume_tokens.contains_key("muse")
             || (chat.backend == "muse" && chat.resume_token.is_some())
         {
-            tokenstat_paths::home_dir()
-                .and_then(|home| tokenstat_core::sources::muse::discover(&home))
+            match crate::profiles::login_folder(chat.profile_id.as_deref(), "muse") {
+                Some(profile) => Some(profile.join("data/muse/sessions")),
+                None => tokenstat_paths::home_dir()
+                    .and_then(|home| tokenstat_core::sources::muse::discover(&home)),
+            }
         } else {
             None
         };
@@ -3899,7 +3904,11 @@ impl Store {
     /// Same folder, agent, model and settings. Its first turn is pointed at
     /// the earlier history (see [`Self::continuation`]) instead of resuming
     /// the old session, which would read the whole conversation again.
-    pub fn continue_in_new(&self, id: &str) -> Result<Conversation, String> {
+    pub fn continue_in_new(
+        &self,
+        id: &str,
+        profile: Option<String>,
+    ) -> Result<Conversation, String> {
         let source = self.get(id)?;
         let created = self.create(Create {
             workspace_id: source.workspace_id.clone(),
@@ -3916,12 +3925,14 @@ impl Store {
             // or refuse the continuation.
             persona_id: Some(String::new()),
             // Same logins: a continuation is the same work.
-            profile_id: Some(
-                source
-                    .profile_id
-                    .clone()
-                    .unwrap_or_else(|| crate::profiles::SYSTEM.into()),
-            ),
+            profile_id: profile.or_else(|| {
+                Some(
+                    source
+                        .profile_id
+                        .clone()
+                        .unwrap_or_else(|| crate::profiles::SYSTEM.into()),
+                )
+            }),
         })?;
         self.edit_conversation(&created.id, |chat| {
             chat.persona_id = source.persona_id.clone();
@@ -4313,9 +4324,22 @@ impl Store {
         }
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
+        // The chat's profile decides whose login the agent uses. Nothing
+        // for the machine's own, so every chat from before profiles runs as
+        // it always did. A removed profile stops the turn rather than quietly
+        // using the machine's account.
+        crate::profiles::check_workspace_lock(&chat.workspace_id, chat.profile_id.as_deref())?;
+        let profile_environment = crate::profiles::environment(
+            chat.profile_id.as_deref(),
+            launcher_profile_id(&chat.backend),
+        )?;
+        let remove_auth = crate::profiles::inherited_auth(&profile_environment);
+        let profile_login = profile_environment
+            .first()
+            .map(|(_, path)| PathBuf::from(path));
         self.recover_codex_session(&mut chat);
-        self.recover_opencode_session(&mut chat, &workspace.path);
-        self.recover_claude_session(&mut chat);
+        self.recover_opencode_session(&mut chat, &workspace.path, profile_login.as_deref());
+        self.recover_claude_session(&mut chat, profile_login.as_deref());
         let resume_token = chat
             .resume_tokens
             .get(&chat.backend)
@@ -4471,15 +4495,6 @@ impl Store {
                 crate::chat_gate::GATE_DEADLINE_SECONDS.to_string(),
             ));
         }
-        // The chat's profile decides whose login the agent uses. Nothing
-        // for the machine's own, so every chat from before profiles runs as
-        // it always did. A removed profile stops the turn rather than quietly
-        // using the machine's account.
-        let profile_environment =
-            crate::profiles::environment(chat.profile_id.as_deref(), &chat.backend)?;
-        let profile_login = profile_environment
-            .first()
-            .map(|(_, path)| PathBuf::from(path));
         let codex_home = if chat.backend == "codex" && private_codex_home(helper.is_some()) {
             let home = self.codex_home(id);
             crate::chat_gate::write_codex_home_signed_in(
@@ -4487,6 +4502,15 @@ impl Store {
                 helper.as_deref(),
                 profile_login.as_deref(),
             )?;
+            if profile_login.is_some()
+                && let Some(profile) = &chat.profile_id
+            {
+                tokenstat_sync::snapshot::write_private_atomically(
+                    &home.join(tokenstat_paths::CHAT_AGENT_PROFILE_FILE),
+                    profile,
+                )
+                .map_err(|error| error.to_string())?;
+            }
             environment.push(("CODEX_HOME".into(), home.display().to_string()));
             Some(home)
         } else {
@@ -4499,7 +4523,16 @@ impl Store {
             && let Some(helper) = &helper
         {
             let home = self.grok_hook_home(id);
-            crate::chat_gate::write_grok_home(&home, helper)?;
+            crate::chat_gate::write_grok_home(&home, helper, profile_login.as_deref())?;
+            if profile_login.is_some()
+                && let Some(profile) = &chat.profile_id
+            {
+                tokenstat_sync::snapshot::write_private_atomically(
+                    &home.join(tokenstat_paths::CHAT_AGENT_PROFILE_FILE),
+                    profile,
+                )
+                .map_err(|error| error.to_string())?;
+            }
             environment.push(("GROK_HOME".into(), home.display().to_string()));
         }
         let agy_hook_home = if chat.backend == "agy"
@@ -4565,7 +4598,7 @@ impl Store {
                 .map(PathBuf::from)
                 .or_else(tokenstat_paths::home_dir);
             let user_config = crate::chat_gate::muse_config_directory(
-                config_root.as_deref(),
+                profile_login.as_deref().or(config_root.as_deref()),
                 user_home.as_deref(),
             );
             if let Some(root) = crate::chat_gate::install_muse_note_home(
@@ -4643,18 +4676,21 @@ impl Store {
         let spawn_argv = live_speed.as_ref().map_or(&argv, |live| &live.argv);
         tokenstat_sync::push::begin_activity(id, activity_revision);
         let info = match writer
-            .spawn_piped(&tokenstat_pty::Spawn {
-                command: crate::launcher::spawn_command(&spawn_argv[0]),
-                args: spawn_argv[1..].to_vec(),
-                cwd: workspace.path,
-                workspace_id: Some(chat.workspace_id.clone()),
-                hidden: true,
-                rows: 24,
-                cols: 120,
-                no_color: false,
-                dark: None,
-                environment,
-            })
+            .spawn_piped_removing_env(
+                &tokenstat_pty::Spawn {
+                    command: crate::launcher::spawn_command(&spawn_argv[0]),
+                    args: spawn_argv[1..].to_vec(),
+                    cwd: workspace.path,
+                    workspace_id: Some(chat.workspace_id.clone()),
+                    hidden: true,
+                    rows: 24,
+                    cols: 120,
+                    no_color: false,
+                    dark: None,
+                    environment,
+                },
+                remove_auth,
+            )
             .map_err(|e| e.to_string())
         {
             Ok(info) => info,
@@ -5993,8 +6029,11 @@ impl Store {
     /// `--resume` of one it no longer has fails the turn. Start a fresh
     /// session with the handover instead. Team runs keep their own Claude
     /// home, so only private chats are checked here.
-    fn recover_claude_session(&self, chat: &mut Conversation) {
-        self.recover_claude_session_using(chat, crate::chat_cache::claude_session_exists);
+    fn recover_claude_session(&self, chat: &mut Conversation, profile: Option<&Path>) {
+        self.recover_claude_session_using(chat, |token| match profile {
+            Some(home) => crate::chat_cache::claude_session_in_home(home, token),
+            None => crate::chat_cache::claude_session_exists(token),
+        });
     }
 
     fn recover_claude_session_using(
@@ -6048,7 +6087,7 @@ impl Store {
     fn backfill_prompt_caches(&self) {
         const RECENT: std::time::Duration = std::time::Duration::from_secs(45 * 24 * 60 * 60);
         const TAIL: u64 = 1024 * 1024;
-        let candidates: Vec<(String, Option<String>)> = self
+        let candidates: Vec<(String, Option<String>, Option<String>)> = self
             .conversations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -6059,14 +6098,26 @@ impl Store {
                     && chat.team_share.is_none()
                     && !chat.running
             })
-            .map(|chat| (chat.id.clone(), chat.resume_tokens.get("claude").cloned()))
+            .map(|chat| {
+                (
+                    chat.id.clone(),
+                    chat.resume_tokens.get("claude").cloned(),
+                    chat.profile_id.clone(),
+                )
+            })
             .collect();
-        for (id, session) in candidates {
-            if session
-                .as_deref()
-                .and_then(crate::chat_cache::claude_session_exists)
-                == Some(false)
-            {
+        for (id, session, profile) in candidates {
+            let environment = crate::profiles::environment(profile.as_deref(), "claude_code");
+            let exists =
+                session
+                    .as_deref()
+                    .and_then(|token| match environment.as_ref().ok()?.first() {
+                        Some((_, path)) => {
+                            crate::chat_cache::claude_session_in_home(Path::new(path), token)
+                        }
+                        None => crate::chat_cache::claude_session_exists(token),
+                    });
+            if exists == Some(false) {
                 continue;
             }
             let raw = self.root.join(safe_file_name(&id)).join("raw");
@@ -6101,9 +6152,21 @@ impl Store {
         }
     }
 
-    fn recover_opencode_session(&self, chat: &mut Conversation, directory: &Path) {
-        self.recover_opencode_session_using(chat, |backend, token| {
-            crate::opencode_cli::session_exists(backend, token, Some(directory))
+    fn recover_opencode_session(
+        &self,
+        chat: &mut Conversation,
+        directory: &Path,
+        profile: Option<&Path>,
+    ) {
+        self.recover_opencode_session_using(chat, |backend, token| match profile {
+            Some(home) => tokenstat_core::sources::opencode::session_exists(
+                &home.join("opencode/opencode.db"),
+                token,
+                crate::opencode_cli::require_generation(backend).ok()?
+                    == crate::opencode_cli::Generation::V2,
+            )
+            .ok(),
+            None => crate::opencode_cli::session_exists(backend, token, Some(directory)),
         });
     }
 
@@ -7229,7 +7292,7 @@ pub(crate) fn agent_busy(profile_id: &str) -> bool {
         .any(|chat| chat.running && launcher_profile_id(&chat.backend) == profile_id)
 }
 
-fn launcher_profile_id(backend: &str) -> &str {
+pub(crate) fn launcher_profile_id(backend: &str) -> &str {
     match backend {
         "sh" => "shell",
         "claude" => "claude_code",
@@ -8291,7 +8354,8 @@ fn validate_update_setup(chat: &Conversation, changes: &Update) -> Result<(), St
             || changes.model.is_some()
             || changes.effort.is_some()
             || changes.mode.is_some()
-            || changes.autonomy.is_some())
+            || changes.autonomy.is_some()
+            || changes.profile_id.is_some())
     {
         return Err("finish or stop this turn before changing its setup".into());
     }
@@ -16413,7 +16477,7 @@ mod tests {
         // Grok's home is the one that must survive the turn, because its
         // sessions live inside it and `--resume` needs them.
         let grok_home = store.grok_hook_home("chat-test");
-        crate::chat_gate::write_grok_home(&grok_home, helper).unwrap();
+        crate::chat_gate::write_grok_home(&grok_home, helper, None).unwrap();
         let grok_hooks = fs::read_to_string(grok_home.join("hooks/tokenstat.json")).unwrap();
         assert!(grok_hooks.contains("hook grok pre"));
         let _ = fs::remove_dir_all(grok_home);

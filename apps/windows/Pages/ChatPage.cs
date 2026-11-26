@@ -760,6 +760,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 if (setup.Model is not null) request["model"] = setup.Model;
                 if (setup.Effort is not null) request["effort"] = setup.Effort;
                 if (setup.FastMode) request["fastMode"] = true;
+                if (setup.ProfileId is not null)
+                {
+                    if (RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out _) &&
+                        !RemoteFeatureGate.SupportsProtocol(await RemoteFeatureGate.PeerProtocolAsync(peer), AgentProfiles.MinimumProtocol))
+                        throw new InvalidOperationException(L10n.Text("common.profiles.host_update"));
+                    if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded || ownsRequest?.Invoke() == false) return null;
+                    request["profileId"] = setup.ProfileId;
+                }
             }
             else if (saved is not null && Format.Text(chosen, "id") == saved.Backend)
             {
@@ -1932,12 +1940,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private async Task OpenAgentSignInAsync(JsonNode backend)
     {
         if (Busy()) return;
+        var profile = SeparateLogin(backend) ? ChatProfileId : null;
+        if (profile is not null && RemoteWorkspaces.IsRemote(_workspaceId)) return;
         var chat = _openId;
         var generation = _openGeneration;
         try
         {
-            var readiness = await AgentSignInDialog.ShowAsync(this, _workspaceId, backend, (method, parameters) => CallChatAsync(method, parameters));
-            if (chat == _openId && generation == _openGeneration && readiness is not null) backend["readiness"] = readiness;
+            var readiness = await AgentSignInDialog.ShowAsync(this, _workspaceId, backend, (method, parameters) => CallChatAsync(method, parameters), profile);
+            if (chat == _openId && generation == _openGeneration && readiness is not null && profile is null) backend["readiness"] = readiness;
         }
         catch (Exception ex) { if (chat == _openId && generation == _openGeneration) Banner(ex.Message); }
         if (chat == _openId && generation == _openGeneration) PaintConversation();
@@ -1984,7 +1994,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (setupBackend is not null && Installed(setupBackend) && Format.Text(setupBackend, "id") != "sh"
             // Only a state with a next step. Agents whose login nothing can
             // read are always "unknown", and a notice on all of them is noise.
-            && Format.Text(setupBackend, "readiness") is "needsSignIn" or "expired") context.Children.Add(AgentSetupNotice(setupBackend));
+            && !SeparateLogin(setupBackend) && Format.Text(setupBackend, "readiness") is "needsSignIn" or "expired") context.Children.Add(AgentSetupNotice(setupBackend));
         _setupScroll.Content = context;
         FitSetupViewport();
         well.Children.Add(_setupScroll);
@@ -2116,6 +2126,58 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(setup);
         return row;
     }
+    private AgentProfiles? _agentProfiles;
+    private string ChatProfileId => Format.Text(_openChat, "profileId", AgentProfiles.SystemId);
+    private string? WorkspaceProfileLock => _agentProfiles?.Lock(
+        RemoteWorkspaces.TrySplit(_workspaceId, out _, out var inner) ? inner : _workspaceId);
+    private bool SeparateLogin(JsonNode? agent) => ChatProfileId != AgentProfiles.SystemId
+        && (_agentProfiles?.Owns(ChatProfileId, Format.Text(agent, "launcherId")) ?? true);
+
+    private async Task RefreshAgentProfilesAsync(int generation)
+    {
+        try
+        {
+            var profiles = await AgentProfiles.ReadAsync(_workspaceId);
+            if (generation == _openGeneration && IsLoaded)
+            {
+                _agentProfiles = profiles;
+                if (!Busy()) PaintConversation();
+            }
+        }
+        catch { /* Older hosts keep the ordinary agent picker. */ }
+    }
+
+    private async Task PickChatProfileAsync(string profileId)
+    {
+        if (_openId is not string id || SharedSource || Busy()) return;
+        if (Format.Text(_openChat, "lastMessageAtMs").Length == 0 && Format.Text(_openChat, "resumeToken").Length == 0)
+        {
+            var patch = new JsonObject { ["profileId"] = profileId };
+            if (_openChat?["sendRevision"] is JsonNode revision) patch["expectedRevision"] = revision.DeepClone();
+            await TryUpdateAsync(patch);
+            return;
+        }
+        var generation = _openGeneration;
+        var account = AppServices.AccountGeneration;
+        bool Current() => OpenChatIs(id) && generation == _openGeneration && account == AppServices.AccountGeneration;
+        var title = _agentProfiles?.Title(profileId) ?? L10n.Text("common.profiles.removed");
+        var result = await Chrome.ShowDialog(this, new ContentDialog
+        {
+            Title = L10n.Text("common.profiles.continue", title),
+            PrimaryButtonText = L10n.Text("common.done"),
+            CloseButtonText = L10n.Text("common.cancel"),
+        });
+        if (result != ContentDialogResult.Primary || !Current()) return;
+        try
+        {
+            var created = await CallChatAsync("chat.continueInNew", new JsonObject { ["id"] = id, ["profileId"] = profileId });
+            AppServices.NotifyConversationsChanged();
+            if (Current() && Format.Text(created, "id") is { Length: > 0 } next)
+                AppServices.OpenConversation?.Invoke(_workspaceId, next);
+        }
+        catch (Exception failure) { if (Current()) Banner(failure.Message); }
+    }
+
     private UIElement CompactAgentMenu(bool locked) => ChatAgentPicker.Build(new ChatAgentPickerSource(
         Chat: () => _openChat,
         Backends: () => _backends,
@@ -2123,7 +2185,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Repaint: PaintConversation,
         Suppressed: () => _suppress,
         SignIn: OpenAgentSignInAsync,
-        UpdateAgent: UpdateAgentAsync), locked);
+        UpdateAgent: UpdateAgentAsync,
+        Profiles: () => _agentProfiles,
+        SelectedProfile: () => ChatProfileId,
+        ProfileLock: () => WorkspaceProfileLock,
+        PickProfile: PickChatProfileAsync,
+        LimitsWorkspace: _workspaceId), locked);
 
     private void RebuildAttachStrip()
     {
@@ -2303,7 +2370,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with an
         // environment key has no login file at all.
-        if (!liveInput && Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
+        if (!liveInput && !SeparateLogin(backend) && Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
         {
             Banner(L10n.Text("windows.agentsetup.draft_kept", Format.Text(backend, "label")));
             return;
@@ -2636,6 +2703,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         // Secondary menus must never hide a successful conversation list.
         _ = RefreshBackendCatalogAsync(generation);
+        _ = RefreshAgentProfilesAsync(generation);
         _ = RefreshPersonaCatalogAsync(generation);
         var loaded = await chats;
         if (generation == _openGeneration)
@@ -2701,7 +2769,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private void CheckSelectedSignIn()
     {
         var selectedBackend = Backend(Format.Text(_openChat, "backend"));
-        if (selectedBackend is not null && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex" or "cursor" or "cursor_agent" or "muse")
+        if (selectedBackend is not null && !SeparateLogin(selectedBackend) && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex" or "cursor" or "cursor_agent" or "muse")
         {
             // In the background. The CLI can take seconds to answer, and the
             // chat, its menus and its personas are ready without it.
@@ -3205,6 +3273,42 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             catch (Exception error) { Banner(error.Message); }
         });
         copyPath.IsEnabled = path.Length > 0; folderActions.Children.Add(copyPath);
+        if (!SharedSource && !RemoteWorkspaces.IsRemote(_workspaceId) && _agentProfiles is { Choices.Length: > 1 } profiles)
+        {
+            var menu = new MenuFlyout();
+            var locked = WorkspaceProfileLock;
+            void Option(string title, string? profileId)
+            {
+                var item = new MenuFlyoutItem { Text = title, IsEnabled = profileId != locked };
+                item.Click += async (_, _) =>
+                {
+                    if (!Current()) return;
+                    var request = new JsonObject { ["workspaceId"] = _workspaceId };
+                    if (profileId is not null) request["profileId"] = profileId;
+                    try
+                    {
+                        var updated = await CallChatAsync("profiles.setWorkspaceLock", request);
+                        if (!Current()) return;
+                        _agentProfiles = new AgentProfiles(updated, true);
+                        PaintConversation();
+                    }
+                    catch (Exception failure) { if (Current()) Banner(failure.Message); }
+                };
+                menu.Items.Add(item);
+            }
+            var any = L10n.Text("windows.profiles.any");
+            Option(any, null);
+            foreach (var profile in profiles.Choices)
+            {
+                var id = Format.Text(profile, "id");
+                Option(profiles.Title(id), id);
+            }
+            folderActions.Children.Add(new Button
+            {
+                Content = L10n.Text("common.profiles.label") + " · " + (locked is null ? any : profiles.Title(locked)),
+                Flyout = menu,
+            });
+        }
         folder.Children.Add(folderActions);
         target.Children.Add(CollapsibleStatsCard(L10n.Text("common.chat.inspector.folder"), "folder", folder, Muted(path)));
         var tools = AsArray(chat, "allowedTools"); var commands = AsArray(chat, "allowedShellPrefixes");

@@ -89,13 +89,14 @@ private final class ReadRefusal: @unchecked Sendable {
         try? bytes.write(to: output.appendingPathComponent("state.json"), options: .atomic)
     }
 
-    private func image() throws -> CGImage {
+    private func image(picker: Bool) throws -> CGImage {
         #if os(macOS)
         try save(NSApplication.shared.windows.map { ["title": $0.title,
             "visible": $0.isVisible, "width": $0.frame.width, "height": $0.frame.height] }, "windows.json")
-        guard let view = NSApplication.shared.windows.first(where: {
-            $0.isVisible && ($0.contentView?.bounds.height ?? 0) > 100
-        })?.contentView,
+        let windows = NSApplication.shared.windows.filter { $0.isVisible && ($0.contentView?.bounds.height ?? 0) > 100 }
+        // AppKit hosts the SwiftUI picker popover in its own untitled window.
+        let window = (picker ? windows.first(where: { $0.title.isEmpty }) : nil) ?? windows.first
+        guard let view = window?.contentView,
               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             throw CocoaError(.fileReadUnknown)
         }
@@ -201,14 +202,14 @@ private final class ReadRefusal: @unchecked Sendable {
         try encoded.write(to: output.appendingPathComponent("snapshot-\(id).png"))
     }
 
-    private func snapshot(_ id: Int, expected: String?) async throws -> [String] {
+    private func snapshot(_ id: Int, expected: String?, picker: Bool = false) async throws -> [String] {
         var observed: [String] = []
         var lastCapture: CGImage?
         let deadline = ContinuousClock.now.advanced(by: .seconds(20))
         var attempt = 0
         repeat {
             try save(["id": id, "stage": "capture", "attempt": attempt], "snapshot-progress.json")
-            let capture = try image()
+            let capture = try image(picker: picker)
             lastCapture = capture
             try saveImage(capture, id)
             try save(["id": id, "stage": "recognize", "attempt": attempt], "snapshot-progress.json")
@@ -408,6 +409,10 @@ private final class ReadRefusal: @unchecked Sendable {
                 return
             #endif
             case "snapshot": break
+            case "profile-picker": model.agentPickerRequest += 1
+            #if os(macOS)
+            case "profile-settings": layoutPage = "profile-settings"
+            #endif
             case "new-chat-layout", "list-layout", "tab-layout", "repository-chats": layoutPage = request["action"] as? String
             case "light": layoutScheme = .light
             case "dark": layoutScheme = .dark
@@ -422,7 +427,8 @@ private final class ReadRefusal: @unchecked Sendable {
             default: throw CocoaError(.coderInvalidValue)
             }
             try await Task.sleep(for: .milliseconds(200))
-            let observed = try await snapshot(id, expected: request["expected"] as? String)
+            let observed = try await snapshot(id, expected: request["expected"] as? String,
+                                              picker: request["action"] as? String == "profile-picker")
             try save(["id": id, "ok": true, "texts": observed], "result-\(id).json")
         } catch {
             try? save(["id": id, "ok": false, "error": error.localizedDescription], "result-\(id).json")
@@ -475,7 +481,9 @@ private final class ReadRefusal: @unchecked Sendable {
                     phoneConversation
                 }
                 #else
-                if session.layoutPage == "automation-compact" {
+                if session.layoutPage == "profile-settings" {
+                    AgentProfileSettings().padding(Theme.Space.m)
+                } else if session.layoutPage == "automation-compact" {
                     ScrollView {
                         TranscriptView(
                             text: "Read Sources/ChatModel.swift\n\nGrep transcript Sources\n\nBash swift test\n| 10 tests passed\n\nEdit Sources/ChatView.swift\n- old line\n+ new line\n\nChanges ready for review.",

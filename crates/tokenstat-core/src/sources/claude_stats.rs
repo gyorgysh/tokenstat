@@ -300,6 +300,7 @@ pub fn backfill_events(
             };
 
             out.push(UsageEvent {
+                profile_id: None,
                 id: EventId::derive(&["claude_rollup", date, model]),
                 source: SourceId::ClaudeCodeRollup,
                 ts: Timestamp::from_ms(ts),

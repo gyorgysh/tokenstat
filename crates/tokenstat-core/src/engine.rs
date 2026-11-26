@@ -330,6 +330,7 @@ mod tests {
 
     fn ev(id: &str, model: &str, session: &str) -> UsageEvent {
         UsageEvent {
+            profile_id: None,
             id: EventId::derive(&[id]),
             source: SourceId::ClaudeCode,
             ts: Timestamp::from_ms(1_700_000_000_000),

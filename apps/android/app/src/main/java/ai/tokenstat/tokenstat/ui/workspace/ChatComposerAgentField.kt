@@ -39,22 +39,23 @@ import kotlinx.serialization.json.JsonObject
 /// `ChatAgentField(compactLabel: true)`.
 @Composable
 internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject?, onOpen: () -> Unit,
-                                    enabled: Boolean, modifier: Modifier = Modifier) {
+                                    enabled: Boolean, modifier: Modifier = Modifier, profileTitle: String? = null) {
     val colors = LocalTsColors.current
     val shape = RoundedCornerShape(10.dp)
     val largeText = LocalDensity.current.fontScale > 1.3f
     val updateWaiting = backendOf(backends, chat?.str("backend").orEmpty())?.bol("updateAvailable") == true
+    val suffix = profileTitle?.let { " · $it" }.orEmpty()
     Box(modifier) {
         Row(Modifier.clip(shape).background(colors.panel).border(1.dp, colors.border, shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
             .semantics {
-                contentDescription = chatAgentSummary(backends, chat) +
+                contentDescription = chatAgentSummary(backends, chat) + suffix +
                     if (updateWaiting) ", " + L10n.text("common.agent_updates.waiting") else ""
             }
             .heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(Modifier.clearAndSetSemantics {}) { HarnessMark(chat?.str("backend").orEmpty(), size = 16.dp) }
-            Text(chatAgentCompactSummary(backends, chat),
+            Text(chatAgentCompactSummary(backends, chat) + suffix,
                 modifier = Modifier.weight(1f, fill = false), style = TsType.callout.copy(fontWeight = FontWeight.Medium),
                 color = if (enabled) colors.textPrimary else colors.textTertiary,
                 maxLines = if (largeText) 2 else 1,
@@ -77,7 +78,7 @@ internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, 
                                 expanded: Boolean, onAgent: () -> Unit, onSetup: () -> Unit,
                                 onExpand: () -> Unit, quota: @Composable () -> Unit,
                                 running: Boolean = false, onStop: () -> Unit = {},
-                                keyboardOpen: Boolean = false, onHideKeyboard: () -> Unit = {}) {
+                                keyboardOpen: Boolean = false, onHideKeyboard: () -> Unit = {}, profileTitle: String? = null) {
     val colors = LocalTsColors.current
     val actions: @Composable RowScope.() -> Unit = {
         IconButton(onClick = onSetup) {
@@ -108,12 +109,12 @@ internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, 
         val actionCount = 3 + (if (keyboardOpen) 1 else 0) + (if (running) 1 else 0)
         if (maxWidth < (120 + actionCount * 48).dp || LocalDensity.current.fontScale > 1.3f) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ChatComposerAgentField(backends, chat, onAgent, !locked)
+                ChatComposerAgentField(backends, chat, onAgent, !locked, profileTitle = profileTitle)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically, content = actions)
             }
         } else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { ChatComposerAgentField(backends, chat, onAgent, !locked) }
+                Box(Modifier.weight(1f)) { ChatComposerAgentField(backends, chat, onAgent, !locked, profileTitle = profileTitle) }
                 actions()
             }
         }

@@ -219,6 +219,7 @@ fn parse_gen_metadata(
     };
 
     Some(UsageEvent {
+        profile_id: None,
         id,
         source: SourceId::Antigravity,
         ts: Timestamp::from_ms(timestamp),

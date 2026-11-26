@@ -114,6 +114,7 @@ pub fn limits() -> ProviderLimits {
     // approximation of those, kept for servers that predate the summary.
     if !summary.is_empty() {
         return ProviderLimits {
+            profile_id: None,
             source: "antigravity".to_string(),
             plan,
             windows: summary,
@@ -146,6 +147,7 @@ pub fn limits() -> ProviderLimits {
         );
     }
     ProviderLimits {
+        profile_id: None,
         source: "antigravity".to_string(),
         plan,
         windows,

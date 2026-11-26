@@ -170,6 +170,7 @@ pub struct InsightsSnapshotDto {
     pub by_model: Vec<BucketDto>,
     pub by_project: Vec<BucketDto>,
     pub by_source: Vec<BucketDto>,
+    pub by_profile: Vec<BucketDto>,
     pub by_session: Vec<BucketDto>,
     pub active_block: Option<BlockDto>,
     pub project_harnesses: Vec<SplitBucketDto>,

@@ -256,6 +256,7 @@ pub fn parse_text(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
         };
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id,
             source: SourceId::Dsh,
             ts: Timestamp::from_ms(row.time.or(started_at).unwrap_or(0)),

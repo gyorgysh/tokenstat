@@ -81,6 +81,25 @@ class NewChatRequestTest {
         assertNull(changed.model); assertNull(changed.effort); assertFalse(changed.fastMode)
     }
 
+    @Test fun namedProfileFollowsAgentChangesAndSelectsOnlyItsOwnQuota() {
+        val id = "p_0000000000000001"
+        val profile = AgentProfiles(Json.parseToJsonElement("""{"default":"$id","profiles":[
+            {"id":"system","own":[]},{"id":"$id","name":"Work","own":["codex"]}],
+            "workspaceLocks":{"repository":"$id"}}""").jsonObject)
+        val setup = NewChatSetup("codex", null, null, profileId = id)
+        assertEquals(id, setup.createParameters("repository")["profileId"]?.jsonPrimitive?.content)
+        assertEquals(id, setup.changed("backend", "claude", emptyList()).profileId)
+        assertEquals(id, profile.locked("repository"))
+        assertEquals(id, ownAgentProfile(profile, profile.defaultId, "codex"))
+        assertNull(ownAgentProfile(profile, profile.defaultId, "claude_code"))
+        val readings = Json.parseToJsonElement("""[
+            {"source":"codex","windows":[{"label":"weekly","percent":70}]},
+            {"source":"codex","profileId":"$id","windows":[{"label":"weekly","percent":25}]}]""")
+            as kotlinx.serialization.json.JsonArray
+        assertEquals(70.0, chatQuotaMainWindow(chatQuotaReading(readings, "codex")!!)?.let(::chatQuotaPercent))
+        assertEquals(25.0, chatQuotaMainWindow(chatQuotaReading(readings, "codex", profileId = id)!!)?.let(::chatQuotaPercent))
+    }
+
     @Test fun onlyTheCapturedAccountHostAndRepositoryCanClaimSendOnce() {
         val drafts = drafts()
         drafts.update(owner, ChatComposerSessions.Snapshot("Review the patch", listOf(file)))

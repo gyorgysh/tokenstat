@@ -55,11 +55,12 @@ struct PlanLimitPanel: View {
     let provider: ProviderLimits
     let isLoading: Bool
     var fillsHeight = false
+    var profileTitle: String? = nil
     let refresh: () -> Void
 
     var body: some View {
         Card(
-            title: harnessName(provider.source),
+            title: profileTitle.map { "\(harnessName(provider.source)) · \($0)" } ?? harnessName(provider.source),
             subtitle: subtitle,
             leading: AnyView(HarnessMark(id: provider.source, size: 22)),
             accessory: AnyView(header),

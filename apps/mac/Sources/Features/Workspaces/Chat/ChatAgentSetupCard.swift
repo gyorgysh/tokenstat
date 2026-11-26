@@ -12,6 +12,16 @@ struct AgentSetupStatus: Decodable, Sendable {
     /// True when the CLI itself answered. False or absent means the host fell
     /// back to what its files say, which is not enough to stop a send.
     let checked: Bool?
+    let email: String?
+
+    var outcome: AgentSignInCheckOutcome {
+        guard checked == true else { return .unconfirmed }
+        switch readiness {
+        case "signedIn": return .signedIn
+        case "needsSignIn", "expired": return .needsSignIn
+        default: return .unconfirmed
+        }
+    }
 }
 private struct AgentSetupAck: Decodable {}
 
@@ -89,11 +99,11 @@ struct ChatAgentSetupCard: View {
     var body: some View {
         Group {
             if backend.installed != false && backend.id != "sh" &&
-                (["needsSignIn", "expired"].contains(backend.readiness ?? "") || recoveryFailureID != nil) {
+                (["needsSignIn", "expired"].contains(model.signInReadiness(for: backend) ?? "") || recoveryFailureID != nil) {
                 AgentSignInPrompt(agent: backend.label, seed: model.faceSeed, ready: ready,
                                   savedMessage: recoveryFailureID != nil, remote: model.peer != nil,
                                   checking: checking, continuing: continuing,
-                                  supported: backend.signInFlow?.supported == true,
+                                  supported: backend.signInFlow?.supported == true && (model.peer == nil || !model.usesOwnLogin(backend, chat: model.selected)),
                                   error: model.backendRefreshError,
                                   removeMessage: removeSavedMessage,
                                   signIn: { showingSignIn = true },
@@ -110,11 +120,12 @@ struct ChatAgentSetupCard: View {
                 .disabled(running)
             }
         }
-        .task(id: "\(backend.id):\(model.peer ?? "local"):\(recoveryFailureID ?? "setup")") {
+        .task(id: "\(backend.id):\(model.peer ?? "local"):\(model.selected?.id ?? ""):\(model.selected?.profileId ?? ""):\(recoveryFailureID ?? "setup")") {
             if ["claude", "claude_code", "codex", "cursor", "cursor_agent", "muse"].contains(backend.id) { _ = await check() }
         }
         .sheet(isPresented: $showingSignIn) {
-            AgentSignInSheet(backend: backend, peer: model.peer) { await check(explicit: true) }
+            AgentSignInSheet(backend: backend, peer: model.peer, profileID: model.selected?.profileId,
+                             profileTitle: model.profileTitle(model.selected)) { await check(explicit: true) }
         }
     }
 
@@ -228,6 +239,8 @@ struct AgentSignInPrompt: View {
 struct AgentSignInSheet: View {
     let backend: ChatBackend
     let peer: String?
+    var profileID: String? = nil
+    var profileTitle: String? = nil
     let onCheck: () async -> AgentSignInCheckOutcome
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -249,7 +262,7 @@ struct AgentSignInSheet: View {
 
     var body: some View {
         ThemedSheet(title: L10n.text("apple.agentsetup.setup_title", backend.label),
-                    subtitle: peer == nil ? L10n.text("apple.agentsetup.this_computer") : L10n.text("apple.agentsetup.chat_host"),
+                    subtitle: profileTitle ?? (peer == nil ? L10n.text("apple.agentsetup.this_computer") : L10n.text("apple.agentsetup.chat_host")),
                     icon: .signIn, scrolls: scrolls, fills: true, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(alignment: .center, spacing: 16) {
@@ -416,7 +429,7 @@ struct AgentSignInSheet: View {
         error = nil
         defer { starting = false }
         do {
-            var started = try await Bridge.agentSetupSignIn(peer: peer, id: id, dark: colorScheme == .dark)
+            var started = try await Bridge.agentSetupSignIn(peer: peer, id: id, dark: colorScheme == .dark, profile: profileID)
             if Task.isCancelled {
                 if let peer { let _: AgentSetupAck? = try? await Bridge.onPeer(peer, "pty.close", ["id": started.id], as: AgentSetupAck.self) }
                 else { try? await Bridge.ptyClose(id: started.id) }

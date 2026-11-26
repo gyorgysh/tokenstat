@@ -79,6 +79,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     /// </summary>
     private string? _focusDay;
     private string _tab = "overview";
+    private AgentProfiles? _agentProfiles;
     private string? _selectedKey;
     private int _visible = FirstPage;
     private bool _chartShowsValue;
@@ -274,7 +275,11 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             }, _accountCut, async value => { _accountCut = value; _visible = FirstPage; await LoadAsync(); });
             return;
         }
-        _tabSlot.Content = TabStrip.View(LocalTabs, _tab, value =>
+        var tabs = new List<(string Value, string Label, ActionIcon? Glyph)>(LocalTabs);
+        if (SnapshotRows("byProfile", "by_profile").Any(row => Format.Text(row, "key") != AgentProfiles.SystemId))
+            tabs.Add(("profiles", L10n.Text("windows.profiles.title"), null));
+        else if (_tab == "profiles") _tab = "overview";
+        _tabSlot.Content = TabStrip.View(tabs, _tab, value =>
         {
             _tab = value;
             _selectedKey = null;
@@ -465,6 +470,12 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             _error = FriendlyError.Display(ex.Message);
             return;
         }
+        if (SnapshotRows("byProfile", "by_profile").Any(row => Format.Text(row, "key") != AgentProfiles.SystemId))
+        {
+            try { _agentProfiles = await AgentProfiles.ReadAsync(""); }
+            catch { _agentProfiles = null; }
+        }
+        RebuildTabs();
         if (_showingLoadingStatus)
         {
             _status.Text = "";
@@ -844,6 +855,9 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         return key;
     }
 
+    private string ProfileTitle(string id) => _agentProfiles?.Title(id) ??
+        (id == AgentProfiles.SystemId ? L10n.Text("common.profiles.this_pc") : L10n.Text("common.profiles.removed"));
+
     private JsonArray TabRows(string tab)
     {
         return tab switch
@@ -852,6 +866,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             "projects" => SnapshotRows("byProject", "by_project"),
             "harnesses" => SnapshotRows("bySource", "by_source"),
             "sessions" => SnapshotRows("bySession", "by_session"),
+            "profiles" => SnapshotRows("byProfile", "by_profile"),
             _ => SnapshotRows("byModel", "by_model"),
         };
     }
@@ -885,13 +900,14 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             return;
         }
         bool showsValue = _tab == "models";
-        bool monospaced = _tab != "harnesses";
+        bool monospaced = _tab is not ("harnesses" or "profiles");
         bool isHarness = _tab == "harnesses";
         string title = _tab switch
         {
             "models" => L10n.Text("windows.insightspage.models.d17d2d78"),
             "projects" => L10n.Text("common.projects"),
             "harnesses" => L10n.Text("windows.insightspage.coding_tools.6032f740"),
+            "profiles" => L10n.Text("windows.profiles.title"),
             _ => L10n.Text("windows.insightspage.sessions.6fa3cbf4"),
         };
         _root.Children.Add(BreakdownTable(title, TabRows(_tab), showsValue, monospaced, isHarness));
@@ -1485,7 +1501,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             }
             var name = monospaced
                 ? Fonts.Code(DisplayName(key, isHarness), Fonts.Callout)
-                : Fonts.Text(DisplayName(key, isHarness), Fonts.Headline);
+                : Fonts.Text(_tab == "profiles" ? ProfileTitle(key) : DisplayName(key, isHarness), Fonts.Headline);
             name.TextTrimming = TextTrimming.CharacterEllipsis;
             name.MaxLines = 1;
             name.VerticalAlignment = VerticalAlignment.Center;
@@ -1730,7 +1746,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         var key = Format.Text(selected, "key");
         var name = Fonts.Code(
-            _tab == "harnesses" ? DisplayName(key, isHarness: true)
+            _tab == "profiles" ? ProfileTitle(key)
+            : _tab == "harnesses" ? DisplayName(key, isHarness: true)
             : string.IsNullOrEmpty(key) ? "unknown" : key,
             Fonts.Callout);
         name.TextWrapping = TextWrapping.Wrap;

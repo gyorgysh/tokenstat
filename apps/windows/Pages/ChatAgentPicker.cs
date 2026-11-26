@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.System;
 
 namespace Tokenstat.Pages;
@@ -23,7 +24,12 @@ internal sealed record ChatAgentPickerSource(
     Func<bool>? Suppressed = null,
     Func<JsonNode, Task>? SignIn = null,
     /// <summary>Update this agent with its own updater (protocol 55).</summary>
-    Func<JsonNode, Task>? UpdateAgent = null);
+    Func<JsonNode, Task>? UpdateAgent = null,
+    Func<AgentProfiles?>? Profiles = null,
+    Func<string>? SelectedProfile = null,
+    Func<string?>? ProfileLock = null,
+    Func<string, Task>? PickProfile = null,
+    string? LimitsWorkspace = null);
 
 /// <summary>
 /// The composer's agent field, as on the Mac: the harness mark, the model
@@ -53,12 +59,12 @@ internal static class ChatAgentPicker
     /// The panel this opens is where the defaults are named.
     /// </summary>
     /// <summary>The last limits reading, shared by every open picker.</summary>
-    private static JsonArray? s_limits;
-    private static DateTimeOffset s_limitsAt;
+    private static long s_limitsAccount = -1;
+    private static readonly Dictionary<string, (JsonArray Rows, DateTimeOffset Date)> LimitsByHost = new();
 
-    private static FrameworkElement? QuotaLine(string backend)
+    private static FrameworkElement? QuotaLine(JsonArray? readings, string backend, string? profileId)
     {
-        if (s_limits is null || ChatQuotaData.Read(s_limits, backend) is not { } provider) return null;
+        if (readings is null || ChatQuotaData.Read(readings, backend, profileId) is not { } provider) return null;
         var rows = ChatQuotaData.Headline(provider);
         if (rows.Count == 0) return null;
         var stale = provider["stale"] is JsonValue flag && flag.TryGetValue<bool>(out var old) && old;
@@ -98,6 +104,20 @@ internal static class ChatAgentPicker
         var model = Format.Text(chat, "model");
         var effort = Format.Text(chat, "effort");
         var label = backendId.Length == 0 ? L10n.Text("common.chat.select_agent") : Summary(backend, backendId, model, effort);
+        var account = AppServices.AccountGeneration;
+        if (s_limitsAccount != account)
+        {
+            s_limitsAccount = account;
+            LimitsByHost.Clear();
+        }
+        var workspace = source.LimitsWorkspace;
+        var host = workspace is not null && RemoteWorkspaces.TrySplit(workspace, out var peer, out _) ? peer : "";
+        JsonArray? Readings() => account == AppServices.AccountGeneration && LimitsByHost.TryGetValue(host, out var entry)
+            ? entry.Rows : null;
+        var profiles = source.Profiles?.Invoke();
+        var profileId = source.SelectedProfile?.Invoke() ?? AgentProfiles.SystemId;
+        var profileLabel = profileId != AgentProfiles.SystemId ? profiles?.Title(profileId) : null;
+        if (profileLabel is not null) label += " · " + profileLabel;
         var field = new Grid { MaxWidth = 280, ColumnSpacing = 6 };
         field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         field.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -112,6 +132,7 @@ internal static class ChatAgentPicker
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        if (profileLabel is not null) modelText.Text += " · " + profileLabel;
         Grid.SetColumn(modelText, 1);
         field.Children.Add(modelText);
         if (backend?["efforts"] is JsonArray { Count: > 0 } && !string.IsNullOrWhiteSpace(effort))
@@ -144,6 +165,14 @@ internal static class ChatAgentPicker
         var flyout = new Flyout();
         var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };
         panel.Children.Add(new TextBlock { Text = L10n.Text("windows.chatpage.agent_model_and_effort.217ff8ae"), FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        if (profiles is not null && source.PickProfile is { } pickProfile &&
+            profiles.Picker(profileId, source.ProfileLock?.Invoke(), !locked, async id =>
+            {
+                await pickProfile(id);
+                flyout.Hide();
+                source.Repaint();
+            }) is FrameworkElement picker)
+            panel.Children.Add(picker);
         var strip = new Grid { ColumnSpacing = 2 };
         panel.Children.Add(new Border
         {
@@ -359,7 +388,8 @@ internal static class ChatAgentPicker
                 var text = new TextBlock { Text = item.Label, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
                 if (item.Value == current) text.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
                 FrameworkElement label = text;
-                if (step == ChatAgentSteps.Agent && Readiness(Backend(item.Value)) is string note)
+                var ownLogin = profiles?.Owns(profileId, Format.Text(Backend(item.Value), "launcherId")) == true;
+                if (step == ChatAgentSteps.Agent && !ownLogin && Readiness(Backend(item.Value)) is string note)
                 {
                     var rows = new StackPanel { Spacing = 1 };
                     rows.Children.Add(text);
@@ -367,7 +397,7 @@ internal static class ChatAgentPicker
                     label = rows;
                 }
                 FrameworkElement content = step == ChatAgentSteps.Agent ? AgentMark.Row(item.Value, label) : label;
-                if (step == ChatAgentSteps.Agent && QuotaLine(item.Value) is { } quota)
+                if (step == ChatAgentSteps.Agent && QuotaLine(Readings(), item.Value, ownLogin ? profileId : null) is { } quota)
                 {
                     var withQuota = new Grid { ColumnSpacing = Theme.SpaceS };
                     withQuota.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -462,16 +492,20 @@ internal static class ChatAgentPicker
             changed = false;
             search.Text = "";
             Render();
-            if (DateTimeOffset.UtcNow - s_limitsAt >= TimeSpan.FromSeconds(30)) _ = LoadLimitsAsync();
+            if (!LimitsByHost.TryGetValue(host, out var entry) || DateTimeOffset.UtcNow - entry.Date >= TimeSpan.FromSeconds(30))
+                _ = LoadLimitsAsync();
         };
         async Task LoadLimitsAsync()
         {
-            s_limitsAt = DateTimeOffset.UtcNow;
             try
             {
-                if (await AppServices.Host.CallAsync("usage.limits", new JsonObject { ["force"] = false }) is JsonArray readings)
+                var request = new JsonObject { ["force"] = false };
+                var result = workspace is null
+                    ? await AppServices.Host.CallAsync("usage.limits", request)
+                    : await RemoteWorkspaces.CallWorkspaceAsync(workspace, "usage.limits", request);
+                if (account == AppServices.AccountGeneration && result is JsonArray readings)
                 {
-                    s_limits = readings;
+                    LimitsByHost[host] = (readings, DateTimeOffset.UtcNow);
                     if (flyoutOpen && step == ChatAgentSteps.Agent) Render();
                 }
             }

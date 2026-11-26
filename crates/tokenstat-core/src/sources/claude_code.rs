@@ -269,6 +269,7 @@ pub fn parse_file(path: &Path, projects_root: &Path, contents: &str) -> ParseOut
             .unwrap_or(Timestamp::from_ms(0));
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id,
             source: SourceId::ClaudeCode,
             ts,

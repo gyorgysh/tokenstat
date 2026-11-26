@@ -49,6 +49,7 @@ import ai.tokenstat.tokenstat.ui.logic.favoriteOrderedModels
 import ai.tokenstat.tokenstat.ui.marks.HarnessMark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonArray
@@ -97,6 +98,8 @@ internal fun chatAgentChoices(
     backends: List<JsonObject>,
     chat: JsonObject?,
     favorites: List<String> = emptyList(),
+    profiles: AgentProfiles? = null,
+    profileId: String? = chat?.str("profileId"),
 ): List<PickerChoice<ChatAgentChoice>> {
     val rows = mutableListOf<PickerChoice<ChatAgentChoice>>()
     chatBackendOptions(backends).forEach { (id, label) ->
@@ -105,7 +108,9 @@ internal fun chatAgentChoices(
             PickerChoice(
                 value = ChatAgentChoice.Agent(id),
                 label = label,
-                detail = when (backend?.str("readiness")) {
+                detail = if (ownAgentProfile(profiles, profileId, backend?.str("launcherId")) != null) {
+                    L10n.text("common.profiles.manage_login_on_host")
+                } else when (backend?.str("readiness")) {
                     "needsSignIn" -> L10n.text("android.chatagentpanel.sign_in_may_be_needed.c3dde98c")
                     "expired" -> L10n.text("android.chatagentpanel.stored_login_has_expired.bf189dae")
                     else -> null
@@ -232,7 +237,7 @@ internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): St
 /// somebody notices the list is short: they added an API key to a CLI a minute
 /// ago and the provider it unlocked is not in the list yet.
 @Composable
-fun ChatAgentSheet(
+internal fun ChatAgentSheet(
     model: AppViewModel,
     peer: String,
     chatId: String,
@@ -246,6 +251,8 @@ fun ChatAgentSheet(
     onBackends: (List<JsonObject>) -> Unit,
     onChanged: suspend (JsonObject) -> Unit,
     onDismiss: () -> Unit,
+    onContinueProfile: (suspend (String) -> Unit)? = null,
+    profiles: AgentProfiles? = null,
 ) {
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
@@ -267,6 +274,9 @@ fun ChatAgentSheet(
     val updatingAgent by model.updatingAgent.collectAsStateWithLifecycle()
     var updateNotes by remember(peer) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val quotaReadings = rememberAgentQuotaReadings(model, peer)
+    val profileId = chat?.str("profileId") ?: "system"
+    val profileLock = profiles?.locked(chat?.str("workspaceId"))
+    var continueProfile by remember(peer, chatId) { mutableStateOf<String?>(null) }
 
     suspend fun load(refresh: Boolean) {
         runCatching {
@@ -280,8 +290,23 @@ fun ChatAgentSheet(
     }
     LaunchedEffect(peer, chatId) { if (backends.isEmpty()) load(refresh = false) }
 
+    val target = continueProfile
+    if (target != null) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { continueProfile = null },
+        title = { Text(L10n.text("common.profiles.continue", profiles?.title(target).orEmpty())) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                continueProfile = null
+                scope.launch { onContinueProfile?.invoke(target) }
+            }) { Text(L10n.text("common.done")) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = { continueProfile = null }) { Text(L10n.text("common.cancel")) }
+        },
+    )
+
     val current = backends.firstOrNull { it.str("id") == chat?.str("backend") }
-    val choices = remember(backends, chat, pinned) { chatAgentChoices(backends, chat, pinned) }
+    val choices = remember(backends, chat, pinned, profiles) { chatAgentChoices(backends, chat, pinned, profiles) }
 
     var cacheQuestion by remember(chatId) { mutableStateOf<ChatCacheQuestion?>(null) }
     var cacheAnswer by remember(chatId) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<ChatCacheAnswer>?>(null) }
@@ -316,7 +341,7 @@ fun ChatAgentSheet(
             }) as? JsonObject ?: return null
             refreshError = null
             onChanged(updated)
-            return chatAgentSections(chatAgentChoices(backends, updated))
+            return chatAgentSections(chatAgentChoices(backends, updated, profiles = profiles))
         } catch (error: kotlinx.coroutines.CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -411,7 +436,7 @@ fun ChatAgentSheet(
                             )
                         }
                     }
-                    current?.let { backend ->
+                    current?.takeIf { ownAgentProfile(profiles, profileId, it.str("launcherId")) == null }?.let { backend ->
                         AgentSetupCard(model, peer, hostLabel, backend, locked || updating, showWhenReady = true) { readiness, verified ->
                             onBackends(backends.map {
                                 if (it.str("id") == backend.str("id")) JsonObject(it + ("readiness" to JsonPrimitive(readiness)) + ("signInVerified" to JsonPrimitive(verified))) else it
@@ -429,6 +454,8 @@ fun ChatAgentSheet(
                                 Text(
                                     when {
                                         backendNotInstalled(backend) -> L10n.text("android.chatagentpanel.not_installed.d177cdc0")
+                                        ownAgentProfile(profiles, profileId, backend.str("launcherId")) != null ->
+                                            L10n.text("common.profiles.manage_login_on_host")
                                         backend.str("readiness") == "needsSignIn" ||
                                             backend.str("readiness") == "expired" ->
                                             L10n.text("android.chatagentpanel.open_this_agent_in_the_host_s_terminal_to.758284f3")
@@ -477,6 +504,28 @@ fun ChatAgentSheet(
                     }
                 }
             } else {
+                if (profiles != null) {
+                    AgentProfilePicker(profiles, profileId, profileLock, enabled = !locked && !updating) { id ->
+                        if (id != profileId) {
+                            if (chat?.get("lastMessageAtMs") is JsonPrimitive || !chat?.str("resumeToken").isNullOrEmpty()) {
+                                if (onContinueProfile != null) continueProfile = id
+                            } else {
+                                scope.launch {
+                                    updating = true
+                                    try {
+                                        val updated = model.workspaceSection(peer, "chat.update", buildJsonObject {
+                                            put("id", chatId); put("profileId", id)
+                                            chat?.get("sendRevision")?.let { put("expectedRevision", it) }
+                                        }) as? JsonObject
+                                        if (updated != null) onChanged(updated)
+                                    } catch (cancelled: CancellationException) { throw cancelled }
+                                    catch (failure: Exception) { setupError = failure.message }
+                                    finally { updating = false }
+                                }
+                            }
+                        }
+                    }
+                }
                 TsPickerOptionList(
                     choices = choices,
                     isSelected = { chatAgentIsSelected(it, chat) },
@@ -493,13 +542,14 @@ fun ChatAgentSheet(
                     stepped = true,
                     stepPrompt = ::chatAgentSearchPrompt,
                     onFinish = onDismiss,
-                    selectionSummary = chatAgentSummary(backends, chat),
+                    selectionSummary = withAgentProfile(chatAgentSummary(backends, chat), profiles, profileId),
                     enabled = !updating && !locked,
                     pick = {},
                     onStepPick = ::pick,
                     icon = { ChatAgentRowMark(it) },
                     accessory = { value ->
-                        ChatAgentRowExtras(value, backends, quotaReadings, enabled = updatingAgent == null && !locked, ::updateAgent)
+                        ChatAgentRowExtras(value, backends, quotaReadings, enabled = updatingAgent == null && !locked,
+                            profiles = profiles, profileId = profileId, onUpdate = ::updateAgent)
                         val id = (value as? ChatAgentChoice.Model)?.id
                         if (!id.isNullOrEmpty() && backendId.isNotEmpty()) {
                             val starred = id in pinned
@@ -587,6 +637,8 @@ internal fun ChatAgentRowExtras(
     backends: List<JsonObject>,
     quotaReadings: JsonArray,
     enabled: Boolean,
+    profiles: AgentProfiles? = null,
+    profileId: String? = null,
     onUpdate: (launcherId: String, label: String) -> Unit,
 ) {
     val agent = value as? ChatAgentChoice.Agent ?: return
@@ -610,7 +662,8 @@ internal fun ChatAgentRowExtras(
                 .padding(4.dp),
         )
     }
-    ChatQuotaLine(chatQuotaReading(quotaReadings, agent.id))
+    val quotaProfile = ownAgentProfile(profiles, profileId, launcherId)
+    ChatQuotaLine(chatQuotaReading(quotaReadings, agent.id, profileId = quotaProfile))
 }
 
 /// The agent's brand mark at the start of its row in the picker.

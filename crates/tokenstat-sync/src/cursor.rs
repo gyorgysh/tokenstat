@@ -199,6 +199,7 @@ pub fn limits() -> ProviderLimits {
     let plan = string_value(&body, &["plan", "membershipType", "planName", "planType"])
         .or_else(|| cached_plan_name(&client, &token));
     ProviderLimits {
+        profile_id: None,
         source: "cursor".to_string(),
         plan,
         windows,
@@ -675,6 +676,7 @@ fn parse_events_json(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
         ]);
 
         events.push(UsageEvent {
+            profile_id: None,
             id,
             source: SourceId::Cursor,
             ts: Timestamp::from_ms(ts_ms),
@@ -842,6 +844,7 @@ pub fn parse_csv(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
         *occurrence += 1;
 
         events.push(UsageEvent {
+            profile_id: None,
             id,
             source: SourceId::Cursor,
             ts: Timestamp::from_ms(ts_ms),

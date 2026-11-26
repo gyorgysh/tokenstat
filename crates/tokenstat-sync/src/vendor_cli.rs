@@ -50,6 +50,17 @@ pub(crate) fn run(
     extra: &[&str],
     timeout: Duration,
 ) -> Option<Zeroizing<String>> {
+    run_with_env(program, args, extra, timeout, &[], &[])
+}
+
+pub(crate) fn run_with_env(
+    program: &Path,
+    args: &[&str],
+    extra: &[&str],
+    timeout: Duration,
+    environment: &[(String, String)],
+    remove: &[&str],
+) -> Option<Zeroizing<String>> {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -60,6 +71,10 @@ pub(crate) fn run(
     if let Some(home) = directories::BaseDirs::new() {
         command.current_dir(home.home_dir());
     }
+    for key in remove {
+        command.env_remove(key);
+    }
+    command.envs(environment.iter().map(|(key, value)| (key, value)));
     let mut child = command.spawn().ok()?;
     let stdout = child.stdout.take()?;
     let (sender, receiver) = std::sync::mpsc::channel();

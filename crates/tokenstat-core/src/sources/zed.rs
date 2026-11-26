@@ -290,6 +290,7 @@ fn event_from_usage(
     confidence: Confidence,
 ) -> UsageEvent {
     UsageEvent {
+        profile_id: None,
         id: EventId::derive(&["zed", thread_id, req_id]),
         source: SourceId::Zed,
         ts: Timestamp::from_ms(ts_ms),

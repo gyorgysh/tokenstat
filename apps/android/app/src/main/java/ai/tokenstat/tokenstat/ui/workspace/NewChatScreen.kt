@@ -43,7 +43,7 @@ import kotlinx.serialization.json.*
 
 /** All next-turn choices stay local until the explicit Send/Open chat action. */
 data class NewChatSetup(val backend: String, val model: String?, val effort: String?,
-    val mode: String = LaunchDefaults.MODE, val autonomy: String = LaunchDefaults.AUTONOMY, val fastMode: Boolean = false) {
+    val mode: String = LaunchDefaults.MODE, val autonomy: String = LaunchDefaults.AUTONOMY, val fastMode: Boolean = false, val profileId: String? = null) {
     fun isAvailable(backends: List<JsonObject>): Boolean {
         val descriptor = backends.firstOrNull { it.newChatText("id") == backend } ?: return false
         return chatBackendOptions(backends).any { it.first == backend && backend != "sh" } &&
@@ -55,6 +55,7 @@ data class NewChatSetup(val backend: String, val model: String?, val effort: Str
     fun chat(): JsonObject = buildJsonObject {
         put("backend", backend); model?.let { put("model", it) }; effort?.let { put("effort", it) }
         put("mode", mode); put("autonomy", autonomy); put("fastMode", fastMode)
+        profileId?.let { put("profileId", it) }
     }
     fun createParameters(workspace: String): JsonObject = JsonObject(chat() + ("workspaceId" to JsonPrimitive(workspace)))
     fun changed(field: String, value: String, backends: List<JsonObject>): NewChatSetup = when (field) {
@@ -147,6 +148,19 @@ fun NewChatScreen(
     val currentOwner by rememberUpdatedState(accountOwner)
     var backends by remember(accountOwner, effectivePeer) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var setup by remember(accountOwner, effectivePeer) { mutableStateOf(initialSetup) }
+    val protocol = rememberWorkspaceHostProtocol(model, effectivePeer.orEmpty(), selectedRepository.orEmpty(), "newChat")
+    val profiles = rememberAgentProfiles(model, effectivePeer.orEmpty(), protocol)
+    val workspace = selectedRepository?.let { if (it.startsWith("remote:")) it.split(':', limit = 3).last() else it }
+    val lockedProfile = profiles?.locked(workspace)
+    val currentProfile = lockedProfile ?: setup?.profileId ?: profiles?.defaultId
+    LaunchedEffect(lockedProfile, setup?.profileId) {
+        // The host applies the lock. Clear a previous explicit pick so it
+        // cannot compete with that lock after the repository changes.
+        if (lockedProfile != null && setup?.profileId != null) {
+            setup = setup?.copy(profileId = null)
+            onSetup(setup)
+        }
+    }
     var setupError by remember(accountOwner) { mutableStateOf<String?>(null) }
     var attachError by remember(accountOwner) { mutableStateOf<String?>(null) }
     var catalogAttempt by remember(accountOwner) { mutableIntStateOf(0) }
@@ -321,6 +335,7 @@ fun NewChatScreen(
                             onPasteImages = { uris, release -> importFiles(inputLease, uris, release) },
                             onRemove = { attachment -> if (owns(accountOwner)) { val snapshot = model.chatComposers.snapshot(accountOwner); model.chatComposers.update(accountOwner, snapshot.copy(attachments = snapshot.attachments - attachment)) } },
                             onSend = onSend, onStop = {}, onChange = { field, value -> setup = setup?.changed(field, value, backends); onSetup(setup) },
+                            profileTitle = agentProfileTitle(profiles, currentProfile),
                             backends = backends, onAgent = { agentMenu = true }, onSetup = { setupMenu = true },
                             launchAutonomy = setup?.autonomy ?: LaunchDefaults.autonomy(savedChoice, bypassOnly = false),
                             allowEmpty = true, submitEnabled = effectivePeer != null && !connecting && selected != null && catalogReady && setup?.isAvailable(backends) == true && !reading,
@@ -379,15 +394,21 @@ fun NewChatScreen(
     if (agentMenu) {
         val chat = setup?.chat()
         val agents = backends.filter { it.newChatText("id") != "sh" }
-        val choices = chatAgentChoices(agents, chat)
+        val choices = chatAgentChoices(agents, chat, profiles = profiles, profileId = currentProfile)
         val quotaReadings = rememberAgentQuotaReadings(model, effectivePeer.orEmpty())
         val updatingAgent by model.updatingAgent.collectAsStateWithLifecycle()
         TsPickerSheet(L10n.text("android.chatagentpanel.agent_model_and_effort.217ff8ae"), { agentMenu = false }) {
+            if (profiles != null) {
+                AgentProfilePicker(profiles, currentProfile, lockedProfile, enabled = !connecting) { id ->
+                    setup = setup?.copy(profileId = id)
+                    onSetup(setup)
+                }
+            }
             TsPickerOptionList(choices, { chatAgentIsSelected(it, chat) },
                 L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da"),
                 L10n.text("android.chatagentpanel.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
                 pick = {},
-                sectionValue = { chatAgentSectionValue(it, backends, chat) }, sectionTabs = chatAgentSections(choices), selectionSummary = chatAgentSummary(backends, chat),
+                sectionValue = { chatAgentSectionValue(it, backends, chat) }, sectionTabs = chatAgentSections(choices), selectionSummary = withAgentProfile(chatAgentSummary(backends, chat), profiles, currentProfile),
                 stepped = true,
                 stepPrompt = ::chatAgentSearchPrompt,
                 onFinish = { agentMenu = false },
@@ -398,12 +419,13 @@ fun NewChatScreen(
                         val (field, value) = chatAgentField(choice)
                         setup = setup?.changed(field, value, backends)
                         onSetup(setup)
-                        chatAgentSections(chatAgentChoices(agents, setup?.chat()))
+                        chatAgentSections(chatAgentChoices(agents, setup?.chat(), profiles = profiles, profileId = currentProfile))
                     }
                 },
                 icon = { ChatAgentRowMark(it) },
                 accessory = { value ->
-                    ChatAgentRowExtras(value, backends, quotaReadings, enabled = updatingAgent == null) { launcherId, label ->
+                    ChatAgentRowExtras(value, backends, quotaReadings, enabled = updatingAgent == null,
+                        profiles = profiles, profileId = currentProfile) { launcherId, label ->
                         effectivePeer?.let { peer -> model.updateAgent(peer, launcherId, label) { catalogAttempt++ } }
                     }
                 },

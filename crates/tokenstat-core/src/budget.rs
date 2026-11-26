@@ -259,6 +259,7 @@ mod tests {
         // 1M input @ $10/M = $10
         let _ = today;
         let ev = UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["budget-test"]),
             source: SourceId::ClaudeCode,
             ts: Timestamp::from_ms(jiff::Timestamp::now().as_millisecond()),
@@ -294,6 +295,7 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
         let ev = UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["budget-unpriced-test"]),
             source: SourceId::ClaudeCode,
             ts: Timestamp::from_ms(jiff::Timestamp::now().as_millisecond()),

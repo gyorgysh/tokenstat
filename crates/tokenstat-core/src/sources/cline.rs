@@ -141,6 +141,7 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             .unwrap_or_else(|| "unknown".to_string());
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["cline", &session, &identity]),
             source: SourceId::Cline,
             ts: Timestamp::from_ms(msg.ts.unwrap_or(0)),

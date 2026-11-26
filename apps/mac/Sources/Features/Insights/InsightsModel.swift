@@ -35,7 +35,7 @@ final class InsightsModel {
     }
 
     enum Tab: String, CaseIterable, Hashable {
-        case overview, models, projects, harnesses, sessions
+        case overview, models, projects, harnesses, profiles, sessions
 
         var label: String {
             switch self {
@@ -43,6 +43,7 @@ final class InsightsModel {
             case .models: return L10n.text("apple.insightsmodel.models.d17d2d78")
             case .projects: return L10n.text("common.projects")
             case .harnesses: return L10n.text("apple.insightsmodel.coding_tools.6032f740")
+            case .profiles: return L10n.text("apple.profiles.title")
             case .sessions: return L10n.text("apple.insightsmodel.sessions.6fa3cbf4")
             }
         }
@@ -53,6 +54,7 @@ final class InsightsModel {
             case .models: return "cpu"
             case .projects: return "folder"
             case .harnesses: return "terminal"
+            case .profiles: return "person.2"
             case .sessions: return "bubble.left.and.bubble.right"
             }
         }
@@ -65,6 +67,7 @@ final class InsightsModel {
     var byProject: [Bucket] = []
     var bySource: [Bucket] = []
     var bySession: [Bucket] = []
+    var byProfile: [Bucket] = []
     var activeBlock: Block?
 
     /// Which harnesses ran in each archive project.
@@ -88,6 +91,7 @@ final class InsightsModel {
         case .models: return byModel
         case .projects: return byProject
         case .harnesses: return bySource
+        case .profiles: return byProfile
         case .sessions: return bySession
         }
     }
@@ -186,6 +190,11 @@ final class InsightsModel {
             self.byProject = snapshot.byProject
             self.bySource = snapshot.bySource
             self.bySession = snapshot.bySession
+            self.byProfile = snapshot.byProfile ?? []
+            if tab == .profiles && !byProfile.contains(where: { $0.key != AgentProfiles.system }) { tab = .overview }
+            if byProfile.contains(where: { $0.key != AgentProfiles.system }) {
+                try? await AgentProfileCatalog.shared.refresh()
+            }
             self.activeBlock = snapshot.activeBlock
             self.projectHarnesses = Self.buildProjectHarnesses(
                 projects: self.byProject,

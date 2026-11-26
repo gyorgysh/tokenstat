@@ -336,6 +336,7 @@ pub fn parse_file(path: &Path, contents: &str, sessions: &HashMap<String, String
         };
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id,
             source: SourceId::Qwen,
             ts,

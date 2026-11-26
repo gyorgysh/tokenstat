@@ -1267,6 +1267,7 @@ extension Bridge {
         effort: String? = nil,
         budgetSeconds: UInt64? = nil,
         personaID: String? = nil,
+        profileID: String? = nil,
         peer: String? = nil
     ) async throws -> ChatConversation {
         let route = chatRoute(workspaceID: workspaceID, peer: peer)
@@ -1284,6 +1285,14 @@ extension Bridge {
         // empty string is No persona and has to travel, or it would look like
         // the same omit.
         if let personaID { params["personaId"] = personaID }
+        if let profileID {
+            guard await RemoteHostFeature.agentProfiles.isSupported(peer: route.peer) else {
+                throw NSError(domain: "Chat", code: 57, userInfo: [
+                    NSLocalizedDescriptionKey: L10n.text("common.profiles.host_update")
+                ])
+            }
+            params["profileId"] = profileID
+        }
         return try await chatInvoke(peer: route.peer, "chat.create", params, as: ChatConversation.self)
     }
 
@@ -1298,13 +1307,22 @@ extension Bridge {
 
     /// Start a new chat that carries this one's setup and points its first
     /// turn at the earlier history, without loading it.
-    static func continueChatInNew(id: String, peer: String? = nil) async throws -> ChatConversation {
+    static func continueChatInNew(id: String, profileID: String? = nil, peer: String? = nil) async throws -> ChatConversation {
         guard await RemoteHostFeature.chatContinue.isSupported(peer: peer) else {
             throw NSError(domain: "Chat", code: 54, userInfo: [
                 NSLocalizedDescriptionKey: L10n.text("apple.bridge.update_the_project_s_computer_to_continue_in_new_chat")
             ])
         }
-        return try await chatInvoke(peer: peer, "chat.continueInNew", ["id": id], as: ChatConversation.self)
+        var params = ["id": id]
+        if let profileID {
+            guard await RemoteHostFeature.agentProfiles.isSupported(peer: peer) else {
+                throw NSError(domain: "Chat", code: 57, userInfo: [
+                    NSLocalizedDescriptionKey: L10n.text("common.profiles.host_update")
+                ])
+            }
+            params["profileId"] = profileID
+        }
+        return try await chatInvoke(peer: peer, "chat.continueInNew", params, as: ChatConversation.self)
     }
 
     static func updateChat(
@@ -1321,9 +1339,11 @@ extension Bridge {
         systemPrompt: String? = nil,
         allowedTools: [String]? = nil,
         allowedShellPrefixes: [String]? = nil,
+        profileID: String? = nil,
         peer: String? = nil
     ) async throws -> ChatConversation {
         var params: [String: Any] = ["id": id]
+        if let profileID { params["profileId"] = profileID }
         if let title { params["title"] = title }
         if let backend { params["backend"] = backend }
         if let model { params["model"] = model }
@@ -2819,15 +2839,55 @@ extension Bridge {
         try await background("launcher.catalog", as: [RemoteLaunchProfile].self)
     }
 
-    static func agentSetupCheck(peer: String?, id: String) async throws -> AgentSetupStatus {
+    /// `profile` asks about a profile's own login. Profiles are this
+    /// machine's, so it is never sent to a peer.
+    static func agentSetupCheck(peer: String?, id: String, profile: String? = nil) async throws -> AgentSetupStatus {
         if let peer { return try await onPeer(peer, "launcher.checkSignIn", ["id": id], as: AgentSetupStatus.self) }
-        return try await background("launcher.checkSignIn", ["id": id], as: AgentSetupStatus.self)
+        var params: [String: Any] = ["id": id]
+        if let profile { params["profile"] = profile }
+        return try await background("launcher.checkSignIn", params, as: AgentSetupStatus.self)
     }
 
-    static func agentSetupSignIn(peer: String?, id: String, dark: Bool) async throws -> PtySessionInfo {
-        let params: [String: Any] = ["id": id, "rows": 24, "cols": 100, "dark": dark]
+    static func agentSetupSignIn(peer: String?, id: String, dark: Bool, profile: String? = nil) async throws -> PtySessionInfo {
+        var params: [String: Any] = ["id": id, "rows": 24, "cols": 100, "dark": dark]
+        if peer == nil, let profile { params["profile"] = profile }
         if let peer { return try await onPeer(peer, "launcher.signIn", params, as: PtySessionInfo.self) }
         return try await background("launcher.signIn", params, as: PtySessionInfo.self)
+    }
+
+    // MARK: Agent profiles. This machine's only, so never sent to a peer.
+
+    static func agentProfiles(peer: String? = nil) async throws -> AgentProfiles {
+        if let peer { return try await onPeer(peer, "profiles.list", [:], as: AgentProfiles.self) }
+        return try await background("profiles.list", as: AgentProfiles.self)
+    }
+
+    static func createAgentProfile(name: String) async throws -> (id: String, profiles: AgentProfiles) {
+        struct Created: Codable, Sendable { var id: String; var profiles: AgentProfiles }
+        let created = try await background("profiles.create", ["name": name], as: Created.self)
+        return (created.id, created.profiles)
+    }
+
+    static func renameAgentProfile(id: String, name: String) async throws -> AgentProfiles {
+        try await background("profiles.rename", ["id": id, "name": name], as: AgentProfiles.self)
+    }
+
+    static func setAgentProfileLogin(id: String, agent: String, own: Bool) async throws -> AgentProfiles {
+        try await background("profiles.setAgent", ["id": id, "agent": agent, "own": own], as: AgentProfiles.self)
+    }
+
+    static func setDefaultAgentProfile(id: String) async throws -> AgentProfiles {
+        try await background("profiles.setDefault", ["id": id], as: AgentProfiles.self)
+    }
+
+    static func setWorkspaceAgentProfile(workspaceID: String, profileID: String?) async throws -> AgentProfiles {
+        var params = ["workspaceId": workspaceID]
+        if let profileID { params["profileId"] = profileID }
+        return try await background("profiles.setWorkspaceLock", params, as: AgentProfiles.self)
+    }
+
+    static func deleteAgentProfile(id: String) async throws -> AgentProfiles {
+        try await background("profiles.delete", ["id": id], patience: Patience.long, as: AgentProfiles.self)
     }
 
     /// Run a profile's official installer on this machine, then the caller

@@ -50,7 +50,9 @@ fn chat_codex_homes() -> Vec<std::path::PathBuf> {
     entries
         .flatten()
         .map(|entry| entry.path().join("codex-hook"))
-        .filter(|home| home.join("sessions").is_dir())
+        .filter(|home| {
+            home.join("sessions").is_dir() && tokenstat_paths::chat_agent_profile(home).is_none()
+        })
         .collect()
 }
 
@@ -77,7 +79,7 @@ fn read_through_codex(force: bool) -> Option<ProviderLimits> {
         }
     }
     let program = crate::launcher::resolve_command("codex")?;
-    let reading = ask(&program)
+    let reading = ask(&program, &[])
         .and_then(|answer| tokenstat_core::limits::codex_limits_from_answer(&answer, now_ms()));
     *last = Some(Pace {
         at: Instant::now(),
@@ -89,16 +91,29 @@ fn read_through_codex(force: bool) -> Option<ProviderLimits> {
 /// Start `codex app-server`, ask for the account's rate limits, and stop it.
 /// It runs from the home folder with the person's own Codex home, because
 /// the question is about their account and Codex's sign-in lives there.
-fn ask(program: &str) -> Option<Value> {
+pub(crate) fn read_profile(environment: &[(String, String)]) -> ProviderLimits {
+    let reading = crate::launcher::resolve_command("codex")
+        .and_then(|program| ask(&program, environment))
+        .and_then(|answer| tokenstat_core::limits::codex_limits_from_answer(&answer, now_ms()));
+    reading.unwrap_or_else(|| {
+        ProviderLimits::unavailable("codex", "Codex did not report limits for this login.")
+    })
+}
+
+fn ask(program: &str, environment: &[(String, String)]) -> Option<Value> {
     let mut command = Command::new(program);
     command
         .arg("app-server")
         .env("PATH", crate::launcher::search_path_var())
+        .envs(environment.iter().map(|(key, value)| (key, value)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     if let Some(home) = tokenstat_paths::home_dir() {
         command.current_dir(home);
+    }
+    for key in crate::profiles::inherited_auth(environment) {
+        command.env_remove(key);
     }
     let mut child = command.spawn().ok()?;
     let mut stdin = child.stdin.take();

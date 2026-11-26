@@ -214,7 +214,7 @@ struct ChatComposer: View {
                     ChatComposerControls(model: model, chat: chat, locked: setupLocked, compact: true, condensed: true)
                     HStack(spacing: Theme.Space.s) {
                         turnStatus
-                        ComposerLimitsBadge(backend: chat.backend, peer: model.peer, compact: true, showUsage: {
+                        ComposerLimitsBadge(backend: chat.backend, peer: model.peer, profileID: model.limitsProfileID(for: chat), compact: true, showUsage: {
                             model.showingUsageStats = true
                             model.showingCommandStats = true
                         })

@@ -385,12 +385,57 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         }
     }
 
+    // A profile owns its own native transcripts. Its roll-up cache is
+    // deliberately not merged with the machine's day/model recovery window.
+    for (profile, home) in tokenstat_paths::agent_profile_homes("claude_code") {
+        let projects = home.join("projects");
+        let files = claude_code::shards(&projects);
+        report.files_found += files.len() as u64;
+        let parsed = files
+            .par_iter()
+            .map(|path| {
+                let mut outcome = read_shard(path, &marks, |p, text| {
+                    claude_code::parse_file(p, &projects, text).into()
+                });
+                for event in &mut outcome.parsed.events {
+                    event.profile_id = Some(profile.clone());
+                }
+                outcome
+            })
+            .collect();
+        absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
+    }
+
     // Codex: JSONL, but session_meta / turn_context live at the start of the
     // file. An append-only reparse of the tail would lose that context and
     // reset ordinals, so any change re-reads the whole rollout.
-    let files: Vec<_> = codex::discover_all(&home)
-        .iter()
-        .flat_map(|sessions| codex::shards(sessions))
+    let mut roots: Vec<_> = codex::discover_all(&home)
+        .into_iter()
+        .map(|sessions| {
+            let profile = sessions
+                .parent()
+                .and_then(tokenstat_paths::chat_agent_profile);
+            (sessions, profile)
+        })
+        .collect();
+    roots.extend(
+        tokenstat_paths::agent_profile_homes("codex")
+            .into_iter()
+            .map(|(profile, home)| (home.join("sessions"), Some(profile))),
+    );
+    let mut seen = std::collections::HashSet::new();
+    let files: Vec<_> = roots
+        .into_iter()
+        .rev()
+        .flat_map(|(sessions, profile)| {
+            codex::shards(&sessions)
+                .into_iter()
+                .filter_map(|file| {
+                    let path = std::fs::canonicalize(&file).unwrap_or(file);
+                    seen.insert(path.clone()).then(|| (path, profile.clone()))
+                })
+                .collect::<Vec<_>>()
+        })
         .collect();
     if !files.is_empty() {
         // Version the watermark so existing logs are repaired once, including
@@ -398,17 +443,21 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         let codex_marks = marks
             .iter()
             .filter_map(|(key, mark)| {
-                key.strip_prefix("codex-v2:")
+                key.strip_prefix("codex-v3:")
                     .map(|path| (path.to_string(), mark.clone()))
             })
             .collect();
         report.files_found += files.len() as u64;
         let mut outcomes: Vec<_> = files
             .par_iter()
-            .map(|path| {
-                read_document_shard(path, &codex_marks, |p, text| {
+            .map(|(path, profile)| {
+                let mut outcome = read_document_shard(path, &codex_marks, |p, text| {
                     codex::parse_file(p, text).into()
-                })
+                });
+                for event in &mut outcome.parsed.events {
+                    event.profile_id.clone_from(profile);
+                }
+                outcome
             })
             .collect();
         for outcome in &mut outcomes {
@@ -425,21 +474,47 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             }
             codex_replacements.append(&mut outcome.parsed.events);
             if let Some((key, _)) = &mut outcome.mark {
-                *key = format!("codex-v2:{key}");
+                *key = format!("codex-v3:{key}");
             }
         }
         absorb(&mut report, &mut all_events, &mut marks_to_store, outcomes);
     }
 
     // Grok: one append-only log plus a session summary index for model/project.
-    if let Some(grok_home) = grok::discover(&home)
-        && let Some(log) = grok::log_path(&grok_home)
+    let grok_chats = tokenstat_paths::data_dir()
+        .into_iter()
+        .flat_map(|data| {
+            std::fs::read_dir(data.join("chat"))
+                .into_iter()
+                .flatten()
+                .flatten()
+        })
+        .filter_map(|entry| {
+            let home = entry.path().join("grok-home");
+            let profile = tokenstat_paths::chat_agent_profile(&home)?;
+            Some((home, Some(profile)))
+        });
+    for (grok_home, profile) in grok::discover(&home)
+        .into_iter()
+        .map(|home| (home, None))
+        .chain(
+            tokenstat_paths::agent_profile_homes("grok")
+                .into_iter()
+                .map(|(id, home)| (home, Some(id))),
+        )
+        .chain(grok_chats)
     {
+        let Some(log) = grok::log_path(&grok_home) else {
+            continue;
+        };
         report.files_found += 1;
         let sessions = grok::session_index(&grok_home);
-        let outcome = read_shard(&log, &marks, |p, text| {
+        let mut outcome = read_shard(&log, &marks, |p, text| {
             grok::parse_file(p, text, &sessions).into()
         });
+        for event in &mut outcome.parsed.events {
+            event.profile_id.clone_from(&profile);
+        }
         absorb(
             &mut report,
             &mut all_events,
@@ -449,9 +524,22 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     }
 
     // OpenCode: SQLite. Re-parse when the db file changes.
-    if let Some(db) = opencode::discover(&home) {
+    for (db, profile) in opencode::discover(&home)
+        .into_iter()
+        .map(|db| (db, None))
+        .chain(
+            ["opencode", "opencode2"]
+                .into_iter()
+                .flat_map(tokenstat_paths::agent_profile_homes)
+                .map(|(profile, home)| (home.join("opencode/opencode.db"), Some(profile))),
+        )
+        .filter(|(db, _)| db.is_file())
+    {
         report.files_found += 1;
-        let outcome = read_db_shard(&db, &marks, |p| opencode::parse_db(p).into());
+        let mut outcome = read_db_shard(&db, &marks, |p| opencode::parse_db(p).into());
+        for event in &mut outcome.parsed.events {
+            event.profile_id.clone_from(&profile);
+        }
         absorb(
             &mut report,
             &mut all_events,
@@ -574,13 +662,26 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
 
     // Muse: re-read changed logs to preserve absolute record positions used
     // when model-completed records have no durable ID.
-    if let Some(sessions) = muse::discover(&home) {
+    for (sessions, profile) in muse::discover(&home)
+        .into_iter()
+        .map(|root| (root, None))
+        .chain(
+            tokenstat_paths::agent_profile_homes("muse")
+                .into_iter()
+                .map(|(id, root)| (root.join("data/muse/sessions"), Some(id))),
+        )
+    {
         let files = muse::shards(&sessions);
         report.files_found += files.len() as u64;
         let parsed: Vec<_> = files
             .par_iter()
             .map(|path| {
-                read_document_shard(path, &marks, |p, text| muse::parse_file(p, text).into())
+                let mut outcome =
+                    read_document_shard(path, &marks, |p, text| muse::parse_file(p, text).into());
+                for event in &mut outcome.parsed.events {
+                    event.profile_id.clone_from(&profile);
+                }
+                outcome
             })
             .collect();
         absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);

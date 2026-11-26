@@ -111,6 +111,7 @@ impl Store {
                     continue;
                 }
                 rows.push(UsageEvent {
+                    profile_id: None,
                     id: EventId::derive(&[
                         prefix,
                         source.as_str(),
@@ -167,6 +168,7 @@ mod tests {
 
     fn request(id: &str, ts_ms: i64, tokens: u64) -> UsageEvent {
         UsageEvent {
+            profile_id: None,
             id: EventId::derive(&[id]),
             source: SourceId::Cursor,
             ts: Timestamp::from_ms(ts_ms),

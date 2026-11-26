@@ -2157,19 +2157,27 @@ fn drain_pty(
     let mut writer = crate::workspace_writer::Guard::acquire(Path::new(cwd))
         .map_err(|error| error.to_string())?;
     writer.ensure_current().map_err(|error| error.to_string())?;
+    let environment = match crate::launcher::agent_id_for_command(&argv[0]) {
+        Some(agent) => crate::profiles::for_workspace_agent(&run.workspace_id, None, agent)?,
+        None => Vec::new(),
+    };
+    let remove = crate::profiles::inherited_auth(&environment);
     let info = writer
-        .spawn(&tokenstat_pty::Spawn {
-            command: crate::launcher::spawn_command(&argv[0]),
-            args: argv[1..].to_vec(),
-            cwd: PathBuf::from(cwd),
-            workspace_id: Some(run.workspace_id.clone()),
-            hidden: true,
-            rows: 24,
-            cols: 120,
-            no_color: false,
-            dark: None,
-            environment: Vec::new(),
-        })
+        .spawn_removing_env(
+            &tokenstat_pty::Spawn {
+                command: crate::launcher::spawn_command(&argv[0]),
+                args: argv[1..].to_vec(),
+                cwd: PathBuf::from(cwd),
+                workspace_id: Some(run.workspace_id.clone()),
+                hidden: true,
+                rows: 24,
+                cols: 120,
+                no_color: false,
+                dark: None,
+                environment,
+            },
+            remove,
+        )
         .map_err(|e| e.to_string())?;
     let pty_id = info.id.clone();
     run.live_pty_ids.push(pty_id.clone());

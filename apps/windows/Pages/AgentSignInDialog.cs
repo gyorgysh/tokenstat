@@ -14,11 +14,13 @@ internal static class AgentSignInDialog
         ? Format.Flag(flow, "supported") : Format.Text(backend, "launcherId") is "claude_code" or "codex";
     private static string Kind(JsonNode backend) => backend["signIn"] is JsonNode flow
         ? Format.Text(flow, "kind") : Format.Text(backend, "launcherId") == "codex" ? "deviceCode" : "browserCode";
-    public static async Task<string> CheckAsync(JsonNode backend, Func<string, JsonNode?, Task<JsonNode>> call)
+    public static async Task<string> CheckAsync(JsonNode backend, Func<string, JsonNode?, Task<JsonNode>> call, string? profileId = null)
     {
         if (Format.Flag(backend, "canCheckSignIn"))
         {
-            var status = await call("launcher.checkSignIn", new JsonObject { ["id"] = Format.Text(backend, "launcherId") });
+            var request = new JsonObject { ["id"] = Format.Text(backend, "launcherId") };
+            if (profileId is not null) request["profile"] = profileId;
+            var status = await call("launcher.checkSignIn", request);
             // Whether the CLI answered itself, which is what a send may trust.
             backend["signInVerified"] = Format.Flag(status, "checked");
             return Format.Text(status, "readiness", "unknown");
@@ -30,11 +32,13 @@ internal static class AgentSignInDialog
     }
 
     public static async Task<string?> ShowAsync(UIElement owner, string workspaceId, JsonNode backend,
-        Func<string, JsonNode?, Task<JsonNode>> call)
+        Func<string, JsonNode?, Task<JsonNode>> call, string? profileId = null)
     {
         var id = Format.Text(backend, "launcherId");
         if (id.Length == 0) return null;
-        var info = await call("launcher.signIn", new JsonObject { ["id"] = id, ["rows"] = 24, ["cols"] = 100, ["dark"] = Theme.IsDark });
+        var request = new JsonObject { ["id"] = id, ["rows"] = 24, ["cols"] = 100, ["dark"] = Theme.IsDark };
+        if (profileId is not null) request["profile"] = profileId;
+        var info = await call("launcher.signIn", request);
         var sessionId = Format.Text(info, "id");
         if (sessionId.Length == 0) throw new InvalidOperationException(L10n.Text("windows.agentsetup.no_terminal"));
         var terminalId = RemoteWorkspaces.TrySplit(workspaceId, out var peer, out _) ? $"remote:{peer}:{sessionId}" : sessionId;
@@ -56,7 +60,7 @@ internal static class AgentSignInDialog
                 CloseButtonText = L10n.Text("common.close"),
             });
             if (result != ContentDialogResult.Primary) return null;
-            return await CheckAsync(backend, call);
+            return await CheckAsync(backend, call, profileId);
         }
         finally
         {

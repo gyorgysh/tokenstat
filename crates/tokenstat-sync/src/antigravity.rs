@@ -174,6 +174,7 @@ fn cli_usage_reading(value: &Value) -> Option<ProviderLimits> {
         return None;
     }
     Some(ProviderLimits {
+        profile_id: None,
         source: "antigravity".into(),
         plan: None,
         windows,

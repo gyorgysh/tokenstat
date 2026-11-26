@@ -110,23 +110,41 @@ impl Guard {
     pub fn ensure_current(&self) -> Result<(), Error> {
         self.location.ensure_current()
     }
+    #[cfg(test)]
     pub fn spawn(
         &mut self,
         request: &tokenstat_pty::Spawn,
     ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
-        self.spawn_with_io(request, false)
+        self.spawn_removing_env(request, &[])
+    }
+
+    pub fn spawn_removing_env(
+        &mut self,
+        request: &tokenstat_pty::Spawn,
+        remove: &[&str],
+    ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
+        self.spawn_with_io(request, false, remove)
     }
     /// Structured, noninteractive agent output must survive a quick child exit.
+    #[cfg(test)]
     pub fn spawn_piped(
         &mut self,
         request: &tokenstat_pty::Spawn,
     ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
-        self.spawn_with_io(request, true)
+        self.spawn_with_io(request, true, &[])
+    }
+    pub fn spawn_piped_removing_env(
+        &mut self,
+        request: &tokenstat_pty::Spawn,
+        remove: &[&str],
+    ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
+        self.spawn_with_io(request, true, remove)
     }
     fn spawn_with_io(
         &mut self,
         request: &tokenstat_pty::Spawn,
         piped: bool,
+        remove: &[&str],
     ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
         self.location
             .ensure_for(&request.cwd)
@@ -138,9 +156,9 @@ impl Guard {
                 .map_err(|error| tokenstat_pty::PtyError::Spawn(error.to_string()))
         };
         let (info, process) = if piped {
-            tokenstat_pty::manager().spawn_piped_owned_checked(&anchored, check)
+            tokenstat_pty::manager().spawn_piped_owned_removing_env(&anchored, check, remove)
         } else {
-            tokenstat_pty::manager().spawn_owned_checked(&anchored, check)
+            tokenstat_pty::manager().spawn_owned_removing_env(&anchored, check, remove)
         }?;
         self.attach(process);
         Ok(info)

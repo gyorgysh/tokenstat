@@ -40,7 +40,7 @@ pub(crate) enum Readiness {
 }
 
 impl Readiness {
-    fn id(self) -> &'static str {
+    pub(crate) fn id(self) -> &'static str {
         match self {
             Self::NotInstalled => "notInstalled",
             Self::NeedsSignIn => "needsSignIn",
@@ -158,6 +158,21 @@ const SIGN_INS: &[SignIn] = &[
         id: "cursor_agent",
         args: &["login"],
         kind: "browserCode",
+    },
+    SignIn {
+        id: "opencode",
+        args: &["auth", "login"],
+        kind: "cli",
+    },
+    SignIn {
+        id: "opencode2",
+        args: &["auth", "login"],
+        kind: "cli",
+    },
+    SignIn {
+        id: "grok",
+        args: &["login", "--device-auth"],
+        kind: "deviceCode",
     },
     // Muse signs in to a Meta account with a device code: it prints a page
     // and a code like `ABCD-EFGH`, then waits for the browser to approve it.
@@ -388,7 +403,10 @@ fn cursor_agent_readiness(
 /// the token itself in the keychain. The record is the evidence: an entry for
 /// `meta`, the provider a chat turn starts with, is a login. The file holds no
 /// expiry, so none is reported.
-fn muse_readiness(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> (Readiness, Option<i64>) {
+pub(crate) fn muse_readiness(
+    home: &Path,
+    env: &dyn Fn(&str) -> Option<PathBuf>,
+) -> (Readiness, Option<i64>) {
     if env("META_API_KEY").is_some_and(|key| !key.as_os_str().is_empty()) {
         return (Readiness::SignedIn, None);
     }

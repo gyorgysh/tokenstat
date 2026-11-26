@@ -27,6 +27,7 @@ fn wrapped_sanitizes_hostile_labels() {
     store
         .insert_events(
             &[UsageEvent {
+                profile_id: None,
                 id: EventId::derive(&["evil"]),
                 source: SourceId::ClaudeCode,
                 ts: Timestamp::from_ms(1_720_000_000_000),

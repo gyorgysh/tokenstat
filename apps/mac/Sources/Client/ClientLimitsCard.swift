@@ -109,12 +109,19 @@ struct ClientLimitsCard: View {
 private struct ProviderRow: View {
     let provider: ProviderLimits
 
+    private var title: String {
+        let name = harnessName(provider.source)
+        guard let id = provider.profileId else { return name }
+        let profile = AgentProfileCatalog.shared.name(id) ?? L10n.text("common.profiles.named_limits")
+        return "\(name) · \(profile)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 HarnessMark(id: provider.source, size: 24)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(harnessName(provider.source))
+                    Text(title)
                         .font(ClientType.label.weight(.medium))
                     if let plan = provider.plan {
                         Text(plan)

@@ -40,10 +40,10 @@ internal static class ChatQuotaData
         return rows;
     }
 
-    internal static JsonObject? Read(JsonArray readings, string backend)
+    internal static JsonObject? Read(JsonArray readings, string backend, string? profileId = null)
     {
         if (string.IsNullOrWhiteSpace(backend)) return null;
-        var provider = readings.OfType<JsonObject>().FirstOrDefault(item => Canonical(Text(item, "source")) == Canonical(backend));
+        var provider = readings.OfType<JsonObject>().FirstOrDefault(item => Canonical(Text(item, "source")) == Canonical(backend) && Text(item, "profileId") == (profileId ?? ""));
         if (provider is null) return null;
         var windows = new JsonArray();
         foreach (var window in (provider["windows"] as JsonArray ?? new()).OfType<JsonObject>())

@@ -44,7 +44,7 @@ import java.util.Locale
 
 internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boolean)
 
-@Composable internal fun rememberChatQuota(model: AppViewModel, backend: String, peer: String = "", refresh: Int = 0): ChatQuotaState {
+@Composable internal fun rememberChatQuota(model: AppViewModel, backend: String, peer: String = "", refresh: Int = 0, profileId: String? = null): ChatQuotaState {
     val state by model.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val owner = state.account?.let(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot::owner)
@@ -78,9 +78,9 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
             }
         }
     }
-    val reading = remember(direct, failed, state.limits, state.limitsError, backend, peer) {
+    val reading = remember(direct, failed, state.limits, state.limitsError, backend, peer, profileId) {
         chatQuotaReading(direct ?: state.limits, backend,
-            failed || (peer.isNotBlank() && direct == null) || (peer.isBlank() && state.limitsError != null))
+            failed || (peer.isNotBlank() && direct == null) || (peer.isBlank() && state.limitsError != null), profileId)
     }
     return ChatQuotaState(reading, refreshing)
 }

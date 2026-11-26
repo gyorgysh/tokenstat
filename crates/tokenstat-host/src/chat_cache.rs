@@ -106,7 +106,14 @@ pub(crate) const CLAUDE_MISSING_SESSION: &str = "No conversation found with sess
 /// None when it cannot tell: an unusual session id, or no projects folder
 /// to look in. A caller only drops a session on a definite no, so a guess
 /// never throws away a conversation the agent still has.
+#[cfg(feature = "local-host")]
 pub(crate) fn claude_session_exists(session: &str) -> Option<bool> {
+    let base = crate::profiles::user_claude_dir()?;
+    claude_session_in_home(&base, session)
+}
+
+#[cfg(any(feature = "local-host", test))]
+pub(crate) fn claude_session_in_home(base: &std::path::Path, session: &str) -> Option<bool> {
     if session.is_empty()
         || !session
             .chars()
@@ -114,15 +121,12 @@ pub(crate) fn claude_session_exists(session: &str) -> Option<bool> {
     {
         return None;
     }
-    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|dir| !dir.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| tokenstat_paths::home_dir().map(|home| home.join(".claude")))?;
     session_in_projects(&base.join("projects"), session)
 }
 
 /// Claude Code files a session under a folder named after the working
 /// directory. Looking in every project folder avoids re-deriving that name.
+#[cfg(any(feature = "local-host", test))]
 fn session_in_projects(projects: &std::path::Path, session: &str) -> Option<bool> {
     let entries = std::fs::read_dir(projects).ok()?;
     let name = format!("{session}.jsonl");
@@ -256,7 +260,10 @@ mod tests {
         assert_eq!(session_in_projects(&projects, "abc"), Some(false));
         std::fs::write(projects.join("-Users-me-two/abc.jsonl"), "{}").unwrap();
         assert_eq!(session_in_projects(&projects, "abc"), Some(true));
-        assert_eq!(claude_session_exists("../etc/passwd"), None);
+        assert_eq!(
+            claude_session_in_home(std::path::Path::new("."), "../etc/passwd"),
+            None
+        );
     }
 
     #[cfg(unix)]

@@ -636,6 +636,7 @@ mod tests {
         cw: u64,
     ) -> UsageEvent {
         UsageEvent {
+            profile_id: None,
             id: EventId::derive(&[id]),
             source,
             ts: Timestamp::from_ms(ms),

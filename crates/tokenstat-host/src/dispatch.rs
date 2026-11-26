@@ -343,6 +343,7 @@ struct PtySpawnParams {
     /// not appear as a workspace tab. The process still runs in the folder.
     #[serde(default)]
     hidden: bool,
+    profile_id: Option<String>,
 }
 
 /// Fold the activity sampler's verdict into a serialized session.
@@ -1281,6 +1282,7 @@ fn group_name(group: GroupBy) -> &'static str {
         GroupBy::Model => "model",
         GroupBy::Project => "project",
         GroupBy::Source => "source",
+        GroupBy::Profile => "profile",
         GroupBy::Session => "session",
     }
 }
@@ -1289,6 +1291,16 @@ fn group_name(group: GroupBy) -> &'static str {
 /// settings belong to the person at it. An approved phone can work in a
 /// folder. It cannot log the host out, re-point the archive, admit another
 /// peer's update, change what leaves this machine, or unlink a device.
+/// Profiles are this machine's own logins, so a remote peer may neither sign
+/// in inside one nor ask about one.
+#[cfg(feature = "local-host")]
+fn refuse_remote_profile(profile: Option<&str>) -> Result<(), String> {
+    if profile.is_some() && crate::request_context::remote_peer().is_some() {
+        return Err("Profiles can only be used on this machine.".to_string());
+    }
+    Ok(())
+}
+
 fn owner_only_method(method: &str) -> bool {
     method.starts_with("app.update")
         || matches!(
@@ -1307,11 +1319,11 @@ fn owner_only_method(method: &str) -> bool {
                 | "account.skipHandle"
                 | "account.setVisibility"
                 | "account.renameMachine"
-                | "profiles.list"
                 | "profiles.create"
                 | "profiles.rename"
                 | "profiles.setAgent"
                 | "profiles.setDefault"
+                | "profiles.setWorkspaceLock"
                 | "profiles.delete"
                 | "account.unlinkMachine"
                 | "account.registerMachine"
@@ -1410,6 +1422,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     by_model: priced(GroupBy::Model, &query)?,
                     by_project: priced(GroupBy::Project, &query)?,
                     by_source: priced(GroupBy::Source, &query)?,
+                    by_profile: priced(GroupBy::Profile, &query)?,
                     by_session: priced(GroupBy::Session, &sessions)?,
                     active_block,
                     project_harnesses,
@@ -2389,7 +2402,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             serde_json::to_value(store.fork(&p.id.ok_or("chat.fork needs id")?)?).envelope()
         }
         "chat.continueInNew" => serde_json::to_value(
-            store.continue_in_new(&p.id.ok_or("chat.continueInNew needs id")?)?,
+            store.continue_in_new(&p.id.ok_or("chat.continueInNew needs id")?, p.profile_id)?,
         )
         .envelope(),
         "chat.update" => serde_json::to_value(
@@ -3820,6 +3833,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     "modelProvider": p.model_provider,
                     "modelId": p.model_id,
                     "hidden": p.hidden,
+                    "profileId": p.profile_id,
                 });
                 let mut value =
                     crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
@@ -3831,11 +3845,20 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 return Ok(value);
             }
             let ws = crate::workspaces::folder(&p.workspace_id)?;
-            let environment = crate::launcher::model_environment(
+            let agent = crate::launcher::agent_id_for_command(&p.command);
+            let profile_environment = match agent {
+                Some(agent) => {
+                    crate::profiles::for_workspace_agent(&ws.id, p.profile_id.as_deref(), agent)?
+                }
+                None => Vec::new(),
+            };
+            let remove = crate::profiles::inherited_auth(&profile_environment);
+            let mut environment = crate::launcher::model_environment(
                 &p.command,
                 p.model_provider.as_deref(),
                 p.model_id.as_deref(),
             )?;
+            environment.extend(profile_environment);
             // The selection's arguments are appended here rather than sent by
             // the caller, so the two halves of one harness contract are decided
             // together and a remote spawn gets the peer's own mapping.
@@ -3846,7 +3869,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 p.model_id.as_deref(),
             ));
             let command = crate::launcher::spawn_command(&p.command);
-            let mut writer = if crate::launcher::is_agent_command(&p.command) {
+            let mut writer = if agent.is_some() {
                 Some(
                     crate::workspace_writer::Guard::acquire(&ws.path)
                         .map_err(|error| error.to_string())?,
@@ -3867,7 +3890,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 environment,
             };
             let info = match writer.as_mut() {
-                Some(writer) => writer.spawn(&request),
+                Some(writer) => writer.spawn_removing_env(&request, remove),
                 None => tokenstat_pty::manager().spawn(&request),
             }
             .map_err(|e| e.to_string())?;
@@ -4650,7 +4673,20 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // Profiles: more than one login per agent on this machine. See
         // `profiles`. Owner only: a peer may not add, rename or remove a
         // login on someone's machine.
-        "profiles.list" => crate::profiles::list(),
+        "profiles.list" => {
+            crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
+            crate::profiles::list()
+        }
+        "profiles.setWorkspaceLock" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Params {
+                workspace_id: String,
+                profile_id: Option<String>,
+            }
+            let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            crate::profiles::set_workspace_lock(&p.workspace_id, p.profile_id.as_deref())
+        }
         "profiles.create"
         | "profiles.rename"
         | "profiles.setAgent"
@@ -4684,6 +4720,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 profile: Option<String>,
             }
             let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            refuse_remote_profile(p.profile.as_deref())?;
             crate::launcher::check_sign_in_for(&p.id, p.profile.as_deref())
         }
 
@@ -4761,6 +4798,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 Ok(p) => p,
                 Err(e) => return Err(e.to_string()),
             };
+            refuse_remote_profile(p.profile.as_deref())?;
             crate::launcher::sign_in(&p.id, p.rows, p.cols, p.dark, p.profile.as_deref())
         }
 
@@ -4903,7 +4941,24 @@ fn usage_limits(force: bool) -> Value {
         tokenstat_sync::config::limits_skip(),
         tokenstat_sync::config::limits_sync_enabled()
     );
-    REFRESH.run(key, force, || fetch_usage_limits(force))
+    #[cfg(feature = "local-host")]
+    let key = format!("{key}:{:?}", crate::profiles::own_logins());
+    let value = REFRESH.run(key, force, || fetch_usage_limits(force));
+    #[cfg(feature = "local-host")]
+    if crate::request_context::remote_peer().is_some()
+        && crate::workspace_policy::require_current_access().is_err()
+    {
+        return Value::Array(
+            value
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|provider| provider["profileId"].is_null())
+                .cloned()
+                .collect(),
+        );
+    }
+    value
 }
 
 fn fetch_usage_limits(_force: bool) -> Value {
@@ -4919,7 +4974,7 @@ fn fetch_usage_limits(_force: bool) -> Value {
     {
         let skip = tokenstat_sync::config::limits_skip();
         let skipped = |id: &str| skip.iter().any(|s| s == id);
-        let providers = std::thread::scope(|scope| {
+        let mut providers = std::thread::scope(|scope| {
             let claude = (!skipped("claude_code"))
                 .then(|| scope.spawn(|| crate::claude_usage::read(_force)));
             let cursor = (!skipped("cursor")).then(|| scope.spawn(tokenstat_sync::cursor::limits));
@@ -4980,6 +5035,51 @@ fn fetch_usage_limits(_force: bool) -> Value {
             }
             out
         });
+        // Use only the agent's profile-aware CLI. A personal live feed,
+        // credential fallback or default-home log cannot answer for this login.
+        let own = crate::profiles::own_logins();
+        for batch in own.chunks(4) {
+            std::thread::scope(|scope| {
+                let jobs: Vec<_> = batch
+                    .iter()
+                    .filter(|(_, agent)| !skipped(agent))
+                    .map(|(profile, agent)| {
+                        scope.spawn(move || {
+                            let environment =
+                                crate::profiles::environment(Some(profile), agent).ok()?;
+                            if environment.is_empty() {
+                                return None;
+                            }
+                            let mut reading = match agent.as_str() {
+                                "claude_code" => crate::claude_usage::read_profile(&environment),
+                                "codex" => crate::codex_usage::read_profile(&environment),
+                                "opencode" | "opencode2" => {
+                                    let mut reading =
+                                        tokenstat_sync::opencode_limits::fetch_profile(
+                                            agent,
+                                            &environment,
+                                            crate::profiles::inherited_auth(&environment),
+                                        );
+                                    reading.source.clone_from(agent);
+                                    reading
+                                }
+                                "muse" => tokenstat_sync::muse_limits::fetch_profile(
+                                    &environment,
+                                    crate::profiles::inherited_auth(&environment),
+                                ),
+                                "grok" => tokenstat_sync::grok_limits::fetch_profile(
+                                    std::path::Path::new(&environment.first()?.1),
+                                ),
+                                _ => return None,
+                            };
+                            reading.profile_id = Some(profile.clone());
+                            Some(reading)
+                        })
+                    })
+                    .collect();
+                providers.extend(jobs.into_iter().filter_map(|job| job.join().ok().flatten()));
+            });
+        }
         // A vendor that could not be read this time is not a vendor whose quota is
         // unknown. Remember every real reading and hand back the last one, marked
         // stale and dated, when a refresh comes back with only a reason.
@@ -5052,6 +5152,7 @@ fn account_plane_limits() -> Value {
         let age_ms = jiff::Timestamp::now().as_millisecond() - row.observed_at_ms;
         let stale = row.stale || age_ms > READING_GOES_STALE_MS;
         let reading = ProviderLimits {
+            profile_id: row.profile_id,
             source: row.src.clone(),
             plan: row.plan.clone(),
             windows,
@@ -5059,10 +5160,10 @@ fn account_plane_limits() -> Value {
             note: row.machine.map(|m| format!("from {m}")),
             stale,
         };
-        match best.get(&reading.source) {
+        match best.get(&reading.cache_key()) {
             Some(prev) if prev.observed_at_ms >= reading.observed_at_ms => {}
             _ => {
-                best.insert(reading.source.clone(), reading);
+                best.insert(reading.cache_key(), reading);
             }
         }
     }
@@ -6100,6 +6201,7 @@ mod tests {
         let mut s = session();
         use tokenstat_core::model::{Confidence, EventId, Extras, SourceId, Timestamp, UsageEvent};
         let make = |id: &str, source: SourceId, out: u64| UsageEvent {
+            profile_id: None,
             id: EventId::derive(&[id]),
             source,
             ts: Timestamp::from_ms(1_699_920_000_000), // 2023-11-14 UTC

@@ -294,6 +294,8 @@ async def run(args):
             TOKENSTAT_IDENTITY_DIR=str(run_root / "host-identity"),
             HOME=str(run_root / "home"), ZDOTDIR=str(run_root / "home"), HISTFILE=os.devnull,
             PATH=str(run_root / "bin") + ":/usr/bin:/bin:/usr/sbin:/sbin")
+        if args.profiles:
+            environment["TOKENSTAT_NATIVE_HISTORY_PROFILES"] = "1"
         if relay:
             environment.update(TOKENSTAT_NATIVE_HISTORY_RELAY="1", TOKENSTAT_API_BASE=relay["accountOrigin"])
         log = (run_root / "producer.log").open("w"); handles.append(log)
@@ -345,6 +347,22 @@ try: result=json.loads(ctypes.string_at(pointer))
 finally: library.tokenstat_ffi_string_free(pointer)
 assert result.get('ok'),result
 assert result['result']['events'],result
+if profile := fixture.get('profileId'):
+    def rpc(method, params, ok=True):
+        args={'peer':fixture['hostKey'],'method':method,'params':params}
+        pointer=library.tokenstat_ffi_call(b'remote.call',json.dumps(args).encode())
+        try: answer=json.loads(ctypes.string_at(pointer))
+        finally: library.tokenstat_ffi_string_free(pointer)
+        assert answer.get('ok') is ok, (method, answer)
+        return answer.get('result')
+    profiles=rpc('profiles.list',{})
+    assert any(p['id']==profile and p['name']=='Fixture Work' for p in profiles['profiles']),profiles
+    created=rpc('chat.create',{'workspaceId':fixture['workspaceId'],'backend':'grok','profileId':profile})
+    assert created['profileId']==profile,created
+    rpc('chat.remove',{'id':created['id']})
+    rpc('profiles.create',{'name':'Forbidden'},False)
+    rpc('launcher.signIn',{'id':'grok','profile':profile},False)
+    rpc('launcher.checkSignIn',{'id':'grok','profile':profile},False)
 print(json.dumps({'events':len(result['result']['events'])}))
 '''
         if relay:
@@ -355,6 +373,8 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 probe_environment['TOKENSTAT_NATIVE_HISTORY_FFI'] = str(ROOT / 'target/aarch64-apple-darwin/release-ffi/libtokenstat_ffi.dylib')
                 await command(sys.executable, '-c', probe, env=probe_environment)
             prove("Both fresh identities read history through the production FFI and pinned encrypted RPCs")
+            if args.profiles:
+                prove("Trusted peers can list and select profiles while login and profile edits stay host-only")
         if args.probe_only:
             atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs,
                 "proxies": {role: proxy.status() for role, proxy in proxies.items()}})
@@ -452,6 +472,22 @@ print(json.dumps({'events':len(result['result']['events'])}))
                 live()
                 await asyncio.sleep(0.5)
             atomic_json(run_root / "result.json", {"ok": True, "states": {role: state(role) for role in roles}})
+            return
+        if args.profiles:
+            await visible("Fixture Work")
+            prove("Named profile is visible on the native composer")
+            emit({"type": "end", "stopReason": "end_turn"})
+            await wait(lambda: all(state(role) and not state(role)["running"] for role in roles), 30)
+            pickers = await asyncio.gather(*(native(role, "profile-picker", "Agent, model and effort") for role in roles))
+            for role, picker in zip(roles, pickers):
+                lines = ["".join(line.split()) for line in picker["texts"]]
+                assert any("Profile" in line for line in lines), (role, picker)
+            prove("The native agent picker shows the Profile control")
+            if "desktop" in roles and args.desktop_local:
+                await native("desktop", "profile-settings", "Agent profiles")
+                prove("Agent profile settings render on the native Mac")
+            atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs,
+                "states": {role: state(role) for role in roles}})
             return
         if args.layout:
             assert not args.desktop_only, "Layout QA requires an iPhone"
@@ -908,6 +944,7 @@ if __name__ == "__main__":
     parser.add_argument("--unbroken-code", type=int, nargs="?", const=50000, metavar="CHARACTERS",
                         help="Check a long single-line code fence (default: 50000 characters)")
     parser.add_argument("--inline-edges", action="store_true", help="Check unbroken quotes and table cells at the largest text size")
+    parser.add_argument("--profiles", action="store_true", help="Exercise profile selection over the encrypted transport and render the named composer")
     parser.add_argument("--layout", action="store_true", help="Inspect new chat and grouped lists using the shipping phone views")
     parser.add_argument("--search-only", action="store_true", help="Verify native search placement into a folded step")
     parser.add_argument("--activity-stress", action="store_true", help="Check visibility through a tool-heavy running turn and navigation")

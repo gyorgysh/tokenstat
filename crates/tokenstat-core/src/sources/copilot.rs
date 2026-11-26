@@ -183,6 +183,7 @@ pub fn parse_db(path: &Path) -> ParseOutput {
         let turn = turn_index.unwrap_or(-1).to_string();
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["copilot", &session, &id.to_string(), &turn]),
             source: SourceId::Copilot,
             ts: Timestamp::from_ms(ts_ms),

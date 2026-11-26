@@ -15,6 +15,7 @@
 //!
 //! Profiles are local to the machine. Their names and folders never leave it.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -29,13 +30,16 @@ pub(crate) const SYSTEM: &str = "system";
 const AGENTS: &[(&str, &str)] = &[
     ("claude_code", "CLAUDE_CONFIG_DIR"),
     ("codex", "CODEX_HOME"),
+    ("grok", "GROK_HOME"),
+    ("muse", "XDG_CONFIG_HOME"),
+    ("opencode", "XDG_DATA_HOME"),
+    ("opencode2", "XDG_DATA_HOME"),
 ];
 
 /// Personal Claude Code files a profile shares with the person's own folder.
 /// `.claude.json` is deliberately absent: it names the signed-in account.
 const SHARED_CLAUDE: &[&str] = &[
     "CLAUDE.md",
-    "settings.json",
     "agents",
     "commands",
     "skills",
@@ -53,6 +57,8 @@ struct Store {
     default: Option<String>,
     #[serde(default)]
     profiles: Vec<Profile>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    workspace_locks: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -120,7 +126,8 @@ fn edit<T>(change: impl FnOnce(&mut Store) -> Result<T, String>) -> Result<T, St
 /// Every profile, the machine's first, and which one new chats start on.
 pub(crate) fn list() -> Result<Value, String> {
     let store = load()?;
-    let mut profiles = vec![json!({"id": SYSTEM, "system": true, "own": []})];
+    let mut profiles =
+        vec![json!({"id": SYSTEM, "system": true, "platform": std::env::consts::OS, "own": []})];
     profiles.extend(store.profiles.iter().map(|profile| {
         json!({"id": profile.id, "name": profile.name, "system": false, "own": profile.own})
     }));
@@ -128,6 +135,7 @@ pub(crate) fn list() -> Result<Value, String> {
         "default": store.default.clone().unwrap_or_else(|| SYSTEM.to_string()),
         "agents": AGENTS.iter().map(|(id, _)| id).collect::<Vec<_>>(),
         "profiles": profiles,
+        "workspaceLocks": store.workspace_locks,
     }))
 }
 
@@ -188,43 +196,139 @@ pub(crate) fn set_default(id: &str) -> Result<Value, String> {
     list()
 }
 
-/// Remove a profile and the logins kept in it. Claude Code keeps its login in
-/// the Keychain under a name tied to the folder, so it is asked to sign out
-/// first, or the login would outlive the folder it belongs to.
+pub(crate) fn login_folder(profile: Option<&str>, agent: &str) -> Option<PathBuf> {
+    let id = profile.filter(|id| *id != SYSTEM)?;
+    let store = load().ok()?;
+    let record = store.profiles.iter().find(|p| p.id == id)?;
+    record
+        .own
+        .iter()
+        .any(|known| known == agent)
+        .then_some(())?;
+    agent_folder(id, agent).ok()
+}
+
+pub(crate) fn own_logins() -> Vec<(String, String)> {
+    load().map_or_else(
+        |_| Vec::new(),
+        |store| {
+            store
+                .profiles
+                .into_iter()
+                .flat_map(|profile| {
+                    profile
+                        .own
+                        .into_iter()
+                        .map(move |agent| (profile.id.clone(), agent))
+                })
+                .collect()
+        },
+    )
+}
+
+pub(crate) fn is_own_claude_folder(path: &Path) -> bool {
+    let Ok(root) = root() else { return false };
+    path.starts_with(root) && path.file_name().is_some_and(|name| name == "claude_code")
+}
+
+pub(crate) fn set_workspace_lock(workspace: &str, profile: Option<&str>) -> Result<Value, String> {
+    crate::workspaces::get(workspace)?;
+    edit(|store| {
+        if let Some(profile) = profile {
+            if profile != SYSTEM {
+                find_mut(store, profile)?;
+            }
+            store
+                .workspace_locks
+                .insert(workspace.to_string(), profile.to_string());
+        } else {
+            store.workspace_locks.remove(workspace);
+        }
+        Ok(())
+    })?;
+    list()
+}
+
+pub(crate) fn for_new_chat(workspace: &str, requested: Option<&str>) -> Result<String, String> {
+    let store = load()?;
+    if let Some(locked) = store.workspace_locks.get(workspace) {
+        if requested.is_some_and(|id| id != locked) {
+            return Err("This repository is locked to another profile.".into());
+        }
+        return Ok(locked.clone());
+    }
+    Ok(requested
+        .or(store.default.as_deref())
+        .unwrap_or(SYSTEM)
+        .to_string())
+}
+
+pub(crate) fn for_workspace_agent(
+    workspace: &str,
+    requested: Option<&str>,
+    agent: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let store = load()?;
+    let locked = store.workspace_locks.get(workspace).map(String::as_str);
+    if locked.is_some() && requested.is_some() && locked != requested {
+        return Err("This repository is locked to another profile.".into());
+    }
+    environment(locked.or(requested), agent)
+}
+
+pub(crate) fn check_workspace_lock(workspace: &str, profile: Option<&str>) -> Result<(), String> {
+    if load()?
+        .workspace_locks
+        .get(workspace)
+        .is_some_and(|locked| locked != profile.unwrap_or(SYSTEM))
+    {
+        return Err(
+            "This repository is locked to another profile. Continue in a new chat on that profile."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Remove the saved logins, including a Claude login retained after changing
+/// its setting back to the machine login.
 pub(crate) fn delete(id: &str) -> Result<Value, String> {
     if id == SYSTEM {
-        return Err("This Mac's own logins cannot be removed.".into());
+        return Err("The machine profile cannot be removed.".into());
     }
-    let own = {
-        let store = load()?;
-        store
-            .profiles
-            .iter()
-            .find(|p| p.id == id)
-            .ok_or("no such profile")?
-            .own
-            .clone()
-    };
-    if own.iter().any(|agent| agent == "claude_code") {
-        let env = environment(Some(id), "claude_code").unwrap_or_default();
-        crate::launcher::run_agent_quietly("claude_code", &["auth", "logout"], &env);
-    }
+    let claude = agent_folder(id, "claude_code")?;
+    let folder = claude.parent().ok_or("no profile folder")?;
     edit(|store| {
+        find_mut(store, id)?;
+        store
+            .workspace_locks
+            .retain(|workspace, _| crate::workspaces::get(workspace).is_ok());
+        if store.workspace_locks.values().any(|profile| profile == id) {
+            return Err(
+                "Choose another profile for the repositories that use this one before deleting it."
+                    .into(),
+            );
+        }
+        if claude.is_dir() {
+            let env = [("CLAUDE_CONFIG_DIR".into(), claude.display().to_string())];
+            crate::launcher::run_agent_quietly("claude_code", &["auth", "logout"], &env);
+        }
+        if let Err(error) = std::fs::remove_dir_all(folder)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(error.to_string());
+        }
         store.profiles.retain(|profile| profile.id != id);
         if store.default.as_deref() == Some(id) {
             store.default = None;
         }
         Ok(())
     })?;
-    let folder = root()?.join(id);
-    if folder.starts_with(root()?) {
-        let _ = std::fs::remove_dir_all(folder);
-    }
     list()
 }
 
-/// The profile new chats start on, or the machine's.
-pub(crate) fn default_id() -> String {
+#[cfg(test)]
+fn default_id() -> String {
     load()
         .ok()
         .and_then(|store| store.default)
@@ -247,6 +351,9 @@ pub(crate) fn environment(
     let Some(id) = profile.filter(|id| !id.is_empty() && *id != SYSTEM) else {
         return Ok(Vec::new());
     };
+    let _held = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let store = load()?;
     let profile = store
         .profiles
@@ -261,7 +368,118 @@ pub(crate) fn environment(
     };
     let folder = agent_folder(id, agent)?;
     prepare(agent, &folder)?;
-    Ok(vec![(var.to_string(), folder.display().to_string())])
+    let mut environment = vec![(var.to_string(), folder.display().to_string())];
+    if matches!(agent, "opencode" | "opencode2") {
+        for (key, name) in [
+            ("XDG_CONFIG_HOME", "config"),
+            ("XDG_STATE_HOME", "state"),
+            ("XDG_CACHE_HOME", "cache"),
+        ] {
+            environment.push((key.into(), folder.join(name).display().to_string()));
+        }
+        for key in [
+            "OPENCODE_DISABLE_PROJECT_CONFIG",
+            "OPENCODE_CONFIG_PROJECT_DISABLE",
+            "OPENCODE_DISABLE_AUTOUPDATE",
+        ] {
+            environment.push((key.into(), "1".into()));
+        }
+    }
+    if agent == "grok" {
+        environment.push((
+            "GROK_LEADER_SOCKET".into(),
+            folder.join("l.sock").display().to_string(),
+        ));
+    }
+    if agent == "muse" {
+        environment.extend([
+            (
+                "XDG_DATA_HOME".into(),
+                folder.join("data").display().to_string(),
+            ),
+            (
+                "XDG_STATE_HOME".into(),
+                folder.join("state").display().to_string(),
+            ),
+            (
+                "XDG_CACHE_HOME".into(),
+                folder.join("cache").display().to_string(),
+            ),
+            ("TBH_CREDENTIAL_BACKEND".into(), "file".into()),
+            ("MUSE_NO_AUTO_UPDATE".into(), "1".into()),
+        ]);
+    }
+    Ok(environment)
+}
+
+/// A separate login must not pick up a machine API key or alternate provider
+/// from the login shell. The agent can still configure its own credentials.
+pub(crate) fn inherited_auth(environment: &[(String, String)]) -> &'static [&'static str] {
+    match environment.first().map(|(key, _)| key.as_str()) {
+        Some("CLAUDE_CONFIG_DIR") => &[
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+        ],
+        Some("CODEX_HOME") => &["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"],
+        Some("XDG_DATA_HOME") => &[
+            "OPENCODE_API_KEY",
+            "PANTHEON_OPENCODE_API_KEY",
+            "OPENCODE_SERVER_PASSWORD",
+            "OPENCODE_SERVER_USERNAME",
+            "OPENCODE_CONFIG",
+            "OPENCODE_CONFIG_DIR",
+            "OPENCODE_CONFIG_CONTENT",
+            "OPENCODE_DB",
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            "XAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "GROQ_API_KEY",
+            "AZURE_OPENAI_API_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_PROFILE",
+        ],
+        Some("GROK_HOME") => &[
+            "XAI_API_KEY",
+            "GROK_CODE_XAI_API_KEY",
+            "XAI_API_BASE_URL",
+            "GROK_XAI_API_BASE_URL",
+            "GROK_CLI_BASE_URL",
+            "GROK_CLI_CHAT_PROXY_BASE_URL",
+            "GROK_MODELS_BASE_URL",
+            "GROK_MODELS_LIST_URL",
+            "GROK_CODE_BACKEND_URL",
+            "GROK_OIDC_ISSUER",
+            "GROK_OIDC_CLIENT_ID",
+            "GROK_AUTH",
+            "GROK_DEPLOYMENT_KEY",
+        ],
+        Some("XDG_CONFIG_HOME") => &[
+            "META_API_KEY",
+            "MUSE_AUTH_PATH",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "OPENROUTER_API_KEY",
+            "OPENROUTER_BASE_URL",
+        ],
+        _ => &[],
+    }
 }
 
 fn variable(agent: &str) -> Option<&'static str> {
@@ -272,7 +490,7 @@ fn variable(agent: &str) -> Option<&'static str> {
 }
 
 fn agent_folder(id: &str, agent: &str) -> Result<PathBuf, String> {
-    if !id.starts_with("p_") || !id[2..].chars().all(|c| c.is_ascii_hexdigit()) {
+    if !tokenstat_paths::is_agent_profile_id(id) {
         return Err("not a profile id".into());
     }
     Ok(root()?.join(id).join(agent))
@@ -293,6 +511,14 @@ fn prepare(agent: &str, folder: &Path) -> Result<(), String> {
     match agent {
         "claude_code" => {
             if let Some(source) = user_claude_dir().filter(|source| source != folder) {
+                // Previous builds linked the machine's settings, which can
+                // supply credential helpers and override the selected login.
+                let settings = folder.join("settings.json");
+                if std::fs::read_link(&settings)
+                    .is_ok_and(|path| path == source.join("settings.json"))
+                {
+                    std::fs::remove_file(settings).map_err(|e| e.to_string())?;
+                }
                 for name in SHARED_CLAUDE {
                     let original = source.join(name);
                     if original.exists() {
@@ -301,7 +527,7 @@ fn prepare(agent: &str, folder: &Path) -> Result<(), String> {
                 }
             }
         }
-        "codex" => crate::chat_gate::share_user_codex_home(folder),
+        "codex" => crate::chat_gate::share_user_codex_home(folder).map_err(|e| e.to_string())?,
         _ => {}
     }
     Ok(())
@@ -309,7 +535,7 @@ fn prepare(agent: &str, folder: &Path) -> Result<(), String> {
 
 /// The person's own Claude Code folder: their `CLAUDE_CONFIG_DIR` from the
 /// login shell when set, else `~/.claude`.
-fn user_claude_dir() -> Option<PathBuf> {
+pub(crate) fn user_claude_dir() -> Option<PathBuf> {
     let login = tokenstat_pty::login_env();
     login
         .as_ref()
@@ -431,11 +657,37 @@ mod tests {
     }
 
     #[test]
+    fn repository_lock_overrides_the_default_and_refuses_explicit_mismatch() {
+        with_data_dir(|_| {
+            let folder = tempfile::tempdir().unwrap();
+            let workspace = crate::workspaces::write()
+                .add(folder.path(), crate::chat::now_ms())
+                .unwrap();
+            let work = create("Work").unwrap()["id"].as_str().unwrap().to_string();
+            let personal = create("Personal").unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            set_default(&personal).unwrap();
+            set_workspace_lock(&workspace.id, Some(&work)).unwrap();
+            assert_eq!(for_new_chat(&workspace.id, None).unwrap(), work);
+            assert_eq!(for_new_chat(&workspace.id, Some(&work)).unwrap(), work);
+            assert!(for_new_chat(&workspace.id, Some(SYSTEM)).is_err());
+            assert!(check_workspace_lock(&workspace.id, None).is_err());
+            assert!(check_workspace_lock(&workspace.id, Some(&work)).is_ok());
+            assert!(delete(&work).is_err());
+            set_workspace_lock(&workspace.id, None).unwrap();
+            assert_eq!(for_new_chat(&workspace.id, None).unwrap(), personal);
+            assert!(delete(&work).is_ok());
+        });
+    }
+
+    #[test]
     fn a_folder_name_cannot_leave_the_profiles_folder() {
         with_data_dir(|_| {
             assert!(agent_folder("../x", "codex").is_err());
             assert!(agent_folder("p_zz", "codex").is_err());
-            assert!(agent_folder("p_0a", "codex").is_ok());
+            assert!(agent_folder("p_000000000000000a", "codex").is_ok());
         });
     }
 }

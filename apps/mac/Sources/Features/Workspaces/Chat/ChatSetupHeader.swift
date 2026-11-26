@@ -619,8 +619,8 @@ struct ChatAgentChoices {
     var choices: [PickerChoice<Choice>] {
         var rows = agentOptions.map {
             PickerChoice(value: Choice.agent($0.value), label: $0.label,
-                         detail: model.backend(for: $0.value)?.readiness == "needsSignIn" ? L10n.text("apple.chatsetupheader.sign_in_may_be_needed.c3dde98c") :
-                            model.backend(for: $0.value)?.readiness == "expired" ? L10n.text("apple.chatsetupheader.stored_login_has_expired.bf189dae") : nil,
+                         detail: readiness($0.value) == "needsSignIn" ? L10n.text("apple.chatsetupheader.sign_in_may_be_needed.c3dde98c") :
+                            readiness($0.value) == "expired" ? L10n.text("apple.chatsetupheader.stored_login_has_expired.bf189dae") : nil,
                          section: L10n.text("apple.chatsetupheader.agent.11b39c93"),
                          monospaced: false)
         }
@@ -646,6 +646,11 @@ struct ChatAgentChoices {
             }
         }
         return rows
+    }
+
+    private func readiness(_ id: String) -> String? {
+        guard let backend = model.backend(for: id) else { return nil }
+        return model.signInReadiness(for: backend, chat: chat)
     }
 
     /// Only show filters that have choices for the selected agent. For
@@ -726,6 +731,7 @@ struct ChatAgentChoices {
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
             parts.append(effort)
         }
+        if let profile = model.profileTitle(chat) { parts.append(profile) }
         return parts.joined(separator: " · ")
     }
 
@@ -738,6 +744,7 @@ struct ChatAgentChoices {
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
             parts.append(L10n.text("apple.chatsetupheader.0_effort.b0d63362", "\(effort)"))
         }
+        if let profile = model.profileTitle(chat) { parts.append(profile) }
         return parts.joined(separator: " · ")
     }
 }
@@ -759,15 +766,7 @@ struct ChatAgentField: View {
         Button(action: onOpen) {
             HStack(spacing: 6) {
                 if compactLabel { HarnessMark(id: chat.backend, size: 16).accessibilityHidden(true) }
-                Text(compactLabel ? choices.compactSummary : choices.summary)
-                    #if os(macOS)
-                    .font(Theme.font(12, weight: .medium))
-                    #else
-                    .font(Theme.callout.weight(.medium))
-                    #endif
-                    .lineLimit(compactLabel ? 1 : 2)
-                    .minimumScaleFactor(compactLabel ? 0.85 : 1)
-                    .truncationMode(.middle)
+                fieldLabel
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Theme.fixed(8, weight: .semibold))
                     .foregroundStyle(.tertiary)
@@ -800,6 +799,26 @@ struct ChatAgentField: View {
     }
 
     private var choices: ChatAgentChoices { ChatAgentChoices(model: model, chat: chat) }
+
+    @ViewBuilder private var fieldLabel: some View {
+        Group {
+            if compactLabel, let profile = model.profileTitle(chat) {
+                ViewThatFits(in: .horizontal) {
+                    Text(choices.compactSummary).fixedSize(horizontal: true, vertical: false)
+                    Text(profile).truncationMode(.tail)
+                }
+            } else {
+                Text(compactLabel ? choices.compactSummary : choices.summary).truncationMode(.middle)
+            }
+        }
+        #if os(macOS)
+        .font(Theme.font(12, weight: .medium))
+        #else
+        .font(Theme.callout.weight(.medium))
+        #endif
+        .lineLimit(compactLabel ? 1 : 2)
+        .minimumScaleFactor(compactLabel ? 0.85 : 1)
+    }
 
     /// Only the agent this chat runs on. Another agent being behind is
     /// marked on its own row in the picker, not on this chat's button.
@@ -854,6 +873,7 @@ struct ChatAgentPanel: View {
     var locked: Bool
     var onDone: () -> Void = {}
 
+    @State private var continuingProfile: AgentProfile?
     @State private var showingSetup = false
     @State private var installing: String?
     @State private var signInBackend: ChatBackend?
@@ -882,6 +902,7 @@ struct ChatAgentPanel: View {
             }
             .padding(Theme.Space.s)
             #endif
+            if !showingSetup { profilePicker }
             if showingSetup {
                 setupList
             } else {
@@ -915,7 +936,16 @@ struct ChatAgentPanel: View {
                                     enabled: model.updatingAgentID == nil && installing == nil && !locked
                                 ) { Task { await model.updateAgent(id: backend.launcherID ?? backend.id, label: backend.label) } }
                             }
-                            AgentLimitsSummary(backend: id, peer: model.peer)
+                            if let backend = model.backend(for: id), model.usesOwnLogin(backend, chat: chat) {
+                                if model.peer == nil && model.signInReadiness(for: backend, chat: chat) == "needsSignIn" {
+                                    Button(L10n.text("common.sign_in"), .signIn) { signInBackend = backend }
+                                        .buttonStyle(.borderless)
+                                } else {
+                                    AgentLimitsSummary(backend: id, peer: model.peer, profileID: model.profileID(for: chat))
+                                }
+                            } else {
+                                AgentLimitsSummary(backend: id, peer: model.peer)
+                            }
                         })
                     }
                 )
@@ -953,6 +983,83 @@ struct ChatAgentPanel: View {
             .padding(Theme.Space.s)
             .disabled(locked)
         }
+        .task(id: model.peer ?? "local") { await model.refreshAgentProfiles() }
+        .task(id: ProfileProbeKey(profile: model.profileID(for: chat), catalog: model.agentProfiles,
+                                  agents: model.backends.map(\.id))) {
+            for backend in model.backends where model.usesOwnLogin(backend, chat: chat) && backend.installed == true {
+                guard !Task.isCancelled else { return }
+                _ = await model.checkSignIn(backend)
+            }
+        }
+        .sheet(item: $signInBackend) { backend in
+            AgentSignInSheet(backend: backend, peer: model.peer, profileID: model.profileID(for: chat),
+                             profileTitle: model.profileTitle(chat)) {
+                let status = await model.checkSignIn(backend)
+                guard model.backendRefreshError == nil else { return .unavailable }
+                return status?.outcome ?? .unconfirmed
+            }
+        }
+        .alert(L10n.text("apple.profiles.continue", continuingProfile?.title ?? ""), isPresented: Binding(
+            get: { continuingProfile != nil }, set: { if !$0 { continuingProfile = nil } }
+        ), presenting: continuingProfile) { profile in
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+            Button(L10n.text("apple.profiles.continue", profile.title)) {
+                performSetupChange(model: model, chat: chat) {
+                    if await model.continueInNew(chat, expectedDraft: model.draft, profileID: profile.id) != nil {
+                        onDone()
+                    }
+                }
+            }
+        } message: { profile in
+            Text(L10n.text("apple.profiles.continue_message", profile.title))
+        }
+    }
+
+    private struct ProfileProbeKey: Equatable {
+        let profile: String?
+        let catalog: AgentProfiles?
+        let agents: [String]
+    }
+
+    @ViewBuilder
+    private var profilePicker: some View {
+        if let profiles = model.agentProfiles, !profiles.named.isEmpty || chat.profileId != nil {
+            let selected = model.profileID(for: chat) ?? AgentProfiles.system
+            HStack {
+                Text(L10n.text("apple.profiles.profile")).font(Theme.caption)
+                Spacer()
+                if let lock = model.workspaceProfileLock, let profile = profiles.profile(lock) {
+                    if selected != lock && !locked {
+                        Button(L10n.text("apple.profiles.continue", profile.title), .next) { continuingProfile = profile }
+                    } else {
+                        Label(L10n.text("apple.profiles.locked", profile.title), systemImage: "lock")
+                            .font(Theme.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Menu {
+                        ForEach(profiles.profiles) { profile in
+                            Button {
+                                if chat.lastMessageAtMs != nil || chat.resumeToken != nil {
+                                    continuingProfile = profile
+                                } else {
+                                    performSetupChange(model: model, chat: chat) { await model.update(profileID: profile.id) }
+                                }
+                            } label: {
+                                if selected == profile.id { Label(profile.title, systemImage: "checkmark") }
+                                else { Text(profile.title) }
+                            }
+                            .disabled(selected == profile.id)
+                        }
+                    } label: {
+                        Text(profiles.profile(selected)?.title ?? L10n.text("apple.profiles.unavailable"))
+                    }
+                    .fixedSize()
+                    .disabled(locked || updating)
+                }
+            }
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.bottom, Theme.Space.s)
+        }
     }
 
     private var setupList: some View {
@@ -975,7 +1082,7 @@ struct ChatAgentPanel: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(backend.label).font(Theme.callout)
                             Text(backend.installed == false ? L10n.text("apple.chatsetupheader.not_installed.d177cdc0") :
-                                 backend.readiness == "needsSignIn" || backend.readiness == "expired"
+                                 ["needsSignIn", "expired"].contains(model.signInReadiness(for: backend, chat: chat) ?? "")
                                  ? L10n.text("apple.chatsetupheader.open_this_agent_in_the_host_s_terminal_to.717a86f6")
                                  : backend.installed == true ? L10n.text("apple.chatsetupheader.installed.f8b32f4e") : L10n.text("apple.chatsetupheader.availability_unknown.2e0078a8"))
                                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
@@ -999,7 +1106,7 @@ struct ChatAgentPanel: View {
                                 install(backend)
                             }
                             .disabled(installing != nil || locked)
-                        } else if backend.signInFlow?.supported == true {
+                        } else if backend.signInFlow?.supported == true && (model.peer == nil || !model.usesOwnLogin(backend, chat: chat)) {
                             Button(L10n.text("apple.agentsetup.sign_in", backend.label), .signIn) { signInBackend = backend }
                                 .disabled(installing != nil || locked)
                         }
@@ -1012,19 +1119,6 @@ struct ChatAgentPanel: View {
             checkedUpdates = false
             updateNotes = [:]
             if supportsUpdates { await loadVersions(check: false) }
-        }
-        .sheet(item: $signInBackend) { backend in
-            AgentSignInSheet(backend: backend, peer: model.peer) {
-                let status = await model.checkSignIn(backend)
-                guard model.backendRefreshError == nil else { return .unavailable }
-                guard status?.checked == true else { return .unconfirmed }
-                if status?.readiness == "signedIn" { return .signedIn }
-                if ["needsSignIn", "expired"].contains(status?.readiness ?? "") { return .needsSignIn }
-                return .unconfirmed
-            }
-        }
-        .onChange(of: signInBackend?.id) { _, id in
-            if id == nil { Task { await model.reloadBackends() } }
         }
     }
 

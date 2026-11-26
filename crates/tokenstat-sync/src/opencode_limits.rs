@@ -35,7 +35,7 @@ struct UsageWindowResponse {
 
 /// Read OpenCode Go/Zen's vendor-reported quota windows.
 pub fn fetch() -> ProviderLimits {
-    if let Some(reading) = cli_usage() {
+    if let Some(reading) = cli_usage("opencode", &[], &[]) {
         return reading;
     }
     key_usage()
@@ -46,9 +46,22 @@ const CLI_TIMEOUT: Duration = Duration::from_secs(20);
 /// Where OpenCode's installer puts it, beside the shared defaults.
 const OPENCODE_DIRS: &[&str] = &[".opencode/bin"];
 
-fn cli_usage() -> Option<ProviderLimits> {
-    let program = crate::vendor_cli::program("opencode", OPENCODE_DIRS)?;
-    let raw = crate::vendor_cli::run(
+pub fn fetch_profile(
+    agent: &str,
+    environment: &[(String, String)],
+    remove: &[&str],
+) -> ProviderLimits {
+    cli_usage(agent, environment, remove)
+        .unwrap_or_else(|| unavailable("OpenCode did not report limits for this login.".into()))
+}
+
+fn cli_usage(
+    agent: &str,
+    environment: &[(String, String)],
+    remove: &[&str],
+) -> Option<ProviderLimits> {
+    let program = crate::vendor_cli::program(agent, OPENCODE_DIRS)?;
+    let raw = crate::vendor_cli::run_with_env(
         &program,
         &[
             "api",
@@ -58,6 +71,8 @@ fn cli_usage() -> Option<ProviderLimits> {
         ],
         OPENCODE_DIRS,
         CLI_TIMEOUT,
+        environment,
+        remove,
     )?;
     cli_reading(&serde_json::from_str(raw.trim()).ok()?, now_ms())
 }
@@ -93,6 +108,7 @@ fn cli_reading(value: &serde_json::Value, observed_at_ms: i64) -> Option<Provide
     })
     .collect::<Vec<_>>();
     (!windows.is_empty()).then(|| ProviderLimits {
+        profile_id: None,
         source: "opencode".to_string(),
         plan: Some("Go".to_string()),
         windows,
@@ -176,6 +192,7 @@ fn key_usage() -> ProviderLimits {
         return unavailable("OpenCode reported no usage windows for this account.".to_string());
     }
     ProviderLimits {
+        profile_id: None,
         source: "opencode".to_string(),
         plan: Some("Go/Zen".to_string()),
         windows,

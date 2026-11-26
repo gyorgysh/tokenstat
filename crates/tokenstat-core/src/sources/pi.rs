@@ -226,6 +226,7 @@ fn parse_file_for(
         };
 
         out.events.push(UsageEvent {
+            profile_id: None,
             id,
             source,
             ts,

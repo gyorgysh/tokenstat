@@ -79,6 +79,42 @@ fn data_dir_override() -> Option<PathBuf> {
     Some(dir)
 }
 
+/// A generated opaque agent profile identifier, safe as a path segment.
+pub fn is_agent_profile_id(id: &str) -> bool {
+    id.strip_prefix("p_").is_some_and(|suffix| {
+        suffix.len() == 16 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
+pub const CHAT_AGENT_PROFILE_FILE: &str = ".tokenstat-profile";
+
+pub fn chat_agent_profile(home: &Path) -> Option<String> {
+    let id = std::fs::read_to_string(home.join(CHAT_AGENT_PROFILE_FILE)).ok()?;
+    is_agent_profile_id(&id).then_some(id)
+}
+
+/// Known native agent homes under this installation's profile directory.
+pub fn agent_profile_homes(agent: &str) -> Vec<(String, PathBuf)> {
+    let Some(entries) = data_dir().and_then(|data| std::fs::read_dir(data.join("profiles")).ok())
+    else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let id = entry.file_name().into_string().ok()?;
+            if !is_agent_profile_id(&id) || !entry.file_type().ok()?.is_dir() {
+                return None;
+            }
+            let home = entry.path().join(agent);
+            std::fs::symlink_metadata(&home)
+                .ok()?
+                .is_dir()
+                .then_some((id, home))
+        })
+        .collect()
+}
+
 pub fn data_local_dir() -> Option<PathBuf> {
     MOBILE_ROOTS
         .get()

@@ -7,9 +7,9 @@ import kotlinx.serialization.json.*
 internal fun chatQuotaPercent(window: JsonObject): Double? =
     (window["percent"] as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull?.takeIf { it.isFinite() && it >= 0 }
 
-internal fun chatQuotaReading(readings: JsonArray, backend: String, failed: Boolean = false): JsonObject? {
+internal fun chatQuotaReading(readings: JsonArray, backend: String, failed: Boolean = false, profileId: String? = null): JsonObject? {
     val provider = readings.filterIsInstance<JsonObject>().firstOrNull {
-        harnessCanonicalID(it.str("source").orEmpty()) == harnessCanonicalID(backend)
+        it.str("profileId") == profileId && harnessCanonicalID(it.str("source").orEmpty()) == harnessCanonicalID(backend)
     } ?: return null
     val windows = (provider["windows"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().filter {
         !it.str("label").isNullOrBlank() && chatQuotaPercent(it) != null

@@ -69,7 +69,7 @@ final class PlanLimitsStore {
                 guard held == owner(), flight?.id == id else { throw CancellationError() }
                 // Account retains disabled sources so their switches can be turned back on.
                 state.providers = providers + cached.providers.filter { previous in
-                    cached.skip.contains(previous.source) && !providers.contains { $0.source == previous.source }
+                    cached.skip.contains(previous.source) && !providers.contains { $0.id == previous.id }
                 }
             } catch {
                 if held == owner(), flight?.id == id, !(error is CancellationError) {
@@ -108,7 +108,7 @@ final class PlanLimitsStore {
     /// a newer background reading should reach every surface without HTTP.
     private func mergeCachedProviders(_ providers: [ProviderLimits]) {
         for provider in providers {
-            if let index = state.providers.firstIndex(where: { $0.source == provider.source }) {
+            if let index = state.providers.firstIndex(where: { $0.id == provider.id }) {
                 if provider.observedAtMs > state.providers[index].observedAtMs {
                     state.providers[index] = provider
                 }

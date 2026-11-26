@@ -594,11 +594,31 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
     let args: &[&str] = match id {
         "claude_code" => &["auth", "status"],
         "codex" => &["login", "status"],
+        "opencode" | "opencode2" if !environment.is_empty() => {
+            // A provider list is not a sign-in requirement: free models can
+            // still work without a provider account. Avoid gating such sends.
+            return Ok(json!({"readiness": "unknown", "checked": false}));
+        }
         // Its `status` reports a login whose tokens have all expired, so the
         // stored expiry is the answer and it counts as checked.
         "cursor_agent" => return Ok(crate::agent_readiness::describe_checked(id)),
         // Muse has no status command. Its `auth.json` names the provider it
         // signed in to, which is the same answer.
+        "muse" if let Some((_, base)) = environment.first() => {
+            let base = Path::new(base);
+            let (readiness, _) = crate::agent_readiness::muse_readiness(base, &|key| {
+                (key == "XDG_CONFIG_HOME").then(|| base.to_path_buf())
+            });
+            return Ok(json!({"readiness": readiness.id(), "checked": true}));
+        }
+        "grok" if let Some((_, base)) = environment.first() => {
+            let readiness = if Path::new(base).join("auth.json").is_file() {
+                "unknown"
+            } else {
+                "needsSignIn"
+            };
+            return Ok(json!({"readiness": readiness, "checked": false}));
+        }
         "muse" => return Ok(crate::agent_readiness::describe(id, true)),
         _ => {
             // File evidence only. A missing login file is not the CLI saying
@@ -612,7 +632,20 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
     let mut result = crate::agent_readiness::describe(id, true);
     // Older CLI versions may lack a status command. A timeout or an unknown
     // response proves neither signed-in nor signed-out.
-    let probe = probe_sign_in(&command, args, id, &environment);
+    let output = run_probe_with(&command, args, &environment);
+    let probe = output
+        .as_ref()
+        .and_then(|parts| status_readiness(id, parts));
+    if id == "claude_code"
+        && probe == Some("signedIn")
+        && !environment.is_empty()
+        && let Some(email) = output.as_ref().into_iter().flatten().find_map(|part| {
+            let status = serde_json::from_slice::<Value>(part).ok()?;
+            status["email"].as_str().map(str::to_string)
+        })
+    {
+        result["email"] = json!(email);
+    }
     let probed = probe.is_some();
     let state = probe.unwrap_or_else(|| {
         // An older CLI or a Windows npm shim may not support this process
@@ -636,15 +669,6 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
         _ => Value::Null,
     };
     Ok(result)
-}
-
-fn probe_sign_in(
-    command: &str,
-    args: &[&str],
-    id: &str,
-    environment: &[(String, String)],
-) -> Option<&'static str> {
-    status_readiness(id, &run_probe_with(command, args, environment)?)
 }
 
 /// Run one of an agent's own commands to completion, for what it prints on
@@ -683,6 +707,9 @@ fn run_probe_with(
         for (key, value) in &env.vars {
             cmd.env(key, value);
         }
+    }
+    for key in crate::profiles::inherited_auth(environment) {
+        cmd.env_remove(key);
     }
     // A profile's variables last, so they win over the login shell's.
     for (key, value) in environment {
@@ -814,19 +841,23 @@ pub(crate) fn sign_in(
             .ok_or_else(|| format!("{} is not installed on this machine", profile.name))?
     };
     let args = sign_in_args(id, &command);
+    let remove = crate::profiles::inherited_auth(&environment);
     let info = tokenstat_pty::manager()
-        .spawn(&tokenstat_pty::Spawn {
-            command,
-            args: args.iter().map(|arg| (*arg).to_string()).collect(),
-            cwd: PathBuf::from(&home),
-            workspace_id: None,
-            hidden: false,
-            rows,
-            cols,
-            no_color: false,
-            dark,
-            environment,
-        })
+        .spawn_removing_env(
+            &tokenstat_pty::Spawn {
+                command,
+                args: args.iter().map(|arg| (*arg).to_string()).collect(),
+                cwd: PathBuf::from(&home),
+                workspace_id: None,
+                hidden: false,
+                rows,
+                cols,
+                no_color: false,
+                dark,
+                environment,
+            },
+            remove,
+        )
         .map_err(|e| e.to_string())?;
     serde_json::to_value(info).map_err(|e| e.to_string())
 }
@@ -1358,15 +1389,16 @@ fn executable_name(command: &str) -> &str {
     name
 }
 
-pub(crate) fn is_agent_command(command: &str) -> bool {
+pub(crate) fn agent_id_for_command(command: &str) -> Option<&'static str> {
     let name = executable_name(command);
     PROFILES
         .iter()
         .filter(|profile| profile.harness_id.is_some())
-        .any(|profile| {
+        .find(|profile| {
             command_names(profile)
                 .any(|command| executable_name(command).eq_ignore_ascii_case(name))
         })
+        .map(|profile| profile.id)
 }
 
 fn valid_model_id(model: &str) -> bool {

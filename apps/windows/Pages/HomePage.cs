@@ -59,6 +59,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
 
     private JsonNode? _calendar;
     private JsonArray _planLimits = new();
+    private AgentProfiles? _planProfiles;
     private JsonArray _planBySource = new();
     private JsonArray _recent = new();
     private string? _planError;
@@ -411,6 +412,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 }
             }
         }
+        AgentProfiles? profiles;
+        try { profiles = await AgentProfiles.ReadAsync(""); }
+        catch { profiles = null; }
+        if (!Current()) return;
+        _planProfiles = profiles;
         _planLimits = new JsonArray();
         foreach (var item in limits)
         {
@@ -1098,7 +1104,15 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var refresh = Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => await RefreshAsync());
         refresh.Width = refresh.Height = 22;
         actions.Children.Add(refresh);
-        return Chrome.Card(HarnessName(source), body, ProviderSubtitle(provider), accessory: actions, mark: AgentMark.View(source, 22));
+        var title = HarnessName(source);
+        var profileId = Format.Text(provider, "profileId");
+        if (profileId.Length > 0 || _planProfiles?.Choices.Length > 1)
+        {
+            var label = _planProfiles?.Title(profileId.Length > 0 ? profileId : AgentProfiles.SystemId)
+                ?? L10n.Text("common.profiles.named_limits");
+            title += " · " + label;
+        }
+        return Chrome.Card(title, body, ProviderSubtitle(provider), accessory: actions, mark: AgentMark.View(source, 22));
     }
 
     /// <summary>

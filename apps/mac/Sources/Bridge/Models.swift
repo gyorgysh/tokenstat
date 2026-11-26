@@ -950,6 +950,7 @@ struct InsightsSnapshot: Codable, Sendable, Hashable {
     var byModel: [Bucket]
     var byProject: [Bucket]
     var bySource: [Bucket]
+    var byProfile: [Bucket]? = nil
     var bySession: [Bucket]
     var activeBlock: Block?
     var projectHarnesses: [SplitBucket]
@@ -1395,6 +1396,41 @@ struct DevicePoll: Codable, Sendable, Hashable {
     var machine: String?
 
     var isConfirmed: Bool { state == "confirmed" }
+}
+
+/// Logins for coding agents on this machine: the machine's own, and any
+/// named profiles that give chosen agents a login of their own.
+struct AgentProfiles: Codable, Sendable, Hashable {
+    var `default`: String
+    /// Agents a profile can give a login of their own.
+    var agents: [String]
+    var profiles: [AgentProfile]
+    var workspaceLocks: [String: String]?
+
+    static let system = "system"
+    var named: [AgentProfile] { profiles.filter { !$0.system } }
+    func profile(_ id: String?) -> AgentProfile? { profiles.first { $0.id == (id ?? Self.system) } }
+}
+
+struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    /// Nil for the machine's own, which the app names for the platform.
+    var name: String?
+    var system: Bool
+    var platform: String? = nil
+    /// Agents with a login of their own in this profile.
+    var own: [String]
+
+    var title: String {
+        if system {
+            switch platform {
+            case "macos": return L10n.text("common.profiles.this_mac")
+            case "windows": return L10n.text("common.profiles.this_pc")
+            default: return L10n.text("common.profiles.this_computer")
+            }
+        }
+        return name ?? id
+    }
 }
 
 /// The profile page's settings, as the account holds them.
@@ -2578,6 +2614,7 @@ struct LimitsSyncState: Codable, Sendable {
 
 struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
     var source: String
+    var profileId: String? = nil
     var plan: String?
     var windows: [UsageWindow]
     var observedAtMs: Int64
@@ -2588,7 +2625,7 @@ struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
     /// failed. Real numbers, just not current ones.
     var stale: Bool?
 
-    var id: String { source }
+    var id: String { profileId.map { "\(source):\($0)" } ?? source }
 
     var observedAt: Date? {
         observedAtMs > 0 ? Date(timeIntervalSince1970: TimeInterval(observedAtMs) / 1000) : nil
@@ -2748,6 +2785,9 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var budgetSeconds: UInt64
     var createdAtMs: Int64
     var updatedAtMs: Int64
+    /// The profile whose logins this chat's agent uses. Nil for the
+    /// machine's own, which every chat from before profiles is.
+    var profileId: String? = nil
     /// Last actual human/agent event. Setup edits move `updatedAtMs` but do
     /// not make a conversation unread.
     var lastMessageAtMs: Int64?
@@ -2806,7 +2846,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
         case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, waiting, sendRevision, runRevision, runStartedAtMs, pendingSteer, nativeSteer, nativeSteerAttachments
-        case branch, pull, pulls, routing, promptCache, continuedFrom
+        case branch, pull, pulls, routing, promptCache, continuedFrom, profileId
     }
 
     init(from decoder: Decoder) throws {
@@ -2848,6 +2888,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         // Advice, never a reason to lose the conversation.
         promptCache = try? c.decodeIfPresent(ChatPromptCache.self, forKey: .promptCache)
         continuedFrom = try c.decodeIfPresent(String.self, forKey: .continuedFrom)
+        profileId = try c.decodeIfPresent(String.self, forKey: .profileId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2884,6 +2925,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(pull, forKey: .pull)
         try c.encodeIfPresent(promptCache, forKey: .promptCache)
         try c.encodeIfPresent(continuedFrom, forKey: .continuedFrom)
+        try c.encodeIfPresent(profileId, forKey: .profileId)
     }
 }
 

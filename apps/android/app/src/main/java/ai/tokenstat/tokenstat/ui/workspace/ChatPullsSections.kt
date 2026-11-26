@@ -246,6 +246,7 @@ fun ChatSection(
 ) {
     val scope = rememberCoroutineScope()
     val client by model.state.collectAsStateWithLifecycle()
+    val profiles = rememberAgentProfiles(model, peer, protocol)
     val projectOwner = ProjectOwner.from(client.account, peer, workspace)
     fun ownsProject() = projectOwner != null && ProjectOwner.from(model.state.value.account, peer, workspace) == projectOwner
     var chats by remember(projectOwner) { mutableStateOf<List<JsonObject>>(emptyList()) }
@@ -749,6 +750,9 @@ fun ChatSection(
             val saved = launchChoice.read()
             val backendId = setup?.backend ?: LaunchDefaults.backend(saved, backends)
             val backend = backends.firstOrNull { it.str("id") == backendId }
+            check(setup?.profileId == null || HostContracts.supportsAgentProfiles(protocol)) {
+                L10n.text("common.profiles.host_update")
+            }
             check(setup == null || setup.isAvailable(backends)) { L10n.text("common.new_chat.setup_changed") }
             model.workspaceSection(peer, "chat.create", setup?.createParameters(workspace) ?: buildJsonObject {
                 put("workspaceId", workspace)
@@ -1300,7 +1304,7 @@ fun ChatSection(
         // an environment key has no login file at all.
         val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") &&
             ChatCommandRules.canSteer(command, staged.isNotEmpty(), chat.bol("nativeSteerAttachments"))
-        if (!liveInput && selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
+        if (!liveInput && ownAgentProfile(profiles, chat?.str("profileId"), selectedBackend?.str("launcherId")) == null && selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
             error = L10n.text("android.agentsetup.draft_kept", selectedBackend?.str("label") ?: "")
             return
         }
@@ -2297,7 +2301,7 @@ fun ChatSection(
             )
             if (!offline) {
                 val selectedBackend = backends.firstOrNull { it.str("id") == chats.firstOrNull { chat -> chat.str("id") == openId }?.str("backend") }
-                selectedBackend?.let { backend ->
+                selectedBackend?.takeIf { ownAgentProfile(profiles, openChat?.str("profileId"), it.str("launcherId")) == null }?.let { backend ->
                     key(projectOwner, backend.str("id")) {
                         AgentSetupCard(model, peer, hostLabel, backend, sending || runningTurn) { readiness, verified ->
                             if (ownsProject()) backends = backends.map {
@@ -2316,8 +2320,12 @@ fun ChatSection(
             ChatComposer(
                 compactKeyboard = compactKeyboard,
                 chat = chats.firstOrNull { it.str("id") == openId },
+                profileTitle = agentProfileTitle(profiles, openChat?.str("profileId")),
                 quota = {
-                    ChatQuotaBadge(rememberChatQuota(model, openChat?.str("backend").orEmpty(), peer).reading) {
+                    val backendId = openChat?.str("backend").orEmpty()
+                    val launcher = backendOf(backends, backendId)?.str("launcherId")
+                    val profile = ownAgentProfile(profiles, openChat?.str("profileId"), launcher)
+                    ChatQuotaBadge(rememberChatQuota(model, backendId, peer, profileId = profile).reading) {
                         activitySection = null; showingUsage = true; showingStats = true
                     }
                 },
@@ -2565,6 +2573,25 @@ fun ChatSection(
                         }
                         loadChats()
                     }
+                },
+                profiles = profiles,
+                onContinueProfile = { profile ->
+                    try {
+                        if (ownsProject() && openId == id) {
+                            val created = model.workspaceSection(peer, "chat.continueInNew", buildJsonObject {
+                                put("id", id); put("profileId", profile)
+                            }) as? JsonObject
+                            if (ownsProject() && openId == id) {
+                                val next = created?.str("id")
+                                if (next != null) {
+                                    loadChats()
+                                    openId = next
+                                    showingAgent = false
+                                }
+                            }
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { if (ownsProject() && openId == id) error = failure.message }
                 },
                 onDismiss = { showingAgent = false },
             )
@@ -3788,6 +3815,7 @@ internal fun ChatComposer(
     onAgent: () -> Unit,
     onSetup: () -> Unit = onAgent,
     quota: @Composable () -> Unit = {},
+    profileTitle: String? = null,
     launchAutonomy: String = LaunchDefaults.AUTONOMY,
     /// Whether this device can reach the host at all.
     offline: Boolean = false,
@@ -3880,7 +3908,7 @@ internal fun ChatComposer(
                         )
                     }
                     if (!compactKeyboard) ChatComposerToolbar(backends, chat, locked, expanded, onAgent, onSetup,
-                        onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota,
+                        profileTitle = profileTitle, onExpand = { restoreInputFocus = inputFocused || !expanded; expanded = !expanded }, quota = quota,
                         running = locked, onStop = onStop,
                         keyboardOpen = inputFocused, onHideKeyboard = { keyboard?.hide(); focus.clearFocus(); expanded = false })
                     staged.forEach { attachment ->

@@ -1490,6 +1490,7 @@ mod tests {
 
     fn event(model: &str, input: u64, cache_read: u64, output: u64) -> UsageEvent {
         UsageEvent {
+            profile_id: None,
             id: EventId::derive(&["meter", model, &input.to_string(), &output.to_string()]),
             source: SourceId::ClaudeCode,
             ts: Timestamp::from_ms(0),

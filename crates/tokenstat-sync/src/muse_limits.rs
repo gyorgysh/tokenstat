@@ -116,15 +116,27 @@ struct CliWindow {
 
 /// Fetch the vendor-reported subscription quota using Muse's own tools.
 pub fn fetch() -> ProviderLimits {
-    if let Some(limits) = cli_usage() {
+    if let Some(limits) = cli_usage(&[], &[]) {
         return limits;
     }
     account_usage()
 }
 
-fn cli_usage() -> Option<ProviderLimits> {
+pub fn fetch_profile(environment: &[(String, String)], remove: &[&str]) -> ProviderLimits {
+    cli_usage(environment, remove)
+        .unwrap_or_else(|| unavailable("Muse did not report limits for this login."))
+}
+
+fn cli_usage(environment: &[(String, String)], remove: &[&str]) -> Option<ProviderLimits> {
     let program = crate::vendor_cli::program("muse", MUSE_DIRS)?;
-    let raw = crate::vendor_cli::run(&program, &["usage", "--json"], MUSE_DIRS, CLI_TIMEOUT)?;
+    let raw = crate::vendor_cli::run_with_env(
+        &program,
+        &["usage", "--json"],
+        MUSE_DIRS,
+        CLI_TIMEOUT,
+        environment,
+        remove,
+    )?;
     let parsed: CliUsage = serde_json::from_str(&raw).ok()?;
     Some(cli_reading(parsed))
 }
@@ -159,6 +171,7 @@ fn cli_reading(usage: CliUsage) -> ProviderLimits {
         return unavailable("Muse reported no valid subscription usage windows for this account.");
     }
     ProviderLimits {
+        profile_id: None,
         source: "muse".into(),
         plan: allowance
             .tier
@@ -270,6 +283,7 @@ fn reading(account: AccountResponse, observed_at_ms: i64) -> ProviderLimits {
         return unavailable("Muse reported no valid subscription usage windows for this account.");
     }
     ProviderLimits {
+        profile_id: None,
         source: "muse".into(),
         plan: account
             .subs_tier_name

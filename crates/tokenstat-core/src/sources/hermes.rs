@@ -209,6 +209,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 None => r,
             });
         out.events.push(UsageEvent {
+            profile_id: None,
             // The row's whole primary key, and no timestamp: the row is a
             // running total and has to land on the same event each time it is
             // read.
