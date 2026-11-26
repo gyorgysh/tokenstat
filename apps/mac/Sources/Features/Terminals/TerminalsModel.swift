@@ -409,6 +409,7 @@ final class TerminalsModel {
         cols: Int,
         modelProvider: String? = nil,
         modelID: String? = nil,
+        profileID: String? = nil,
         hidden: Bool = false,
         selectAfter: Bool = true
     ) async -> TerminalSession? {
@@ -426,6 +427,7 @@ final class TerminalsModel {
                 dark: Self.isDarkAppearance,
                 modelProvider: modelProvider,
                 modelID: modelID,
+                profileID: profileID,
                 hidden: hidden
             )
             // The tab can be closed while the spawn is in flight. Attaching
@@ -470,7 +472,8 @@ final class TerminalsModel {
         rows: Int = 24,
         cols: Int = 80,
         modelProvider: String? = nil,
-        modelID: String? = nil
+        modelID: String? = nil,
+        profileID: String? = nil
     ) async -> TerminalSession? {
         let session = begin(workspace: workspace, command: command, rows: rows, cols: cols)
         return await complete(
@@ -479,7 +482,8 @@ final class TerminalsModel {
             rows: rows,
             cols: cols,
             modelProvider: modelProvider,
-            modelID: modelID
+            modelID: modelID,
+            profileID: profileID
         )
     }
 

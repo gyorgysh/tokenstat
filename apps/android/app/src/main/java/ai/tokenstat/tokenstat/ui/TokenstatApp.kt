@@ -4819,17 +4819,7 @@ private fun AccountDialog(
                 0 -> {
                     AccountIdentityCard(state = state, model = model, onOpen = ::open)
                     if (state.signedIn) {
-                        TsCard(
-                            title = L10n.text("common.teams.title"),
-                            subtitle = L10n.text("common.teams.hub_detail"),
-                        ) {
-                            TsSecondaryButton(
-                                label = L10n.text("common.teams.manage_teams"),
-                                icon = ActionIcon.Account.vector,
-                                onClick = onTeam,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
+                        AccountTeamCard(onTeam)
                     }
                     AccountPlanCard(state = state, onPlans = { paywall = true })
                     RelayUsageCard(state.account, onRefresh = { scope.launch { TsRefresh.run("relay") { model.refresh() } } })
@@ -5465,6 +5455,42 @@ private fun AccountIdentityCard(state: ClientState, model: AppViewModel, onOpen:
             onOpen = onOpen,
             onClose = { showing = false },
         )
+    }
+}
+
+/// One row, like the profile above it: the whole card opens Team. Port of
+/// `ClientTeamAccountLink`.
+@Composable
+private fun AccountTeamCard(onTeam: () -> Unit) {
+    val colors = LocalTsColors.current
+    TsCard(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .clickable(onClickLabel = L10n.text("common.teams.manage_teams"), onClick = onTeam),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    Icon(ActionIcon.Team.vector, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+                    Text(
+                        L10n.text("common.teams.title"),
+                        style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+                        color = colors.textPrimary,
+                    )
+                }
+                Text(
+                    L10n.text("common.teams.hub_detail"),
+                    style = TextStyle(fontSize = 14.sp),
+                    color = colors.textSecondary,
+                )
+            }
+            Icon(ActionIcon.Disclosure.vector, null, tint = colors.accent)
+        }
     }
 }
 

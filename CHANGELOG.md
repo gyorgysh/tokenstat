@@ -9,12 +9,12 @@ desktop is a review build. Newest first.
 
 ### Added
 
-- Claim your handle and choose who can open your profile from the app on Mac, iPhone, iPad and Android. Tap your name in Account to open your profile: your tokenstat.ai address, Private or Public, search engine listing, and View public profile, which opens your browser on Mac and stays in the app on phones and tablets. An account without a handle is offered one once after sign-in, with a live check while you type. Skipping it on one device answers it on all of them.
+- Claim your handle and choose who can open your profile from the app on Mac, iPhone, iPad and Android. Tap your name in Account to open your profile: your tokenstat.ai address, Private or Public, search engine listing, and View public profile, which opens your browser on Mac and stays in the app on phones and tablets. An account without a handle is offered one once after sign-in, with a live check while you type. Skipping it on one device answers it on all of them. Turning off search engine listing explains that removing a page a search engine already lists is up to that search engine and can take days or months.
 
 - On Mac, Refresh in the agent picker also checks every agent for a newer version, and the setup page offers Update all for the agents that are behind. When the agent a chat runs on is behind, sending a message offers Update and send, or Skip this version, which stays quiet until the next one. The picker still updates any agent by hand.
 - On Mac, click your name on Home to open your profile.
 - OpenCode Go limits are asked of OpenCode itself first, through its own login. A stored API key is only the fallback.
-- Sign your coding agents in with more than one account. Add a profile in Account on Mac, Windows, iPhone, iPad or Android, pick it when starting a chat, and optionally lock a repository to one profile so work code never runs on a personal plan. Claude, Codex, Grok, OpenCode and Muse can each keep their own login per profile, while Cursor and Antigravity keep using this machine's login. Plan limits and Insights split by profile, and the composer names the profile when it is not the default.
+- Sign your coding agents in with more than one account. Add a profile in Account on Mac, Windows, iPhone, iPad or Android, pick it when starting a chat, and optionally lock a repository to one profile so work code never runs on a personal plan. Claude, Codex, Grok, OpenCode and Muse can each keep their own login per profile, while Cursor and Antigravity keep using this machine's login. Plan limits and Insights split by profile, and the composer names the profile when it is not the default. Terminals use the same profiles: Mac, iPhone, iPad and Android launch agents on the profile picked for that folder, the default profile until you pick one.
 
 ### Fixed
 

@@ -240,4 +240,80 @@ struct BypassPermissionsControl: View {
     }
 }
 
+
+/// The agent profile menu, sized for a chrome row. Hidden until there is a
+/// profile other than this machine's to choose.
+struct AgentProfileLaunchControl: View {
+    let folder: WorkspaceFolder
+    let peer: String?
+
+    @State private var profiles: AgentProfiles?
+    @State private var chosen: String?
+    @State private var loadGeneration = 0
+
+    private var lock: String? {
+        profiles?.workspaceLocks?[WorkDestinationResolver.route(folderID: folder.id).workspaceID]
+    }
+
+    private var current: String {
+        lock ?? chosen ?? profiles?.default ?? AgentProfiles.system
+    }
+
+    var body: some View {
+        Group {
+            if let profiles, !profiles.named.isEmpty {
+                Menu {
+                    ForEach(profiles.profiles) { profile in
+                        Button {
+                            chosen = profile.id
+                            LaunchAgentProfile.choose(profile.id, for: folder.id)
+                        } label: {
+                            Label(profile.title, systemImage: profile.id == current ? "checkmark" : "")
+                        }
+                        .disabled(lock != nil && lock != profile.id)
+                    }
+                    if let lock, let title = profiles.profile(lock)?.title {
+                        ThemeRule()
+                        Text(L10n.text("common.profiles.locked", title))
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: lock != nil ? "lock.fill" : ActionIcon.team.symbol)
+                            .font(Theme.font(11))
+                        Text(profiles.profile(current)?.title ?? AgentProfiles.system)
+                            .font(Theme.font(11))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(L10n.text("common.profiles.launch_help"))
+                .accessibilityLabel(L10n.text("common.profiles.label"))
+            }
+        }
+        .task(id: "\(folder.id)|\(peer ?? "")") { await load() }
+    }
+
+    private func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        chosen = LaunchAgentProfile.chosen(for: folder.id)
+        let loaded: AgentProfiles?
+        if let peer {
+            guard await RemoteHostFeature.agentProfiles.isSupported(peer: peer) else {
+                profiles = nil; LaunchAgentProfile.forget(folderID: folder.id); return
+            }
+            loaded = try? await Bridge.agentProfiles(peer: peer)
+        } else {
+            try? await AgentProfileCatalog.shared.refresh()
+            loaded = AgentProfileCatalog.shared.value
+        }
+        guard !Task.isCancelled, generation == loadGeneration else { return }
+        profiles = loaded
+        LaunchAgentProfile.remember(loaded, folderID: folder.id,
+                                    workspaceID: WorkDestinationResolver.route(folderID: folder.id).workspaceID)
+    }
+}
+
 #endif

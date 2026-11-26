@@ -279,6 +279,7 @@ struct ChatTerminalPane: View {
         Task {
             let started = await terminals.complete(session, args: args, rows: grid.rows, cols: grid.cols,
                                                    modelProvider: model?.provider, modelID: model?.model,
+                                                   profileID: LaunchAgentProfile.stored(for: folder.id),
                                                    selectAfter: false)
             guard scope == WorkSessionContext.shared.scope else { return }
             if started == nil { launchError = terminals.errorMessage ?? L10n.text("apple.chatterminalpane.the_terminal_could_not_start_reconnect_thi.c7cbe80c") }

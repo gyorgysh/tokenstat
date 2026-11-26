@@ -101,6 +101,7 @@ import ai.tokenstat.tokenstat.ui.browser.acquireBrowserListener
 import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
+import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.SkeletonPage
@@ -197,7 +198,7 @@ fun WorkspaceSection(
 
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
-        "Sessions" -> SessionsSection(model, peer, workspace, folderName, hostLabel, data, error, loading, onOpenTerminal, reload, onOpenSection, onStartChat, modifier)
+        "Sessions" -> SessionsSection(model, peer, workspace, folderName, hostLabel, data, error, loading, onOpenTerminal, reload, onOpenSection, onStartChat, modifier, protocol = protocol)
         "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel, onChatOpened, initialChatId, openConversationOnAppear, conversationNonce, machineId = machineId, onOpenSection = onOpenSection, newChatRequest = newChatRequest, onNewChatHandled = onNewChatHandled, onNewChat = onNewChat)
         "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
         "Changes" -> ChangesSection(model, peer, workspace, modifier, folderName, hostLabel, protocol, onChanged = reload)
@@ -245,6 +246,7 @@ private fun SessionsSection(
     onOpenSection: (String) -> Unit,
     onStartChat: () -> Unit,
     modifier: Modifier,
+    protocol: Long? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -274,6 +276,22 @@ private fun SessionsSection(
             context.getSharedPreferences("tokenstat.bypass.v1", android.content.Context.MODE_PRIVATE)
                 .getBoolean("bypass.$workspace", false),
         )
+    }
+    // The agent login the next launch uses. Remembered per folder; until one
+    // is picked it follows the default for new chats, and a repository lock
+    // always wins, so a terminal and a chat in one folder share a login.
+    val agentProfiles = rememberAgentProfiles(model, peer, protocol)
+    val profilePrefs = remember(context) {
+        context.getSharedPreferences("tokenstat.launchprofile.v1", android.content.Context.MODE_PRIVATE)
+    }
+    var chosenProfile by remember(peer, workspace) {
+        mutableStateOf(profilePrefs.getString("profile.$peer.$workspace", null))
+    }
+    val profileLock = agentProfiles?.locked(workspace)
+    fun launchProfileId(): String? {
+        val profiles = agentProfiles ?: return null
+        if (profileLock != null) return null
+        return (chosenProfile ?: profiles.defaultId).takeIf { it != "system" && profiles.byId(it) != null }
     }
     val locallyHidden: Set<String> = remember(prefs, hiddenVersion) {
         prefs.getStringSet("hidden.$peer", emptySet()) ?: emptySet()
@@ -332,6 +350,7 @@ private fun SessionsSection(
                     put("cols", duplicate?.long("cols")?.coerceIn(1, 500)?.toInt() ?: 100)
                     put("noColor", false)
                     put("dark", dark)
+                    launchProfileId()?.let { put("profileId", it) }
                 }) as? JsonObject
             }.onSuccess { info ->
                 launchingId = null
@@ -409,6 +428,22 @@ private fun SessionsSection(
                         .edit().putBoolean("bypass.$workspace", next).apply()
                 },
             )
+        }
+        agentProfiles?.takeIf { it.profiles.size > 1 || profileLock != null }?.let { profiles ->
+            item {
+                TsCard(Modifier.fillMaxWidth()) {
+                    AgentProfilePicker(
+                        profiles = profiles,
+                        selected = profileLock ?: chosenProfile ?: profiles.defaultId,
+                        lock = profileLock,
+                        enabled = launchingId == null,
+                        onChange = { id ->
+                            chosenProfile = id
+                            profilePrefs.edit().putString("profile.$peer.$workspace", id).apply()
+                        },
+                    )
+                }
+            }
         }
         item {
             OpenDestinationsGrid(onOpenSection = onOpenSection, onStartChat = onStartChat, chatCount = chatCount)

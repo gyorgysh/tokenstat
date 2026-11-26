@@ -648,6 +648,7 @@ struct TerminalPane: View {
             if !modelProfiles.isEmpty {
                 LocalModelControl(folder: folder, peer: peer, workspaces: workspaces)
             }
+            AgentProfileLaunchControl(folder: folder, peer: peer)
             BypassPermissionsControl(folder: folder, workspaces: workspaces)
         }
         .padding(.horizontal, Theme.Space.m)
@@ -806,7 +807,8 @@ struct TerminalPane: View {
                 rows: grid.rows,
                 cols: grid.cols,
                 modelProvider: selection?.provider,
-                modelID: selection?.model
+                modelID: selection?.model,
+                profileID: LaunchAgentProfile.stored(for: folder.id)
             )
             if started != nil, let url = profile.openUrl {
                 await workspaces.openHarnessPage(url, in: folder)
@@ -1671,7 +1673,8 @@ private struct LaunchSurface: View {
                         rows: grid.rows,
                         cols: grid.cols,
                         modelProvider: selection?.provider,
-                        modelID: selection?.model
+                        modelID: selection?.model,
+                        profileID: LaunchAgentProfile.stored(for: folder.id)
                     )
                     if started != nil, let url = profile.openUrl {
                         await workspaces.openHarnessPage(url, in: folder)

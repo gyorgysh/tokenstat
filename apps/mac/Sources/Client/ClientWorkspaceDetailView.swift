@@ -55,6 +55,9 @@ struct ClientWorkspaceSessionsView: View {
     /// Whether the next launch from this phone skips permission prompts.
     /// Remembered per folder on this device, same key the Mac uses.
     @State private var bypassOn = false
+    /// The agent login the next launch uses. See `LaunchAgentProfile`.
+    @State private var launchProfiles: AgentProfiles?
+    @State private var launchProfile: String?
     /// How many launch tiles this host had last time, so the grid opens at the
     /// size it will end up. Without it the row painted one Shell tile and then
     /// jumped to eight when the catalog answered. Per host: two machines with
@@ -122,7 +125,9 @@ struct ClientWorkspaceSessionsView: View {
         .onChange(of: folder.id, initial: true) {
             closeBrowser()
             bypassOn = WorkspacePreference.bypassPermissions(for: folder.id)
+            launchProfile = LaunchAgentProfile.chosen(for: folder.id)
         }
+        .task(id: "\(peer)|\(folder.id)") { await loadLaunchProfiles() }
         .task(id: workspaceID) {
             // Keyed on the folder: the sidebar can swap folders under this
             // screen, and an unkeyed task would keep showing the old one's
@@ -247,6 +252,7 @@ struct ClientWorkspaceSessionsView: View {
                 }
 
                 bypassCard
+                profileCard
                 openCard
                 launchCard
                 sessionsCard
@@ -285,6 +291,63 @@ struct ClientWorkspaceSessionsView: View {
     private func closeBrowser() {
         browserSession?.close()
         browserSession = nil
+    }
+
+    private func loadLaunchProfiles() async {
+        let folderID = folder.id
+        guard await RemoteHostFeature.agentProfiles.isSupported(peer: peer) else {
+            launchProfiles = nil; LaunchAgentProfile.forget(folderID: folderID); return
+        }
+        let loaded = try? await Bridge.agentProfiles(peer: peer)
+        guard !Task.isCancelled, folder.id == folderID else { return }
+        launchProfiles = loaded
+        LaunchAgentProfile.remember(loaded, folderID: folderID, workspaceID: workspaceID)
+    }
+
+    /// Which agent login a launch here uses, beside the bypass switch.
+    /// Hidden until there is a profile other than the computer's own.
+    @ViewBuilder
+    private var profileCard: some View {
+        if let profiles = launchProfiles, !profiles.named.isEmpty {
+            let lock = profiles.workspaceLocks?[workspaceID]
+            let current = lock ?? launchProfile ?? profiles.default
+            HStack(spacing: Theme.Space.s) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.Space.xs)
+                        .fill(Theme.accent.opacity(0.12))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: lock != nil ? "lock.fill" : ActionIcon.team.symbol)
+                        .foregroundStyle(Theme.accent)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.text("common.profiles.label"))
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                    Text(profiles.profile(current)?.title ?? L10n.text("common.profiles.removed"))
+                        .font(ClientType.label.weight(.medium))
+                }
+                Spacer(minLength: 0)
+                if lock == nil {
+                    Menu {
+                        ForEach(profiles.profiles) { profile in
+                            Button {
+                                launchProfile = profile.id
+                                LaunchAgentProfile.choose(profile.id, for: folder.id)
+                            } label: {
+                                Label(profile.title, systemImage: profile.id == current ? "checkmark" : "")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.up.chevron.down")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel(L10n.text("common.profiles.label"))
+                }
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .cardSurface()
+        }
     }
 
     /// Bypass, the switch the Mac keeps next to Launch. Branch lives on the
@@ -759,7 +822,8 @@ struct ClientWorkspaceSessionsView: View {
                 args: args,
                 rows: 40,
                 cols: 100,
-                dark: dark
+                dark: dark,
+                profileID: LaunchAgentProfile.stored(for: folder.id)
             )
             guard owner == WorkSessionContext.shared.scope else { pending.stop(); return }
             pending.attach(info: info)

@@ -120,6 +120,14 @@ struct ProfileSheet: View {
                     .frame(maxWidth: .infinity, minHeight: touch ? 44 : nil, alignment: .leading)
                     .padding(.leading, 4)
                     .disabled(saving)
+                    Text(profile.indexable
+                         ? L10n.text("common.profile.indexable_on_detail")
+                         : L10n.text("common.profile.indexable_off_detail"))
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 4)
                 }
             }
             if isPublic, let url { viewButton(url) }

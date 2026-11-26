@@ -4045,7 +4045,8 @@ struct RootView: View {
                 let session = await terminals.start(
                     workspace: folder,
                     command: command,
-                    args: Array(argv.dropFirst())
+                    args: Array(argv.dropFirst()),
+                    profileID: LaunchAgentProfile.stored(for: folder.id)
                 )
                 if session == nil {
                     todo.errorMessage = terminals.errorMessage

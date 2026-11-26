@@ -63,22 +63,20 @@ enum ClientRemote {
         args: [String],
         rows: Int,
         cols: Int,
-        dark: Bool
+        dark: Bool,
+        profileID: String? = nil
     ) async throws -> PtySessionInfo {
-        try await Bridge.onPeer(
-            peer,
-            "pty.spawn",
-            [
-                "workspaceId": workspaceID,
-                "command": command,
-                "args": args,
-                "rows": rows,
-                "cols": cols,
-                "noColor": false,
-                "dark": dark,
-            ],
-            as: PtySessionInfo.self
-        )
+        var params: [String: Any] = [
+            "workspaceId": workspaceID,
+            "command": command,
+            "args": args,
+            "rows": rows,
+            "cols": cols,
+            "noColor": false,
+            "dark": dark,
+        ]
+        if let profileID { params["profileId"] = profileID }
+        return try await Bridge.onPeer(peer, "pty.spawn", params, as: PtySessionInfo.self)
     }
 
     /// Start an agent's own sign-in in a terminal on the machine that runs it.

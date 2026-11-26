@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
@@ -62,7 +63,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 /// Save cannot be a check on one screen and a download on the next.
 enum class ActionIcon {
     Save, Claim, Create, Upload, Copy, Download,
-    SignIn, SignOut, Account, Settings, Security, Edit,
+    SignIn, SignOut, Account, Team, Settings, Security, Edit,
     Plans, Billing, AppStore, AutoRenew, Downgrade, CancelPlan,
     Token, Preview, Visibility, Theme, Layout,
     Connect, Disconnect, Approve, Pair, Refresh, Revoke, Device,
@@ -84,6 +85,7 @@ enum class ActionIcon {
             Copy -> Icons.Outlined.ContentCopy
             Download -> Icons.Default.Download
             SignIn, Account, Profile -> Icons.Default.Person
+            Team -> Icons.Default.Groups
             SignOut -> Icons.AutoMirrored.Filled.Logout
             Settings -> Icons.Default.Settings
             Security -> Icons.Default.Lock

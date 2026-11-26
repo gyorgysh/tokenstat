@@ -17,12 +17,41 @@ struct ClientTeamAccountLink: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        Card(title: L10n.text("common.teams.title"), subtitle: L10n.text("common.teams.hub_detail"), mark: "mark_account",
-            accessory: AnyView(Button(L10n.text("common.teams.manage_teams"), .team) {
-                navigation.chooseNavigation(); navigation.restoredRoute = nil
-                navigation.destination = .team; navigation.folderID = nil
-                dismiss()
-            }.buttonStyle(TeamSmallButtonStyle())))
+        // One row, like the profile above it: the whole card opens Team.
+        Button {
+            navigation.chooseNavigation(); navigation.restoredRoute = nil
+            navigation.destination = .team; navigation.folderID = nil
+            dismiss()
+        } label: {
+            HStack(spacing: Theme.Space.m) {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: ActionIcon.team.symbol)
+                            .font(Theme.font(17, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 22, height: 22)
+                            .accessibilityHidden(true)
+                        Text(L10n.text("common.teams.title"))
+                            .font(ClientType.sectionTitle)
+                            .foregroundStyle(.primary)
+                    }
+                    Text(L10n.text("common.teams.hub_detail"))
+                        .font(ClientType.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                RowChevron()
+            }
+            .padding(.vertical, Theme.Space.s)
+            .contentShape(.rect)
+        }
+        .buttonStyle(RowFeedbackStyle(bleed: Theme.Space.s, radius: 12))
+        .accessibilityHint(L10n.text("common.teams.manage_teams"))
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
     }
 }
 #endif

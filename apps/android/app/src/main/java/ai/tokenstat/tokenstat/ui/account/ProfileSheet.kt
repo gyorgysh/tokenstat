@@ -321,6 +321,13 @@ fun ProfileSheet(
                                 )
                                 TsBrandSwitch(settings.indexable, { save(indexable = it) }, enabled = !saving)
                             }
+                            Text(
+                                if (settings.indexable) L10n.text("common.profile.indexable_on_detail")
+                                else L10n.text("common.profile.indexable_off_detail"),
+                                style = TsType.caption,
+                                color = colors.textSecondary,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
                         }
                     }
                     error?.let { Text(it, style = TsType.caption, color = colors.danger) }

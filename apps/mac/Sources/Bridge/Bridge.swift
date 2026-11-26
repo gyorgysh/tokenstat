@@ -2716,6 +2716,7 @@ extension Bridge {
         dark: Bool,
         modelProvider: String? = nil,
         modelID: String? = nil,
+        profileID: String? = nil,
         hidden: Bool = false
     ) async throws -> PtySessionInfo {
         // Urgent: a person clicked Shell and is watching this round trip. It
@@ -2738,6 +2739,9 @@ extension Bridge {
         }
         if let modelID {
             params["modelId"] = modelID
+        }
+        if let profileID {
+            params["profileId"] = profileID
         }
         // Inspector consoles and daemon jobs stay off the workspace tab list.
         if hidden {
