@@ -165,10 +165,21 @@ try {
         throw "Control cannot be invoked: $($Control.Current.Name)"
     }
     function Reveal-RepositorySidebar {
-        $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+        # The drawer closes on navigation at the runner's narrow width, so a
+        # visible check followed by navigation can go stale before the next
+        # wait. Re-open until the control stays visible instead of toggling once.
         $id = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'sidebar.addProject')
-        $add = $window.FindFirst($descendants, $id)
-        if (!$add -or $add.Current.IsOffscreen) { Open-Place 'Show or hide repositories' }
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+            $add = $window.FindFirst($descendants, $id)
+            if ($add -and !$add.Current.IsOffscreen) {
+                Start-Sleep -Milliseconds 500
+                $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+                $add = $window.FindFirst($descendants, $id)
+                if ($add -and !$add.Current.IsOffscreen) { return }
+            }
+            Open-Place 'Show or hide repositories'
+        }
         Wait-ForControl 'sidebar.addProject' | Out-Null
         # Repository disclosure is persisted independently of pane visibility.
         # Reopening the drawer does not promise that this folder is expanded.
@@ -183,7 +194,7 @@ try {
             $row = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($row)
         }
     }
-    Wait-ForControl 'sidebar.addProject' | Out-Null
+    Reveal-RepositorySidebar
     $folders = @(Call-Host 'workspace.list')
     if ($folders.Count -eq 0) { Wait-ForControl 'projects.firstAdd' | Out-Null }
     $fixture = Join-Path $env:RUNNER_TEMP 'tokenstat-ui-project'
