@@ -96,7 +96,7 @@ struct AsciiGraphicsSink: AsciiSink {
         self.light = light
         let inset = cell * 0.12
         disc = Path(ellipseIn: CGRect(x: inset, y: inset, width: cell - inset * 2, height: cell - inset * 2))
-        font = .system(size: (cell * 0.66).rounded(), weight: .semibold, design: .monospaced)
+        font = Theme.mono((cell * 0.66).rounded(), weight: .semibold)
     }
 
     private mutating func color(_ value: UInt32) -> Color {
