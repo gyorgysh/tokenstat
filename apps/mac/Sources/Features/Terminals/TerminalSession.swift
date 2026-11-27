@@ -35,6 +35,10 @@ enum SessionState: Equatable {
     }
 }
 
+/// Live token and list-rate reading for one session.
+///
+/// Numbers only. The host drops conversation text at the parser boundary,
+/// and this type has nowhere to put it back.
 struct SessionMeter: Equatable, Sendable {
     var tokens: UInt64
     var costMicros: Int64?
@@ -49,6 +53,8 @@ struct SessionMeter: Equatable, Sendable {
     var isPlan: Bool { billing == "plan" }
 }
 
+/// Terminal preferences, stored as user defaults and read by the terminal
+/// strip and by the spawn path (which sends the colour choice to the daemon).
 enum TerminalPreferences {
     private static let voiceOverKey = "terminal.accessibility.enabled"
     private static let noColorKey = "terminal.noColor.enabled"
@@ -617,6 +623,12 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         return 0
     }
 
+    /// Bytes read from the host that have not been fed into SwiftTerm yet.
+    ///
+    /// A segmented queue, not a copying buffer. Output is always on its way to
+    /// the emulator; the queue exists so the poll loop never waits on main-
+    /// thread parse work and so output remains ordered while the renderer gets
+    /// its fair share of each frame.
     @ObservationIgnored private var pendingFeed: [Data] = []
     @ObservationIgnored private var pendingFeedHead = 0
     @ObservationIgnored private var pendingFeedBytes = 0
@@ -891,6 +903,10 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         if state != next { state = next }
     }
 
+    /// Dismiss the current call for attention.
+    ///
+    /// Silence this episode's notification. Keep the waiting state until
+    /// the host confirms that the prompt was answered or cleared.
     func acknowledgeAttention() {
         attentionAcknowledged = true
         RunNotifications.shared.attentionHandled(sessionID: id)

@@ -12,6 +12,6 @@ internal static class EditorTree
         SelectionMode = TreeViewSelectionMode.Single,
         CanDragItems = false, CanReorderItems = false, AllowDrop = false,
         ItemTemplate = (DataTemplate)XamlReader.Load(
-            """<DataTemplate xmlns="http:
+            """<DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"><TreeViewItem Content="{Binding Content}"/></DataTemplate>"""),
     };
 }

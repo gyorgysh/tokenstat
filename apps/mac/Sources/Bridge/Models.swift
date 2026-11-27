@@ -2297,6 +2297,11 @@ struct ChatPromptCache: Codable, Sendable, Hashable {
     var ttlMs: Int64
 }
 
+/// Answer from `chat.steerDeliver`.
+///
+/// `delivered` is false when the note did not start a turn. The conversation,
+/// when present, is the disk record of the turn that did start, and it does
+/// not carry the parked note.
 struct ChatSteerDelivery: Codable, Sendable {
     var delivered: Bool
     var conversation: ChatConversation?
@@ -2679,6 +2684,8 @@ extension ChatApproval {
 }
 
 
+/// An agent CLI the daemon can run: a backend, a prompt, a workspace, and a
+/// schedule with a budget the run stops at.
 struct Automation: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var name: String

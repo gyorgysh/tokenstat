@@ -318,6 +318,8 @@ final class ChatModel {
         return .held
     }
 
+    /// Explicit Continue reuses durable delivery and receipts, keeping any new
+    /// composer draft untouched. A stale card cannot send into a different chat.
     func continueAfterSignIn(gateID: String?, owner: WorkReference?) async {
         guard let owner, owner == currentReference, ownsQueue, savedCopy == nil,
               gateID == signInGateRowID, !busy, !sending, unconfirmedSend == nil, heldSubmission == nil, let selected else { return }
@@ -1870,6 +1872,8 @@ final class ChatModel {
         await openEvents(id: selected.id, generation: generation)
     }
 
+    /// One creation at a time: a second tap while the backend answers awaits
+    /// the same conversation instead of doubling the sidebar.
     private var createSingleflight = Singleflight<ChatConversation?>()
     private var createContext: UInt64?
     private var createTicket = UUID()
@@ -1959,6 +1963,19 @@ final class ChatModel {
         }
     }
 
+    /// Take the backend list again when the one in hand looks like a daemon
+    /// that had not finished probing.
+    ///
+    /// The host answers immediately and fills its model lists on a background
+    /// thread, so the first request after it starts is served from curated
+    /// fallbacks. A client that asks once, at launch, and keeps the answer
+    /// forever is holding that half-filled list for the life of the window,
+    /// which is how a Codex chat ended up with no model picker on a machine
+    /// whose host could list six models a second later.
+    ///
+    /// Unforced: this is the ordinary cached read, arriving late enough to be
+    /// the real one. Refresh in the picker is the other call, for a list that
+    /// is complete but out of date.
     func refillBackendsIfIncomplete() async {
         guard savedCopy == nil else { return }
         guard let chosen = backends.first(where: { $0.id == selected?.backend }) else { return }
@@ -2976,6 +2993,8 @@ final class ChatModel {
         return approvals.contains { $0.id == approval.id }
     }
 
+    /// Workspace ownership does not require a selected conversation: personas
+    /// can also be managed before the first chat is created.
     struct PersonaContext: Equatable {
         let generation: UInt64
         let scope: WorkReference.Scope
@@ -3607,6 +3626,8 @@ final class ChatModel {
         sharingRecoveryNotice = notice
     }
 
+    /// Refresh the open list without drawing an unchanged one. False when the
+    /// read failed or the reader has moved on.
     private func reloadOpenChats() async -> Bool {
         guard let selected else { return false }
         let generation = selectionGeneration

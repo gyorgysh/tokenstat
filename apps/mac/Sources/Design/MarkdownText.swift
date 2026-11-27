@@ -91,6 +91,15 @@ private actor MarkdownWarmup {
     }
 }
 
+/// Whether this markdown is the point of the screen or a note beside it.
+///
+/// `document` is an answer: a document's own title scale, and wide content
+/// gets its own sideways scroller so a table or a long line keeps its shape.
+///
+/// `aside` is reasoning, drawn small and grey. Headings come back to the
+/// surrounding text's size, because `##` at 22pt would make a footnote the
+/// largest thing on screen, and wide content wraps in place rather than
+/// nesting another scroll view inside the transcript's.
 enum MarkdownStyle: String {
     case document
     case chat

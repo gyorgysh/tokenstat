@@ -390,6 +390,11 @@ internal static class SidebarLive
         return id is null ? baseName : HarnessName(id);
     }
 
+    /// <summary>
+    /// What the session is doing: the host attention flag first, then its
+    /// working/idle verdict. Absent means the sampler has not reached it yet,
+    /// which reads as Starting and never as Idle.
+    /// </summary>
     public static (string Label, Windows.UI.Color Tint) SessionState(JsonNode item)
     {
         if (Format.Text(item, "alive") == "false")
@@ -429,6 +434,10 @@ internal static class SidebarLive
         };
     }
 
+    /// <summary>
+    /// The meter line: context, cost, tokens in fixed places, like the Mac
+    /// row. CPU and RAM stay the fallback before any meter exists.
+    /// </summary>
     public static string? SessionStats(JsonNode? item)
     {
         if (item is null)

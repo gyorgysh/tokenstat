@@ -410,6 +410,11 @@ enum Bridge {
         return code == "host_timeout"
     }
 
+    /// Whether a transport error means the daemon is gone rather than busy.
+    ///
+    /// Only connection-level failures are repairable. A timeout means the
+    /// daemon is alive and working, and restarting it would interrupt that
+    /// work for no reason.
     private static func isRepairable(_ error: Error) -> Bool {
         guard let bridge = error as? BridgeError, case let .core(code, _) = bridge else {
             return false
@@ -427,6 +432,11 @@ enum Bridge {
         }
     }
 
+    /// Whether an error means the host was unreachable or silent, which is
+    /// worth retrying once it is back.
+    ///
+    /// Screens use this to keep refreshing while the daemon boots instead of
+    /// pinning an error the user did not cause.
     static func isHostRecoveryError(_ error: Error) -> Bool {
         guard let bridge = error as? BridgeError, case let .core(code, _) = bridge else {
             return false
@@ -1940,6 +1950,12 @@ extension Bridge {
         return version >= RemoteHostFeature.pullAllState.minimumProtocol
     }
 
+    /// Public author pictures for a history list.
+    ///
+    /// An older paired computer returns an empty index, because it has no
+    /// method to ask. A missing forge or a failed request throws, and the
+    /// history list treats that the same way: initials, and the commits
+    /// still show.
     static func commitAvatars(workspaceID: String, peer: String? = nil, oid: String) async throws -> HistoryAvatarIndex {
         var params: [String: Any] = ["workspaceId": workspaceID]
         if !oid.isEmpty { params["oid"] = oid }

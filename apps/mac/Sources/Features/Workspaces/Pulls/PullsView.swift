@@ -36,6 +36,7 @@ final class PullCountStore {
     }
 }
 
+/// A small, memory-only working set owned by one pull-request workspace.
 @MainActor
 final class PullDetailCache {
     struct Owner: Hashable {
@@ -69,6 +70,11 @@ final class PullDetailCache {
     }
 }
 
+/// Connection boundary for the pull-request workspace.
+///
+/// The same view ships on Mac, iPhone and iPad. A phone reads availability
+/// through its host, but authorization itself stays on that computer so a
+/// paired client can never retrieve the secret half of a login.
 struct PullsView: View {
     let workspaceID: String
     var peer: String? = nil
