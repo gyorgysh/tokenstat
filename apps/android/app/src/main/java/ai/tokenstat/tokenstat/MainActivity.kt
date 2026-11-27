@@ -9,7 +9,6 @@ import android.view.View
 import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.core.view.WindowCompat
@@ -32,11 +31,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             installLaunchSplash(launchedAt)
         }
-        if (Build.VERSION.SDK_INT >= 35) {
-            WindowCompat.setDecorFitsSystemWindows(window, false)
-        } else {
-            enableEdgeToEdge()
-        }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         if (savedInstanceState == null) {
             NotificationOpen.offerFromIntent(intent)
             ai.tokenstat.tokenstat.ecosystem.QuickAccess.offer(intent)
