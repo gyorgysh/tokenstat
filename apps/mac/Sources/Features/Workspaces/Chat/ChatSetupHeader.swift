@@ -564,7 +564,6 @@ extension ChatComposerControls where Chrome == EmptyView {
 /// sections out backwards. That is gone. One panel, three sections, one
 /// declaration, and the filter runs across all of them, so typing "meta" in a
 /// forty-model list gets there in four keystrokes instead of a scroll.
-/// Capture before scheduling so a control cannot apply to a later selection.
 @MainActor
 struct ChatAgentChoices {
     let model: ChatModel
@@ -1369,6 +1368,7 @@ struct ChatCompactPills: View {
     }
 }
 
+/// Capture before scheduling so a control cannot apply to a later selection.
 @MainActor
 func performSetupChange(
     model: ChatModel, chat: ChatConversation,
