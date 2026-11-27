@@ -27,8 +27,36 @@ struct AgentProfileSettings: View {
     @State private var busy = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            guide
+            manager
+        }
+    }
+
+    private var guide: some View {
+        Card(title: L10n.text("common.profiles.guide_title"), subtitle: L10n.text("apple.profiles.description")) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                ProfilesIllustration()
+                ForEach(Array([L10n.text("common.profiles.guide_step1"), L10n.text("common.profiles.guide_step2"),
+                                     L10n.text("common.profiles.guide_step3")].enumerated()), id: \.offset) { index, line in
+                    HStack(alignment: .top, spacing: Theme.Space.s) {
+                        Text("\(index + 1)")
+                            .font(Theme.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(Theme.accent))
+                        Text(line)
+                            .font(Theme.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var manager: some View {
         Card(title: L10n.text("apple.profiles.title"),
-             subtitle: L10n.text("apple.profiles.description"), mark: "mark_account") {
+             mark: "mark_account") {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let error { ErrorBanner(message: error) }
                 if let profiles = catalog.value, let profile = profiles.profile(selectedID) {
