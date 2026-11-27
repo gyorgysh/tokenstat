@@ -87,4 +87,9 @@ struct ChatRoutingState: Codable, Sendable, Hashable {
     var preferred: ChatRouteDestination?
     var activity: [ChatRoutingActivity]?
     var nextReset: ChatRoutingReset? = nil
+    var followsDefault: Bool? = nil
+    var defaultPolicy: ChatRoutingPolicy? = nil
+}
+struct ChatRoutingDefaults: Codable, Sendable {
+    var policy: ChatRoutingPolicy?
 }

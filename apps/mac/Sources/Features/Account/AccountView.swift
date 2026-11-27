@@ -11,6 +11,7 @@ private enum AccountSettingsPane: String, CaseIterable, Hashable {
     case account
     case planLimits
     case profiles
+    case routing
     case thisMac
 
     var label: String {
@@ -18,6 +19,7 @@ private enum AccountSettingsPane: String, CaseIterable, Hashable {
         case .account: return L10n.text("common.account")
         case .planLimits: return L10n.text("apple.accountview.plan_limits.925788cd")
         case .profiles: return L10n.text("apple.profiles.title")
+        case .routing: return L10n.text("common.chat_routing")
         case .thisMac: return L10n.text("apple.accountview.this_mac.79a4aefc")
         }
     }
@@ -27,6 +29,7 @@ private enum AccountSettingsPane: String, CaseIterable, Hashable {
         case .account: return "person.crop.circle"
         case .planLimits: return "list.clipboard"
         case .profiles: return "person.2"
+        case .routing: return "arrow.triangle.branch"
         case .thisMac: return "laptopcomputer"
         }
     }
@@ -212,6 +215,8 @@ struct AccountView: View {
             planLimitsPane
         case .profiles:
             AgentProfileSettings()
+        case .routing:
+            RoutingSettings()
         case .thisMac:
             thisMacPane
         }
