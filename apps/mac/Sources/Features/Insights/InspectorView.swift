@@ -58,7 +58,6 @@ struct InspectorView: View {
             Stat(
                 label: L10n.text("apple.inspectorview.api_list_price.060458ef"),
                 value: model.periodValue.formatted,
-                note: L10n.text("apple.inspectorview.not_an_extra_bill.79d2c7ad"),
                 tint: Theme.accent,
                 size: DisplayFit.factor < 1 ? 22 : 26
             )

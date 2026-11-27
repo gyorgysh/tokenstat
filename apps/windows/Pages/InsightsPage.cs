@@ -1609,7 +1609,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             return Chrome.Card(_focusDay is null ? L10n.Text("windows.insightspage.this_period.8ed3e11f") : L10n.Text("windows.insightspage.this_day.16f586d3"), body);
         }
         body.Children.Add(Chrome.Stat(
-            L10n.Text("windows.insightspage.api_list_price.060458ef"), MoneyTotal(SnapshotRows("byModel", "by_model")), L10n.Text("windows.insightspage.not_an_extra_bill.79d2c7ad")));
+            L10n.Text("windows.insightspage.api_list_price.060458ef"), MoneyTotal(SnapshotRows("byModel", "by_model"))));
         body.Children.Add(StatPair(
             L10n.Text("windows.insightspage.tokens.a039dfb9"), Format.Tokens(Format.Long(totals?["counters"], "total")),
             L10n.Text("windows.insightspage.sessions.6fa3cbf4"), Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture)));

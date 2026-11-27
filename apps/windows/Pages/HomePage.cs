@@ -1513,7 +1513,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         children.Add(Chrome.Stat(
             L10n.Text("windows.homepage.api_list_price.060458ef"),
             value,
-            Format.Flag(detail, "estimated") ? "estimated" : L10n.Text("windows.homepage.not_an_extra_bill.79d2c7ad"), accent: true));
+            Format.Flag(detail, "estimated") ? "estimated" : null, accent: true));
         var sessions = OptLong(extra?.Totals, "sessions");
         var headline = L10n.Text("windows.homepage.0_tokens_1_requests.02bc82f3", $"{Format.Tokens(Format.Long(detail, "tokens"))}", $"{Format.Long(detail, "events").ToString("N0")}");
         if (sessions is not null)

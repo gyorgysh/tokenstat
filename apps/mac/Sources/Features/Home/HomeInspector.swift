@@ -96,7 +96,7 @@ struct HomeInspector: View {
             Stat(
                 label: L10n.text("apple.homeinspector.api_list_price.060458ef"),
                 value: detail.value.formatted,
-                note: detail.estimated ? "estimated" : L10n.text("apple.homeinspector.not_an_extra_bill.79d2c7ad"),
+                note: detail.estimated ? "estimated" : nil,
                 tint: Theme.accent,
                 size: 22
             )
