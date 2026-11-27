@@ -9,20 +9,20 @@ desktop is a review build. Newest first.
 
 ### Added
 
-- Give your coding agents more than one login with profiles, such as Work and Personal. Add one on Mac or Windows from the profile menu in the agent picker, or in Account, then pick it on any device when you start a chat or open a terminal. Your usual logins are the Main profile. A folder's terminals use the default profile until you pick another. Lock a repository to a profile so work code never runs on a personal plan. Claude, Codex, Grok, OpenCode and Muse keep a separate login per profile, while Cursor and Antigravity keep using this machine's login. Plan limits and Insights split by profile, and the composer names the profile when it is not the default. On Mac, Account → Agent profiles walks through a Work and Personal example.
-- Routing asks clearly whether it is for all your chats or only this one. On Mac, iPhone and iPad it is a short setup: what happens when an agent runs out of usage, which agents take over, and where it applies, with a picture of each choice and a one-line summary before you save. Chats that use the default now follow it when you change it, and a chat with its own routing says so and can go back to the default. On Mac, set the default without opening a chat in Account → Routing. Update the computer to 1.27.0 for chats to follow the default.
-- Run chats on local models from LM Studio or Ollama. They appear in the model picker for Claude, Codex and OpenCode on every client, marked as local beside cloud models, and tasks, workflow steps and automations can use them too. Claude needs a server with the Anthropic Messages API. iPhone, iPad, Android and Windows can also launch terminal agents on a local model, as the Mac already could.
-- Claim your tokenstat.ai handle and choose who can open your profile, from Account on Mac, iPhone, iPad, Android and Windows. Set it Private or Public, turn search engine listing on or off, and open your public page: in your browser on desktop, inside the app on phones and tablets. An account without a handle is offered one once after sign-in, with a live check while you type, and skipping it on one device skips it on all of them. Turning listing off explains that each search engine decides when to drop a page it already lists, which can take days or months.
-- When the agent a chat runs on has a newer version, every client offers Update and send, or Skip this version. On Mac, Refresh in the agent picker also checks every agent for updates, and the setup page offers Update all for the ones that are behind.
-- On Mac, iPhone and iPad, chats can have an animated dot background, Dot Waves or the quieter Dot Code. Pick one from the chat's More menu or in Appearance. The dots use your colour theme and follow Light, Dark and OLED. They move faster while an agent works and stop when the chat is hidden or Reduce Motion is on. Appearance also imports a theme given as a background, text and accent colour, and works out the other light or dark mode.
+- Keep separate agent logins with profiles, such as Work and Personal, and pick one when you start a chat or open a terminal. Add profiles on Mac or Windows. Lock a repository to a profile so work code never runs on a personal plan. Plan limits and Insights split by profile. Claude, Codex, Grok, OpenCode and Muse keep a login per profile, while Cursor and Antigravity use this machine's login.
+- Routing asks whether a setting is for all your chats or only this one, and chats on the default now follow it when you change it. Mac, iPhone and iPad walk you through it step by step, and on Mac you can set the default in Account → Routing. Update the computer to 1.27.0 for chats to follow the default.
+- Run chats, tasks and automations on local models from LM Studio or Ollama, with Claude, Codex or OpenCode. Claude needs a server with the Anthropic Messages API. iPhone, iPad, Android and Windows can now start terminal agents on a local model too.
+- Claim your tokenstat.ai handle in Account on any client, and choose whether your profile is public and listed by search engines.
+- When an agent has a newer version, chats offer Update and send, or Skip this version. On Mac, Refresh in the agent picker checks every agent, and setup can update them all at once.
+- On Mac, iPhone and iPad, give your chats an animated dot background, Dot Waves or the quieter Dot Code, from the chat's More menu or Appearance. It follows your colour theme in Light, Dark and OLED.
 - On Mac, click your name on Home to open your profile.
-- OpenCode Go limits come from OpenCode's own login first. A stored API key is only the fallback.
+- OpenCode Go limits come from OpenCode's own login, with a stored API key as the fallback.
 
 ### Fixed
 
-- Local model usage is marked Local and valued at zero, in the apps and on your synced account and profile. Local chats hide cloud plan limits and say how to recover if the model server stops, and the picker warns when a model reports less than 64K of context.
-- On Mac, iPhone, iPad and Android, drafts, pins and recent places on this device stay with your account when you claim or change your handle.
-- On iPhone and iPad, recent chats and the project chat list show the pull request a chat opened, as they already do on Mac and Android.
+- Local model usage shows as Local and costs nothing, in the apps and on your synced profile. Local chats hide cloud plan limits and help you recover if the model server stops, and the picker warns when a model has less than 64K of context.
+- On Mac, iPhone, iPad and Android, drafts, pins and recent places stay with your account when you claim or change your handle.
+- On iPhone and iPad, chat lists show the pull request a chat opened.
 
 ## [1.26.0] - 2026-11-25
 
