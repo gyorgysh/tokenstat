@@ -6006,5 +6006,11 @@
   "apple.review.feedback": "Send feedback",
   "apple.review.close": "Close",
   "apple.review.never": "Don’t ask me again",
-  "apple.review.stopped": "tokenstat won’t ask for a rating on its own. You can always find this in Settings."
+  "apple.review.stopped": "tokenstat won’t ask for a rating on its own. You can always find this in Settings.",
+  "apple.clientstore.intro_offer": "{0} for {1}, then {2}.",
+  "apple.clientstore.intro_offer_each": "{0} {1} for {2}, then {3}.",
+  "apple.clientstore.per_day": "a day",
+  "apple.clientstore.per_week": "a week",
+  "apple.clientstore.per_month": "a month",
+  "apple.clientstore.per_year": "a year"
 }

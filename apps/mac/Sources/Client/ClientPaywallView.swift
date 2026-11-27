@@ -211,6 +211,12 @@ struct ClientPaywallView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let product, !isCurrent, let intro = store.introCaptions[product.id] {
+                Text(intro)
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let product, !isCurrent {
                 Text(L10n.text("apple.clientpaywallview.renewal_terms",
                                product.displayPrice + (item.interval == .month

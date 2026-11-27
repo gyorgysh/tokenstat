@@ -172,6 +172,7 @@ enum ClientPlanChange {
 @MainActor
 final class ClientStore {
     var products: [Product] = []
+    var introCaptions: [String: String] = [:]
     var isLoading = false
     var purchasingProductID: String?
     var isRestoring = false
@@ -272,9 +273,55 @@ final class ClientStore {
                 .sorted { $0.price < $1.price }
             errorMessage = nil
             await refreshSubscriptionStatus()
+            await refreshIntroCaptions()
         } catch {
             errorMessage = L10n.text("apple.clientstore.could_not_load_app_store_plans.d42d421d")
         }
+    }
+
+    func refreshIntroCaptions() async {
+        var captions: [String: String] = [:]
+        for product in products {
+            guard let subscription = product.subscription,
+                  let offer = subscription.introductoryOffer,
+                  await subscription.isEligibleForIntroOffer else { continue }
+            let span = Self.spanText(offer.period, count: offer.periodCount)
+            switch offer.paymentMode {
+            case .freeTrial:
+                captions[product.id] = L10n.text("apple.clientstore.intro_offer", L10n.text("apple.clientpaywallview.free.f411a1fb"), span, product.displayPrice)
+            case .payAsYouGo where offer.periodCount > 1:
+                captions[product.id] = L10n.text("apple.clientstore.intro_offer_each", offer.displayPrice, Self.perUnitText(offer.period.unit), span, product.displayPrice)
+            default:
+                captions[product.id] = L10n.text("apple.clientstore.intro_offer", offer.displayPrice, span, product.displayPrice)
+            }
+        }
+        introCaptions = captions
+    }
+
+    private static func perUnitText(_ unit: Product.SubscriptionPeriod.Unit) -> String {
+        switch unit {
+        case .day: L10n.text("apple.clientstore.per_day")
+        case .week: L10n.text("apple.clientstore.per_week")
+        case .year: L10n.text("apple.clientstore.per_year")
+        default: L10n.text("apple.clientstore.per_month")
+        }
+    }
+
+    private static func spanText(_ period: Product.SubscriptionPeriod, count: Int) -> String {
+        let total = period.value * max(count, 1)
+        var parts = DateComponents()
+        let unit: NSCalendar.Unit
+        switch period.unit {
+        case .day: parts.day = total; unit = .day
+        case .week: parts.weekOfMonth = total; unit = .weekOfMonth
+        case .month: parts.month = total; unit = .month
+        case .year: parts.year = total; unit = .year
+        @unknown default: parts.day = total; unit = .day
+        }
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.allowedUnits = [unit]
+        return formatter.string(from: parts) ?? "\(total)"
     }
 
     /// A tap from the App Store product page. Completes now if someone is
@@ -335,6 +382,7 @@ final class ClientStore {
                 try await activate(verification, owner: owner)
                 guard owns(owner) else { return }
                 await reportRenewal()
+                await refreshIntroCaptions()
             case .userCancelled:
                 break
             case .pending:
