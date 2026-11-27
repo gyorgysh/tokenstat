@@ -218,7 +218,7 @@ fun PaywallSheet(
                         val buttonLabel = when {
                             readsCurrent -> L10n.text("android.paywallsheet.your_current_plan.2653f9e7")
                             canSwitch -> if (monthly) L10n.text("android.paywallsheet.switch_to_monthly.1ade98ed") else L10n.text("android.paywallsheet.switch_to_yearly.015b8cf3")
-                            product != null -> "${pitch.title} · ${product.price}"
+                            product != null -> "${pitch.title} · ${product.firstPrice}"
                             billingState.products.isEmpty() -> L10n.text("android.paywallsheet.loading_price.50992858")
                             else -> L10n.text("android.paywallsheet.price_unavailable.6a9e657b")
                         }

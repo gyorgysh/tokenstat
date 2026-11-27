@@ -5,6 +5,12 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Newest first.
 
+## [1.28.0]
+
+### Added
+
+- Plans show limited-time discounts. On Android, a discounted Google Play offer applies at checkout. On iPhone and iPad, the plan shows the introductory price before you buy.
+
 ## [1.27.0] - 2026-11-27
 
 ### Added

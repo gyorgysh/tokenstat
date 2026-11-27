@@ -27,6 +27,7 @@ data class PlanProduct(
     val offerToken: String,
     val label: String,
     val price: String,
+    val firstPrice: String = price,
     val introCaption: String? = null,
     val billingPeriod: String,
 )
@@ -100,7 +101,13 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                 details.subscriptionOfferDetails.orEmpty()
                     .groupBy { it.basePlanId }
                     .mapNotNull { (basePlanId, group) ->
-                        val offer = group.firstOrNull { it.offerId == null } ?: return@mapNotNull null
+                        val offer = bestOffer(group, trialUsed) {
+                            OfferView(
+                                it.offerId,
+                                it.offerTags,
+                                it.pricingPhases.pricingPhaseList.firstOrNull()?.priceAmountMicros ?: Long.MAX_VALUE,
+                            )
+                        } ?: return@mapNotNull null
                         val phases = offer.pricingPhases.pricingPhaseList
                         val phase = phases.lastOrNull() ?: return@mapNotNull null
                         val interval = intervalOfBasePlan(basePlanId, phase.billingPeriod)
@@ -111,7 +118,8 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                             offer.offerToken,
                             details.name,
                             phase.formattedPrice,
-                            introCaption(phases.map { PhaseView(it.formattedPrice, it.billingPeriod) }),
+                            phases.first().formattedPrice,
+                            introCaption(phases.map { PhaseView(it.formattedPrice, it.billingPeriod, it.billingCycleCount) }),
                             phase.billingPeriod,
                         )
                     }

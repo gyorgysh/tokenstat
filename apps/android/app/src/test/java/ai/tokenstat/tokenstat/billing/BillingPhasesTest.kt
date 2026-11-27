@@ -52,4 +52,53 @@ class BillingPhasesTest {
         assertNull(intervalOfBasePlan("monthly", "P1W"))
         assertNull(intervalOfBasePlan("annual", "P3D"))
     }
+
+    private fun pick(offers: List<OfferView>, trialUsed: Boolean = false) =
+        bestOffer(offers, trialUsed) { it }?.offerId
+
+    private val base = OfferView(null, emptyList(), 99_000_000)
+
+    @Test
+    fun taggedCheaperOfferWins() {
+        assertEquals("cyber26", pick(listOf(base, OfferView("cyber26", listOf("promo"), 49_500_000))))
+    }
+
+    @Test
+    fun untaggedOfferIsIgnored() {
+        assertNull(pick(listOf(base, OfferView("winback", emptyList(), 10_000_000))))
+    }
+
+    @Test
+    fun cheapestTaggedOfferWins() {
+        assertEquals("deep", pick(listOf(
+            base,
+            OfferView("light", listOf("PROMO"), 80_000_000),
+            OfferView("deep", listOf("promo"), 40_000_000),
+        )))
+    }
+
+    @Test
+    fun offerThatCostsMoreKeepsBasePlan() {
+        assertNull(pick(listOf(base, OfferView("odd", listOf("promo"), 120_000_000))))
+    }
+
+    @Test
+    fun usedTrialSkipsFreeOffer() {
+        val offers = listOf(base, OfferView("trial", listOf("promo"), 0), OfferView("half", listOf("promo"), 49_500_000))
+        assertEquals("trial", pick(offers))
+        assertEquals("half", pick(offers, trialUsed = true))
+    }
+
+    @Test
+    fun noBasePlanMeansNoProduct() {
+        assertNull(bestOffer(listOf(OfferView("cyber26", listOf("promo"), 1)), false) { it })
+    }
+
+    @Test
+    fun captionCountsRepeatedIntroCycles() {
+        assertEquals(
+            "$4.99 for 3 months, then $9.99.",
+            introCaption(listOf(PhaseView("$4.99", "P1M", 3), PhaseView("$9.99", "P1M", 0))),
+        )
+    }
 }
