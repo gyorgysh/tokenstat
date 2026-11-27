@@ -9,6 +9,7 @@ desktop is a review build. Newest first.
 
 ### Added
 
+- On Mac, Account shows your plan and where to manage it: the App Store, Google Play, or tokenstat.ai in your browser.
 - Plans show limited-time discounts. On Android, a discounted Google Play offer applies at checkout. On iPhone and iPad, the plan shows the introductory price before you buy.
 
 ## [1.27.0] - 2026-11-27

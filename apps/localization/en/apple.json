@@ -6012,5 +6012,20 @@
   "apple.clientstore.per_day": "a day",
   "apple.clientstore.per_week": "a week",
   "apple.clientstore.per_month": "a month",
-  "apple.clientstore.per_year": "a year"
+  "apple.clientstore.per_year": "a year",
+  "apple.accountview.plan.title": "Plan",
+  "apple.accountview.plan.monthly": "monthly",
+  "apple.accountview.plan.yearly": "yearly",
+  "apple.accountview.plan.line": "{0}, {1}",
+  "apple.accountview.plan.line_renews": "{0}, {1} · renews {2}",
+  "apple.accountview.plan.line_ends": "{0}, {1} · ends {2}",
+  "apple.accountview.plan.switches": "Switches to {0}, {1}, at the next renewal.",
+  "apple.accountview.plan.app_store": "Bought on the App Store. Change or cancel it in your Apple ID subscriptions, or switch plans in the iPhone or iPad app.",
+  "apple.accountview.plan.google_play": "Bought on Google Play. Change or cancel it in your Play subscriptions, or switch plans in the Android app.",
+  "apple.accountview.plan.website": "Manage this plan on tokenstat.ai. It opens in your browser, so sign in with this account if asked.",
+  "apple.accountview.plan.free": "The app and remote management stay free. Paid plans add more devices, history, and relay traffic.",
+  "apple.accountview.plan.manage_app_store": "Manage on the App Store",
+  "apple.accountview.plan.manage_google_play": "Manage on Google Play",
+  "apple.accountview.plan.manage_website": "Manage on website",
+  "apple.accountview.plan.see_plans": "See plans"
 }

@@ -196,6 +196,9 @@ struct AccountView: View {
     private func signedIn(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             identity(account)
+            #if os(macOS)
+            planCard(account)
+            #endif
             RelayUsageCard(usage: account.relayUsage) { await model.load() }
             RelayFallbackSetting(enabled: model.remoteStatus?.relayFallback) {
                 try await model.setRelayFallback($0)
@@ -309,6 +312,95 @@ struct AccountView: View {
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
     }
+
+    #if os(macOS)
+    private func planCard(_ account: Account) -> some View {
+        let billing = account.billing
+        let storeLive = billing?.blocksOtherStore == true
+        let apple = storeLive && billing?.isApple == true
+        let play = storeLive && billing?.isGooglePlay == true
+        return Card(title: L10n.text("apple.accountview.plan.title"), mark: "mark_plan") {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if account.isPaidTier, let tier = account.tier {
+                    Text(planLine(tier: tier, billing: billing))
+                        .font(Theme.callout)
+                }
+                if let next = billing?.scheduledTier, !next.isEmpty, storeLive {
+                    Text(L10n.text("apple.accountview.plan.switches", PlanName.title(next),
+                                   billing?.scheduledInterval == "month"
+                                       ? L10n.text("apple.accountview.plan.monthly")
+                                       : L10n.text("apple.accountview.plan.yearly")))
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.accent)
+                }
+                Text(apple ? L10n.text("apple.accountview.plan.app_store")
+                     : play ? L10n.text("apple.accountview.plan.google_play")
+                     : account.isPaidTier ? L10n.text("apple.accountview.plan.website")
+                     : L10n.text("apple.accountview.plan.free"))
+                    .font(Theme.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Theme.Space.s) {
+                    if apple {
+                        Button(L10n.text("apple.accountview.plan.manage_app_store"), .appStore) {
+                            openURL(Self.appStoreSubscriptions)
+                        }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                    } else if play {
+                        Button(L10n.text("apple.accountview.plan.manage_google_play"), .playStore) {
+                            openURL(Self.playSubscriptions)
+                        }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                    } else if account.isPaidTier {
+                        Button(L10n.text("apple.accountview.plan.manage_website"), .browser) {
+                            openWebsite(account, path: "/settings")
+                        }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                    }
+                    if account.isPaidTier {
+                        Button(L10n.text("apple.accountview.plan.see_plans"), .plans) {
+                            openWebsite(account, path: "/pricing")
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    } else {
+                        Button(L10n.text("apple.accountview.plan.see_plans"), .plans) {
+                            openWebsite(account, path: "/pricing")
+                        }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                    }
+                }
+            }
+        }
+    }
+
+    private func planLine(tier: String, billing: AccountBilling?) -> String {
+        let interval = billing?.interval == "month"
+            ? L10n.text("apple.accountview.plan.monthly")
+            : L10n.text("apple.accountview.plan.yearly")
+        guard let end = billing?.periodEnd.flatMap(Self.upcomingDay) else {
+            return L10n.text("apple.accountview.plan.line", PlanName.title(tier), interval)
+        }
+        return billing?.cancelScheduled == true
+            ? L10n.text("apple.accountview.plan.line_ends", PlanName.title(tier), interval, end)
+            : L10n.text("apple.accountview.plan.line_renews", PlanName.title(tier), interval, end)
+    }
+
+    private static func upcomingDay(_ raw: String) -> String? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw),
+              date > Date() else { return nil }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func openWebsite(_ account: Account, path: String) {
+        guard let url = URL(string: account.host + path) else { return }
+        openURL(url)
+    }
+
+    private static let appStoreSubscriptions = URL(string: "https://apps.apple.com/account/subscriptions")!
+    private static let playSubscriptions = URL(string: "https://play.google.com/store/account/subscriptions")!
+    #endif
 
     private func syncCard(_ account: Account) -> some View {
         Card(
